@@ -1,0 +1,6 @@
+[package]
+name = "keylime"
+version = "0.1.0"
+authors = ["Robbie Harwood <rharwood@redhat.com>"]
+
+[dependencies]
