@@ -4,3 +4,12 @@ version = "0.1.0"
 authors = ["Robbie Harwood <rharwood@redhat.com>"]
 
 [dependencies]
+futures = "0.1.24"
+hyper = "0.12"
+tokio-io = "0.1"
+
+[workspace]
+members = [
+	"keylime_node",
+	"common",
+]

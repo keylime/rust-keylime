@@ -1,0 +1,12 @@
+[package]
+name = "keylime_node"
+version = "0.1.0"
+authors = ["Pei Jia <leojia@bu.edu>"]
+
+[dependencies]
+futures = "0.1.24"
+hyper = "0.12"
+tokio-io = "0.1"
+serde_json = "1.0"
+
+common = { path = "../common" }
