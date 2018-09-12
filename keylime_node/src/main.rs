@@ -1,10 +1,14 @@
 extern crate futures;
 extern crate hyper;
+extern crate common;
+extern crate pretty_env_logger;
+
 
 use futures::future;
 use hyper::rt::{Future, Stream};
 use hyper::service::service_fn;
 use hyper::{Body, Method, Request, Response, server, StatusCode};
+use std::collections::HashMap;
 
 type BoxFut = Box<Future<Item = Response<Body>, Error = hyper::Error> + Send>;
 
@@ -14,11 +18,11 @@ fn main() {
 
     pretty_env_logger::init();
 
-    let addr = ([127.0.0.1], 3000).into();
+    let addr = ([127.0,0.1], 3000).into();
 
     let server = Server::bind(&addr)
     	.serve(|| service_fn(response_function))
-    	.map_err(|e| epringln!("server erro: {}", e));
+    	.map_err(|e| eprintln!("server erro: {}", e));
 
     println!("Listening no http://{}", addr);
 
@@ -31,49 +35,39 @@ fn response_function(req: Request<Body>) -> BoxFut {
 	let mut response = Response::new(Body::empty));
 
 
-	// need a method to process input api path
-	match (req.method(), req.uri().path()){
+	// need a method to process input api path !!
+	let mut parameters = common::et_restful_parameters(req.uri().path());
 
-		(&Method::GET, "/v2/keys/pubkey") => {
+	match req.method() {
 
+		&Method::GET => {
+			if parameters.contains_key("keys") {
+				match parameters.get(&"keys") {
+
+					// verify will do hmac for the challenge
+					// orignal: crypto.do_hmac(self.server.K, challenge) 
+					Some("verify") => {
+						let res = common::json_response_content(200, "Success", parameters.get("challenge"));
+					}
+
+					// pubkey export the rsa pub key
+					// original: self.server.rsapublickey_exportable
+					Some("pubkey") => {
+						let res = common::json_response_content(200, "Success", "pubkey_placeholder");
+					}
+				};
+
+			// tpm implementation need for quote
+			}else if parameters.contains_key("quotes") {
+
+			}else{
+				let res = common::json_response_content(400, "fail","Uri is not supported");
+			}
 		}
 
-		(&Method::GET, "/v2/keys/vkey") => {
+		&Method::POST => {
 
 		}
-
-		// api request: /v2/keys/verify/challenge/#
-		// challenge = #
-		// "response['hmac'] = crypto.do_hmac(self.server.K, challenge)"
-		// 
-		// need a crypto library to fullfill this funcitonality
-		// hmac should be consistenc with the original cropytodome version - Charlie
-		// 
-		// response: 200, success, response
-		(&Method::GET, "/v2/keys/verify") => {
-
-		}
-
-		// Haven't implemnt yet
-		// (&Method::GET, "/v2/keys/verify/challenge") => {
-
-		// }
-
-		// (&Method::GET, "/v2/quotes/integrity") => {
-
-		// }
-
-		// (&Method::GET, "/v2/quotes/integrity/nouce/*/mask/*/vmask/*/partial/*/") => {
-
-		// }
-
-		// (&Method::GET, "/v2/quotes/identity") => {
-
-		// }
-
-		// (&Method::GET, "/v2/quotes/identity/nouce/*/") => {
-
-		// }
 
 		_  =>  {
 			let body = Body::from(NOTFOUND);
@@ -83,7 +77,22 @@ fn response_function(req: Request<Body>) -> BoxFut {
 				.unwrap())
 		}
 
-	}
+	};
+
+	Box::new(future::ok(res))
 }
 
-fn 
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+    #[test]
+    fn test_get_restful_parameters() {
+    	let mut map = HashMap::new();
+    	map.insert("verify", "pubkey");
+    	map.insert("api_version", "2");
+
+    	// "{"api_version": "v2", "verify": "pubkey"}"	
+    	assert_eq!(common::get_restful_parameters("/v2/verify/pubkey"), map);
+    }
+}

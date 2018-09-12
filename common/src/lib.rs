@@ -1,54 +1,108 @@
 // use std::vec::Vec<&str>;
 // use std::string::String;
 
+extern crate futures;
+extern crate hyper;
+extern crate serde_json;
+
+use hyper::{Response, StatusCode, Body, header};
+use std::collections::HashMap;
+
+
+
+
+
+pub fn json_response_content(code: i32, status: String, results: String) -> Response<Body> {
+	// let c = code.to_string();
+	let data = vec![code.to_string(), status, results];
+
+	let res = match serde_json::to_string(&data){
+		Ok(json) => {
+			// return a json response
+			Response::builder()
+				.header(header::CONTENT_TYPE, "application/json")
+				.body(Body::from(json))
+				.unwrap()
+		}
+
+		// This is unnecessary here，probably won't fail
+		Err(e) => {
+			eprintln!("serializing json: {}", e);
+
+			Response::builder()
+				.status(StatusCode::INTERNAL_SERVER_ERROR)
+				.body(Body::from("Internal Server Error"))
+				.unwrap()
+		}
+	};
+
+	res
+}
+
+
+/*
+ * seperate url path by '/', first element is dropped since it is an empty string
+ *
+ * Paramters: string and delimiter
+ * return: Vector of string contains the path content in original order
+ *
+ *
+ *
+ */
+pub fn string_split_by_seperator(data: &str, seperator: char) -> Vec<&str> {
+	let mut v: Vec<&str> = data.split(seperator).collect();
+	v.remove(0);
+	v
+}
+
+
+// hashmap doesn't own the parameters, just borrow it
+
+/*
+ * convert a api resquest path to a map that contains the key and value in pair
+ * from the original api request
+ *
+ * Parameters: api string
+ * Return: map with api key and value
+ */
+pub fn get_restful_parameters(urlstring: &str) -> HashMap<&str, &str> {
+	let list = string_split_by_seperator(urlstring, '/');
+	let mut parameters = HashMap::new();
+	let (_, right) = list[0].split_at(1);
+	parameters.insert("api_version", right);
+
+	let mut iter = 1..list.len();
+	loop {
+		match iter.next() {
+			Some(x) => {
+				parameters.insert(list[x], list[x + 1]);
+			},
+			None => break,
+		}
+		iter.next();
+	}
+	parameters
+}
+
+
+// Unit Testing
 #[cfg(test)]
 mod tests {
-
 	use super::*;
 
     #[test]
     fn test_split_string() {
         assert_eq!(string_split_by_seperator("/v2/verify/pubkey", '/'), ["v2", "verify", "pubkey"]);
     }
+
+    #[test]
+    fn test_get_restful_parameters() {
+    	let mut map = HashMap::new();
+    	map.insert("verify", "pubkey");
+    	map.insert("api_version", "2");
+
+    	// "{"api_version": "v2", "verify": "pubkey"}"	
+    	assert_eq!(get_restful_parameters("/v2/verify/pubkey"), map);
+    }
 }
 
-
-// fn json_response_content(code: i32, status: &str, results: &str) -> Response {
-
-// 	extern crate futures;
-// 	extern crate hyper;
-// 	extern crate serde_json;
-
-// 	use hyper::{Response, StatusCode, Body};
-
-
-// 	let data = vec![code, status, results];
-
-// 	let res = match serde_json::to_string(&data){
-// 		Ok(json) => {
-// 			// return a json response
-// 			Response::builder()
-// 				.header(header::CONTENT_TYPE, "application/json")
-// 				.body(Body::from(json))
-// 				.unwrap()
-// 		}
-
-// 		Err(e) => {
-// 			eprintln!("serializing json: {}", e);
-
-// 			Response::buildre()
-// 				.status(StatusCode::INTERNAL_SERVER_ERROR)
-// 				.body(Body::from("Internal Server Error"))
-// 				.unwrap();
-// 		}
-// 	}
-// }
-
-fn string_split_by_seperator(data: &str, seperator: char) -> Vec<&str> {
-
-	let mut v: Vec<&str> = data.split(seperator).collect();
-	v.remove(0);
-	v
-}
-
-// fn get_restful_parameters(urlstring: &str) -> 
