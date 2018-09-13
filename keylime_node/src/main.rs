@@ -41,24 +41,52 @@ fn response_function(req: Request<Body>) -> BoxFut {
 	match req.method() {
 
 		&Method::GET => {
+
+			// keys request 
 			if parameters.contains_key("keys") {
 				match parameters.get(&"keys") {
+					// check Kb value is available to perform the do_hmac crypto request
 
 					// verify will do hmac for the challenge
 					// orignal: crypto.do_hmac(self.server.K, challenge) 
 					Some("verify") => {
-						let res = common::json_response_content(200, "Success", parameters.get("challenge"));
+						let challenge = parameters.get(&"challenge");
+						let hmac_result = String::from("hmac placeholder")
+						let res = common::json_response_content(200, "Success", hmac_result);
 					}
 
 					// pubkey export the rsa pub key
 					// original: self.server.rsapublickey_exportable
 					Some("pubkey") => {
-						let res = common::json_response_content(200, "Success", "pubkey_placeholder");
+						let pubkey = String::from("pubkey_placeholder");
+						let res = common::json_response_content(200, "Success", pubkey_placeholder);
 					}
 				};
 
+			// quote resques
 			// tpm implementation need for quote
+
+			// response include quote and ima_measurement_list
 			}else if parameters.contains_key("quotes") {
+				let nouce = parameters.get(&"nouce");
+
+				// only one of these two is available, the other is None if it is not in the HashMap
+				let pcrMask = parameters.get(&"mask");
+				let vpcrMask = parameters.get(&"vmask");
+
+				match parameters.get(&"quotes"){
+					Some("identity") => {
+						// vtpm option
+						let imaMask = vpcrMask; // take ownership
+					}
+
+					_ => {
+						let imaMask = pcrMask;
+					}
+				}
+
+
+
 
 			}else{
 				let res = common::json_response_content(400, "fail","Uri is not supported");
