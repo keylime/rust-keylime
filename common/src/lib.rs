@@ -11,7 +11,13 @@ use std::collections::HashMap;
 
 
 
-
+/*
+ * convert the input into a Response struct
+ * 
+ * Parameters: code number, status string, content string
+ * Return: Combine all information into a Response struct
+ *
+ */
 pub fn json_response_content(code: i32, status: String, results: String) -> Response<Body> {
 	// let c = code.to_string();
 	let data = vec![code.to_string(), status, results];
