@@ -8,9 +8,6 @@ extern crate serde_json;
 use hyper::{Response, StatusCode, Body, header};
 use std::collections::HashMap;
 
-
-
-
 /*
  * convert the input into a Response struct
  * 
