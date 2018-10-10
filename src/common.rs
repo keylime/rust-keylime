@@ -61,8 +61,13 @@ pub fn string_split_by_seperator(data: &str, seperator: char) -> Vec<&str> {
  * Return: map with api key and value
  */
 pub fn get_restful_parameters(urlstring: &str) -> HashMap<&str, &str> {
-    let list = string_split_by_seperator(urlstring, '/');
     let mut parameters = HashMap::new();
+
+    let list = string_split_by_seperator(urlstring, '/');
+    if list.len() <= 1 {
+        return parameters;
+    }
+
     let (_, right) = list[0].split_at(1);
     parameters.insert("api_version", right);
 

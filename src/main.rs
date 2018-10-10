@@ -23,9 +23,9 @@ fn main() {
 
     let server = Server::bind(&addr)
         .serve(|| service_fn(response_function))
-        .map_err(|e| eprintln!("server erro: {}", e));
+        .map_err(|e| eprintln!("server error: {}", e));
 
-    println!("Listening no http://{}", addr);
+    println!("Listening on http://{}", addr);
 
     // run server forever
     hyper::rt::run(server);
@@ -101,12 +101,7 @@ fn response_function(req: Request<Body>) -> BoxFut {
                 res = common::json_response_content(
                     400, "Fail".to_string(),
                     "Check with tpm using imaMask".to_string());
-            }
-
-            // else if parameters.contains_key("showkeys") {
-            //  println!("U: {}, V: {}", U, V);;
-            // }
-            else {
+            } else {
                 res = common::json_response_content(
                     400, "Fail".to_string(),
                     "uri is not supported".to_string());
