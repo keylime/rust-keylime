@@ -147,6 +147,7 @@ fn response_function(req: Request<Body>) -> BoxFut {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
     use super::*;
 
     #[test]
