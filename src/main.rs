@@ -1,6 +1,7 @@
 extern crate futures;
 extern crate hyper;
 extern crate pretty_env_logger;
+#[macro_use] extern crate log;
 
 mod common;
 
@@ -14,18 +15,17 @@ type BoxFut = Box<Future<Item = Response<Body>, Error = hyper::Error> + Send>;
 static NOTFOUND: &[u8] = b"Not Found";
 
 fn main() {
-    println!("Hello, world!");
-
     pretty_env_logger::init();
+    info!("Starting server...");
 
     /* Should be port 3000 eventually */
     let addr = "127.0.0.1:1337".parse().unwrap();
 
     let server = Server::bind(&addr)
         .serve(|| service_fn(response_function))
-        .map_err(|e| eprintln!("server error: {}", e));
+        .map_err(|e| error!("server error: {}", e));
 
-    println!("Listening on http://{}", addr);
+    info!("Listening on http://{}", addr);
 
     // run server forever
     hyper::rt::run(server);
@@ -96,12 +96,13 @@ fn response_function(req: Request<Body>) -> BoxFut {
                     }
                 }
 
-                println!("Now it should use ima_mask: {} to check with tpm",
-                         ima_mask);
+                info!("Now it should use ima_mask: {} to check with tpm",
+                      ima_mask);
                 res = common::json_response_content(
                     400, "Fail".to_string(),
                     "Check with tpm using imaMask".to_string());
             } else {
+                warn!("Bad GET request for {}", req.uri());
                 res = common::json_response_content(
                     400, "Fail".to_string(),
                     "uri is not supported".to_string());
@@ -114,17 +115,18 @@ fn response_function(req: Request<Body>) -> BoxFut {
                     res = common::json_response_content(
                         400, "Success".to_string(),
                         "u key added".to_string()); 
-                    println!("adding u key");
+                    info!("adding u key");
                 }
 
                 Some(&"vkey") => {
                     res = common::json_response_content(
                         400, "Success".to_string(),
                         "v key added".to_string());
-                    println!("adding v key");
+                    info!("adding v key");
                 }
 
                 _ => {
+                    warn!("Bad POST request to {}", req.uri());
                     res = common::json_response_content(
                         400, "Fail".to_string(),
                         "uri not supported".to_string());
@@ -133,6 +135,7 @@ fn response_function(req: Request<Body>) -> BoxFut {
         }
 
         _  =>  {
+            warn!("Bad request type {}", req.uri());
             let body = Body::from(NOTFOUND);
             res = Response::builder()
                 .status(StatusCode::NOT_FOUND)

@@ -26,7 +26,7 @@ pub fn json_response_content(code: i32, status: String, results: String)
 
         // This is unnecessary here，probably won't fail
         Err(e) => {
-            eprintln!("serializing json: {}", e);
+            error!("serializing json: {}", e);
 
             Response::builder()
                 .status(StatusCode::INTERNAL_SERVER_ERROR)
