@@ -5,6 +5,10 @@ extern crate serde_json;
 use hyper::{Response, StatusCode, Body, header};
 use std::collections::HashMap;
 
+
+
+pub const BOOTSTRAP_KEY_SIZE: usize = 32;
+
 /*
  * convert the input into a Response struct
  * 
