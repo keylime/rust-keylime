@@ -4,7 +4,7 @@ extern crate pretty_env_logger;
 #[macro_use] extern crate log;
 
 mod common;
-mod tpm_initialize;
+mod tpm;
 
 use futures::future;
 use hyper::rt::Future;
