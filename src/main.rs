@@ -1,7 +1,8 @@
 extern crate futures;
 extern crate hyper;
 extern crate pretty_env_logger;
-#[macro_use] extern crate log;
+#[macro_use]
+extern crate log;
 
 mod common;
 
@@ -31,28 +32,30 @@ fn main() {
     hyper::rt::run(server);
 }
 
-
 fn response_function(req: Request<Body>) -> BoxFut {
     let mut res = Response::default();
-    
+
     // need a method to process input api path !!
     let parameters = common::get_restful_parameters(req.uri().path());
 
     match req.method() {
         &Method::GET => {
-            // keys request 
+            // keys request
             if parameters.contains_key("keys") {
                 match parameters.get(&"keys") {
                     // check Kb value is available to perform the do_hmac
                     // crypto request
                     // verify will do hmac for the challenge
-                    // orignal: crypto.do_hmac(self.server.K, challenge) 
+                    // orignal: crypto.do_hmac(self.server.K, challenge)
                     Some(&"verify") => {
                         /* /keys/verify/challenge/blablabla */
                         let _challenge = parameters.get(&"challenge");
                         let hmac_result = String::from("hmac placeholder");
                         res = common::json_response_content(
-                            200, "Success".to_string(), hmac_result);
+                            200,
+                            "Success".to_string(),
+                            hmac_result,
+                        );
                     }
 
                     // pubkey export the rsa pub key
@@ -62,13 +65,18 @@ fn response_function(req: Request<Body>) -> BoxFut {
                         let pubkey_placeholder =
                             String::from("pubkey_placeholder");
                         res = common::json_response_content(
-                            200, "Success".to_string(), pubkey_placeholder);
+                            200,
+                            "Success".to_string(),
+                            pubkey_placeholder,
+                        );
                     }
 
                     _ => {
                         res = common::json_response_content(
-                            400, "Fail".to_string(),
-                            "uri is not supported".to_string());
+                            400,
+                            "Fail".to_string(),
+                            "uri is not supported".to_string(),
+                        );
                     }
                 };
 
@@ -85,7 +93,7 @@ fn response_function(req: Request<Body>) -> BoxFut {
                 let vpcr_mask = parameters.get(&"vmask").unwrap();
                 let mut ima_mask: &str;
 
-                match parameters.get(&"quotes"){
+                match parameters.get(&"quotes") {
                     Some(&"identity") => {
                         // vtpm option
                         ima_mask = vpcr_mask; // take ownership
@@ -96,45 +104,55 @@ fn response_function(req: Request<Body>) -> BoxFut {
                     }
                 }
 
-                info!("Now it should use ima_mask: {} to check with tpm",
-                      ima_mask);
+                info!(
+                    "Now it should use ima_mask: {} to check with tpm",
+                    ima_mask
+                );
                 res = common::json_response_content(
-                    400, "Fail".to_string(),
-                    "Check with tpm using imaMask".to_string());
+                    400,
+                    "Fail".to_string(),
+                    "Check with tpm using imaMask".to_string(),
+                );
             } else {
                 warn!("Bad GET request for {}", req.uri());
                 res = common::json_response_content(
-                    400, "Fail".to_string(),
-                    "uri is not supported".to_string());
+                    400,
+                    "Fail".to_string(),
+                    "uri is not supported".to_string(),
+                );
             }
         }
 
-        &Method::POST => {
-            match parameters.get(&"keys") {
-                Some(&"ukey") => {
-                    res = common::json_response_content(
-                        400, "Success".to_string(),
-                        "u key added".to_string()); 
-                    info!("adding u key");
-                }
-
-                Some(&"vkey") => {
-                    res = common::json_response_content(
-                        400, "Success".to_string(),
-                        "v key added".to_string());
-                    info!("adding v key");
-                }
-
-                _ => {
-                    warn!("Bad POST request to {}", req.uri());
-                    res = common::json_response_content(
-                        400, "Fail".to_string(),
-                        "uri not supported".to_string());
-                }
+        &Method::POST => match parameters.get(&"keys") {
+            Some(&"ukey") => {
+                res = common::json_response_content(
+                    400,
+                    "Success".to_string(),
+                    "u key added".to_string(),
+                );
+                info!("adding u key");
             }
-        }
 
-        _  =>  {
+            Some(&"vkey") => {
+                res = common::json_response_content(
+                    400,
+                    "Success".to_string(),
+                    "v key added".to_string(),
+                );
+                info!("adding v key");
+            }
+
+            _ => {
+                warn!("Bad POST request to {}", req.uri());
+                res = common::json_response_content(
+                    400,
+                    "Fail".to_string(),
+                    "uri not supported".to_string(),
+                );
+            }
+        },
+
+        _ => {
             warn!("Bad request type {}", req.uri());
             let body = Body::from(NOTFOUND);
             res = Response::builder()
@@ -142,7 +160,6 @@ fn response_function(req: Request<Body>) -> BoxFut {
                 .body(body)
                 .unwrap();
         }
-
     }
 
     Box::new(future::ok(res))
@@ -150,8 +167,8 @@ fn response_function(req: Request<Body>) -> BoxFut {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
     use super::*;
+    use std::collections::HashMap;
 
     #[test]
     fn test_get_restful_parameters() {
@@ -159,7 +176,7 @@ mod tests {
         map.insert("verify", "pubkey");
         map.insert("api_version", "2");
 
-        // "{"api_version": "v2", "verify": "pubkey"}"  
+        // "{"api_version": "v2", "verify": "pubkey"}"
         assert_eq!(common::get_restful_parameters("/v2/verify/pubkey"), map);
     }
 }
