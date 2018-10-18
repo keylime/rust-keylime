@@ -2,6 +2,7 @@ extern crate lib;
 extern crate rustc_serialize;
 extern crate serde_json;
 
+mod common;
 
 use rustc_serialize::json::Json;
 use std::fs::File;
@@ -69,3 +70,34 @@ fn write_tpm_data()  -> Result<()>{
 	Ok()
 }
 
+fn is_vtpm() {
+	match common::STUB_VTPM {
+		true => {
+			true
+		},
+		false => {
+			let tpm_manufacturer = get_tpm_manufacturer();
+			tpm_manufacturer == "ETHZ"
+		},
+	}
+}
+
+fn get_tpm_manufacturer() {
+	let return_output = tpm_exec::run("getcapability -cap 1a");
+
+
+	let placeholder = "ETHZ"
+	placeholder
+}
+
+
+#[cfg(test)]
+mod tests{
+	use super::*;
+
+	#[test]
+	fn test_is_vtpm() {
+		let return_value = is_vtpm();
+		assert_eq!(return_value, true);
+	}
+}

@@ -8,6 +8,7 @@ use std::collections::HashMap;
 
 
 pub const BOOTSTRAP_KEY_SIZE: usize = 32;
+pub const STUB_VTPM: bool = false;
 
 /*
  * convert the input into a Response struct
