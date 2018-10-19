@@ -1,17 +1,17 @@
 extern crate rustc_serialize;
 use super::*;
-use hyper::{Response, StatusCode, Body, header};
-use std::collections::HashMap;
+use hyper::{header, Body, Response, StatusCode};
+use libc::{umask, geteuid};
 use rustc_serialize::json::Json;
+use std::collections::HashMap;
 use std::fs::File;
 use std::io::prelude::*;
 use std::io::{Read, Write};
-use libc::{umask, geteuid};
 use std::path::Path;
 use std::process::Command;
 use std::process::Output;
-use std::{thread, time};
 use std::time::{Duration, SystemTime};
+use std::{thread, time};
 use tempfile::tempfile;
 use tempfile::NamedTempFile;
 
@@ -101,9 +101,7 @@ write tpmdata to tpmdata.json file to store the value
 
 pub fn is_vtpm() -> Option<bool> {
     match common::STUB_VTPM {
-        true => {
-            Some(true)
-        },
+        true => Some(true),
         false => {
             let tpm_manufacturer = get_tpm_manufacturer();
 
@@ -111,11 +109,11 @@ pub fn is_vtpm() -> Option<bool> {
             println!("tpm manufacturer: {:?}", tpm_manufacturer);
             
             Some(tpm_manufacturer.unwrap() == "ETHZ")
-        },
+        }
     }
 }
 
-pub fn get_tpm_manufacturer<'a>() -> Option<&'a str>{
+pub fn get_tpm_manufacturer<'a>() -> Option<&'a str> {
     // let return_output = run("getcapability -cap 1a".to_string());
 
 
@@ -167,7 +165,7 @@ pub fn fingerprint(cmd: String) -> String {
             } else if cmd.contains("-cap la") {
                 fprt.push_str("-capls");
             }
-        },
+        }
 
         "nv_readvalue" => {
             if cmd.contains("-in 100f000") {
@@ -175,9 +173,9 @@ pub fn fingerprint(cmd: String) -> String {
             } else if cmd.contains("-in 1") {
                 fprt.push_str("-in1");
             }
-        },
+        }
 
-        _ => (),
+        _ => {}
     };
 
     fprt
@@ -196,7 +194,7 @@ find the the first command and return the index to seperate the string
 pub fn command_split(cmd: String) -> usize {
     let bytes = cmd.as_bytes();
 
-    for(i, &item) in bytes.iter().enumerate() {
+    for (i, &item) in bytes.iter().enumerate() {
         if item == b' ' {
             return i;
         }
@@ -231,11 +229,9 @@ pub fn run<'a>(cmd: String) -> (Vec<u8>, Option<i32>) {
         .expect("failed to execute process");
 
     loop {
-    // let t0 = System::now();
-
-
-    // assume the system is linux
-        
+        // let t0 = System::now();
+        // assume the system is linux
+            
         println!("number tries: {:?}", number_tries);
 
         match output.status.code().unwrap() {
@@ -248,15 +244,16 @@ pub fn run<'a>(cmd: String) -> (Vec<u8>, Option<i32>) {
                 }
 
                 output = Command::new(&cmd)
-                        .args(args)
-                        .output()
-                        .expect("failed to execute process");
+                    .args(args)
+                    .output()
+                    .expect("failed to execute process");
 
                 // log placeholder
 
                 thread::sleep(RETRY_SLEEP);
-            },
-            _ => {},
+            }
+
+            _ => {}
          } 
 
     }
@@ -278,17 +275,26 @@ mod tests {
 
     #[test]
     fn fingerprint_getcapability_test() {
-        assert_eq!(fingerprint("getcapability -cap 5".to_string()), "getcapability-cap5");  
+        assert_eq!(
+            fingerprint("getcapability -cap 5".to_string()), 
+            "getcapability-cap5"
+        );  
     }
 
     #[test]
     fn fingerprint_getcapability_test2() {
-        assert_eq!(fingerprint("getcapability -n - e -cap 5".to_string()), "getcapability-cap5");   
+        assert_eq!(
+            fingerprint("getcapability -n - e -cap 5".to_string()), 
+            "getcapability-cap5"
+        );   
     }
 
     #[test]
     fn fingerprint_nv_readvalue_test() {
-        assert_eq!(fingerprint("nv_readvalue".to_string()), "nv_readvalue");
+        assert_eq!(
+            fingerprint("nv_readvalue".to_string()), 
+            "nv_readvalue"
+        );
     }
 
 
@@ -313,7 +319,7 @@ mod tests {
 
     // }
     #[test]
-    fn test_is_vtpm(){
+    fn test_is_vtpm() {
         let return_value = is_vtpm();
         assert_eq!(return_value.unwrap(), true);
     }
