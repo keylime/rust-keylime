@@ -5,6 +5,7 @@ extern crate serde_json;
 use hyper::{header, Body, Response, StatusCode};
 use std::collections::HashMap;
 
+pub const STUB_VTPM: bool = false;
 /*
  * convert the input into a Response struct
  *
