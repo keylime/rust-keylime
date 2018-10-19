@@ -21,15 +21,18 @@ pub const STUB_VTPM: bool = false;
 
 /*
  * convert the input into a Response struct
- * 
+ *
  * Parameters: code number, status string, content string
  * Return: Combine all information into a Response struct
  */
-pub fn json_response_content(code: i32, status: String, results: String)
-                             -> Response<Body> {
+pub fn json_response_content(
+    code: i32,
+    status: String,
+    results: String,
+) -> Response<Body> {
     let data = vec![code.to_string(), status, results];
 
-    match serde_json::to_string(&data){
+    match serde_json::to_string(&data) {
         Ok(json) => {
             // return a json response
             Response::builder()
@@ -50,9 +53,8 @@ pub fn json_response_content(code: i32, status: String, results: String)
     }
 }
 
-
 /*
- * seperate url path by '/', first element is dropped since it is an empty
+ * separate url path by '/', first element is dropped since it is an empty
  * string
  *
  * Paramters: string and delimiter
@@ -63,7 +65,6 @@ pub fn string_split_by_seperator(data: &str, seperator: char) -> Vec<&str> {
     v.remove(0);
     v
 }
-
 
 // hashmap doesn't own the parameters, just borrow it
 
@@ -92,7 +93,6 @@ pub fn get_restful_parameters(urlstring: &str) -> HashMap<&str, &str> {
     parameters
 }
 
-
 // Unit Testing
 #[cfg(test)]
 mod tests {
@@ -100,8 +100,10 @@ mod tests {
 
     #[test]
     fn test_split_string() {
-        assert_eq!(string_split_by_seperator("/v2/verify/pubkey", '/'),
-                   ["v2", "verify", "pubkey"]);
+        assert_eq!(
+            string_split_by_seperator("/v2/verify/pubkey", '/'),
+            ["v2", "verify", "pubkey"]
+        );
     }
 
     #[test]
@@ -110,7 +112,7 @@ mod tests {
         map.insert("verify", "pubkey");
         map.insert("api_version", "2");
 
-        // "{"api_version": "v2", "verify": "pubkey"}"  
+        // "{"api_version": "v2", "verify": "pubkey"}"
         assert_eq!(get_restful_parameters("/v2/verify/pubkey"), map);
     }
 }
