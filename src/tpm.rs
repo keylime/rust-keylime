@@ -3,6 +3,7 @@ use std::process::Command;
 use std::thread;
 use std::time::Duration;
 
+
 const MAX_TRY: usize = 10;
 const RETRY_SLEEP: Duration = Duration::from_millis(50);
 const TPM_IO_ERROR: i32 = 5;
@@ -214,7 +215,6 @@ pub fn run<'a>(cmd: String) -> (Vec<u8>, Option<i32>) {
     loop {
         // let t0 = System::now();
         // assume the system is linux
-
         println!("number tries: {:?}", number_tries);
 
         match output.status.code().unwrap() {
@@ -275,7 +275,7 @@ mod tests {
     fn fingerprint_nv_readvalue_test() {
         assert_eq!(fingerprint("nv_readvalue".to_string()), "nv_readvalue");
     }
-
+  
     #[test]
     fn command_split_get_command() {
         let cmd = String::from("ls -d /usr/local/bin");
@@ -297,3 +297,4 @@ mod tests {
         assert_eq!(return_value.unwrap(), true);
     }
 }
+

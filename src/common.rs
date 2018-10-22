@@ -1,9 +1,23 @@
-extern crate futures;
-extern crate hyper;
-extern crate serde_json;
-
-use hyper::{header, Body, Response, StatusCode};
+use super::*;
+use hyper::{Response, StatusCode, Body, header};
 use std::collections::HashMap;
+use rustc_serialize::json::Json;
+use std::fs::File;
+use std::io::prelude::*;
+use std::io::{Read, Write};
+use libc::{umask, geteuid};
+use std::path::Path;
+use std::process::Command;
+use std::process::Output;
+use std::{thread, time};
+use std::time::{Duration, SystemTime};
+use tempfile::tempfile;
+use tempfile::NamedTempFile;
+
+
+pub const BOOTSTRAP_KEY_SIZE: usize = 32;
+pub const STUB_VTPM: bool = false;
+
 
 pub const STUB_VTPM: bool = false;
 /*
