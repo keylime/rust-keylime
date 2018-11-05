@@ -6,11 +6,14 @@ use hyper::{header, Body, Response, StatusCode};
 use serde_json::{Map, Value};
 use std::collections::HashMap;
 
+/*
+ * Constants and static variables
+ */
 pub const STUB_VTPM: bool = false;
 pub const STUB_IMA: bool = true;
 pub const TPM_DATA_PCR: usize = 16;
 pub const IMA_PCR: usize = 10;
-pub static RSA_PUBLICKEY_EXPORTABLE: &'static str = "placeholder";
+pub static RSA_PUBLICKEY_EXPORTABLE: &'static str = "rsa placeholder";
 pub static TPM_TOOLS_PATH: &'static str = "/usr/local/bin/";
 pub static IMA_ML_STUB: &'static str =
     "../scripts/ima/ascii_runtime_measurements";
@@ -19,24 +22,33 @@ pub static IMA_ML: &'static str =
 pub static KEY: &'static str = "secret";
 
 /*
- * convert the input into a Response struct
+ * Input: Response status code
+ *        Response result status
+ *        Json output content
  *
- * Parameters: code number, status string, content string
- * Return: Combine all information into a Response struct
+ * Return: HTTP Respnose struct
+ *
+ * convert the input into HTTP Response struct with json output formatting.
+ * Follow original python-keylime echo_json_response() output structure. But
+ * there are two difference between this response json content and the
+ * original echo_json_response() response json content.
+ * 1. The serde_json crate sorts keys in alphebetic order, which is
+ * different than the python version response structure.
+ * 2. There is no space in the json content, but python version response
+ * content contains white space in between keys.
  */
 pub fn json_response_content(
     code: i32,
     status: String,
     results: Map<String, Value>,
 ) -> Response<Body> {
-    // integrate everything to one single map contains all the results
-    let mut integrated_results = results.clone();
-    integrated_results.insert("code".into(), code.into());
-    integrated_results.insert("status".into(), status.into());
+    let integerated_result = json!({
+        "status": status,
+        "code": code,
+        "results": results,    
+    });
 
-    let results_value: Value = results.into();
-
-    match serde_json::to_string(&results_value) {
+    match serde_json::to_string(&integerated_result) {
         Ok(json) => {
             // return a json response
             Response::builder()
@@ -58,38 +70,30 @@ pub fn json_response_content(
 }
 
 /*
- * separate url path by '/', first element is dropped since it is an empty
- * string
+ * Input: URL string
  *
- * Paramters: string and delimiter
- * return: Vector of string contains the path content in original order
- */
-pub fn string_split_by_seperator(data: &str, seperator: char) -> Vec<&str> {
-    let mut v: Vec<&str> = data.split(seperator).collect();
-    v.remove(0);
-    v
-}
-
-/*
- * convert a api resquest path to a map that contains the key and value in
- * pair from the original api request
+ * Ouput: Map contains the request type and content in the request
  *
- * Parameters: api string
- * Return: map with api key and value
+ * Convert a api resquest path to a map that contains the key and value, which
+ * are the requested function and content given in pair from the original url.
+ * Same implementation as the original python version get_resrful_parameters()
+ * function.
  */
 pub fn get_restful_parameters(urlstring: &str) -> HashMap<&str, &str> {
     let mut parameters = HashMap::new();
+    let list: Vec<&str> = urlstring.split('/').collect();
 
-    let list = string_split_by_seperator(urlstring, '/');
-    if list.len() <= 1 {
+    // error hanlding, empty url
+    if list.len() <= 0 {
         return parameters;
     }
 
-    let (_, right) = list[0].split_at(1);
+    // capture the version number
+    let (_, right) = list[1].split_at(1);
     parameters.insert("api_version", right);
 
-    /* TODO comment why this drops the first element */
-    for x in 1..(list.len() - 1) {
+    // starting from the second element, which is the first requested function
+    for x in 2..(list.len() - 1) {
         parameters.insert(list[x], list[x + 1]);
     }
     parameters
@@ -100,21 +104,17 @@ pub fn get_restful_parameters(urlstring: &str) -> HashMap<&str, &str> {
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_split_string() {
-        assert_eq!(
-            string_split_by_seperator("/v2/verify/pubkey", '/'),
-            ["v2", "verify", "pubkey"]
-        );
-    }
-
+    // Test the get_restful_parameters function with a given sampel url
     #[test]
     fn test_get_restful_parameters() {
         let mut map = HashMap::new();
         map.insert("verify", "pubkey");
         map.insert("api_version", "2");
 
-        // "{"api_version": "v2", "verify": "pubkey"}"
-        assert_eq!(get_restful_parameters("/v2/verify/pubkey"), map);
+        // Map content "{"api_version": "v2", "verify": "pubkey"}"
+        assert_eq!(
+            get_restful_parameters("127.0.0.1:1337/v2/verify/pubkey"),
+            map
+        );
     }
 }
