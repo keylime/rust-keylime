@@ -44,6 +44,7 @@ struct TpmData {
 ftpm_initialize.py
 Following are function from tpm_initialize.py program      
 *****************************************************************/
+
 /*
 input: content key in tpmdata
 return: deserlized json object
@@ -56,10 +57,12 @@ fn get_tpm_metadata(content_key: String) -> Option<String> {
 }
 
 /*
- * input: none
+ * input: N/A
  * return: tpmdata in json object
  *
- * read in tpmdata.json file and convert it to a pre-defined struct
+ * Read in tpmdata.json file and convert it to a pre-defined struct. Now its
+ * using the sample tpmdata.json in the crate root directory for testing. The
+ * format the same as the original python version.
  */
 fn read_tpm_data() -> Result<TpmData, Box<Error>> {
     let file = File::open("tpmdata.json")?;
@@ -78,9 +81,6 @@ pub fn is_vtpm() -> Option<bool> {
         true => Some(true),
         false => {
             let tpm_manufacturer = get_tpm_manufacturer();
-
-            // ******* //
-            println!("tpm manufacturer: {:?}", tpm_manufacturer);
             Some(tpm_manufacturer.unwrap() == "ETHZ")
         }
     }
@@ -91,10 +91,29 @@ pub fn is_vtpm() -> Option<bool> {
  * is_vtpm helper method
  */
 fn get_tpm_manufacturer() -> Option<String> {
-    // let return_output = run("getcapability -cap 1a".to_string());
+    let (return_output, _return_code, _file_output) = run(
+        "getcapability -cap 1a".to_string(),
+        EXIT_SUCCESS,
+        true,
+        false,
+        String::new(),
+    );
+    let content_result = String::from_utf8(return_output);
+    let content = content_result.unwrap();
 
-    let placeholder = String::from("ETHZ");
-    Some(placeholder)
+    let lines: Vec<&str> = content.split("\n").collect();
+    let mut manufacturer = String::new();
+    for line in lines {
+        let line_tmp = String::from(line);
+        let token: Vec<&str> = line_tmp.split_whitespace().collect();
+        if token.len() == 3 {
+            match (token[0], token[1]) {
+                ("VendorID", ":") => manufacturer = token[2].to_string(),
+                _ => {}
+            }
+        }
+    }
+    Some(manufacturer)
 }
 
 /***************************************************************
@@ -102,6 +121,15 @@ tpm_quote.py
 Following are function from tpm_quote.py program    
 *****************************************************************/
 
+/*
+ * Input: nonce string
+ *        data that needs to be pass to the pcr
+ *        pcrmask
+ *
+ * Output: quote from tpm pcr
+ *
+ * Getting quote form tpm, same implementation as the original python version.
+ */
 pub fn create_quote(
     nonce: String,
     data: String,
@@ -124,7 +152,7 @@ pub fn create_quote(
         // RUN
         run(command, EXIT_SUCCESS, true, false, String::new());
 
-        // sha1 hash data
+        // Use SHA1 to hash the data
         let mut hasher = sha::Sha1::new();
         hasher.update(data.as_bytes());
         let data_sha1_hash = hasher.finish();
@@ -161,6 +189,16 @@ pub fn create_quote(
     Some(quote_return)
 }
 
+/*
+ * Input: nonce string
+ *        data that needs to be pass to the pcr
+ *        pcrmask
+ *
+ * Output: deep quote from tpm pcr
+ *
+ * Getting deep quote form tpm, same implementation as the original python
+ * version. Same  procedures as quote by this is a deep quote.
+ */
 pub fn create_deep_quote(
     nonce: String,
     data: String,
@@ -235,6 +273,10 @@ pub fn create_deep_quote(
  *
  * Use zlib to compression the input and encoded with base64 encoding
  * method
+ *
+ * It doesn't given the same hex output as python but python is able to
+ * decode the hex output and give back the original text message. No able
+ * to test with identical python function output string.
  */
 fn base64_zlib_encode(data: String) -> String {
     let mut e = ZlibEncoder::new(Vec::new(), Compression::default());
@@ -251,6 +293,14 @@ fn base64_zlib_encode(data: String) -> String {
     }
 }
 
+/*
+ * Input: ima mask
+ *        ima pcr
+ * Output: match result
+ *
+ * If ima_mask match ima_pcr return true, otherwise, return false. Same as
+ * original python version.
+ */
 pub fn check_mask(ima_mask: String, ima_pcr: usize) -> bool {
     if ima_mask.is_empty() {
         return false;
@@ -259,6 +309,26 @@ pub fn check_mask(ima_mask: String, ima_pcr: usize) -> bool {
     match (1 << ima_pcr) & ima_mask_int {
         0 => return false,
         _ => return true,
+    }
+}
+
+/*
+ * Input: quote string
+ * Output: deep quote check result boolean
+ *
+ * Check the quote string, if it is deep quote string, return true, otherwise,
+ * return false. Same as the original python version.
+ */
+#[allow(dead_code)]
+pub fn is_deep_quote(quote: String) -> bool {
+    let first_char = &quote[0..1];
+    match first_char {
+        "d" => true,
+        "r" => false,
+        _ => {
+            warn!("Invalid quote type {}", quote);
+            false
+        }
     }
 }
 
@@ -282,11 +352,12 @@ Following are function from tpm_exec.py program
  * return:
  *     tuple contains (standard output, return code, and file output)
  *
- * execute tpm command through shell commands and return the execution
- * result in a tuple
+ * Execute tpm command through shell commands and return the execution
+ * result in a tuple. Implement as original python version. Haven't
+ * implemented tpm stubbing and metric.
  */
 fn run<'a>(
-    cmd: String,
+    command: String,
     except_code: i32,
     raise_on_error: bool,
     _lock: bool,
@@ -295,9 +366,10 @@ fn run<'a>(
     /* stubbing  placeholder */
 
     // tokenize input command
-    let words: Vec<&str> = cmd.split(" ").collect();
+    let words: Vec<&str> = command.split(" ").collect();
     let mut number_tries = 0;
     let args = &words[1..words.len()];
+    let cmd = &words[0];
 
     // setup environment variable
     let mut env_vars: HashMap<String, String> = HashMap::new();
@@ -360,10 +432,10 @@ fn run<'a>(
     let return_output = output.stdout;
     let return_code = output.status.code();
 
-    if return_code.unwrap() == except_code && raise_on_error {
+    if return_code.unwrap() != except_code && raise_on_error {
         panic!(
             "Command: {} returned {}, expected {}, output {}",
-            cmd,
+            command,
             return_code.unwrap(),
             except_code.to_string(),
             String::from_utf8_lossy(&return_output),
@@ -396,13 +468,80 @@ fn read_file_output_path(output_path: String) -> std::io::Result<String> {
     Ok(contents)
 }
 
+/*
+ * These test are for Centos and tpm4720 elmulator install environment. It
+ * will fail if tpm is not install in the system.
+ */
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
 
     #[test]
+    fn test_read_file_output_path() {
+        assert_eq!(
+            read_file_output_path("test_input.txt".to_string()).unwrap(),
+            "Hello World!\n"
+        );
+    }
+
+    #[test]
+    fn test_is_deep_quote() {
+        assert_eq!(is_deep_quote(String::from("dqewrtypuo")), true);
+    }
+
+    // The following test will base on the system capability to run. TPM is
+    // require to run those tests.
+    #[test]
     fn test_is_vtpm() {
-        let return_value = is_vtpm();
-        assert_eq!(return_value.unwrap(), true);
+        match command_exist("getcapability") {
+            true => assert_eq!(is_vtpm().unwrap(), false),
+            false => assert!(true),
+        }
+    }
+
+    #[test]
+    fn test_get_manufacturer() {
+        match command_exist("getcapability") {
+            true => assert_eq!(get_tpm_manufacturer().unwrap(), "IBM"),
+            false => assert!(true),
+        }
+    }
+
+    #[test]
+    fn test_run_command() {
+        match command_exist("getcapability") {
+            true => {
+                let command = "getrandom -size 8 -out foo.out".to_string();
+                run(command, EXIT_SUCCESS, true, false, String::new());
+
+                let p = Path::new("foo.out");
+                assert_eq!(p.exists(), true);
+                match fs::remove_file("foo.out") {
+                    Ok(_) => {}
+                    Err(_) => {}
+                }
+            }
+            false => assert!(true),
+        }
+    }
+
+    /*
+     * Input: command name
+     * Output: checkout command result
+     *
+     * Look for the command in path, if command is there return true, if
+     * command is not exist return false.
+     */
+    fn command_exist(command: &str) -> bool {
+        if let Ok(path) = env::var("PATH") {
+            for pp in path.split(":") {
+                let command_path = format!("{}/{}", pp, command);
+                if fs::metadata(command_path).is_ok() {
+                    return true;
+                }
+            }
+        }
+        false
     }
 }

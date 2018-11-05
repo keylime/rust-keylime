@@ -4,6 +4,9 @@ extern crate log;
 #[macro_use]
 extern crate serde_derive;
 
+#[macro_use]
+extern crate serde_json;
+
 extern crate base64;
 extern crate flate2;
 extern crate futures;
@@ -14,7 +17,6 @@ extern crate openssl;
 extern crate pretty_env_logger;
 extern crate rustc_serialize;
 extern crate serde;
-extern crate serde_json;
 extern crate tempfile;
 
 mod common;
@@ -324,7 +326,10 @@ fn response_function(req: Request<Body>) -> BoxFut {
  * Input: file path
  * Output: file content
  *
- * Read file path and return the file content string wrap by Result
+ * Helper function to help the keylime node read file and get the file
+ * content. It is not from the original python version. Because rust needs
+ * to handle error in result, it is good to keep this function seperate from
+ * the main function.
  */
 fn read_in_file(path: String) -> std::io::Result<String> {
     let file = File::open(path)?;
@@ -338,15 +343,13 @@ fn read_in_file(path: String) -> std::io::Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashMap;
 
     #[test]
-    fn test_get_restful_parameters() {
-        let mut map = HashMap::new();
-        map.insert("verify", "pubkey");
-        map.insert("api_version", "2");
-
-        // "{"api_version": "v2", "verify": "pubkey"}"
-        assert_eq!(common::get_restful_parameters("/v2/verify/pubkey"), map);
+    fn test_read_in_file() {
+        assert_eq!(
+            read_in_file("test_input.txt".to_string())
+                .expect("File doesn't exist"),
+            String::from("Hello World!\n")
+        );
     }
 }
