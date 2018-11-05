@@ -35,7 +35,27 @@ Use `sudo rpm -ivh python-keylime-1.2-1.noarch.rpm` to install the RPM. Use
 package using `yum install python-devel`. Once finished, the RPM should
 install with no issues.
 
-### Running Keylime
+### Install Keylime
 
 The RPM installs Keylime to the `usr/bin/python-keylime` directory. Everything
-needed to run Keylime can be found there.
+needed to run Keylime can be found there. Execute Keylime installer to install 
+`Keylime` and `tmp4720` to your system. 
+```
+$ cd /usr/bin/python-keylime
+$ sudo ./install.sh
+```
+While installing keylime with tpm emulator, use `-s` flag for socket mode 
+installation. Typically, virtual machine needs to use tpm emulator.
+```
+$ cd /usr/bin/python-keylime
+$ sudo ./install.sh -s
+```
+
+#### Reference
+
+mit keylime tpm470 [repository](https://github.com/mit-ll/tpm4720-keylime)
+
+mit python-keylime [repository](https://github.com/mit-ll/python-keylime)
+
+python-keylime rpm install 
+[repository](https://github.com/HuzefaMandvi/keylimeRPM)
