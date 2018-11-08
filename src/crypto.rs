@@ -16,13 +16,16 @@ use std::string::String;
  *
  * Sign message and return HMAC result string
  */
-pub fn do_hmac(input_key: String, input_message: String) -> String {
-    let key = PKey::hmac(input_key.as_bytes()).unwrap();
+pub fn do_hmac(
+    input_key: String,
+    input_message: String,
+) -> Result<String, ErrorStack> {
+    let key = PKey::hmac(input_key.as_bytes())?;
     let message = input_message.as_bytes();
-    let mut signer = Signer::new(MessageDigest::sha384(), &key).unwrap();
-    signer.update(message).unwrap();
-    let hmac = signer.sign_to_vec().unwrap();
-    return to_hex_string(hmac);
+    let mut signer = Signer::new(MessageDigest::sha384(), &key)?;
+    signer.update(message)?;
+    let hmac = signer.sign_to_vec()?;
+    Ok(to_hex_string(hmac))
 }
 
 /*
@@ -85,7 +88,7 @@ mod tests {
         let key = String::from("mysecret");
         let message = String::from("hellothere");
         let mac = do_hmac(key, message);
-        assert_eq!("b8558314f515931c8d9b329805978fe77b9bb020b05406c0ef189d89846ff8f5f0ca10e387d2c424358171df7f896f9f".to_string(), mac);
+        assert_eq!("b8558314f515931c8d9b329805978fe77b9bb020b05406c0ef189d89846ff8f5f0ca10e387d2c424358171df7f896f9f".to_string(), mac.unwrap());
     }
 
     // Test KDF to ensure derived password matches result derived from Python
