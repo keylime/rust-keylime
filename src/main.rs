@@ -81,19 +81,39 @@ fn response_function(req: Request<Body>) -> BoxFut {
                     Some(&"verify") => {
                         /* /keys/verify/challenge/blablabla */
                         let challenge = parameters.get(&"challenge");
-                        let hmac = crypto::do_hmac(
+                        let result = crypto::do_hmac(
                             common::KEY.to_string(),
                             challenge.unwrap().to_string(),
                         );
-
-                        response.insert("hmac".into(), hmac.into());
-                        res = common::json_response_content(
-                            200,
-                            "Success".to_string(),
-                            response,
-                        );
-
-                        info!("GET key challenge returning 200 response");
+                        match result {
+                            Ok(hmac) => {
+                                info!(
+                                    "
+                                    GET keys/verify challenge returning 200
+                                    response.
+                                    "
+                                );
+                                response.insert("hmac".into(), hmac.into());
+                                res = common::json_response_content(
+                                    200,
+                                    "Success".to_string(),
+                                    response,
+                                );
+                            }
+                            Err(e) => {
+                                warn!(
+                                    "GET keys/verify challenge returning 400
+                                    response. HMAC call failed with error:\n
+                                    {}",
+                                    e
+                                );
+                                res = common::json_response_content(
+                                    400,
+                                    "Bad Request".to_string(),
+                                    Map::new(),
+                                );
+                            }
+                        }
                     }
 
                     // pubkey export the rsa pub key
