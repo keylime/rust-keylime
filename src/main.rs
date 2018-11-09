@@ -10,6 +10,7 @@ extern crate futures;
 extern crate hex;
 extern crate hyper;
 extern crate libc;
+extern crate no_panic;
 extern crate openssl;
 extern crate pretty_env_logger;
 extern crate rustc_serialize;
@@ -25,6 +26,7 @@ use futures::future;
 use hyper::rt::Future;
 use hyper::service::service_fn;
 use hyper::{Body, Method, Request, Response, Server, StatusCode};
+use no_panic::no_panic;
 use serde_json::Map;
 use std::collections::HashMap;
 use std::fs::File;
@@ -53,6 +55,7 @@ fn main() {
     hyper::rt::run(server);
 }
 
+#[no_panic]
 fn response_function(req: Request<Body>) -> BoxFut {
     let res;
 
