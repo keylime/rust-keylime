@@ -20,6 +20,15 @@ pub static IMA_ML_STUB: &'static str =
 pub static IMA_ML: &'static str =
     "/sys/kernel/security/ima/ascii_runtime_measurements";
 pub static KEY: &'static str = "secret";
+pub static WORK_DIR: &'static str = "/tmp";
+
+/*
+ * Temporaray location for configuration parameters
+ */
+
+// cloud node
+pub static SECURE_SIZE: &'static str = "1m";
+pub static MOUNT_SECURE: bool = true;
 
 /*
  * Input: Response status code
@@ -97,6 +106,35 @@ pub fn get_restful_parameters(urlstring: &str) -> HashMap<&str, &str> {
         parameters.insert(list[x], list[x + 1]);
     }
     parameters
+}
+
+/*
+ * Input: path directory to be changed owner to root
+ * Return: Result contains execution result
+ *         - directory name for successful execution
+ *         - -1 code for failure execution.
+ *
+ * If privilege requirement is met, change the owner of the path to root
+ * This function is unsafely using libc. Result is returned indicating
+ * execution result.
+ */
+pub fn chownroot(path: String) -> Result<String, i32> {
+    unsafe {
+        // check privilege
+        if libc::geteuid() != 0 {
+            error!("Privilege level unable to change ownership to root for file: {}", path);
+            return Err(-1);
+        }
+
+        // change directory owner to root
+        if libc::chown(path.as_bytes().as_ptr() as *const i8, 0, 0) != 0 {
+            error!("Failed to change file {} owner.", path);
+            return Err(-1);
+        }
+
+        info!("Changed file {} owner to root.", path);
+        Ok(path)
+    }
 }
 
 // Unit Testing

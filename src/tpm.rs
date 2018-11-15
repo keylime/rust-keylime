@@ -22,7 +22,7 @@ const MAX_TRY: usize = 10;
 const RETRY_SLEEP: Duration = Duration::from_millis(50);
 const TPM_IO_ERROR: i32 = 5;
 const RETRY: usize = 4;
-const EXIT_SUCCESS: i32 = 0;
+pub const EXIT_SUCCESS: i32 = 0;
 
 static EMPTYMASK: &'static str = "1";
 
@@ -319,7 +319,6 @@ pub fn check_mask(ima_mask: String, ima_pcr: usize) -> bool {
  * Check the quote string, if it is deep quote string, return true, otherwise,
  * return false. Same as the original python version.
  */
-#[allow(dead_code)]
 pub fn is_deep_quote(quote: String) -> bool {
     let first_char = &quote[0..1];
     match first_char {
@@ -356,7 +355,7 @@ Following are function from tpm_exec.py program
  * result in a tuple. Implement as original python version. Haven't
  * implemented tpm stubbing and metric.
  */
-fn run<'a>(
+pub fn run<'a>(
     command: String,
     except_code: i32,
     raise_on_error: bool,

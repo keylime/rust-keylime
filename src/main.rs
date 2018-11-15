@@ -21,6 +21,7 @@ extern crate tempfile;
 
 mod common;
 mod crypto;
+mod secure_mount;
 mod tpm;
 
 use futures::future;
