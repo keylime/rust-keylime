@@ -2,13 +2,15 @@ extern crate base64;
 extern crate flate2;
 
 use super::*;
+use common::emsg;
 use flate2::write::ZlibEncoder;
 use flate2::Compression;
 use openssl::sha;
+use serde_json::Value;
 use std::env;
-use std::error::Error;
 use std::fs::File;
 use std::io::prelude::*;
+use std::io::BufWriter;
 use std::io::Read;
 use std::process::Command;
 use std::process::Output;
@@ -26,48 +28,117 @@ pub const EXIT_SUCCESS: i32 = 0;
 
 static EMPTYMASK: &'static str = "1";
 
-/*
- * tpm data struct for tpmdata.json file IO
- */
-#[derive(Serialize, Deserialize, Debug)]
-struct TpmData {
-    aik_pw: String,
-    ek: String,
-    owner_pw: String,
-    aik_handle: String,
-    aikmod: String,
-    aikpriv: String,
-    aik: String,
-}
-
 /***************************************************************
 ftpm_initialize.py
 Following are function from tpm_initialize.py program
 *****************************************************************/
 
 /*
-input: content key in tpmdata
-return: deserlized json object
-getting the tpm data struct and convert it to a json value object to access to a particular field inside the tpm data file
-*/
-fn get_tpm_metadata(content_key: String) -> Option<String> {
-    let t_data = read_tpm_data().unwrap();
-    let t_data_json_value = serde_json::to_value(t_data).unwrap();
-    Some(t_data_json_value[content_key].to_string())
+ * Input: content key in tpmdata
+ * Return: Result wrap value string or error message
+ *
+ * Getting the tpm data struct and convert it to a json value object to
+ * retrive a particular value by the given key inside the tpm data.
+ */
+fn get_tpm_metadata_content(key: &str) -> Result<String, Box<String>> {
+    let tpm_data = match read_tpm_data() {
+        Ok(data) => data,
+        Err(e) => return emsg("Failed to read tpmdata.json.", Some(e)),
+    };
+
+    let remove: &[_] = &['"', ' ', '/'];
+    match tpm_data.get(key) {
+        Some(content) => match content.as_str() {
+            Some(s) => Ok(s.to_string().trim_matches(remove).to_string()),
+            None => emsg("Can't convert to string", None::<String>),
+        },
+        None => emsg("Key doesn't exist", None::<String>),
+    }
 }
 
 /*
- * input: N/A
- * return: tpmdata in json object
+ * Input: tpm data key
+ *        tpm data value
+ * Return: Result wrap success or error code -1
+ *
+ * Set the corresponding tpm data key with new value and save the new content
+ * to tpmdata.json. This version remove global tpmdata variable. Read the file
+ * before write the content to the file.
+ */
+fn set_tpm_metadata_content(
+    key: &str,
+    value: &str,
+) -> Result<(), Box<String>> {
+    let mut tpm_data = match read_tpm_data() {
+        Ok(data) => data,
+        Err(e) => return emsg("Fail to read tpmdata.json.", Some(e)),
+    };
+
+    match tpm_data.get_mut(key) {
+        Some(ptr) => *ptr = json!(value),
+        None => return emsg("Key doesn't exist", None::<String>),
+    };
+
+    if let Err(e) = write_tpm_data(tpm_data) {
+        return emsg("Failed to write data to dpmdata.json", Some(e));
+    }
+    Ok(())
+}
+
+/*
+ * Return: Result wrap TPM data or Error Message
  *
  * Read in tpmdata.json file and convert it to a pre-defined struct. Now its
  * using the sample tpmdata.json in the crate root directory for testing. The
- * format the same as the original python version.
+ * format the same as the original python version. Result is returned to
+ * caller for error handling.
  */
-fn read_tpm_data() -> Result<TpmData, Box<Error>> {
-    let file = File::open("tpmdata.json")?;
-    let data: TpmData = serde_json::from_reader(file)?;
+fn read_tpm_data() -> Result<Value, Box<String>> {
+    let file = match File::open("tpmdata.json") {
+        Ok(f) => f,
+        Err(e) => return emsg("Failed to open tpmdata.json.", Some(e)),
+    };
+
+    let data: Value = match serde_json::from_reader(file) {
+        Ok(d) => d,
+        Err(e) => return emsg("Failed to convert tpm data to Json.", Some(e)),
+    };
+
     Ok(data)
+}
+
+/*
+ * Input: tpmdata in Value type
+ * Return: Result wrap success or io Error
+ *
+ * Write the tpmdata to tpmdata.json file with result indicating execution
+ * result. Different implementation than the original python version, which
+ * changes the global variable tpmdata to local scope variable. Because it
+ * could read the data before write instead of using a static type to store
+ * it globally.
+ */
+fn write_tpm_data(data: Value) -> Result<(), Box<String>> {
+    let mut buffer = match File::create("tpmdata.json") {
+        Ok(f) => BufWriter::new(f),
+        Err(e) => return emsg("Failed to open tpmdata.json.", Some(e)),
+    };
+
+    let data_string = match serde_json::to_string_pretty(&data) {
+        Ok(d) => d,
+        Err(e) => return emsg("Failed to convert tpm data to Json.", Some(e)),
+    };
+
+    match buffer.write(data_string.as_bytes()) {
+        Ok(s) => info!("Wrote {} byte to file.", s),
+        Err(e) => return emsg("Failed to write to tpmdata.json.", Some(e)),
+    };
+
+    // Use flush to ensure all the intermediately buffered contents
+    // reach their destination
+    if let Err(e) = buffer.flush() {
+        return emsg("Failed to flush to tpm data file.", Some(e));
+    }
+    Ok(())
 }
 
 /*
@@ -136,8 +207,21 @@ pub fn create_quote(
     mut pcrmask: String,
 ) -> Option<String> {
     let quote_path = NamedTempFile::new().unwrap();
-    let key_handle = get_tpm_metadata("aik_handle".to_string());
-    let aik_password = get_tpm_metadata("aik_pw".to_string());
+    let key_handle = match get_tpm_metadata_content("aik_handle") {
+        Ok(c) => c,
+        Err(e) => {
+            println!("Failed to get tpm aik_handle with error {}.", e);
+            return None;
+        }
+    };
+
+    let aik_password = match get_tpm_metadata_content("aik_pw") {
+        Ok(c) => c,
+        Err(e) => {
+            println!("Failed to get tpm aik_pw with error {}.", e);
+            return None;
+        }
+    };
 
     if pcrmask == "".to_string() {
         pcrmask = EMPTYMASK.to_string();
@@ -169,8 +253,8 @@ pub fn create_quote(
     // store quote into the temp file that will be extracted later
     let command = format!(
         "tpmquote -hk {} -pwdk {} -bm {} -nonce {} -noverify -oq {}",
-        key_handle.unwrap(),
-        aik_password.unwrap(),
+        key_handle,
+        aik_password,
         pcrmask,
         nonce,
         quote_path.path().to_str().unwrap().to_string(),
@@ -206,9 +290,29 @@ pub fn create_deep_quote(
     mut vpcrmask: String,
 ) -> Option<String> {
     let quote_path = NamedTempFile::new().unwrap();
-    let key_handle = get_tpm_metadata("aik_handle".to_string());
-    let aik_password = get_tpm_metadata("aik_pw".to_string());
-    let owner_password = get_tpm_metadata("owner_pw".to_string());
+    let key_handle = match get_tpm_metadata_content("aik_handle") {
+        Ok(c) => c,
+        Err(e) => {
+            println!("Failed to get tpm aik_handle with error {}.", e);
+            return None;
+        }
+    };
+
+    let aik_password = match get_tpm_metadata_content("aik_pw") {
+        Ok(c) => c,
+        Err(e) => {
+            println!("Failed to get tpm aik_pw with error {}.", e);
+            return None;
+        }
+    };
+
+    let owner_password = match get_tpm_metadata_content("owner_pw") {
+        Ok(c) => c,
+        Err(e) => {
+            println!("Failed to get tpm owner_pw with error {}.", e);
+            return None;
+        }
+    };
 
     if pcrmask == "".to_string() {
         pcrmask = EMPTYMASK.to_string();
@@ -244,12 +348,12 @@ pub fn create_deep_quote(
     // store quote into the temp file that will be extracted later
     let command = format!(
         "deepquote -vk {} -hm {} -vm {} -nonce {} -pwdo {} -pwdk {} -oq {}",
-        key_handle.unwrap(),
+        key_handle,
         pcrmask,
         vpcrmask,
         nonce,
-        owner_password.unwrap(),
-        aik_password.unwrap(),
+        owner_password,
+        aik_password,
         quote_path.path().to_str().unwrap(),
     );
 
@@ -469,11 +573,12 @@ fn read_file_output_path(output_path: String) -> std::io::Result<String> {
 
 /*
  * These test are for Centos and tpm4720 elmulator install environment. It
- * will fail if tpm is not install in the system.
+ * test tpm command before execution.
  */
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::error::Error;
     use std::fs;
 
     #[test]
@@ -509,7 +614,7 @@ mod tests {
 
     #[test]
     fn test_run_command() {
-        match command_exist("getcapability") {
+        match command_exist("getrandom") {
             true => {
                 let command = "getrandom -size 8 -out foo.out".to_string();
                 run(command, EXIT_SUCCESS, true, false, String::new());
@@ -523,6 +628,38 @@ mod tests {
             }
             false => assert!(true),
         }
+    }
+
+    #[test]
+    fn test_get_tpm_metadata_1() {
+        assert!(set_tpmdata_test().is_ok());
+
+        // using test tpmdata.json content must present, system won't panic
+        let remove: &[_] = &['"', ' ', '/'];
+        let password = get_tpm_metadata_content("aik_handle")
+            .expect("Failed to get aik_handle.");
+        assert_eq!(password.trim_matches(remove), String::from("FB1F19E0"));
+    }
+
+    #[test]
+    fn test_get_tpm_metadata_2() {
+        assert!(set_tpmdata_test().is_ok());
+
+        // foo is not a key in tpmdata, this call should fail
+        assert!(!get_tpm_metadata_content("foo").is_ok());
+    }
+
+    #[test]
+    fn test_write_tpm_metadata() {
+        assert!(set_tpmdata_test().is_ok());
+        set_tpm_metadata_content("owner_pw", "hello")
+            .expect("Failed to set owner_pw.");
+
+        // using test tpmdata.json content must present, system won't panic
+        let remove: &[_] = &['"', ' ', '/'];
+        let password = get_tpm_metadata_content("owner_pw")
+            .expect("Failed to get owner_pw.");
+        assert_eq!(password.trim_matches(remove), String::from("hello"));
     }
 
     /*
@@ -542,5 +679,18 @@ mod tests {
             }
         }
         false
+    }
+
+    /*
+     * copy tpmdata_test.json file to tpmdata.json for testing
+     */
+    fn set_tpmdata_test() -> Result<(), Box<Error>> {
+        let file = File::open("tpmdata_test.json")?;
+        let data: Value = serde_json::from_reader(file)?;
+        let mut buffer = BufWriter::new(File::create("tpmdata.json")?);
+        let data_string = serde_json::to_string_pretty(&data)?;
+        buffer.write(data_string.as_bytes())?;
+        buffer.flush()?;
+        Ok(())
     }
 }

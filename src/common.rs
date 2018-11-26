@@ -5,6 +5,7 @@ extern crate serde_json;
 use hyper::{header, Body, Response, StatusCode};
 use serde_json::{Map, Value};
 use std::collections::HashMap;
+use std::fmt::Debug;
 
 /*
  * Constants and static variables
@@ -134,6 +135,26 @@ pub fn chownroot(path: String) -> Result<String, i32> {
 
         info!("Changed file {} owner to root.", path);
         Ok(path)
+    }
+}
+
+/*
+ * Input: error message
+ *        Error (Option)
+ * Return: integrated error message string
+ *
+ * A error message helper funciton to integrate error message with error
+ * information. Integrate the error message and error into a single error
+ * message string. Error could be None. Message is return as a Err<> for
+ * error handling Result<>.
+ */
+pub fn emsg<T, E>(message: &str, error: Option<T>) -> Result<E, Box<String>>
+where
+    T: Debug,
+{
+    match error {
+        Some(e) => Err(Box::new(format!("{} Error, {:?}.", message, e))),
+        None => Err(Box::new(message.to_string())),
     }
 }
 
