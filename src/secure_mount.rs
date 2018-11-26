@@ -122,17 +122,24 @@ fn mount() -> Result<String, Box<String>> {
                         })?;
 
                     // mount tmpfs with secure directory
-                    tpm::run(
+                    if let Err(e) = tpm::run(
                         format!(
                             "mount -t tmpfs -o size={},mode=0700 tmpfs {}",
                             common::SECURE_SIZE,
                             s,
                         ),
                         tpm::EXIT_SUCCESS,
-                        true,
-                        false,
-                        String::new(),
-                    );
+                        None,
+                    ) {
+                        error!(
+                            "Failed to execute mount command with error {}.",
+                            e
+                        );
+                        return emsg(
+                            "Failed to mount secure directory tmpfs.",
+                            None::<String>,
+                        );
+                    }
 
                     Ok(s.to_string())
                 }
