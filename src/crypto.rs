@@ -6,7 +6,7 @@ use openssl::error::ErrorStack;
 use openssl::hash::MessageDigest;
 use openssl::pkcs5;
 use openssl::pkey::{PKey, Private, Public};
-use openssl::rsa::Rsa;
+use openssl::rsa::{Padding, Rsa};
 use openssl::sign::Signer;
 use std::error::Error;
 use std::fmt;
@@ -60,6 +60,27 @@ pub fn rsa_generate(
     key_size: u32,
 ) -> Result<Rsa<Private>, KeylimeCryptoError> {
     Ok(Rsa::generate(key_size)?)
+}
+
+/*
+ * Inputs: OpenSSL RSA key
+ *         ciphertext to be decrypted
+ * Output: decrypted plaintext
+ *
+ * Take in an RSA-encrypted ciphertext and an RSA private key and decrypt the
+ * ciphertext based on PKCS1 OAEP. Parameters match that of Python-Keylime.
+ */
+pub fn rsa_decrypt(
+    private_key: Rsa<Private>,
+    ciphertext: String,
+) -> Result<String, KeylimeCryptoError> {
+    let mut dec_result = vec![0; private_key.size() as usize];
+    let dec_len = private_key.private_decrypt(
+        ciphertext.as_bytes(),
+        &mut dec_result,
+        Padding::PKCS1,
+    )?;
+    Ok(to_hex_string(dec_result[..dec_len].to_vec()))
 }
 
 /*

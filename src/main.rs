@@ -483,13 +483,19 @@ fn get_request_handler(
         if let Err(e) =
             set_response_content(200, "Success", response_map, my_response)
         {
-            return emsg("Failed to edit the response content body.", Some(e));
+            return emsg(
+                "Failed to edit the response content body.",
+                Some(e),
+            );
         }
     } else {
         if let Err(e) =
             set_response_content(400, "Bad Request.", Map::new(), my_response)
         {
-            return emsg("Failed to edit the response content body.", Some(e));
+            return emsg(
+                "Failed to edit the response content body.",
+                Some(e),
+            );
         }
         return emsg("Bad Request. Invalid request content.", None::<String>);
     }
