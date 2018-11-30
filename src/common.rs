@@ -1,3 +1,4 @@
+extern crate config;
 extern crate futures;
 extern crate hyper;
 extern crate serde_json;
@@ -5,6 +6,7 @@ extern crate serde_json;
 use hyper::{header, Body, Response, StatusCode};
 use serde_json::{Map, Value};
 use std::collections::HashMap;
+use std::path::Path;
 
 /*
  * Constants and static variables
@@ -21,14 +23,39 @@ pub static IMA_ML: &'static str =
     "/sys/kernel/security/ima/ascii_runtime_measurements";
 pub static KEY: &'static str = "secret";
 pub static WORK_DIR: &'static str = "/tmp";
+pub static MOUNT_SECURE: bool = true;
+pub const EXIT_SUCCESS: i32 = 0;
 
 /*
- * Temporaray location for configuration parameters
+ * Input: key in configuration file
+ * Return: Option wrap the associated value
+ *
+ * Read the config file and retrieve the value based on the given key.
  */
+pub fn get_config_parameter(key: &str) -> Result<String, String> {
+    let mut configs = config::Config::default();
+    match configs.merge(config::File::from(Path::new("config.yml"))) {
+        Ok(_) => {}
+        Err(e) => {
+            return Err(format!("Failed to merge config file, error: {}.", e))
+        }
+    };
 
-// cloud node
-pub static SECURE_SIZE: &'static str = "1m";
-pub static MOUNT_SECURE: bool = true;
+    let config_param = match configs.try_into::<HashMap<String, String>>() {
+        Ok(m) => m,
+        Err(e) => {
+            return Err(format!(
+                "Failed to deserialize file into map, error: {}.",
+                e
+            ))
+        }
+    };
+
+    match config_param.get(key) {
+        Some(value) => Ok(value.to_string()),
+        None => Err(format!("Key value not exist.")),
+    }
+}
 
 /*
  * Input: Response status code
@@ -154,5 +181,16 @@ mod tests {
             get_restful_parameters("127.0.0.1:1337/v2/verify/pubkey"),
             map
         );
+    }
+
+    #[test]
+    fn test_get_config_parameters_exist() {
+        let result = get_config_parameter("secure_size").unwrap();
+        assert_eq!(result, "1m");
+    }
+
+    #[test]
+    fn test_get_config_parameters_not_exist() {
+        assert!(!get_config_parameter("foo").is_ok());
     }
 }

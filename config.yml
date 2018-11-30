@@ -1,0 +1,17 @@
+# size of the memory backed tmpfs partition where keylime stores crypto keys
+# use syntax that mount would accept as a size parameter for tmpfs
+# the default below sets it to 1 megabyte
+secure_size: 1m
+
+# use this option to set the TPM ownerpassword to something you want to use.  
+# Set it to "generate" if you want keylime to choose a random owner password 
+# for you
+tpm_ownerpassword: keylime
+
+# integer number of retries to communicate with the tpm before giving up
+max_retries: 10
+
+# how long to wait between failed attempts to communicate with the tpm in
+# seconds.  floating point values accepted here
+# Unit: milisecond
+retry_interval: 1000

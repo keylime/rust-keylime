@@ -112,14 +112,17 @@ fn mount() -> Result<String, i32> {
             }
         }
 
+        let secure_size =
+            common::get_config_parameter("secure_size").unwrap();
+
         // mount tmpfs with secure directory
         tpm::run(
             format!(
                 "mount -t tmpfs -o size={},mode=0700 tmpfs {}",
-                common::SECURE_SIZE,
+                secure_size,
                 secure_dir_path.to_str().unwrap()
             ),
-            tpm::EXIT_SUCCESS,
+            common::EXIT_SUCCESS,
             true,
             false,
             String::new(),

@@ -18,12 +18,8 @@ use std::time::Duration;
 use std::time::SystemTime;
 use tempfile::NamedTempFile;
 
-const MAX_TRY: usize = 10;
-const RETRY_SLEEP: Duration = Duration::from_millis(50);
+// Global variables
 const TPM_IO_ERROR: i32 = 5;
-const RETRY: usize = 4;
-pub const EXIT_SUCCESS: i32 = 0;
-
 static EMPTYMASK: &'static str = "1";
 
 /*
@@ -93,7 +89,7 @@ pub fn is_vtpm() -> Option<bool> {
 fn get_tpm_manufacturer() -> Option<String> {
     let (return_output, _return_code, _file_output) = run(
         "getcapability -cap 1a".to_string(),
-        EXIT_SUCCESS,
+        common::EXIT_SUCCESS,
         true,
         false,
         String::new(),
@@ -150,7 +146,7 @@ pub fn create_quote(
         let mut command = format!("pcrreset -ix {}", common::TPM_DATA_PCR);
 
         // RUN
-        run(command, EXIT_SUCCESS, true, false, String::new());
+        run(command, common::EXIT_SUCCESS, true, false, String::new());
 
         // Use SHA1 to hash the data
         let mut hasher = sha::Sha1::new();
@@ -163,7 +159,7 @@ pub fn create_quote(
             hex::encode(data_sha1_hash),
         );
 
-        run(command, EXIT_SUCCESS, true, false, String::new());
+        run(command, common::EXIT_SUCCESS, true, false, String::new());
     }
 
     // store quote into the temp file that will be extracted later
@@ -178,7 +174,7 @@ pub fn create_quote(
 
     let (_return_output, _exit_code, quote_raw) = run(
         command,
-        EXIT_SUCCESS,
+        common::EXIT_SUCCESS,
         true,
         false,
         quote_path.path().to_string_lossy().to_string(),
@@ -225,7 +221,7 @@ pub fn create_deep_quote(
         let mut command = format!("pcrreset -ix {}", common::TPM_DATA_PCR);
 
         // RUN
-        run(command, EXIT_SUCCESS, true, false, String::new());
+        run(command, common::EXIT_SUCCESS, true, false, String::new());
 
         let mut hasher = sha::Sha1::new();
         hasher.update(data.as_bytes());
@@ -238,7 +234,7 @@ pub fn create_deep_quote(
         );
 
         // RUN
-        run(command, EXIT_SUCCESS, true, false, String::new());
+        run(command, common::EXIT_SUCCESS, true, false, String::new());
     }
 
     // store quote into the temp file that will be extracted later
@@ -256,7 +252,7 @@ pub fn create_deep_quote(
     // RUN
     let (_return_output, _exit_code, quote_raw) = run(
         command,
-        EXIT_SUCCESS,
+        common::EXIT_SUCCESS,
         true,
         false,
         quote_path.path().to_string_lossy().to_string(),
@@ -370,13 +366,24 @@ pub fn run<'a>(
     let args = &words[1..words.len()];
     let cmd = &words[0];
 
-    // setup environment variable
+    // getting config parameters
+    let max_retries: i32 = common::get_config_parameter("max_retries")
+        .unwrap()
+        .parse()
+        .unwrap();
+
+    let retry_interval: u64 = common::get_config_parameter("retry_interval")
+        .unwrap()
+        .parse()
+        .unwrap();
+    let retry_duration = Duration::from_millis(retry_interval / 1000);
+
+    // setup tpm environment variable for tpm command
     let mut env_vars: HashMap<String, String> = HashMap::new();
     for (key, value) in env::vars() {
         // println!("{}: {}", key, value);
         env_vars.insert(key.to_string(), value.to_string());
     }
-
     env_vars.insert("TPM_SERVER_PORT".to_string(), "9998".to_string());
     env_vars.insert("TPM_SERVER_NAME".to_string(), "localhost".to_string());
     env_vars
@@ -410,7 +417,7 @@ pub fn run<'a>(
         match output.status.code().unwrap() {
             TPM_IO_ERROR => {
                 number_tries += 1;
-                if number_tries >= MAX_TRY {
+                if number_tries >= max_retries {
                     error!("TPM appears to be in use by another application.  Keylime is incompatible with other TPM TSS applications like trousers/tpm-tools. Please uninstall or disable.");
                     break;
                 }
@@ -418,11 +425,11 @@ pub fn run<'a>(
                 info!(
                     "Failed to call TPM {}/{} times, trying again in {} seconds...",
                     number_tries,
-                    MAX_TRY,
-                    RETRY,
+                    max_retries,
+                    retry_interval/1000,
                 );
 
-                thread::sleep(RETRY_SLEEP);
+                thread::sleep(retry_duration);
             }
             _ => break,
         }
@@ -512,7 +519,13 @@ mod tests {
         match command_exist("getcapability") {
             true => {
                 let command = "getrandom -size 8 -out foo.out".to_string();
-                run(command, EXIT_SUCCESS, true, false, String::new());
+                run(
+                    command,
+                    common::EXIT_SUCCESS,
+                    true,
+                    false,
+                    String::new(),
+                );
 
                 let p = Path::new("foo.out");
                 assert_eq!(p.exists(), true);
