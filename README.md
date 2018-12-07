@@ -23,36 +23,40 @@ Most keylime operations rely on TPM co-processor; therefore, the server needs
 a physical TPM chip (or a TPM emulator) to perform keylime operations.  The
 TPM emulator is a program that runs in the deamon to mimic TPM commands.
 
-## Prerequisite
+## Prerequisites
 
-**Rust** Make sure Rust is installed before running Keylime. Installation
-instructions can be found [here]
-(https://www.rust-lang.org/en-US/install.html).
+### Rust
 
-**TPM** The `TPM4720` package is required to use Keylime.  It can be found at
-[mit-ll/tpm4720-keylime]((https://github.com/mit-ll/tpm4720-keylime). `TPM4720`
-supports systems that have physical TPM chips, and can also provide a TPM
-emulator.
+Make sure Rust is installed before running Keylime. Installation
+instructions can be found [here](https://www.rust-lang.org/en-US/install.html).
+
+### TPM
+The TPM4720 package is required to use Keylime.  It can be found at
+[mit-ll/tpm4720-keylime](https://github.com/mit-ll/tpm4720-keylime). TPM4720`
+supports systems that have physical TPM chips, and can also integrate with
+a TPM emulator (see below).
 
 ## Installation
 
-**TPM4720 Emulator on Fedora-28** To install TPM4720, run the following script
-to install TPM4720 in mit-ll/tpm4720-keylime
-[repo](https://github.com/mit-ll/tpm4720-keylime) root directory as root to
-install tpm emulator into you system.  We have tested it with Fedora 28; it
-may or may not work with other environments.
+#### TPM4720 Emulator on Fedora-28
+
+Run the following script as the root user to install TPM4720 into the
+`mit-ll/tpm4720-keylime` repo root directory.
 
 ```
 $ cd scripts/
 $ sudo bash install-fedora-28.sh
 ```
 
+This has been tested with Fedora 28. It may or may not work with
+other environments.
+
 ## Logging env
 
 To run with `pretty-env-logger` trace logging active, set cargo run
 within `RUST_LOG`, as follows:
 
-    RUST_LOG=keylime_node=trace cargo run
+    $ RUST_LOG=keylime_node=trace cargo run
 
 ## Testing
 
@@ -63,7 +67,6 @@ $ cargo test
 ```
 
 ## References
-1. Keylime Paper: [here]
-(https://github.com/mit-ll/python-keylime/blob/master/doc/tci-acm.pdf)
+1. Keylime Paper: [here](https://github.com/mit-ll/python-keylime/blob/master/doc/tci-acm.pdf)
 2. python-keylime: [here](https://github.com/mit-ll/python-keylime)
 3. TPM4720: [here](https://github.com/mit-ll/tpm4720-keylime)
