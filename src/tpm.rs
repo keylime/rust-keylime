@@ -42,7 +42,7 @@ struct TpmData {
 
 /***************************************************************
 ftpm_initialize.py
-Following are function from tpm_initialize.py program      
+Following are function from tpm_initialize.py program
 *****************************************************************/
 
 /*
@@ -118,7 +118,7 @@ fn get_tpm_manufacturer() -> Option<String> {
 
 /***************************************************************
 tpm_quote.py
-Following are function from tpm_quote.py program    
+Following are function from tpm_quote.py program
 *****************************************************************/
 
 /*
@@ -333,7 +333,7 @@ pub fn is_deep_quote(quote: String) -> bool {
 
 /***************************************************************
 tpm_nvram.py
-Following are function from tpm_nvram.py program    
+Following are function from tpm_nvram.py program
 *****************************************************************/
 
 /***************************************************************

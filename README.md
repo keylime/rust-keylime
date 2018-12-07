@@ -14,12 +14,12 @@ features:
   identities
 * Securely monitors system integrity
 
-For more information, see the original python implementation repo and paper in
-the References section.
+For more information, see the original [python implementation repo](https://github.com/mit-ll/python-keylime)
+and paper in the References section.
 
 For now, this project is focusing on the keylime node component, which is a
 HTTP server running on the server machine that executes keylime operations.
-Most keylime operations reply on TPM co-processor; therefore, the server needs
+Most keylime operations rely on TPM co-processor; therefore, the server needs
 a physical TPM chip (or a TPM emulator) to perform keylime operations.  The
 TPM emulator is a program that runs in the deamon to mimic TPM commands.
 
@@ -46,6 +46,13 @@ may or may not work with other environments.
 $ cd scripts/
 $ sudo bash install-fedora-28.sh
 ```
+
+## Logging env
+
+To run with `pretty-env-logger` trace logging active, set cargo run
+within `RUST_LOG`, as follows:
+
+    RUST_LOG=keylime_node=trace cargo run
 
 ## Testing
 

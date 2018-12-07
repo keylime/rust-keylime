@@ -194,7 +194,8 @@ fn response_function(req: Request<Body>) -> BoxFut {
                                 nonce.unwrap().to_string(),
                                 common::RSA_PUBLICKEY_EXPORTABLE.to_string(),
                                 pcr_mask.unwrap().to_string(),
-                            ).unwrap();
+                            )
+                            .unwrap();
                             // tpm quote placeholder
                             ima_mask = pcr_mask.unwrap().to_string();
                         } else {
@@ -203,7 +204,8 @@ fn response_function(req: Request<Body>) -> BoxFut {
                                 common::RSA_PUBLICKEY_EXPORTABLE.to_string(),
                                 vpcr_mask.unwrap().to_string(),
                                 pcr_mask.unwrap().to_string(),
-                            ).unwrap();
+                            )
+                            .unwrap();
                             ima_mask = vpcr_mask.unwrap().to_string();
                         }
 
