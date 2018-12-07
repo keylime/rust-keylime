@@ -367,6 +367,12 @@ fn read_in_file(path: String) -> std::io::Result<String> {
 mod tests {
     use super::*;
 
+    fn init_logger() {
+        pretty_env_logger::init();
+        info!("Initialized logger for testing suite.");
+        assert!(true);
+    }
+
     #[test]
     fn test_read_in_file() {
         assert_eq!(
