@@ -54,7 +54,7 @@ pub fn json_response_content(
     let integerated_result = json!({
         "status": status,
         "code": code,
-        "results": results,    
+        "results": results,
     });
 
     match serde_json::to_string(&integerated_result) {
