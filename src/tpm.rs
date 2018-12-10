@@ -25,13 +25,211 @@ const RETRY_SLEEP: Duration = Duration::from_millis(50);
 const TPM_IO_ERROR: i32 = 5;
 const RETRY: usize = 4;
 pub const EXIT_SUCCESS: i32 = 0;
-
+const BOOTSTRAP_KEY_SIZE: usize = 32;
 static EMPTYMASK: &'static str = "1";
 
 /***************************************************************
 ftpm_initialize.py
 Following are function from tpm_initialize.py program
 *****************************************************************/
+
+/*
+ * Return: Result wrap named temp file name or error
+ *
+ * Make a temp file and return its file path.
+ */
+fn create_and_get_temp_file_path() -> Result<String, Box<String>> {
+    match NamedTempFile::new() {
+        Ok(tmp_file) => match tmp_file.path().to_str() {
+            Some(s) => Ok(s.to_string()),
+            None => emsg(
+                format!("Failed to get temp file path string. Error")
+                    .as_str(),
+                None::<String>,
+            ),
+        },
+        Err(e) => emsg(
+            format!("Failed to create a  tempfile. Error {}.", e).as_str(),
+            Some(e),
+        ),
+    }
+}
+
+/*
+ * Input: key to write to nvram
+ * Output: write key result
+ *
+ * Write the given key to TPM nvram. Same implementation as the original
+ * python-keylime version. Return value contains the error that needs to be
+ * handled.
+ */
+pub fn nvram_write_key(key: &str) -> Result<(), Box<String>> {
+    let owner_password = get_tpm_metadata_content("owner_pw")?;
+    let tmp_file_path = create_and_get_temp_file_path()?;
+
+    // Define a space in nvram
+    run(
+        format!(
+            "nv_definespace -pwdo {} -in 1 -sz {} -pwdd {} -per 40004",
+            owner_password, BOOTSTRAP_KEY_SIZE, owner_password
+        ),
+        EXIT_SUCCESS,
+        true,
+        false,
+        String::new(),
+    );
+
+    // wrtie key to TPM nvram
+    let (_, return_code, _) = run(
+        format!(
+            "nv_writevalue -pwdd {} -in 1 -if {:?}",
+            owner_password, tmp_file_path
+        ),
+        EXIT_SUCCESS,
+        true,
+        false,
+        String::new(),
+    );
+
+    if let Some(c) = return_code {
+        info!("Success added key to temp file with exit code {}", c)
+    };
+
+    Ok(())
+}
+
+/*
+ * Output: Result wraps the retrieved key if succeed
+ *
+ * Read the key stared in nvram. Same implementation as the original
+ * python-keylime version. Result is wrapped for error handling.
+ */
+pub fn nvram_read_key() -> Result<String, Box<String>> {
+    let owner_password = get_tpm_metadata_content("owner_pw")?;
+    let tmp_file_path = create_and_get_temp_file_path()?;
+
+    // Read U key from TPM nvram
+    let (return_output, return_code, key) = run(
+        format!(
+            "nv_readvalue -pwdd {} -in 1 -sz {} -of {:?}",
+            owner_password, BOOTSTRAP_KEY_SIZE, tmp_file_path,
+        ),
+        EXIT_SUCCESS,
+        true,
+        false,
+        tmp_file_path,
+    );
+
+    let content = match String::from_utf8(return_output) {
+        Ok(c) => c,
+        Err(e) => return emsg("Failed to convert output to String.", Some(e)),
+    };
+
+    let first_line = match content.split("\n").next() {
+        Some(s) => s,
+        None => {
+            return emsg(
+                "Output has no content, unable to handle error.",
+                None::<String>,
+            )
+        }
+    };
+
+    // Execution result error handling
+    if let Some(c) = return_code {
+        if c != EXIT_SUCCESS
+            && first_line.len() > 0
+            && (first_line
+                .starts_with("Error Illegal index from NV_ReadValue")
+                || first_line.starts_with("Error Authentication failed"))
+        {
+            return emsg("No stored U in TPM NVRAM", None::<String>);
+        } else if c != EXIT_SUCCESS {
+            let message = format!(
+                "nv_readvalue failed with code {} and output {}",
+                c, content
+            );
+            return emsg(message.as_str(), None::<String>);
+        }
+    }
+
+    if let Some(k) = key {
+        if k.len() != BOOTSTRAP_KEY_SIZE {
+            return emsg("Invalid key length from nvram", None::<String>);
+        }
+        Ok(k)
+    } else {
+        emsg("Key is None.", None::<String>)
+    }
+}
+
+/*
+ * Output: Result wraps the retrieved ekcert key if succeed
+ *
+ * Read the ekcert key stared in nvram. Same implementation as the original
+ * python-keylime version. Result is wrapped for error handling.
+ */
+fn nvram_read_ekcert() -> Result<String, Box<String>> {
+    let owner_password = get_tpm_metadata_content("owner_pw")?;
+    let tmp_file_path = create_and_get_temp_file_path()?;
+
+    // Read ekcert key from TPM nvram
+    let (return_output, return_code, key) = run(
+        format!(
+            "nv_readvalue -pwdd {} -in 1000f000 -cert -of {:?}",
+            owner_password, tmp_file_path,
+        ),
+        EXIT_SUCCESS,
+        false,
+        true,
+        tmp_file_path,
+    );
+
+    let content = match String::from_utf8(return_output) {
+        Ok(c) => c,
+        Err(e) => return emsg("Failed to convert output to String.", Some(e)),
+    };
+
+    // Execution result error handling
+    if let Some(c) = return_code {
+        let first_line = match content.split("/n").next() {
+            Some(s) => s,
+            None => {
+                return emsg(
+                    "Output has no content. Unable to handle error.",
+                    None::<String>,
+                )
+            }
+        };
+
+        if c != EXIT_SUCCESS
+            && first_line.len() > 0
+            && first_line.starts_with("Error Illegal index from NV_ReadValue")
+        {
+            return emsg(
+                "No EK certificate found in TPM NVRAM",
+                None::<String>,
+            );
+        } else if c != EXIT_SUCCESS {
+            return emsg(
+                format!(
+                "nv_readvalue for ekcert failed with code {} and output {}",
+                c, content
+            )
+                .as_str(),
+                None::<String>,
+            );
+        }
+
+        if let Some(k) = key {
+            Ok(base64::encode(k.as_bytes()))
+        } else {
+            emsg("Failed to retrieve key, key is None.", None::<String>)
+        }
+    } else {
+        emsg("Return code is None, failed to proceed.", None::<String>)
+    }
+}
 
 /*
  * Input: content key in tpmdata
@@ -580,6 +778,11 @@ mod tests {
     use super::*;
     use std::error::Error;
     use std::fs;
+
+    #[test]
+    fn test_create_temp_file() {
+        assert!(create_and_get_temp_file_path().is_ok());
+    }
 
     #[test]
     fn test_read_file_output_path() {
