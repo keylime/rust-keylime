@@ -34,6 +34,63 @@ Following are function from tpm_initialize.py program
 *****************************************************************/
 
 /*
+ * Return: Result wrap the execution result
+ *
+ * This function create a new ek if this hasn't been done before. Otherwise,
+ * it will give the error saying that ek has already been created. Same
+ * implementation as the original python-keylime version. This function only
+ * run once during the starting of cloud node.
+ */
+fn create_ek() -> Result<(), Box<String>> {
+    let (output, code, _) = run(
+        String::from("createek"),
+        EXIT_SUCCESS,
+        false,
+        false,
+        String::new(),
+    );
+
+    // Return success if match success code
+    if let Some(EXIT_SUCCESS) = code {
+        return Ok(());
+    }
+
+    // Error handling for error execution output
+    if output.len() > 0
+        && output.starts_with(
+            "Error Target command disabled from TPM_CreateEndorsementKeyPair"
+                .as_bytes(),
+        )
+    {
+        return emsg("TPM EK already created.", None::<String>);
+    }
+
+    if output.len() > 0
+        && output.starts_with(
+            "Error Defend lock running from TPM_CreateEndorsementKeyPair"
+                .as_bytes(),
+        )
+    {
+        return emsg("createek failed.  TPM locked, will attempt unlock during while taking ownership.  To manually repair run \n$ resetlockvalue -pwdo [owner_password]\n", None::<String>);
+    }
+
+    let output_str = match String::from_utf8(output) {
+        Ok(s) => s,
+        Err(e) => return emsg("Failed to convert output to string.", Some(e)),
+    };
+
+    if let Some(c) = code {
+        emsg(
+            format!("createek failed with code {}: {:?}", c, output_str)
+                .as_str(),
+            None::<String>,
+        )
+    } else {
+        emsg("Failed to get return code.", None::<String>)
+    }
+}
+
+/*
  * Input: content key in tpmdata
  * Return: Result wrap value string or error message
  *
