@@ -158,33 +158,34 @@ pub fn is_vtpm() -> Option<bool> {
 }
 
 /*
- * getting the tpm manufacturer information
- * is_vtpm helper method
+ * Return: Result wrap manufacture info or error
+ *
+ * Getting the tpm manufacturer information fromn TPM.
+ * Helper function for is_vtpm().
  */
-fn get_tpm_manufacturer() -> Option<String> {
-    let (return_output, _return_code, _file_output) = run(
+fn get_tpm_manufacturer() -> Result<String, Box<String>> {
+    let (return_output, _, _) = run(
         "getcapability -cap 1a".to_string(),
         EXIT_SUCCESS,
         true,
         false,
         String::new(),
     );
-    let content_result = String::from_utf8(return_output);
-    let content = content_result.unwrap();
+
+    let content = match String::from_utf8(return_output) {
+        Ok(c) => c,
+        Err(e) => return emsg("Failed to convert output to String.", Some(e)),
+    };
 
     let lines: Vec<&str> = content.split("\n").collect();
-    let mut manufacturer = String::new();
     for line in lines {
         let line_tmp = String::from(line);
         let token: Vec<&str> = line_tmp.split_whitespace().collect();
-        if token.len() == 3 {
-            match (token[0], token[1]) {
-                ("VendorID", ":") => manufacturer = token[2].to_string(),
-                _ => {}
-            }
+        if token.len() == 3 && token[0] == "VendorID" && token[1] == ":" {
+            return Ok(token[2].to_string());
         }
     }
-    Some(manufacturer)
+    emsg("Manufacturer information not found.", None::<String>)
 }
 
 /***************************************************************
