@@ -1,24 +1,28 @@
 use super::*;
 
+use common::emsg;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::process::Command;
 
 /*
  * Input: secure mount directory
- * Return: boolean
+ * Return: Result wrap boolean with error message
  *         - true if directory is mounted
  *         - false if not mounted
  *
  * Check the mount status of the secure mount directory. Same
  * implementation as the original python version.
  */
-fn check_mount(secure_dir: &str) -> bool {
-    let output = Command::new("mount")
-        .output()
-        .expect("Failed to execute mount command");
+fn check_mount(secure_dir: &str) -> Result<bool, Box<String>> {
+    let output = Command::new("mount").output().map_err(|e| {
+        Box::new(format!("Failed to execute mount command. Error {}.", e))
+    })?;
 
-    let mount_result = String::from_utf8(output.stdout).unwrap();
+    let mount_result = String::from_utf8(output.stdout).map_err(|e| {
+        Box::new(format!("Failed to get output to string. Error {}.", e))
+    })?;
+
     let lines: Vec<&str> = mount_result.split("\n").collect();
 
     // Check mount list for secure directory
@@ -30,100 +34,116 @@ fn check_mount(secure_dir: &str) -> bool {
         }
 
         if tokens[2] == secure_dir {
-            if &tokens[0] != &"tmpfs" {
-                error!("secure storage location {} already mounted on wrong file system type: {}.  Unmount to continue.", secure_dir, tokens[0]);
-                debug!(
-                    "secure storage location {} aleady mounted on tmpfs",
-                    secure_dir
-                );
-            } else {
-                return true;
+            if tokens[0] != "tmpfs" {
+                return emsg(format!("secure storage location {} already mounted on wrong file system type: {}.  Unmount to continue.", secure_dir, tokens[0]).as_str(), None::<String>);
             }
+
+            return Ok(true);
         }
     }
-    debug!("secure storage location {} not mounted.", secure_dir);
-    false
+
+    info!("secure storage location {} not mounted.", secure_dir);
+    Ok(false)
 }
 
 /*
- * Return: Result contains secure mount directory or error code
+ * Return: Result wrap secure mount directory or error code
  *
  * Mounted the work directory as tmpfs, which is owned by root. Same
  * implementation as the original python version, but the chown/geteuid
  * functions are unsafe function in Rust to use.
  */
-fn mount() -> Result<String, i32> {
-    // use /tmpfs-dev directory if MOUNT_SECURE flag is setm, which doesn't
-    // mount to the system. This is for developement envrionment.
+fn mount() -> Result<String, Box<String>> {
+    // Use /tmpfs-dev directory if MOUNT_SECURE flag is set, which doesn't
+    // mount to the system. This is for developement envrionment. No need to
+    // mount to file system.
     if !common::MOUNT_SECURE {
         let secure_dir = format!("{}{}", common::WORK_DIR, "/tmpfs-dev");
         let secure_dir_path = Path::new(secure_dir.as_str());
         if !secure_dir_path.exists() {
             match fs::create_dir(secure_dir_path) {
                 Ok(()) => {
-                    return Ok(secure_dir_path.to_str().unwrap().to_string());
+                    info!("Directory {:?} created.", secure_dir_path);
                 }
                 Err(e) => {
-                    error!("Failed to create directory, error {}", e);
-                    return Err(-1);
+                    return emsg("Failed to create directory.", Some(e));
                 }
             }
         }
+
+        if let Some(s) = secure_dir_path.to_str() {
+            return Ok(s.to_string());
+        }
+
+        return emsg("Failed to get the path string.", None::<String>);
     }
 
-    let secure_dir = format!("{}{}", common::WORK_DIR, "/secure");
+    // Monut the directory to file system
+    let secure_dir = format!("{}/secure", common::WORK_DIR);
+    match check_mount(&secure_dir) {
+        Ok(false) => {
+            // If the directory is not mount to file system, mount the directory to
+            // file system.
+            let secure_dir_clone = secure_dir.clone();
+            let secure_dir_path = Path::new(secure_dir_clone.as_str());
 
-    // if the directory is not mount to file system, mount the directory to
-    // file system
-    if !check_mount(&secure_dir) {
-        let secure_dir_clone = secure_dir.clone();
-        let secure_dir_path = Path::new(secure_dir_clone.as_str());
-
-        // create directory if the directory is not exist
-        if !secure_dir_path.exists() {
-            match fs::create_dir(secure_dir_path) {
-                Ok(()) => {
-                    let metadata = fs::metadata(secure_dir_path).unwrap();
-                    let mut perm = metadata.permissions();
-
-                    // This function support unix only
-                    perm.set_mode(448);
+            // Create directory if the directory is not exist. The
+            // directory permission is set to 448.
+            if !secure_dir_path.exists() {
+                if let Err(e) = fs::create_dir(secure_dir_path) {
+                    return emsg("Failed to create directory.", Some(e));
                 }
 
-                Err(e) => {
-                    error!("Failed to create directory, error {}", e);
-                    return Err(-1);
+                info!("Directory {:?} created.", secure_dir_path);
+                let metadata =
+                    fs::metadata(secure_dir_path).map_err(|e| {
+                        Box::new(format!(
+                            "Failed to get file metadata. Error {}",
+                            e
+                        ))
+                    })?;
+                metadata.permissions().set_mode(488);
+            }
+
+            match secure_dir_path.to_str() {
+                Some(s) => {
+                    info!("Mounting secure storage location {} on tmpfs.", s);
+
+                    // change the secure path directory owner to root
+                    common::chownroot(s.to_string())
+                        .map(|path| {
+                            info!("Changed path {} owner to root.", path);
+                        })
+                        .map_err(|e| {
+                            format!(
+                            "Failed to change path owner with error code {}.",
+                            e
+                        )
+                        })?;
+
+                    // mount tmpfs with secure directory
+                    tpm::run(
+                        format!(
+                            "mount -t tmpfs -o size={},mode=0700 tmpfs {}",
+                            common::SECURE_SIZE,
+                            s,
+                        ),
+                        tpm::EXIT_SUCCESS,
+                        true,
+                        false,
+                        String::new(),
+                    );
+
+                    Ok(s.to_string())
                 }
+                None => emsg(
+                    "Failed to get path to String for mount the file system.",
+                    None::<String>,
+                ),
             }
         }
 
-        info!(
-            "Mounting secure storage location {} on tmpfs.",
-            secure_dir_path.to_str().unwrap()
-        );
-
-        // change the secure path directory owner to root
-        match common::chownroot(secure_dir_path.to_str().unwrap().to_string())
-        {
-            Ok(path) => info!("Changed path {} owner to root.", path),
-            Err(e) => {
-                error!("Failed to path owner with error code {}.", e);
-                return Err(-1);
-            }
-        }
-
-        // mount tmpfs with secure directory
-        tpm::run(
-            format!(
-                "mount -t tmpfs -o size={},mode=0700 tmpfs {}",
-                common::SECURE_SIZE,
-                secure_dir_path.to_str().unwrap()
-            ),
-            tpm::EXIT_SUCCESS,
-            true,
-            false,
-            String::new(),
-        );
+        Ok(true) => Ok(secure_dir),
+        Err(e) => emsg("Failed to check file system mount.", Some(e)),
     }
-    Ok(secure_dir)
 }
