@@ -142,26 +142,31 @@ fn write_tpm_data(data: Value) -> Result<(), Box<String>> {
 }
 
 /*
- * input: None
- * output: boolean
+ * Input: None
+ * Return: boolean
  *
  * If tpm is a tpm elumator, return true, other wise return false
  */
-pub fn is_vtpm() -> Option<bool> {
+pub fn is_vtpm() -> bool {
     match common::STUB_VTPM {
-        true => Some(true),
-        false => {
-            let tpm_manufacturer = get_tpm_manufacturer();
-            Some(tpm_manufacturer.unwrap() == "ETHZ")
-        }
+        true => return true,
+        false => match get_tpm_manufacturer() {
+            Ok(data) => data == "EtHZ",
+            Err(e) => {
+                warn!("Fail to get tpm manufacturer. {}", e);
+                false
+            }
+        },
     }
 }
 
 /*
+ * Return: Result wrap the manufacture information
+ *
  * getting the tpm manufacturer information
  * is_vtpm helper method
  */
-fn get_tpm_manufacturer() -> Option<String> {
+fn get_tpm_manufacturer() -> Result<String, Box<String>> {
     let (return_output, _return_code, _file_output) = run(
         "getcapability -cap 1a".to_string(),
         EXIT_SUCCESS,
@@ -169,8 +174,10 @@ fn get_tpm_manufacturer() -> Option<String> {
         false,
         String::new(),
     );
-    let content_result = String::from_utf8(return_output);
-    let content = content_result.unwrap();
+    let content = match String::from_utf8(return_output) {
+        Ok(c) => c,
+        Err(e) => return emsg("Failed to convert output to string.", Some(e)),
+    };
 
     let lines: Vec<&str> = content.split("\n").collect();
     let mut manufacturer = String::new();
@@ -178,13 +185,12 @@ fn get_tpm_manufacturer() -> Option<String> {
         let line_tmp = String::from(line);
         let token: Vec<&str> = line_tmp.split_whitespace().collect();
         if token.len() == 3 {
-            match (token[0], token[1]) {
-                ("VendorID", ":") => manufacturer = token[2].to_string(),
-                _ => {}
+            if token[0] == "VendorID" && token[1] == ":" {
+                return Ok(token[2].to_string());
             }
         }
     }
-    Some(manufacturer)
+    emsg("Vendor information not found.", None::<String>)
 }
 
 /***************************************************************
@@ -206,7 +212,19 @@ pub fn create_quote(
     data: String,
     mut pcrmask: String,
 ) -> Option<String> {
-    let quote_path = NamedTempFile::new().unwrap();
+    let temp_file = match NamedTempFile::new() {
+        Ok(f) => f,
+        Err(e) => {
+            error!("Failed to create new temporary file. Error {}.?", e);
+            return None;
+        }
+    };
+
+    let quote_path = match temp_file.path().to_str() {
+        Some(s) => s,
+        None => return None,
+    };
+
     let key_handle = match get_tpm_metadata_content("aik_handle") {
         Ok(c) => c,
         Err(e) => {
@@ -228,7 +246,14 @@ pub fn create_quote(
     }
 
     if !(data == "".to_string()) {
-        let pcrmask_int: i32 = pcrmask.parse().unwrap();
+        let pcrmask_int: i32 = match pcrmask.parse() {
+            Ok(i) => i,
+            Err(e) => {
+                error!("Failed to parse pcrmask to integer. Error {}.", e);
+                return None;
+            }
+        };
+
         pcrmask =
             format!("0x{}", (pcrmask_int + (1 << common::TPM_DATA_PCR)));
         let mut command = format!("pcrreset -ix {}", common::TPM_DATA_PCR);
@@ -253,24 +278,20 @@ pub fn create_quote(
     // store quote into the temp file that will be extracted later
     let command = format!(
         "tpmquote -hk {} -pwdk {} -bm {} -nonce {} -noverify -oq {}",
-        key_handle,
-        aik_password,
-        pcrmask,
-        nonce,
-        quote_path.path().to_str().unwrap().to_string(),
+        key_handle, aik_password, pcrmask, nonce, quote_path,
     );
 
-    let (_return_output, _exit_code, quote_raw) = run(
-        command,
-        EXIT_SUCCESS,
-        true,
-        false,
-        quote_path.path().to_string_lossy().to_string(),
-    );
+    let (_return_output, _exit_code, quote_raw) =
+        run(command, EXIT_SUCCESS, true, false, quote_path.to_string());
 
     let mut quote_return = String::from("r");
-    quote_return.push_str(&base64_zlib_encode(quote_raw.unwrap()));
-    Some(quote_return)
+
+    if let Some(s) = quote_raw {
+        quote_return.push_str(&base64_zlib_encode(s));
+        Some(quote_return)
+    } else {
+        None
+    }
 }
 
 /*
@@ -289,7 +310,19 @@ pub fn create_deep_quote(
     mut pcrmask: String,
     mut vpcrmask: String,
 ) -> Option<String> {
-    let quote_path = NamedTempFile::new().unwrap();
+    let temp_file = match NamedTempFile::new() {
+        Ok(f) => f,
+        Err(e) => {
+            error!("Failed to create new temporary file. Error {}.?", e);
+            return None;
+        }
+    };
+
+    let quote_path = match temp_file.path().to_str() {
+        Some(s) => s,
+        None => return None,
+    };
+
     let key_handle = match get_tpm_metadata_content("aik_handle") {
         Ok(c) => c,
         Err(e) => {
@@ -323,7 +356,13 @@ pub fn create_deep_quote(
     }
 
     if !(data == "".to_string()) {
-        let vpcrmask_int: i32 = vpcrmask.parse().unwrap();
+        let vpcrmask_int: i32 = match vpcrmask.parse() {
+            Ok(i) => i,
+            Err(e) => {
+                error!("Failed to parse vpcrmask to integer. Error {}.", e);
+                return None;
+            }
+        };
         vpcrmask =
             format!("0x{}", (vpcrmask_int + (1 << common::TPM_DATA_PCR)));
         let mut command = format!("pcrreset -ix {}", common::TPM_DATA_PCR);
@@ -354,21 +393,20 @@ pub fn create_deep_quote(
         nonce,
         owner_password,
         aik_password,
-        quote_path.path().to_str().unwrap(),
+        quote_path,
     );
 
     // RUN
-    let (_return_output, _exit_code, quote_raw) = run(
-        command,
-        EXIT_SUCCESS,
-        true,
-        false,
-        quote_path.path().to_string_lossy().to_string(),
-    );
+    let (_, _, quote_raw) =
+        run(command, EXIT_SUCCESS, true, false, quote_path.to_string());
 
     let mut quote_return = String::from("d");
-    quote_return.push_str(&base64_zlib_encode(quote_raw.unwrap()));
-    Some(quote_return)
+    if let Some(q) = quote_raw {
+        quote_return.push_str(&base64_zlib_encode(q));
+        Some(quote_return)
+    } else {
+        None
+    }
 }
 
 /*
@@ -409,7 +447,13 @@ pub fn check_mask(ima_mask: String, ima_pcr: usize) -> bool {
     if ima_mask.is_empty() {
         return false;
     }
-    let ima_mask_int: i32 = ima_mask.parse().unwrap();
+    let ima_mask_int: i32 = match ima_mask.parse() {
+        Ok(i) => i,
+        Err(e) => {
+            error!("Failed to parse ima_mask to integer. Error {}.", e);
+            return false; // temporary return false for error
+        }
+    };
     match (1 << ima_pcr) & ima_mask_int {
         0 => return false,
         _ => return true,
@@ -483,10 +527,10 @@ pub fn run<'a>(
 
     env_vars.insert("TPM_SERVER_PORT".to_string(), "9998".to_string());
     env_vars.insert("TPM_SERVER_NAME".to_string(), "localhost".to_string());
-    env_vars
-        .get_mut("PATH")
-        .unwrap()
-        .push_str(common::TPM_TOOLS_PATH);
+    match env_vars.get_mut("PATH") {
+        Some(v) => v.push_str(common::TPM_TOOLS_PATH),
+        None => error!("PATH doesn't exist."),
+    }
 
     let mut t_diff: u64 = 0;
     let mut output: Output;
@@ -511,8 +555,8 @@ pub fn run<'a>(
         // assume the system is linux
         println!("number tries: {:?}", number_tries);
 
-        match output.status.code().unwrap() {
-            TPM_IO_ERROR => {
+        match output.status.code() {
+            Some(TPM_IO_ERROR) => {
                 number_tries += 1;
                 if number_tries >= MAX_TRY {
                     error!("TPM appears to be in use by another application.  Keylime is incompatible with other TPM TSS applications like trousers/tpm-tools. Please uninstall or disable.");
@@ -535,14 +579,16 @@ pub fn run<'a>(
     let return_output = output.stdout;
     let return_code = output.status.code();
 
-    if return_code.unwrap() != except_code && raise_on_error {
-        panic!(
-            "Command: {} returned {}, expected {}, output {}",
-            command,
-            return_code.unwrap(),
-            except_code.to_string(),
-            String::from_utf8_lossy(&return_output),
-        );
+    if let (Some(c), true) = (return_code, raise_on_error) {
+        if c != except_code {
+            error!(
+                "Command: {} returned {}, expected {}, output {}",
+                command,
+                c,
+                except_code.to_string(),
+                String::from_utf8_lossy(&return_output),
+            );
+        }
     }
 
     let mut file_output: String = String::new();
@@ -599,7 +645,7 @@ mod tests {
     #[test]
     fn test_is_vtpm() {
         match command_exist("getcapability") {
-            true => assert_eq!(is_vtpm().unwrap(), false),
+            true => assert_eq!(is_vtpm(), false),
             false => assert!(true),
         }
     }

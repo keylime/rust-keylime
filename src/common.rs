@@ -2,6 +2,7 @@ extern crate futures;
 extern crate hyper;
 extern crate serde_json;
 
+use hyper::header::HeaderValue;
 use hyper::{header, Body, Response, StatusCode};
 use serde_json::{Map, Value};
 use std::collections::HashMap;
@@ -47,11 +48,12 @@ pub static MOUNT_SECURE: bool = true;
  * 2. There is no space in the json content, but python version response
  * content contains white space in between keys.
  */
-pub fn json_response_content(
+pub fn set_response_content(
     code: i32,
-    status: String,
+    status: &str,
     results: Map<String, Value>,
-) -> Response<Body> {
+    response: &mut Response<Body>,
+) -> Result<(), Box<i32>> {
     let integerated_result = json!({
         "status": status,
         "code": code,
@@ -59,22 +61,22 @@ pub fn json_response_content(
     });
 
     match serde_json::to_string(&integerated_result) {
-        Ok(json) => {
-            // return a json response
-            Response::builder()
-                .header(header::CONTENT_TYPE, "application/json")
-                .body(Body::from(json))
-                .unwrap()
+        Ok(s) => {
+            // Dereferencing apply here because it needs to derefer the variable
+            // so it can assign the new value to it. But changing the headers
+            // doesn't require dereference is because that it uses the returned
+            // header reference and update it instead of changing it, so no
+            // dereference is needed in this case.
+            *response.body_mut() = s.into();
+            response.headers_mut().insert(
+                header::CONTENT_TYPE,
+                HeaderValue::from_static("application/json"),
+            );
+            Ok(())
         }
-
-        // This is unnecessary here，probably won't fail
         Err(e) => {
-            error!("serializing json: {}", e);
-
-            Response::builder()
-                .status(StatusCode::INTERNAL_SERVER_ERROR)
-                .body(Body::from("Internal Server Error"))
-                .unwrap()
+            error!("Failed to convert Json to string for Response body, error {}.", e);
+            Err(Box::new(-1))
         }
     }
 }
@@ -174,6 +176,14 @@ mod tests {
         assert_eq!(
             get_restful_parameters("127.0.0.1:1337/v2/verify/pubkey"),
             map
+        );
+    }
+
+    #[test]
+    fn test_set_response_content() {
+        let mut my_res: Response<Body> = Response::new("nothing".into());
+        assert!(
+            set_response_content(0, "Ok", Map::new(), &mut my_res).is_ok()
         );
     }
 }
