@@ -34,6 +34,268 @@ Following are function from tpm_initialize.py program
 *****************************************************************/
 
 /*
+ * Input: User configuration password
+ * Return: Result wrap the execution result or error message string
+ *
+ * Getting the ownership of the tpm by setting up the TPM password. It will
+ * make sure the TPM is owned by user and the password is set as the user
+ * requested, which could either be generating a new password or using the
+ * password from the configuraiton file.
+ */
+fn take_onwership(config_password: &str) -> Result<(), Box<String>> {
+    // Assigned owner password to an Option variable instead of returnings.
+    // Even the owner passwrod is not exist in tpmdata json file, None option
+    // is assgined to the variable.
+    let mut owner_password = match get_tpm_metadata_content("owner_pw") {
+        Ok(p) => Some(p),
+        Err(e) => {
+            error!("{}", e);
+            None
+        }
+    };
+
+    let mut owner_password_known = false;
+    // let mut owner_password_copy = owner_password;
+
+    // Return if is_tpm_owned() function encounters an error
+    match is_tpm_owned() {
+        Ok(b) => {
+            if b == true {
+                debug!("TPM ownership already been taken");
+            } else {
+                if config_password == "generate" {
+                    info!("Generating random TPM owner password");
+
+                /* placeholder */
+                // owner_password = random_password(20)
+                } else {
+                    info!("Taking ownership with config provided TPM owner password: {}", config_password);
+                    owner_password = Some(config_password.to_string());
+                }
+
+                info!("Taking ownership of TPM");
+                match &owner_password {
+                    Some(p) => {
+                        run(
+                            format!("takeown -pwdo {} -nopubsrk", p),
+                            EXIT_SUCCESS,
+                            true,
+                            true,
+                            String::new(),
+                        );
+                    }
+                    None => {
+                        return emsg(
+                            "Owner password is None. Failed to execute `takeown`.",
+                            None::<String>
+                        );
+                    }
+                }
+
+                owner_password_known = true;
+            }
+        }
+        Err(e) => {
+            return Err(e);
+        }
+    }
+
+    // Return error if TPM passwrod is None but need to generate new password
+    match (&owner_password, config_password) {
+        (None, "generate") => return emsg(
+            "TPM is owned, but owner password has not been provided.  Set config option tpm_ownerpassword to the existing password if known.  If not know, TPM reset is required.",
+            None::<String>
+        ),
+        _ => {},
+    }
+
+    // Secondary test procedure based on two conditions. Using a nested
+    // function for code efficiency.
+    fn secondary_test<'a>(
+        old_password: &str,
+        password_to_test: &'a str,
+    ) -> Result<&'a str, Box<String>> {
+        info!("TPM Owner password: {} from tpmdata.json invalid.  Trying config provided TPM owner password: {}.", old_password, password_to_test);
+
+        // Second test
+        match test_onwer_password(password_to_test, false) {
+            Ok(b) => {
+                if b == false {
+                    emsg("Config provided owner password invalid. Set config option tpm_ownerpassword to the existing password if known.  If not know, TPM reset is required.", None::<String>)
+                } else {
+                    Ok(password_to_test)
+                }
+            }
+            Err(e) => Err(e),
+        }
+    }
+
+    // Make a copy for another ownership
+    let owner_password_copy = owner_password.clone();
+
+    // Validate owner password when the owner password flag is set to false.
+    // Run secondary test using configuration passowrd if either case
+    // is met.
+    //
+    // First case is that the owner password is None after the first
+    // test.
+    // Second case is that the password validation for the current
+    // owner password failed.
+    if owner_password_known == false {
+        match owner_password_copy {
+            Some(password) => match test_onwer_password(&password, false) {
+                Ok(b) => {
+                    if b == false {
+                        match secondary_test(&password, config_password) {
+                            Ok(p) => owner_password = Some(p.to_string()),
+                            Err(e) => return Err(e),
+                        }
+                    }
+                }
+                Err(e) => return Err(e),
+            },
+            None => match secondary_test("None", config_password) {
+                Ok(p) => owner_password = Some(p.to_string()),
+                Err(e) => return Err(e),
+            },
+        }
+    }
+
+    // Update the owner password to tpm data file
+    if let Some(p) = owner_password {
+        set_tpm_metadata_content("owner_pw", &p)?;
+        info!("TPM owner password confirmed: {}.", p);
+        Ok(())
+    } else {
+        emsg(
+            "Owner password is None. Can't store tpm data file.",
+            None::<String>,
+        )
+    }
+}
+
+/*
+ * Input: Owner password
+ *        First time or second time of execution of the test
+ * Return: Result wrap the test result or error otherwise
+ *
+ * Execute one of the tpm command to validate  the owner password.
+ * If the result fail, it will try to run the resetlockvalue twice to reset
+ * the TPM lock.
+ */
+fn test_onwer_password(
+    owner_password: &str,
+    reentry: bool,
+) -> Result<bool, Box<String>> {
+    // Make a named temp file and retrieve its file name
+    let tmp_file_path = match NamedTempFile::new() {
+        Ok(tmp_file) => match tmp_file.path().to_str() {
+            Some(s) => s.to_string().clone(),
+            None => {
+                return emsg(
+                    format!("Failed to get temp file path string. Error")
+                        .as_str(),
+                    None::<String>,
+                )
+            }
+        },
+        Err(e) => {
+            return emsg(
+                format!("Failed to create a  tempfile. Error {}.", e)
+                    .as_str(),
+                Some(e),
+            )
+        }
+    };
+
+    // Checking owner passwrod by running get pub ek command
+    let (return_output, return_code, _) = run(
+        format!("getpubek -pwdo {} -ok {}", owner_password, tmp_file_path),
+        EXIT_SUCCESS,
+        true,
+        true,
+        tmp_file_path,
+    );
+
+    // Command execution result error handling
+    if let Some(c) = return_code {
+        if c != EXIT_SUCCESS {
+            // Convert output to string
+            let output_string = match String::from_utf8(return_output) {
+                Ok(s) => s,
+                Err(e) => {
+                    return emsg(
+                        "Failed to convert output to string.",
+                        Some(e),
+                    )
+                }
+            };
+
+            // Handling error based on execution output
+            if output_string.len() > 0 && output_string.starts_with("Error Authentication failed (Incorrect Password) from TPM_OwnerReadPubek") {
+                return Ok(false);
+            } else if output_string.len() > 0 && output_string.starts_with("Error Defend lock running from TPM_OwnerReadPubek") {
+                if reentry {
+                    error!("Unable to unlock TPM.");
+                    return Ok(false);
+                }
+
+                error!("TPM is locked from too many invalid owner password attempts, attempting to unlock with password: {}", owner_password);
+
+                // From MIT comment: I have no idea why, but runnig this twice seems to actually work.
+                for _ in 0..2 {
+                    run(
+                        format!("resetlockvalue -pwdo {}", owner_password),
+                        EXIT_SUCCESS,
+                        true,
+                        true,
+                        String::new(),
+                    );
+                }
+
+                // recursive call test owner password for a second verification
+                return test_onwer_password(owner_password, true)
+            } else {
+                return emsg(format!("Tested owner password, getpubek failed with code: {} and output: {}.", c, output_string).as_str(), None::<String>);
+            }
+        }
+    }
+    Ok(true)
+}
+
+/*
+ * Return: Result wrap the tpm ownsership status
+ *
+ * Collect information from TPM get capability command and get the own
+ * status of the TPM from the execution output.
+ */
+
+fn is_tpm_owned() -> Result<bool, Box<String>> {
+    let (return_output, _, _) = run(
+        "getcapability -cap 5 -scap 111".to_string(),
+        EXIT_SUCCESS,
+        true,
+        true,
+        String::new(),
+    );
+
+    // Read token and the result information
+    match String::from_utf8(return_output) {
+        Ok(s) => match s.lines().next() {
+            Some(l) => {
+                if l.to_string().trim().ends_with("TRUE") {
+                    Ok(true)
+                } else {
+                    Ok(false)
+                }
+            }
+            None => emsg("TPM owned information unknown.", None::<String>),
+        },
+        Err(e) => emsg("Unable to read output to string.", Some(e)),
+    }
+}
+
+/*
  * Input: content key in tpmdata
  * Return: Result wrap value string or error message
  *
@@ -660,6 +922,17 @@ mod tests {
         let password = get_tpm_metadata_content("owner_pw")
             .expect("Failed to get owner_pw.");
         assert_eq!(password.trim_matches(remove), String::from("hello"));
+    }
+
+    // Make sure the function return a Ok.
+    #[test]
+    fn test_is_tpm_owned() {
+        if command_exist("getcapability") {
+            assert!(is_tpm_owned().is_ok());
+        } else {
+            info!("Command getcapability doesn't exist. Passed test.");
+            assert!(true);
+        }
     }
 
     /*
