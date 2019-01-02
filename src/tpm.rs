@@ -34,6 +34,73 @@ Following are function from tpm_initialize.py program
 *****************************************************************/
 
 /*
+ * Return: Result wrap named temp file name or error
+ *
+ * Make a temp file and return its file path.
+ */
+fn create_and_get_temp_file_path() -> Result<String, Box<String>> {
+    match NamedTempFile::new() {
+        Ok(tmp_file) => match tmp_file.path().to_str() {
+            Some(s) => Ok(s.to_string()),
+            None => emsg(
+                format!("Failed to get temp file path string. Error")
+                    .as_str(),
+                None::<String>,
+            ),
+        },
+        Err(e) => emsg(
+            format!("Failed to create a  tempfile. Error {}.", e).as_str(),
+            Some(e),
+        ),
+    }
+}
+
+/*
+ * Return: Result unwrap execution result
+ *
+ * Execute TPM command and retrip the public ek key and save to
+ * tpmdata.json file. Same implementation as the original python
+ * version with same error hanlding procedures.
+ */
+fn get_pub_ek() -> Result<(), Box<String>> {
+    let owner_password = get_tpm_metadata_content("owner_pw")?;
+    let tmp_path = create_and_get_temp_file_path()?;
+
+    let (return_output, return_code, ek) = run(
+        format!("getpuek -pwdo {} -ok {}", owner_password, tmp_path),
+        EXIT_SUCCESS,
+        true,
+        true,
+        String::new(),
+    );
+
+    let content = match String::from_utf8(return_output) {
+        Ok(c) => c,
+        Err(e) => return emsg("Failed to convert output to String.", Some(e)),
+    };
+
+    // Handling return code for error execution output
+    if let Some(c) = return_code {
+        if c != EXIT_SUCCESS {
+            return emsg(
+                format!(
+                    "getpubek failed with code: {}, and output: {}",
+                    c, content,
+                )
+                .as_str(),
+                None::<String>,
+            );
+        }
+        if let Some(ek) = ek {
+            set_tpm_metadata_content("ek", &ek);
+        }
+        Ok(())
+    } else {
+        emsg("Return code is None.", None::<String>)
+    }
+}
+
+/*
  * Input: content key in tpmdata
  * Return: Result wrap value string or error message
  *
