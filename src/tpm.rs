@@ -34,6 +34,28 @@ Following are function from tpm_initialize.py program
 *****************************************************************/
 
 /*
+ * Return: Result wrap named temp file name or error
+ *
+ * Create a temporary file and return its file path wrapped in a Result.
+ */
+fn temp_file_get_path() -> Result<String, Box<String>> {
+    match NamedTempFile::new() {
+        Ok(tmp_file) => match tmp_file.path().to_str() {
+            Some(s) => Ok(s.to_string()),
+            None => emsg(
+                format!("Failed to get temp file path string. Temp file path is None.")
+                    .as_str(),
+                None::<String>,
+            ),
+        },
+        Err(e) => emsg(
+            format!("Failed to create a  tempfile. Error {}.", e).as_str(),
+            Some(e),
+        ),
+    }
+}
+
+/*
  * Input: content key in tpmdata
  * Return: Result wrap value string or error message
  *
@@ -660,6 +682,11 @@ mod tests {
         let password = get_tpm_metadata_content("owner_pw")
             .expect("Failed to get owner_pw.");
         assert_eq!(password.trim_matches(remove), String::from("hello"));
+    }
+
+    #[test]
+    fn test_temp_file_get_path() {
+        assert!(temp_file_get_path().is_ok());
     }
 
     /*
