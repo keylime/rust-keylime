@@ -5,7 +5,7 @@ extern crate openssl;
 use openssl::error::ErrorStack;
 use openssl::hash::MessageDigest;
 use openssl::pkcs5;
-use openssl::pkey::{PKey, Public};
+use openssl::pkey::{PKey, Private, Public};
 use openssl::rsa::Rsa;
 use openssl::sign::Signer;
 use std::fs::File;
@@ -46,6 +46,16 @@ pub fn rsa_import_pubkey(
         input_key.read_to_end(&mut key_buffer);
     }
     Ok(Rsa::public_key_from_pem(&key_buffer)?)
+}
+
+/*
+ * Input: desired key size
+ * Output: OpenSSL RSA key object
+ *
+ * Randomly generate a callable OpenSSL RSA key object with desired key size.
+ */
+pub fn rsa_generate(key_size: u32) -> Result<Rsa<Private>, ErrorStack> {
+    Ok(Rsa::generate(key_size)?)
 }
 
 /*
