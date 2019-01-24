@@ -61,7 +61,7 @@ fn mount() -> Result<String, i32> {
         if !secure_dir_path.exists() {
             match fs::create_dir(secure_dir_path) {
                 Ok(()) => {
-                    return Ok(secure_dir_path.to_str().unwrap().to_string())
+                    return Ok(secure_dir_path.to_str().unwrap().to_string());
                 }
                 Err(e) => {
                     error!("Failed to create directory, error {}", e);
