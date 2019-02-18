@@ -8,7 +8,10 @@ use openssl::pkcs5;
 use openssl::pkey::{PKey, Private, Public};
 use openssl::rsa::Rsa;
 use openssl::sign::Signer;
+use std::error::Error;
+use std::fmt;
 use std::fs::File;
+use std::io::Error as StdIOError;
 use std::io::Read;
 use std::string::String;
 
@@ -103,6 +106,57 @@ fn to_hex_string(bytes: Vec<u8>) -> String {
     let strs: Vec<String> =
         bytes.iter().map(|b| format!("{:02x}", b)).collect();
     strs.join("")
+}
+
+/*
+ * KeylimeCryptoError: Custom error type to be thrown by functions in
+ * crypto.rs. Wraps I/O errors and OpenSSL ErrorStack structs together into
+ * one thing.
+ */
+#[derive(Debug)]
+pub enum KeylimeCryptoError {
+    IOError { details: String },
+    OpenSSLError { stack: ErrorStack },
+}
+
+impl fmt::Display for KeylimeCryptoError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match *self {
+            KeylimeCryptoError::IOError { ref details } => {
+                f.write_str(&format!("{:?}", details))
+            }
+            KeylimeCryptoError::OpenSSLError { ref stack } => {
+                f.write_str(&format!("{:?}", stack))
+            }
+        }
+    }
+}
+
+impl Error for KeylimeCryptoError {
+    fn description(&self) -> &str {
+        match *self {
+            KeylimeCryptoError::IOError { ref details } => {
+                ("Error reading file")
+            }
+            KeylimeCryptoError::OpenSSLError { ref stack } => {
+                ("OpenSSL library error")
+            }
+        }
+    }
+}
+
+impl From<ErrorStack> for KeylimeCryptoError {
+    fn from(e: ErrorStack) -> Self {
+        KeylimeCryptoError::OpenSSLError { stack: e }
+    }
+}
+
+impl From<StdIOError> for KeylimeCryptoError {
+    fn from(e: StdIOError) -> Self {
+        KeylimeCryptoError::IOError {
+            details: format!("{:?}", e),
+        }
+    }
 }
 
 // Unit Testing
