@@ -25,7 +25,7 @@ use std::string::String;
 pub fn do_hmac(
     input_key: String,
     input_message: String,
-) -> Result<String, ErrorStack> {
+) -> Result<String, KeylimeCryptoError> {
     let key = PKey::hmac(input_key.as_bytes())?;
     let message = input_message.as_bytes();
     let mut signer = Signer::new(MessageDigest::sha384(), &key)?;
@@ -43,11 +43,10 @@ pub fn do_hmac(
  */
 pub fn rsa_import_pubkey(
     input_key_path: String,
-) -> Result<Rsa<Public>, ErrorStack> {
+) -> Result<Rsa<Public>, KeylimeCryptoError> {
     let mut key_buffer = vec![0; 1];
-    if let Ok(mut input_key) = File::open(input_key_path) {
-        input_key.read_to_end(&mut key_buffer);
-    }
+    let mut input_key = File::open(input_key_path)?;
+    input_key.read_to_end(&mut key_buffer)?;
     Ok(Rsa::public_key_from_pem(&key_buffer)?)
 }
 
@@ -57,7 +56,9 @@ pub fn rsa_import_pubkey(
  *
  * Randomly generate a callable OpenSSL RSA key object with desired key size.
  */
-pub fn rsa_generate(key_size: u32) -> Result<Rsa<Private>, ErrorStack> {
+pub fn rsa_generate(
+    key_size: u32,
+) -> Result<Rsa<Private>, KeylimeCryptoError> {
     Ok(Rsa::generate(key_size)?)
 }
 
@@ -78,7 +79,7 @@ pub fn rsa_generate(key_size: u32) -> Result<Rsa<Private>, ErrorStack> {
 pub fn kdf(
     input_password: String,
     input_salt: String,
-) -> Result<String, ErrorStack> {
+) -> Result<String, KeylimeCryptoError> {
     let password = input_password.as_bytes();
     let salt = input_salt.as_bytes();
     let count = 2000;
