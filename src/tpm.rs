@@ -8,6 +8,8 @@ use flate2::Compression;
 use openssl::sha;
 use serde_json::Value;
 use std::env;
+use std::error::Error;
+use std::fmt;
 use std::fs::File;
 use std::io::prelude::*;
 use std::io::BufWriter;
@@ -24,7 +26,6 @@ const MAX_TRY: usize = 10;
 const RETRY_SLEEP: Duration = Duration::from_millis(50);
 const TPM_IO_ERROR: i32 = 5;
 const RETRY: usize = 4;
-pub const EXIT_SUCCESS: i32 = 0;
 
 static EMPTYMASK: &'static str = "1";
 
@@ -167,8 +168,9 @@ pub fn is_vtpm() -> bool {
  * is_vtpm helper method
  */
 fn get_tpm_manufacturer() -> Result<String, Box<String>> {
-    let (return_output, _, _) =
-        run("getcapability -cap 1a".to_string(), EXIT_SUCCESS, None)?;
+    let (return_output, _) =
+        run("getcapability -cap 1a".to_string(), None)
+            .map_err(|e| Box::new(e.description().to_string()))?;
 
     let lines: Vec<&str> = return_output.split("\n").collect();
     let mut manufacturer = String::new();
@@ -250,7 +252,7 @@ pub fn create_quote(
         let mut command = format!("pcrreset -ix {}", common::TPM_DATA_PCR);
 
         // RUN
-        if let Err(e) = run(command, EXIT_SUCCESS, None) {
+        if let Err(e) = run(command, None) {
             error!("Failed to execute TPM command with error {}.", e);
             return None;
         }
@@ -267,7 +269,7 @@ pub fn create_quote(
         );
 
         // RUN
-        if let Err(e) = run(command, EXIT_SUCCESS, None) {
+        if let Err(e) = run(command, None) {
             error!("Failed to execute TPM command with error {}.", e);
             return None;
         }
@@ -279,11 +281,13 @@ pub fn create_quote(
         key_handle, aik_password, pcrmask, nonce, quote_path,
     );
 
-    let (_, _, quote_raw) = match run(command, EXIT_SUCCESS, Some(quote_path))
-    {
-        Ok((o, c, q)) => ((o, c, q)),
+    let (_, quote_raw) = match run(command, Some(quote_path)) {
+        Ok((o, q)) => ((o, q)),
         Err(e) => {
-            error!("Failed to execute TPM command with error {}.", e);
+            error!(
+                "Failed to execute TPM command with error {}.",
+                e.description()
+            );
             return None;
         }
     };
@@ -367,7 +371,7 @@ pub fn create_deep_quote(
         let mut command = format!("pcrreset -ix {}", common::TPM_DATA_PCR);
 
         //RUN
-        if let Err(e) = run(command, EXIT_SUCCESS, None) {
+        if let Err(e) = run(command, None) {
             error!("Failed to execute TPM command with error {}.", e);
             return None;
         }
@@ -383,7 +387,7 @@ pub fn create_deep_quote(
         );
 
         //RUN
-        if let Err(e) = run(command, EXIT_SUCCESS, None) {
+        if let Err(e) = run(command, None) {
             error!("Failed to execute TPM command with error {}.", e);
             return None;
         }
@@ -402,11 +406,13 @@ pub fn create_deep_quote(
     );
 
     // RUN
-    let (_, _, quote_raw) = match run(command, EXIT_SUCCESS, Some(quote_path))
-    {
-        Ok((o, c, q)) => ((o, c, q)),
+    let (_, quote_raw) = match run(command, Some(quote_path)) {
+        Ok((o, q)) => ((o, q)),
         Err(e) => {
-            error!("Failed to execute TPM command with error {}.", e);
+            error!(
+                "Failed to execute TPM command with error {}.",
+                e.description()
+            );
             return None;
         }
     };
@@ -504,22 +510,21 @@ Following are function from tpm_exec.py program
  * return:
  *     tuple contains:
  *         return output: execution standard output
- *         return code: execution result code
  *         file output: output file content if avaiable
+ *     TpmExecError:
+ *         execution return code and error message
  *
  * Set up execution envrionment to execute tpm command through shell commands
  * and return the execution result in a tuple. Based on the latest update of
  * python keylime this function implement the functionality of cmd_exec
  * script in the python keylime repo. RaiseOnError and lock are dropped due
- * to different error handling in Rust. Output are preprocessed to before
- * returning for code efficient.
+ * to different error handling in Rust. Returned output string are preprocessed
+ * to before returning for code efficient.
  */
 pub fn run<'a>(
     command: String,
-    expect_code: i32,
     output_path: Option<&str>,
-) -> Result<(String, i32, String), Box<String>> {
-    let mut t_diff: u64 = 0;
+) -> Result<(String, String), KeylimeTpmError> {
     let mut file_output = String::new();
     let mut output: Output;
 
@@ -538,7 +543,11 @@ pub fn run<'a>(
     env_vars.insert("TPM_SERVER_NAME".to_string(), "localhost".to_string());
     match env_vars.get_mut("PATH") {
         Some(v) => v.push_str(common::TPM_TOOLS_PATH),
-        None => return emsg("PATH doesn't exist.", None::<String>),
+        None => {
+            return Err(KeylimeTpmError::new_tpm_rust_error(
+                "PATH envrionment variable dosen't exist.",
+            ));
+        }
     }
 
     // main loop
@@ -546,18 +555,11 @@ pub fn run<'a>(
         // Start time stamp
         let t0 = SystemTime::now();
 
-        output = match Command::new(&cmd).args(args).envs(&env_vars).output()
-        {
-            Ok(o) => o,
-            Err(e) => return emsg("Failed to execute command", Some(e)),
-        };
+        output = Command::new(&cmd).args(args).envs(&env_vars).output()?;
 
         // measure execution time
-        t_diff = match t0.duration_since(t0) {
-            Ok(t_delta) => t_delta.as_secs(),
-            Err(e) => return emsg("Can't get time duration", Some(e)),
-        };
-        info!("Time cost: {}", t_diff);
+        let t_diff = t0.duration_since(t0)?;
+        info!("Time cost: {}", t_diff.as_secs());
 
         // assume the system is linux
         println!("number tries: {:?}", number_tries);
@@ -566,17 +568,17 @@ pub fn run<'a>(
             Some(TPM_IO_ERROR) => {
                 number_tries += 1;
                 if number_tries >= MAX_TRY {
-                    return emsg(
+                    return Err(KeylimeTpmError::new_tpm_error(
+                        TPM_IO_ERROR,
                         "TPM appears to be in use by another application. 
-                                Keylime is incompatible with other TPM TSS 
-                                applications like trousers/tpm-tools. Please 
-                                uninstall or disable.",
-                        None::<String>,
-                    );
+                         Keylime is incompatible with other TPM TSS 
+                         applications like trousers/tpm-tools. Please 
+                         uninstall or disable.",
+                    ));
                 }
 
                 info!(
-                    "Failed to call TPM {}/{} times, trying again in {} seconds...",
+                    "Failed to call TPM {}/{} times, trying again in {} secs.",
                     number_tries,
                     MAX_TRY,
                     RETRY,
@@ -589,46 +591,32 @@ pub fn run<'a>(
         }
     }
 
-    // preprocess execution result
-    let return_output = String::from_utf8(output.stdout).map_err(|e| {
-        Box::new(format!(
-            "Can't convert output to utf8 encoded String. Error {}.",
-            e,
-        ))
-    })?;
-
-    // preprocess execution status code
-    let return_code = match output.status.code() {
-        Some(c) => c,
+    let return_output = String::from_utf8(output.stdout)?;
+    match output.status.code() {
         None => {
-            return emsg("Execution status code is None.", None::<String>);
+            return Err(KeylimeTpmError::new_tpm_rust_error(
+                "Execution return code is None.",
+            ));
         }
-    };
-
-    // Execution return code checking
-    if return_code != expect_code {
-        return emsg(
-            format!(
-                "Command: {} returned {}, expected {}, output {}",
-                command,
-                return_code,
-                expect_code.to_string(),
-                return_output,
-            )
-            .as_str(),
-            None::<String>,
-        );
+        Some(0) => info!("Successfully executed TPM command."),
+        Some(c) => {
+            return Err(KeylimeTpmError::new_tpm_error(
+                c,
+                format!(
+                    "Command: {} returned {}, output {}",
+                    command, c, return_output,
+                )
+                .as_str(),
+            ));
+        }
     }
 
     // Retrive data from output path file
     if let Some(p) = output_path {
-        file_output = match read_file_output_path(p.to_string()) {
-            Ok(content) => content,
-            Err(e) => return emsg("Failed to read output path", Some(e)),
-        };
+        file_output = read_file_output_path(p.to_string())?;
     }
 
-    Ok((return_output, return_code, file_output))
+    Ok((return_output, file_output))
 }
 
 /*
@@ -643,6 +631,87 @@ fn read_file_output_path(output_path: String) -> std::io::Result<String> {
     let mut contents = String::new();
     file.read_to_string(&mut contents)?;
     Ok(contents)
+}
+
+/*
+ * Custom Error type for tpm execution error. It contains both error from the
+ * TPM command execution result and error within the run() function.
+ *
+ * Error Code:
+ *  - 10: error cause from the function call within the run()
+ *  -  _: error code cuase from TPM command execution return code
+ */
+#[derive(Debug)]
+pub enum KeylimeTpmError {
+    TpmRustError { details: String },
+    TpmError { code: i32, details: String },
+}
+
+impl KeylimeTpmError {
+    fn new_tpm_error(err_code: i32, err_msg: &str) -> KeylimeTpmError {
+        KeylimeTpmError::TpmError {
+            code: err_code,
+            details: err_msg.to_string(),
+        }
+    }
+
+    fn new_tpm_rust_error(err_msg: &str) -> KeylimeTpmError {
+        KeylimeTpmError::TpmRustError {
+            details: err_msg.to_string(),
+        }
+    }
+}
+
+impl Error for KeylimeTpmError {
+    fn description(&self) -> &str {
+        match &self {
+            KeylimeTpmError::TpmError {
+                ref details,
+                ref code,
+            } => details,
+            KeylimeTpmError::TpmRustError { ref details } => details,
+        }
+    }
+}
+
+impl fmt::Display for KeylimeTpmError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match *self {
+            KeylimeTpmError::TpmError {
+                ref code,
+                ref details,
+            } => write!(
+                f,
+                "Execute TPM command failed with Error Code: [{}] and 
+                Error Message [{}].",
+                code, details,
+            ),
+            KeylimeTpmError::TpmRustError { ref details } => write!(
+                f,
+                "Error occur in TPM rust interface with message [{}].",
+                details,
+            ),
+        }
+    }
+}
+
+// Implement From for error cause by function call within run() function
+impl From<std::io::Error> for KeylimeTpmError {
+    fn from(e: std::io::Error) -> KeylimeTpmError {
+        KeylimeTpmError::new_tpm_rust_error(e.description())
+    }
+}
+
+impl From<std::time::SystemTimeError> for KeylimeTpmError {
+    fn from(e: std::time::SystemTimeError) -> KeylimeTpmError {
+        KeylimeTpmError::new_tpm_rust_error(e.description())
+    }
+}
+
+impl From<std::string::FromUtf8Error> for KeylimeTpmError {
+    fn from(e: std::string::FromUtf8Error) -> KeylimeTpmError {
+        KeylimeTpmError::new_tpm_rust_error(e.description())
+    }
 }
 
 /*
@@ -691,10 +760,13 @@ mod tests {
         match command_exist("getrandom") {
             true => {
                 let command = "getrandom -size 8 -out foo.out".to_string();
-                run(command, EXIT_SUCCESS, None);
+                run(command, None);
                 let p = Path::new("foo.out");
                 assert_eq!(p.exists(), true);
-                fs::remove_file("foo.out").unwrap();
+                match fs::remove_file("foo.out") {
+                    Ok(_) => {}
+                    Err(_) => {}
+                }
             }
             false => assert!(true),
         }

@@ -1,10 +1,10 @@
 use super::*;
 
 use common::emsg;
+use std::error::Error;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::process::Command;
-
 /*
  * Input: secure mount directory
  * Return: Result wrap boolean with error message
@@ -122,24 +122,15 @@ fn mount() -> Result<String, Box<String>> {
                         })?;
 
                     // mount tmpfs with secure directory
-                    if let Err(e) = tpm::run(
+                    tpm::run(
                         format!(
                             "mount -t tmpfs -o size={},mode=0700 tmpfs {}",
                             common::SECURE_SIZE,
                             s,
                         ),
-                        tpm::EXIT_SUCCESS,
                         None,
-                    ) {
-                        error!(
-                            "Failed to execute mount command with error {}.",
-                            e
-                        );
-                        return emsg(
-                            "Failed to mount secure directory tmpfs.",
-                            None::<String>,
-                        );
-                    }
+                    )
+                    .map_err(|e| e.description().to_string())?;
 
                     Ok(s.to_string())
                 }
