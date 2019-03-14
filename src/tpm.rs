@@ -35,32 +35,44 @@ Following are function from tpm_initialize.py program
 *****************************************************************/
 
 /*
- * Input: content key in tpmdata
- * Return: Result wrap value string or error message
+ * Input:
+ *     content key in tpmdata
+ * Return:
+ *     Value string
+ *     KeylimeTpmError
  *
  * Getting the tpm data struct and convert it to a json value object to
  * retrive a particular value by the given key inside the tpm data.
  */
-fn get_tpm_metadata_content(key: &str) -> Result<String, Box<String>> {
-    let tpm_data = match read_tpm_data() {
-        Ok(data) => data,
-        Err(e) => return emsg("Failed to read tpmdata.json.", Some(e)),
-    };
-
+fn get_tpm_metadata_content(key: &str) -> Result<String, KeylimeTpmError> {
+    let tpm_data = read_tpm_data()?;
     let remove: &[_] = &['"', ' ', '/'];
-    match tpm_data.get(key) {
-        Some(content) => match content.as_str() {
-            Some(s) => Ok(s.to_string().trim_matches(remove).to_string()),
-            None => emsg("Can't convert to string", None::<String>),
+    tpm_data.get(key).map_or_else(
+        || {
+            Err(KeylimeTpmError::new_tpm_rust_error(
+                format!("Key: {} is missing in tpmdata.json", key).as_str(),
+            ))
         },
-        None => emsg("Key doesn't exist", None::<String>),
-    }
+        |content| {
+            content.as_str().map_or_else(
+                || {
+                    Err(KeylimeTpmError::new_tpm_rust_error(
+                        "Failed to convert Value to stirng.",
+                    ))
+                },
+                |s| Ok(s.to_string().trim_matches(remove).to_string()),
+            )
+        },
+    )
 }
 
 /*
- * Input: tpm data key
- *        tpm data value
- * Return: Result wrap success or error code -1
+ * Input:
+ *      tpm data key
+ *      tpm data value
+ * Return:
+ *      success
+ *      KeylimeTpmError
  *
  * Set the corresponding tpm data key with new value and save the new content
  * to tpmdata.json. This version remove global tpmdata variable. Read the
@@ -69,48 +81,42 @@ fn get_tpm_metadata_content(key: &str) -> Result<String, Box<String>> {
 fn set_tpm_metadata_content(
     key: &str,
     value: &str,
-) -> Result<(), Box<String>> {
-    let mut tpm_data = match read_tpm_data() {
-        Ok(data) => data,
-        Err(e) => return emsg("Fail to read tpmdata.json.", Some(e)),
-    };
-
+) -> Result<(), KeylimeTpmError> {
+    let mut tpm_data = read_tpm_data()?;
     match tpm_data.get_mut(key) {
         Some(ptr) => *ptr = json!(value),
-        None => return emsg("Key doesn't exist", None::<String>),
+        None => {
+            return Err(KeylimeTpmError::new_tpm_rust_error(
+                format!("Key: {} is missing in tpmdata.json", key).as_str(),
+            ));
+        }
     };
 
-    if let Err(e) = write_tpm_data(tpm_data) {
-        return emsg("Failed to write data to dpmdata.json", Some(e));
-    }
+    write_tpm_data(tpm_data)?;
     Ok(())
 }
 
 /*
- * Return: Result wrap TPM data or Error Message
+ * Return:
+ *     TPM data
+ *     KeylimeTpmError
  *
  * Read in tpmdata.json file and convert it to a pre-defined struct. Now its
  * using the sample tpmdata.json in the crate root directory for testing. The
  * format the same as the original python version. Result is returned to
  * caller for error handling.
  */
-fn read_tpm_data() -> Result<Value, Box<String>> {
-    let file = match File::open("tpmdata.json") {
-        Ok(f) => f,
-        Err(e) => return emsg("Failed to open tpmdata.json.", Some(e)),
-    };
-
-    let data: Value = match serde_json::from_reader(file) {
-        Ok(d) => d,
-        Err(e) => return emsg("Failed to convert tpm data to Json.", Some(e)),
-    };
-
+fn read_tpm_data() -> Result<Value, KeylimeTpmError> {
+    let file = File::open("tpmdata.json")?;
+    let data: Value = serde_json::from_reader(file)?;
     Ok(data)
 }
 
 /*
  * Input: tpmdata in Value type
- * Return: Result wrap success or io Error
+ * Return:
+ *     success
+ *     KeylimeTpmError
  *
  * Write the tpmdata to tpmdata.json file with result indicating execution
  * result. Different implementation than the original python version, which
@@ -118,33 +124,20 @@ fn read_tpm_data() -> Result<Value, Box<String>> {
  * could read the data before write instead of using a static type to store
  * it globally.
  */
-fn write_tpm_data(data: Value) -> Result<(), Box<String>> {
-    let mut buffer = match File::create("tpmdata.json") {
-        Ok(f) => BufWriter::new(f),
-        Err(e) => return emsg("Failed to open tpmdata.json.", Some(e)),
-    };
-
-    let data_string = match serde_json::to_string_pretty(&data) {
-        Ok(d) => d,
-        Err(e) => return emsg("Failed to convert tpm data to Json.", Some(e)),
-    };
-
-    match buffer.write(data_string.as_bytes()) {
-        Ok(s) => info!("Wrote {} byte to file.", s),
-        Err(e) => return emsg("Failed to write to tpmdata.json.", Some(e)),
-    };
+fn write_tpm_data(data: Value) -> Result<(), KeylimeTpmError> {
+    let mut buffer = BufWriter::new(File::create("tpmdata.json")?);
+    let data_string = serde_json::to_string_pretty(&data)?;
+    buffer.write(data_string.as_bytes())?;
 
     // Use flush to ensure all the intermediately buffered contents
     // reach their destination
-    if let Err(e) = buffer.flush() {
-        return emsg("Failed to flush to tpm data file.", Some(e));
-    }
+    buffer.flush()?;
     Ok(())
 }
 
 /*
- * Input: None
- * Return: boolean
+ * Return:
+ *     true for vtpm/false otherwise
  *
  * If tpm is a tpm elumator, return true, other wise return false
  */
@@ -162,16 +155,15 @@ pub fn is_vtpm() -> bool {
 }
 
 /*
- * Return: Result wrap the manufacture information
+ * Return:
+ *     manufacture information
+ *     KeylimeTpmError
  *
  * getting the tpm manufacturer information
  * is_vtpm helper method
  */
-fn get_tpm_manufacturer() -> Result<String, Box<String>> {
-    let (return_output, _) =
-        run("getcapability -cap 1a".to_string(), None)
-            .map_err(|e| Box::new(e.description().to_string()))?;
-
+fn get_tpm_manufacturer() -> Result<String, KeylimeTpmError> {
+    let (return_output, _) = run("getcapability -cap 1a".to_string(), None)?;
     let lines: Vec<&str> = return_output.split("\n").collect();
     let mut manufacturer = String::new();
     for line in lines {
@@ -183,7 +175,9 @@ fn get_tpm_manufacturer() -> Result<String, Box<String>> {
             }
         }
     }
-    emsg("Vendor information not found.", None::<String>)
+    Err(KeylimeTpmError::new_tpm_rust_error(
+        "TPM manufacture information is missing.",
+    ))
 }
 
 /***************************************************************
@@ -192,11 +186,14 @@ Following are function from tpm_quote.py program
 *****************************************************************/
 
 /*
- * Input: nonce string
- *        data that needs to be pass to the pcr
- *        pcrmask
+ * Input:
+ *     nonce string
+ *     data that needs to be pass to the pcr
+ *     pcrmask
  *
- * Output: quote from tpm pcr
+ * Output:
+ *     quote from tpm pcr
+ *     KeylimeTpmError
  *
  * Getting quote form tpm, same implementation as the original python version.
  */
@@ -204,58 +201,32 @@ pub fn create_quote(
     nonce: String,
     data: String,
     mut pcrmask: String,
-) -> Option<String> {
-    let temp_file = match NamedTempFile::new() {
-        Ok(f) => f,
-        Err(e) => {
-            error!("Failed to create new temporary file. Error {}.?", e);
-            return None;
-        }
-    };
-
+) -> Result<String, KeylimeTpmError> {
+    let temp_file = NamedTempFile::new()?;
     let quote_path = match temp_file.path().to_str() {
-        Some(s) => s,
-        None => return None,
-    };
-
-    let key_handle = match get_tpm_metadata_content("aik_handle") {
-        Ok(c) => c,
-        Err(e) => {
-            println!("Failed to get tpm aik_handle with error {}.", e);
-            return None;
+        None => {
+            return Err(KeylimeTpmError::new_tpm_rust_error(
+                "Can't retrieve temp file path.",
+            ));
         }
+        Some(p) => p,
     };
 
-    let aik_password = match get_tpm_metadata_content("aik_pw") {
-        Ok(c) => c,
-        Err(e) => {
-            println!("Failed to get tpm aik_pw with error {}.", e);
-            return None;
-        }
-    };
-
+    let key_handle = get_tpm_metadata_content("aik_handle")?;
+    let aik_password = get_tpm_metadata_content("aik_pw")?;
     if pcrmask == "".to_string() {
         pcrmask = EMPTYMASK.to_string();
     }
 
     if !(data == "".to_string()) {
-        let pcrmask_int: i32 = match pcrmask.parse() {
-            Ok(i) => i,
-            Err(e) => {
-                error!("Failed to parse pcrmask to integer. Error {}.", e);
-                return None;
-            }
-        };
+        let pcrmask_int: i32 = pcrmask.parse()?;
 
         pcrmask =
             format!("0x{}", (pcrmask_int + (1 << common::TPM_DATA_PCR)));
         let mut command = format!("pcrreset -ix {}", common::TPM_DATA_PCR);
 
         // RUN
-        if let Err(e) = run(command, None) {
-            error!("Failed to execute TPM command with error {}.", e);
-            return None;
-        }
+        run(command, None)?;
 
         // Use SHA1 to hash the data
         let mut hasher = sha::Sha1::new();
@@ -269,10 +240,7 @@ pub fn create_quote(
         );
 
         // RUN
-        if let Err(e) = run(command, None) {
-            error!("Failed to execute TPM command with error {}.", e);
-            return None;
-        }
+        run(command, None)?;
     }
 
     // store quote into the temp file that will be extracted later
@@ -281,28 +249,21 @@ pub fn create_quote(
         key_handle, aik_password, pcrmask, nonce, quote_path,
     );
 
-    let (_, quote_raw) = match run(command, Some(quote_path)) {
-        Ok((o, q)) => ((o, q)),
-        Err(e) => {
-            error!(
-                "Failed to execute TPM command with error {}.",
-                e.description()
-            );
-            return None;
-        }
-    };
-
+    let (_, quote_raw) = run(command, Some(quote_path))?;
     let mut quote_return = String::from("r");
-    quote_return.push_str(&base64_zlib_encode(quote_raw));
-    Some(quote_return)
+    quote_return.push_str(&base64_zlib_encode(quote_raw)?);
+    Ok(quote_return)
 }
 
 /*
- * Input: nonce string
- *        data that needs to be pass to the pcr
- *        pcrmask
+ * Input:
+ *     nonce string
+ *     data that needs to be pass to the pcr
+ *     pcrmask
  *
- * Output: deep quote from tpm pcr
+ * Output:
+ *     deep quote string from tpm pcr
+ *     KeylimeTpmError
  *
  * Getting deep quote form tpm, same implementation as the original python
  * version. Same  procedures as quote by this is a deep quote.
@@ -312,43 +273,19 @@ pub fn create_deep_quote(
     data: String,
     mut pcrmask: String,
     mut vpcrmask: String,
-) -> Option<String> {
-    let temp_file = match NamedTempFile::new() {
-        Ok(f) => f,
-        Err(e) => {
-            error!("Failed to create new temporary file. Error {}.?", e);
-            return None;
-        }
-    };
-
+) -> Result<String, KeylimeTpmError> {
+    let temp_file = NamedTempFile::new()?;
     let quote_path = match temp_file.path().to_str() {
-        Some(s) => s,
-        None => return None,
-    };
-
-    let key_handle = match get_tpm_metadata_content("aik_handle") {
-        Ok(c) => c,
-        Err(e) => {
-            println!("Failed to get tpm aik_handle with error {}.", e);
-            return None;
+        None => {
+            return Err(KeylimeTpmError::new_tpm_rust_error(
+                "Can't retieve temp file path.",
+            ));
         }
+        Some(p) => p,
     };
-
-    let aik_password = match get_tpm_metadata_content("aik_pw") {
-        Ok(c) => c,
-        Err(e) => {
-            println!("Failed to get tpm aik_pw with error {}.", e);
-            return None;
-        }
-    };
-
-    let owner_password = match get_tpm_metadata_content("owner_pw") {
-        Ok(c) => c,
-        Err(e) => {
-            println!("Failed to get tpm owner_pw with error {}.", e);
-            return None;
-        }
-    };
+    let key_handle = get_tpm_metadata_content("aik_handle")?;
+    let aik_password = get_tpm_metadata_content("aik_pw")?;
+    let owner_password = get_tpm_metadata_content("owner_pw")?;
 
     if pcrmask == "".to_string() {
         pcrmask = EMPTYMASK.to_string();
@@ -359,23 +296,13 @@ pub fn create_deep_quote(
     }
 
     if !(data == "".to_string()) {
-        let vpcrmask_int: i32 = match vpcrmask.parse() {
-            Ok(i) => i,
-            Err(e) => {
-                error!("Failed to parse vpcrmask to integer. Error {}.", e);
-                return None;
-            }
-        };
+        let vpcrmask_int: i32 = vpcrmask.parse()?;
         vpcrmask =
             format!("0x{}", (vpcrmask_int + (1 << common::TPM_DATA_PCR)));
         let mut command = format!("pcrreset -ix {}", common::TPM_DATA_PCR);
 
         //RUN
-        if let Err(e) = run(command, None) {
-            error!("Failed to execute TPM command with error {}.", e);
-            return None;
-        }
-
+        run(command, None)?;
         let mut hasher = sha::Sha1::new();
         hasher.update(data.as_bytes());
         let data_sha1_hash = hasher.finish();
@@ -387,10 +314,7 @@ pub fn create_deep_quote(
         );
 
         //RUN
-        if let Err(e) = run(command, None) {
-            error!("Failed to execute TPM command with error {}.", e);
-            return None;
-        }
+        run(command, None)?;
     }
 
     // store quote into the temp file that will be extracted later
@@ -406,25 +330,17 @@ pub fn create_deep_quote(
     );
 
     // RUN
-    let (_, quote_raw) = match run(command, Some(quote_path)) {
-        Ok((o, q)) => ((o, q)),
-        Err(e) => {
-            error!(
-                "Failed to execute TPM command with error {}.",
-                e.description()
-            );
-            return None;
-        }
-    };
-
+    let (_, quote_raw) = run(command, Some(quote_path))?;
     let mut quote_return = String::from("d");
     quote_return.push_str(&quote_raw);
-    Some(quote_return)
+    Ok(quote_return)
 }
 
 /*
  * Input: string to be encoded
- * Output: encoded string output
+ * Output:
+ *     encoded string output
+ *     KeylimeTpmError
  *
  * Use zlib to compression the input and encoded with base64 encoding
  * method
@@ -433,19 +349,11 @@ pub fn create_deep_quote(
  * decode the hex output and give back the original text message. No able
  * to test with identical python function output string.
  */
-fn base64_zlib_encode(data: String) -> String {
-    let mut e = ZlibEncoder::new(Vec::new(), Compression::default());
-
-    match e.write_all(data.as_bytes()) {
-        Ok(_) => {
-            let compressed_bytes = e.finish();
-            match compressed_bytes {
-                Ok(e) => base64::encode(&e),
-                Err(_) => String::from(""),
-            }
-        }
-        Err(_) => String::from("Encode Fail!"),
-    }
+fn base64_zlib_encode(data: String) -> Result<String, KeylimeTpmError> {
+    let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
+    encoder.write_all(data.as_bytes())?;
+    let compressed_bytes = encoder.finish()?;
+    Ok(base64::encode(&compressed_bytes))
 }
 
 /*
@@ -505,21 +413,17 @@ Following are function from tpm_exec.py program
 /*
  * Input:
  *     command: command to be executed
- *     expect_code: code expect to have from execution result
  *     output_path: file output location
  * return:
- *     tuple contains:
- *         return output: execution standard output
- *         file output: output file content if avaiable
- *     TpmExecError:
- *         execution return code and error message
+ *     execution return output and file output
+ *     KeylimeTpmError
  *
  * Set up execution envrionment to execute tpm command through shell commands
  * and return the execution result in a tuple. Based on the latest update of
  * python keylime this function implement the functionality of cmd_exec
- * script in the python keylime repo. RaiseOnError and lock are dropped due
- * to different error handling in Rust. Returned output string are preprocessed
- * to before returning for code efficient.
+ * script in the python keylime repo. RaiseOnError, return code and lock are
+ * dropped due to different error handling in Rust. Returned output string are
+ * preprocessed to before returning for code efficient.
  */
 pub fn run<'a>(
     command: String,
@@ -635,11 +539,8 @@ fn read_file_output_path(output_path: String) -> std::io::Result<String> {
 
 /*
  * Custom Error type for tpm execution error. It contains both error from the
- * TPM command execution result and error within the run() function.
- *
- * Error Code:
- *  - 10: error cause from the function call within the run()
- *  -  _: error code cuase from TPM command execution return code
+ * TPM command execution result or error cause by rust function. Potential
+ * rust error are map to this error by implemented From<> trait.
  */
 #[derive(Debug)]
 pub enum KeylimeTpmError {
@@ -695,7 +596,6 @@ impl fmt::Display for KeylimeTpmError {
     }
 }
 
-// Implement From for error cause by function call within run() function
 impl From<std::io::Error> for KeylimeTpmError {
     fn from(e: std::io::Error) -> KeylimeTpmError {
         KeylimeTpmError::new_tpm_rust_error(e.description())
@@ -714,6 +614,17 @@ impl From<std::string::FromUtf8Error> for KeylimeTpmError {
     }
 }
 
+impl From<serde_json::error::Error> for KeylimeTpmError {
+    fn from(e: serde_json::error::Error) -> KeylimeTpmError {
+        KeylimeTpmError::new_tpm_rust_error(e.description())
+    }
+}
+
+impl From<std::num::ParseIntError> for KeylimeTpmError {
+    fn from(e: std::num::ParseIntError) -> KeylimeTpmError {
+        KeylimeTpmError::new_tpm_rust_error(e.description())
+    }
+}
 /*
  * These test are for Centos and tpm4720 elmulator install environment. It
  * test tpm command before execution.
