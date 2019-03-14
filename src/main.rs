@@ -32,6 +32,7 @@ use hyper::service::service_fn;
 use hyper::{Body, Method, Request, Response, Server, StatusCode};
 use serde_json::Map;
 use std::collections::HashMap;
+use std::error::Error;
 use std::fs::File;
 use std::io::BufReader;
 use std::io::Read;
@@ -368,8 +369,8 @@ fn get_request_handler(
                 common::RSA_PUBLICKEY_EXPORTABLE.to_string(),
                 p.to_string(),
             ) {
-                Some(q) => q,
-                None => {
+                Ok(q) => q,
+                Err(err) => {
                     if let Err(e) = set_response_content(
                         400,
                         "Failed to crate quote from TPM.",
@@ -383,7 +384,7 @@ fn get_request_handler(
                     }
                     return emsg(
                         "TPM error. Failed to create quote from TPM.",
-                        None::<String>,
+                        Some(err.description().to_string()),
                     );
                 }
             };
@@ -396,8 +397,8 @@ fn get_request_handler(
                 v.to_string(),
                 p.to_string(),
             ) {
-                Some(q) => q,
-                None => {
+                Ok(q) => q,
+                Err(err) => {
                     if let Err(e) = set_response_content(
                         400,
                         "Failed to create deep quote from TPM.",
@@ -411,7 +412,7 @@ fn get_request_handler(
                     }
                     return emsg(
                         "TPM error. Failed to create deep quote from TPM.",
-                        None::<String>,
+                        Some(err.description().to_string()),
                     );
                 }
             };
