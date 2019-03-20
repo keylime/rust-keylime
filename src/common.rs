@@ -13,8 +13,8 @@ use std::fmt::Debug;
  */
 pub const STUB_VTPM: bool = false;
 pub const STUB_IMA: bool = true;
-pub const TPM_DATA_PCR: usize = 16;
-pub const IMA_PCR: usize = 10;
+pub const TPM_DATA_PCR: i32 = 16;
+pub const IMA_PCR: i32 = 10;
 pub static RSA_PUBLICKEY_EXPORTABLE: &'static str = "rsa placeholder";
 pub static TPM_TOOLS_PATH: &'static str = "/usr/local/bin/";
 pub static IMA_ML_STUB: &'static str =
@@ -23,6 +23,7 @@ pub static IMA_ML: &'static str =
     "/sys/kernel/security/ima/ascii_runtime_measurements";
 pub static KEY: &'static str = "secret";
 pub static WORK_DIR: &'static str = "/tmp";
+pub static TPM_LIBS_PATH: &'static str = "/usr/local/lib/";
 
 /*
  * Temporaray location for configuration parameters
