@@ -433,7 +433,7 @@ fn get_request_handler(
             );
         }
 
-        if tpm::check_mask(ima_mask.to_string(), common::IMA_PCR) {
+        if let Ok(true) = tpm::check_mask(&ima_mask, common::IMA_PCR) {
             match common::STUB_IMA {
                 true => {
                     let temp_path = Path::new(common::IMA_ML_STUB);

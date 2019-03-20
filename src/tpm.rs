@@ -6,6 +6,7 @@ use common::emsg;
 use flate2::write::ZlibEncoder;
 use flate2::Compression;
 use openssl::sha;
+use openssl::sha::Sha256;
 use serde_json::Value;
 use std::env;
 use std::error::Error;
@@ -29,10 +30,20 @@ const RETRY: usize = 4;
 
 static EMPTYMASK: &'static str = "1";
 
-/***************************************************************
-ftpm_initialize.py
-Following are function from tpm_initialize.py program
-*****************************************************************/
+/*
+ * Input:
+ *     A temp file
+ * Return:
+ *     The temp file path
+ *     KeylimeTpmError
+ */
+fn temp_file_get_path<'a>(
+    ref temp_file: &'a NamedTempFile,
+) -> Result<&'a str, KeylimeTpmError> {
+    temp_file.path().to_str().ok_or_else(|| {
+        KeylimeTpmError::new_tpm_rust_error("Can't retrieve temp file path.")
+    })
+}
 
 /*
  * Input:
@@ -142,15 +153,25 @@ fn write_tpm_data(data: Value) -> Result<(), KeylimeTpmError> {
  * If tpm is a tpm elumator, return true, other wise return false
  */
 pub fn is_vtpm() -> bool {
-    match common::STUB_VTPM {
-        true => return true,
-        false => match get_tpm_manufacturer() {
-            Ok(data) => data == "EtHZ",
-            Err(e) => {
-                warn!("Fail to get tpm manufacturer. {}", e);
-                false
-            }
-        },
+    false
+}
+
+/*
+ * Return;
+ *     true for software tpm false otherwise
+ *
+ * Software TPM information is based on the return value of the get
+ * manufacturer function. Even the return value is error, still return
+ * false for not using a simulator. Because simulator must contains a "SW"
+ * in its manufacturer information list.
+ */
+pub fn is_software_tpm() -> bool {
+    match get_tpm_manufacturer() {
+        Ok(data) => data == "SW",
+        Err(e) => {
+            warn!("Fail to get tpm manufacturer information. Error {}.", e);
+            false
+        }
     }
 }
 
@@ -163,27 +184,16 @@ pub fn is_vtpm() -> bool {
  * is_vtpm helper method
  */
 fn get_tpm_manufacturer() -> Result<String, KeylimeTpmError> {
-    let (return_output, _) = run("getcapability -cap 1a".to_string(), None)?;
-    let lines: Vec<&str> = return_output.split("\n").collect();
-    let mut manufacturer = String::new();
-    for line in lines {
-        let line_tmp = String::from(line);
-        let token: Vec<&str> = line_tmp.split_whitespace().collect();
-        if token.len() == 3 {
-            if token[0] == "VendorID" && token[1] == ":" {
-                return Ok(token[2].to_string());
-            }
-        }
+    let (return_output, _) =
+        run("tpm2_getcap -c properties-fixed".to_string(), None)?;
+    let ret_to_json: Value = serde_json::from_str(&return_output)?;
+    if let None = ret_to_json.get("TPM2_PT_VENDOR_STRING_1") {
+        return Err(KeylimeTpmError::new_tpm_rust_error(
+            "TPM manufacture information is missing.",
+        ));
     }
-    Err(KeylimeTpmError::new_tpm_rust_error(
-        "TPM manufacture information is missing.",
-    ))
+    Ok(ret_to_json["TPM2_PT_VENDOR_STRING_1"]["value"].to_string())
 }
-
-/***************************************************************
-tpm_quote.py
-Following are function from tpm_quote.py program
-*****************************************************************/
 
 /*
  * Input:
@@ -196,77 +206,72 @@ Following are function from tpm_quote.py program
  *     KeylimeTpmError
  *
  * Getting quote form tpm, same implementation as the original python version.
+ * Use SHA256 as default hash algorithm.
  */
 pub fn create_quote(
     nonce: String,
     data: String,
     mut pcrmask: String,
 ) -> Result<String, KeylimeTpmError> {
-    let temp_file = NamedTempFile::new()?;
-    let quote_path = match temp_file.path().to_str() {
-        None => {
-            return Err(KeylimeTpmError::new_tpm_rust_error(
-                "Can't retrieve temp file path.",
-            ));
-        }
-        Some(p) => p,
-    };
-
+    let hash_alg = "SHA256";
+    let quote_tf = NamedTempFile::new()?;
+    let sign_tf = NamedTempFile::new()?;
+    let pcr_tf = NamedTempFile::new()?;
     let key_handle = get_tpm_metadata_content("aik_handle")?;
-    let aik_password = get_tpm_metadata_content("aik_pw")?;
+    let aik_pw = get_tpm_metadata_content("aik_pw")?;
     if pcrmask == "".to_string() {
         pcrmask = EMPTYMASK.to_string();
     }
+    let pcr_list = pcr_mask_to_list(pcrmask, hash_alg.to_string())?;
 
-    if !(data == "".to_string()) {
-        let pcrmask_int: i32 = pcrmask.parse()?;
-
-        pcrmask =
-            format!("0x{}", (pcrmask_int + (1 << common::TPM_DATA_PCR)));
-        let mut command = format!("pcrreset -ix {}", common::TPM_DATA_PCR);
-
-        // RUN
-        run(command, None)?;
-
-        // Use SHA1 to hash the data
-        let mut hasher = sha::Sha1::new();
-        hasher.update(data.as_bytes());
-        let data_sha1_hash = hasher.finish();
-
-        command = format!(
-            "extend -ix {} -ic {}",
-            common::TPM_DATA_PCR,
-            hex::encode(data_sha1_hash),
-        );
-
-        // RUN
-        run(command, None)?;
+    if !(data.is_empty()) {
+        run(format!("tpm2_pcrreset {}", common::TPM_DATA_PCR), None)?;
+        let mut hash_data = Sha256::new();
+        hash_data.update(data.as_bytes());
+        let digest_data = hash_data.finish();
+        run(
+            format!(
+                "tpm2_pcrextend {}:{}={}",
+                common::TPM_DATA_PCR,
+                hash_alg,
+                hex::encode(digest_data)
+            ),
+            None,
+        )?;
     }
 
-    // store quote into the temp file that will be extracted later
-    let command = format!(
-        "tpmquote -hk {} -pwdk {} -bm {} -nonce {} -noverify -oq {}",
-        key_handle, aik_password, pcrmask, nonce, quote_path,
-    );
+    let quote_path = temp_file_get_path(&quote_tf)?;
+    let sign_path = temp_file_get_path(&sign_tf)?;
+    let pcr_path = temp_file_get_path(&pcr_tf)?;
 
-    let (_, quote_raw) = run(command, Some(quote_path))?;
-    let mut quote_return = String::from("r");
-    quote_return.push_str(&base64_zlib_encode(quote_raw)?);
-    Ok(quote_return)
+    let paths = vec![quote_path, sign_path, pcr_path];
+
+    let (_, mut quotes) = run(
+        format!(
+            "tpm2_deluxequote -C {} -L {}:{} -q {} -m {} -s {} -p {} -G {} -P {}",
+            hex::encode(key_handle),
+            hash_alg,
+            pcr_list,
+            hex::encode(nonce),
+            quote_path,
+            sign_path,
+            pcr_path,
+            hash_alg,
+            aik_pw,
+        ),
+        Some(paths)
+    )?;
+
+    let mut quote_list = Vec::new();
+    for val in quotes.values() {
+        quote_list.push(base64_zlib_encode(val.to_string())?);
+    }
+
+    Ok(quote_list.as_slice().join(":"))
 }
 
 /*
- * Input:
- *     nonce string
- *     data that needs to be pass to the pcr
- *     pcrmask
- *
- * Output:
- *     deep quote string from tpm pcr
- *     KeylimeTpmError
- *
- * Getting deep quote form tpm, same implementation as the original python
- * version. Same  procedures as quote by this is a deep quote.
+ * Deep quote is in progress
  */
 pub fn create_deep_quote(
     nonce: String,
@@ -274,66 +279,9 @@ pub fn create_deep_quote(
     mut pcrmask: String,
     mut vpcrmask: String,
 ) -> Result<String, KeylimeTpmError> {
-    let temp_file = NamedTempFile::new()?;
-    let quote_path = match temp_file.path().to_str() {
-        None => {
-            return Err(KeylimeTpmError::new_tpm_rust_error(
-                "Can't retieve temp file path.",
-            ));
-        }
-        Some(p) => p,
-    };
-    let key_handle = get_tpm_metadata_content("aik_handle")?;
-    let aik_password = get_tpm_metadata_content("aik_pw")?;
-    let owner_password = get_tpm_metadata_content("owner_pw")?;
-
-    if pcrmask == "".to_string() {
-        pcrmask = EMPTYMASK.to_string();
-    }
-
-    if vpcrmask == "".to_string() {
-        vpcrmask = EMPTYMASK.to_string();
-    }
-
-    if !(data == "".to_string()) {
-        let vpcrmask_int: i32 = vpcrmask.parse()?;
-        vpcrmask =
-            format!("0x{}", (vpcrmask_int + (1 << common::TPM_DATA_PCR)));
-        let mut command = format!("pcrreset -ix {}", common::TPM_DATA_PCR);
-
-        //RUN
-        run(command, None)?;
-        let mut hasher = sha::Sha1::new();
-        hasher.update(data.as_bytes());
-        let data_sha1_hash = hasher.finish();
-
-        command = format!(
-            "extend -ix {} -ic {}",
-            common::TPM_DATA_PCR,
-            hex::encode(data_sha1_hash),
-        );
-
-        //RUN
-        run(command, None)?;
-    }
-
-    // store quote into the temp file that will be extracted later
-    let command = format!(
-        "deepquote -vk {} -hm {} -vm {} -nonce {} -pwdo {} -pwdk {} -oq {}",
-        key_handle,
-        pcrmask,
-        vpcrmask,
-        nonce,
-        owner_password,
-        aik_password,
-        quote_path,
-    );
-
-    // RUN
-    let (_, quote_raw) = run(command, Some(quote_path))?;
-    let mut quote_return = String::from("d");
-    quote_return.push_str(&quote_raw);
-    Ok(quote_return)
+    Err(KeylimeTpmError::new_tpm_rust_error(
+        "Deep quote in progress.",
+    ))
 }
 
 /*
@@ -364,21 +312,37 @@ fn base64_zlib_encode(data: String) -> Result<String, KeylimeTpmError> {
  * If ima_mask match ima_pcr return true, otherwise, return false. Same as
  * original python version.
  */
-pub fn check_mask(ima_mask: String, ima_pcr: usize) -> bool {
+pub fn check_mask(
+    ima_mask: &str,
+    ima_pcr: i32,
+) -> Result<bool, KeylimeTpmError> {
     if ima_mask.is_empty() {
-        return false;
+        return Ok(false);
     }
-    let ima_mask_int: i32 = match ima_mask.parse() {
-        Ok(i) => i,
-        Err(e) => {
-            error!("Failed to parse ima_mask to integer. Error {}.", e);
-            return false; // temporary return false for error
+    let ima_mask_int: i32 = ima_mask.parse()?;
+    Ok((1 << ima_pcr) & ima_mask_int != 0)
+}
+
+pub fn pcr_mask_to_list(
+    mask: String,
+    hash_alg: String,
+) -> Result<String, KeylimeTpmError> {
+    let mut pcr_list = Vec::new();
+    let mut ima_appended = String::new();
+
+    for pcr in 0..24 {
+        let check_result = check_mask(&mask, pcr)?;
+        if check_result {
+            if hash_alg == "SHA1" && pcr == 10 {
+                ima_appended.push_str(format!("+sha1:{}", pcr).as_str());
+            } else {
+                pcr_list.push(pcr.to_string());
+            }
         }
-    };
-    match (1 << ima_pcr) & ima_mask_int {
-        0 => return false,
-        _ => return true,
     }
+    let mut result: String = pcr_list.as_slice().join(",");
+    result.push_str(&ima_appended);
+    Ok(result)
 }
 
 /*
@@ -389,8 +353,7 @@ pub fn check_mask(ima_mask: String, ima_pcr: usize) -> bool {
  * return false. Same as the original python version.
  */
 pub fn is_deep_quote(quote: String) -> bool {
-    let first_char = &quote[0..1];
-    match first_char {
+    match &quote[0..1] {
         "d" => true,
         "r" => false,
         _ => {
@@ -400,22 +363,12 @@ pub fn is_deep_quote(quote: String) -> bool {
     }
 }
 
-/***************************************************************
-tpm_nvram.py
-Following are function from tpm_nvram.py program
-*****************************************************************/
-
-/***************************************************************
-tpm_exec.py
-Following are function from tpm_exec.py program
-*****************************************************************/
-
 /*
  * Input:
  *     command: command to be executed
  *     output_path: file output location
  * return:
- *     execution return output and file output
+ *     execution return output String and file output List Map
  *     KeylimeTpmError
  *
  * Set up execution envrionment to execute tpm command through shell commands
@@ -425,10 +378,10 @@ Following are function from tpm_exec.py program
  * dropped due to different error handling in Rust. Returned output string are
  * preprocessed to before returning for code efficient.
  */
-pub fn run<'a>(
+pub fn run(
     command: String,
-    output_path: Option<&str>,
-) -> Result<(String, String), KeylimeTpmError> {
+    output_path: Option<Vec<&str>>,
+) -> Result<(String, HashMap<String, String>), KeylimeTpmError> {
     let mut file_output = String::new();
     let mut output: Output;
 
@@ -443,8 +396,21 @@ pub fn run<'a>(
     for (key, value) in env::vars() {
         env_vars.insert(key.to_string(), value.to_string());
     }
-    env_vars.insert("TPM_SERVER_PORT".to_string(), "9998".to_string());
-    env_vars.insert("TPM_SERVER_NAME".to_string(), "localhost".to_string());
+    let mut lib_path = String::new();
+    let lib_path = env_vars
+        .get("LD_LIBRARY_PATH")
+        .map_or_else(|| String::new(), |v| v.clone());
+    env_vars.insert(
+        "LD_LIBRARY_PATH".to_string(),
+        format!("{}:{}", lib_path, common::TPM_LIBS_PATH),
+    );
+    env_vars.insert(
+        "TPM2TOOLS_TCTI".to_string(),
+        "tabrmd:bus_name=com.intel.tss2.Tabrmd".to_string(),
+    );
+    // env_vars.insert("TPM2TOOLS_TCTI".to_string(), "mssim:port=2321".to_string());
+    // env_vars.insert("TPM2TOOLS_TCTI".to_string(), "device:/dev/tpm0".to_string());
+
     match env_vars.get_mut("PATH") {
         Some(v) => v.push_str(common::TPM_TOOLS_PATH),
         None => {
@@ -515,11 +481,13 @@ pub fn run<'a>(
         }
     }
 
-    // Retrive data from output path file
-    if let Some(p) = output_path {
-        file_output = read_file_output_path(p.to_string())?;
+    let mut file_output: HashMap<String, String> = HashMap::new();
+    if let Some(paths) = output_path {
+        for p in paths {
+            file_output
+                .insert(p.into(), read_file_output_path(p.to_string())?);
+        }
     }
-
     Ok((return_output, file_output))
 }
 
@@ -644,43 +612,59 @@ mod tests {
     }
 
     #[test]
+    fn test_get_temp_file_path() {
+        let tmp_f = NamedTempFile::new().unwrap();
+        assert!(temp_file_get_path(&tmp_f).is_ok());
+    }
+
+    #[test]
     fn test_is_deep_quote() {
         assert_eq!(is_deep_quote(String::from("dqewrtypuo")), true);
     }
 
-    // The following test will base on the system capability to run. TPM is
-    // require to run those tests.
     #[test]
     fn test_is_vtpm() {
-        match command_exist("getcapability") {
-            true => assert_eq!(is_vtpm(), false),
-            false => assert!(true),
-        }
+        // placeholder vtpm working in progress
+        assert!(true);
     }
 
     #[test]
     fn test_get_manufacturer() {
-        match command_exist("getcapability") {
-            true => assert_eq!(get_tpm_manufacturer().unwrap(), "IBM"),
+        match command_exist("tpm2_getcap") {
+            true => {
+                assert!(tpm_initialize().is_ok());
+                assert!(get_tpm_manufacturer().is_ok());
+            }
             false => assert!(true),
         }
     }
 
     #[test]
+    fn test_zlib_encoding() {
+        let bytes = base64::decode("eJzLTq3MycxN1S0qLS4BAB/wBOw=").unwrap();
+        let mut z = flate2::read::ZlibDecoder::new(&bytes[..]);
+        let mut s = String::new();
+        z.read_to_string(&mut s).unwrap();
+        assert_eq!(String::from("keylime-rust"), s);
+    }
+
+    #[test]
     fn test_run_command() {
-        match command_exist("getrandom") {
+        match command_exist("tpm2_getrandom") {
             true => {
+                assert!(tpm_initialize().is_ok());
                 let command = "getrandom -size 8 -out foo.out".to_string();
                 run(command, None);
                 let p = Path::new("foo.out");
                 assert_eq!(p.exists(), true);
-                match fs::remove_file("foo.out") {
-                    Ok(_) => {}
-                    Err(_) => {}
-                }
+                fs::remove_file("foo.out").unwrap();
             }
             false => assert!(true),
         }
+    }
+
+    fn tpm_initialize() -> Result<(), KeylimeTpmError> {
+        run("tpm2_startup -c".to_string(), None).map(|x| ())
     }
 
     #[test]
