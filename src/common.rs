@@ -24,7 +24,7 @@ pub static IMA_ML: &'static str =
 pub static KEY: &'static str = "secret";
 pub static WORK_DIR: &'static str = "/tmp";
 pub static TPM_LIBS_PATH: &'static str = "/usr/local/lib/";
-
+pub static BOOTSTRAP_KEY_SIZE: i32 = 32;
 /*
  * Temporaray location for configuration parameters
  */

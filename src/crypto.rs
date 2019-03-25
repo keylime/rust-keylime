@@ -15,6 +15,14 @@ use std::io::Error as StdIOError;
 use std::io::Read;
 use std::string::String;
 
+pub fn generate_random_byte(
+    length: &usize,
+) -> Result<Box<Vec<u8>>, StdIOError> {
+    let mut buf = Box::new(vec![0; *length]);
+    openssl::rand::rand_bytes(&mut buf)?;
+    Ok(buf)
+}
+
 /*
  * Inputs: secret key
  *        message to sign
