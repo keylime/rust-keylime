@@ -25,6 +25,19 @@ TPM emulator is a program that runs in the deamon to mimic TPM commands.
 
 ## Prerequisites
 
+### Required Packages
+The rust-keylime agent requires the following packages for both compile and run time.
+
+For Fedora, use the following command
+```
+$ dnf install openssl-devel gcc
+```
+
+For Ubuntu OS, use the following command
+```
+$ apt-get install openssl-dev gcc
+```
+
 ### Rust
 
 Make sure Rust is installed before running Keylime. Installation
