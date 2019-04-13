@@ -1,5 +1,5 @@
 [package]
-name = "keylime_node"
+name = "keylime_agent"
 version = "0.1.0"
 authors = ["Pei Jia <leojia@bu.edu>"]
 

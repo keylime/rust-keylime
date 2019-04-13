@@ -506,7 +506,7 @@ fn get_request_handler(
  * Input: file path
  * Output: file content
  *
- * Helper function to help the keylime node read file and get the file
+ * Helper function to help the keylime agent read file and get the file
  * content. It is not from the original python version. Because rust needs
  * to handle error in result, it is good to keep this function seperate from
  * the main function.
