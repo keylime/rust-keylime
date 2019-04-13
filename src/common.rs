@@ -28,7 +28,7 @@ pub static WORK_DIR: &'static str = "/tmp";
  * Temporaray location for configuration parameters
  */
 
-// cloud node
+// cloud agent
 pub static SECURE_SIZE: &'static str = "1m";
 pub static MOUNT_SECURE: bool = true;
 

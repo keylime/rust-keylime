@@ -17,7 +17,7 @@ features:
 For more information, see the original [python implementation repo](https://github.com/mit-ll/python-keylime)
 and paper in the References section.
 
-For now, this project is focusing on the keylime node component, which is a
+For now, this project is focusing on the keylime agent component, which is a
 HTTP server running on the server machine that executes keylime operations.
 Most keylime operations rely on TPM co-processor; therefore, the server needs
 a physical TPM chip (or a TPM emulator) to perform keylime operations.  The
@@ -56,7 +56,7 @@ other environments.
 To run with `pretty-env-logger` trace logging active, set cargo run
 within `RUST_LOG`, as follows:
 
-    $ RUST_LOG=keylime_node=trace cargo run
+    $ RUST_LOG=keylime_agent=trace cargo run
 
 ## Testing
 
