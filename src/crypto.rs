@@ -194,7 +194,14 @@ mod tests {
         let key = String::from("mysecret");
         let message = String::from("hellothere");
         let mac = do_hmac(key, message);
-        assert_eq!("b8558314f515931c8d9b329805978fe77b9bb020b05406c0ef189d89846ff8f5f0ca10e387d2c424358171df7f896f9f".to_string(), mac.unwrap());
+        assert_eq!(
+            format!(
+                "{}{}",
+                "b8558314f515931c8d9b329805978fe77b9bb020b05406c0e",
+                "f189d89846ff8f5f0ca10e387d2c424358171df7f896f9f"
+            ),
+            mac.unwrap()
+        );
     }
 
     // Test KDF to ensure derived password matches result derived from Python
@@ -204,7 +211,11 @@ mod tests {
         let password = String::from("myverysecretsecret");
         let salt = String::from("thesaltiestsalt");
         let key = kdf(password, salt);
-        assert_eq!("8a6de415abb8b27de5c572c8137bd14e5658395f9a2346e0b1ad8b9d8b9028af".to_string(), key.unwrap());
+        assert_eq!(
+            "8a6de415abb8b27de5c572c8137bd14e5658395f9a2346e0b1ad8b9d8b9028af"
+                .to_string(),
+            key.unwrap()
+        );
     }
 
     #[test]
