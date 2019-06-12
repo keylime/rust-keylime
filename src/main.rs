@@ -23,6 +23,7 @@ mod common;
 mod crypto;
 mod secure_mount;
 mod tpm;
+mod tpm2;
 
 use common::emsg;
 use common::set_response_content;

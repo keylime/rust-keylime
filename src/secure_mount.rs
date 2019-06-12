@@ -53,7 +53,7 @@ fn check_mount(secure_dir: &str) -> Result<bool, Box<String>> {
  * implementation as the original python version, but the chown/geteuid
  * functions are unsafe function in Rust to use.
  */
-fn mount() -> Result<String, Box<String>> {
+pub fn mount() -> Result<String, Box<String>> {
     // Use /tmpfs-dev directory if MOUNT_SECURE flag is set, which doesn't
     // mount to the system. This is for developement envrionment. No need to
     // mount to file system.

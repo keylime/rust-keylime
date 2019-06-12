@@ -349,7 +349,7 @@ pub fn create_deep_quote(
  * decode the hex output and give back the original text message. No able
  * to test with identical python function output string.
  */
-fn base64_zlib_encode(data: String) -> Result<String, KeylimeTpmError> {
+pub fn base64_zlib_encode(data: String) -> Result<String, KeylimeTpmError> {
     let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
     encoder.write_all(data.as_bytes())?;
     let compressed_bytes = encoder.finish()?;
@@ -549,14 +549,14 @@ pub enum KeylimeTpmError {
 }
 
 impl KeylimeTpmError {
-    fn new_tpm_error(err_code: i32, err_msg: &str) -> KeylimeTpmError {
+    pub fn new_tpm_error(err_code: i32, err_msg: &str) -> KeylimeTpmError {
         KeylimeTpmError::TpmError {
             code: err_code,
             details: err_msg.to_string(),
         }
     }
 
-    fn new_tpm_rust_error(err_msg: &str) -> KeylimeTpmError {
+    pub fn new_tpm_rust_error(err_msg: &str) -> KeylimeTpmError {
         KeylimeTpmError::TpmRustError {
             details: err_msg.to_string(),
         }
@@ -614,8 +614,14 @@ impl From<std::string::FromUtf8Error> for KeylimeTpmError {
     }
 }
 
-impl From<serde_json::error::Error> for KeylimeTpmError {
-    fn from(e: serde_json::error::Error) -> KeylimeTpmError {
+impl From<std::str::Utf8Error> for KeylimeTpmError {
+    fn from(e: std::str::Utf8Error) -> KeylimeTpmError {
+        KeylimeTpmError::new_tpm_rust_error(e.description())
+    }
+}
+
+impl From<serde_json::Error> for KeylimeTpmError {
+    fn from(e: serde_json::Error) -> KeylimeTpmError {
         KeylimeTpmError::new_tpm_rust_error(e.description())
     }
 }
@@ -625,6 +631,25 @@ impl From<std::num::ParseIntError> for KeylimeTpmError {
         KeylimeTpmError::new_tpm_rust_error(e.description())
     }
 }
+
+impl From<hex::FromHexError> for KeylimeTpmError {
+    fn from(e: hex::FromHexError) -> KeylimeTpmError {
+        KeylimeTpmError::new_tpm_rust_error(e.description())
+    }
+}
+
+impl From<serde_yaml::Error> for KeylimeTpmError {
+    fn from(e: serde_yaml::Error) -> KeylimeTpmError {
+        KeylimeTpmError::new_tpm_rust_error(e.description())
+    }
+}
+
+impl From<Box<String>> for KeylimeTpmError {
+    fn from(e: Box<String>) -> KeylimeTpmError {
+        KeylimeTpmError::new_tpm_rust_error(&e)
+    }
+}
+
 /*
  * These test are for Centos and tpm4720 elmulator install environment. It
  * test tpm command before execution.
