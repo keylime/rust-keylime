@@ -76,11 +76,11 @@ pub fn rsa_decrypt(
 ) -> Result<String, KeylimeCryptoError> {
     let mut dec_result = vec![0; private_key.size() as usize];
     let dec_len = private_key.private_decrypt(
-        ciphertext.as_bytes(),
+        &ciphertext,
         &mut dec_result,
         Padding::PKCS1,
     )?;
-    Ok(to_hex_string(dec_result[..dec_len].to_vec()))
+    Ok(to_hex_string(&dec_result[..dec_len].to_vec()))
 }
 
 /*

@@ -26,15 +26,20 @@ mod tpm;
 
 use common::emsg;
 use common::set_response_content;
-use futures::future;
+use futures::{future, Stream};
 use hyper::rt::Future;
 use hyper::service::service_fn;
+use hyper::{Body, Chunk, Method, Request, Response, Server, StatusCode};
+use openssl::pkey::Private;
+use openssl::rsa::Rsa;
+use serde_json::{Map, Value};
 use hyper::{Body, Method, Request, Response, Server, StatusCode};
 use serde_json::Map;
 use std::collections::HashMap;
 use std::error::Error;
 use std::fs::File;
 use std::io::BufReader;
+use std::io::Error as IOError;
 use std::io::Read;
 use std::path::Path;
 
@@ -45,6 +50,15 @@ static NOTFOUND: &[u8] = b"Not Found";
 fn main() {
     pretty_env_logger::init();
     info!("Starting server...");
+
+        // Import or initialize keys
+    info!("No existing key found; generating new key.");
+    if let rsa_key = crypto::rsa_generate(2048) {
+        info!("Random RSA key generated.");
+    } else {
+        error!("Failed to generate new RSA key.");
+    }
+    // export public key here based on new private key
 
     /* Should be port 3000 eventually */
     let addr = ([127, 0, 0, 1], 1337).into();
@@ -63,13 +77,16 @@ fn response_function(req: Request<Body>) -> BoxFut {
     let mut my_response: Response<Body> =
         Response::new("Nothing here.".into());
 
+    // Deconstruct request so individual parts are usable
+    let (head, body) = req.into_parts();
+
     // Process input api path
-    let parameters = common::get_restful_parameters(req.uri().path());
+    let parameters = common::get_restful_parameters(head.uri.path());
 
     // Loop scope wrap around the request handling
     // Exit: Encounter error early exit or exit at the end to the scope
-    match req.method() {
-        &Method::GET => {
+    match head.method {
+        Method::GET => {
             match get_request_handler(&mut my_response, parameters) {
                 Ok(()) => {
                     info!("Get request handled successfully.");
@@ -81,8 +98,14 @@ fn response_function(req: Request<Body>) -> BoxFut {
             }
         }
 
-        &Method::POST => {
-            match post_request_handler(&mut my_response, parameters) {
+        Method::POST => {
+            let body_json: Value = {
+                body.concat2().map(move |body: Chunk| {
+                    let v: Value = serde_json::from_slice(&body).unwrap();
+                    v
+                }).wait().unwrap()
+            };
+            match post_request_handler(&mut my_response, parameters, body_json) {
                 Ok(()) => {
                     info!("Post request handled successfully.");
                 }
@@ -93,7 +116,7 @@ fn response_function(req: Request<Body>) -> BoxFut {
         }
 
         _ => {
-            warn!("Bad request type {}", req.uri());
+            warn!("Bad request type {}", head.uri);
             *my_response.body_mut() = "Not Found.".into();
         }
     }
@@ -104,10 +127,13 @@ fn response_function(req: Request<Body>) -> BoxFut {
 fn post_request_handler(
     my_response: &mut Response<Body>,
     parameters: HashMap<&str, &str>,
+    json_value: Value,
 ) -> Result<(), Box<String>> {
     let mut response_map = Map::new();
+    let encrypted_key = &json_value["encrypted_key"];
     match parameters.get(&"keys") {
         Some(&"ukey") => {
+            let auth_tag = &json_value["auth_tag"];
             if let Err(e) = set_response_content(
                 200,
                 "Add u key",
