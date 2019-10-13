@@ -1,5 +1,6 @@
 use super::*;
 
+use common::config_get;
 use common::emsg;
 use std::error::Error;
 use std::fs;
@@ -78,8 +79,10 @@ fn mount() -> Result<String, Box<String>> {
         return emsg("Failed to get the path string.", None::<String>);
     }
 
-    // Monut the directory to file system
+    // Mount the directory to file system
     let secure_dir = format!("{}/secure", common::WORK_DIR);
+    let secure_size =
+        config_get("/etc/keylime.conf", "cloud_agent", "secure_size");
     match check_mount(&secure_dir) {
         Ok(false) => {
             // If the directory is not mount to file system, mount the directory to
@@ -125,8 +128,7 @@ fn mount() -> Result<String, Box<String>> {
                     tpm::run(
                         format!(
                             "mount -t tmpfs -o size={},mode=0700 tmpfs {}",
-                            common::SECURE_SIZE,
-                            s,
+                            secure_size, s,
                         ),
                         None,
                     )

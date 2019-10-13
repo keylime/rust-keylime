@@ -1,12 +1,16 @@
 extern crate futures;
 extern crate hyper;
+extern crate ini;
 extern crate serde_json;
 
 use hyper::header::HeaderValue;
 use hyper::{header, Body, Response, StatusCode};
+use ini::Ini;
 use serde_json::{Map, Value};
 use std::collections::HashMap;
 use std::fmt::Debug;
+use std::path::Path;
+use std::process;
 
 /*
  * Constants and static variables
@@ -24,13 +28,43 @@ pub static IMA_ML: &'static str =
 pub static KEY: &'static str = "secret";
 pub static WORK_DIR: &'static str = "/tmp";
 
-/*
- * Temporaray location for configuration parameters
- */
-
-// cloud agent
-pub static SECURE_SIZE: &'static str = "1m";
+// Secure mount of tpmfs (False is generally used for development environments)
 pub static MOUNT_SECURE: bool = true;
+
+/*
+ * Input: config file location (e.g. /etc/keylime.conf), [section] and key
+ * Return: Returns the matched key
+ *
+ * Example call:
+ * let port = common::config_get("/etc/keylime.conf""general","cloudagent_port");
+ */
+pub fn config_get(conf_name: &str, section: &str, key: &str) -> String {
+    let conf = match Ini::load_from_file(conf_name) {
+        Ok(conf) => conf,
+        Err(_error) => {
+            error!("Error: unable to read config file: {} ", conf_name);
+            process::exit(1);
+        }
+    };
+    let section = match conf.section(Some(section.to_owned())) {
+        Some(section) => section,
+        None => {
+            error!(
+                "Cannot find section called {} within file {}",
+                section, conf_name
+            );
+            process::exit(1)
+        }
+    };
+    let value = match section.get(key) {
+        Some(value) => value,
+        None => {
+            error!("Cannot find key value {} within file {}", key, conf_name);
+            process::exit(1)
+        }
+    };
+    return value.clone();
+}
 
 /*
  * Input: Response status code
@@ -185,5 +219,11 @@ mod tests {
         assert!(
             set_response_content(0, "Ok", Map::new(), &mut my_res).is_ok()
         );
+    }
+
+    #[test]
+    fn test_config_get_parameters_exist() {
+        let result = config_get("keylime.conf", "general", "cloudagent_port");
+        assert_eq!(result, "9002");
     }
 }
