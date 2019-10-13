@@ -638,7 +638,8 @@ mod tests {
     #[test]
     fn test_read_file_output_path() {
         assert_eq!(
-            read_file_output_path("test_input.txt".to_string()).unwrap(),
+            read_file_output_path("test-data/test_input.txt".to_string())
+                .unwrap(),
             "Hello World!\n"
         );
     }
@@ -738,7 +739,7 @@ mod tests {
      * copy tpmdata_test.json file to tpmdata.json for testing
      */
     fn set_tpmdata_test() -> Result<(), Box<Error>> {
-        let file = File::open("tpmdata_test.json")?;
+        let file = File::open("test-data/tpmdata_test.json")?;
         let data: Value = serde_json::from_reader(file)?;
         let mut buffer = BufWriter::new(File::create("tpmdata.json")?);
         let data_string = serde_json::to_string_pretty(&data)?;

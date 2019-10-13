@@ -533,7 +533,7 @@ mod tests {
     #[test]
     fn test_read_in_file() {
         assert_eq!(
-            read_in_file("test_input.txt".to_string())
+            read_in_file("test-data/test_input.txt".to_string())
                 .expect("File doesn't exist"),
             String::from("Hello World!\n")
         );
