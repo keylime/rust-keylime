@@ -12,6 +12,7 @@ extern crate flate2;
 extern crate futures;
 extern crate hex;
 extern crate hyper;
+extern crate ini;
 extern crate libc;
 extern crate openssl;
 extern crate pretty_env_logger;
@@ -24,6 +25,7 @@ mod crypto;
 mod secure_mount;
 mod tpm;
 
+use common::config_get;
 use common::emsg;
 use common::set_response_content;
 use futures::future;
@@ -44,10 +46,16 @@ static NOTFOUND: &[u8] = b"Not Found";
 
 fn main() {
     pretty_env_logger::init();
+
+    let cloudagent_ip =
+        config_get("/etc/keylime.conf", "general", "cloudagent_ip");
+    let cloudagent_port =
+        config_get("/etc/keylime.conf", "general", "cloudagent_port");
+    let endpoint = format!("{}:{}", cloudagent_ip, cloudagent_port);
+
     info!("Starting server...");
 
-    /* Should be port 3000 eventually */
-    let addr = ([127, 0, 0, 1], 1337).into();
+    let addr = (endpoint).parse().expect("Cannot parse IP & Port");
 
     let server = Server::bind(&addr)
         .serve(|| service_fn(response_function))
