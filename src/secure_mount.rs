@@ -125,7 +125,7 @@ fn mount() -> Result<String, Box<String>> {
                         })?;
 
                     // mount tmpfs with secure directory
-                    tpm::run(
+                    cmd_exec::run(
                         format!(
                             "mount -t tmpfs -o size={},mode=0700 tmpfs {}",
                             secure_size, s,

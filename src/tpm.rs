@@ -2,31 +2,23 @@ extern crate base64;
 extern crate flate2;
 
 use super::*;
-use common::emsg;
+use cmd_exec;
 use flate2::write::ZlibEncoder;
 use flate2::Compression;
+use keylime_error;
 use openssl::sha;
 use serde_json::Value;
-use std::env;
-use std::error::Error;
-use std::fmt;
 use std::fs::File;
 use std::io::prelude::*;
 use std::io::BufWriter;
-use std::io::Read;
-use std::process::Command;
-use std::process::Output;
 use std::str;
-use std::thread;
 use std::time::Duration;
-use std::time::SystemTime;
 use tempfile::NamedTempFile;
 
 const MAX_TRY: usize = 10;
 const RETRY_SLEEP: Duration = Duration::from_millis(50);
 const TPM_IO_ERROR: i32 = 5;
 const RETRY: usize = 4;
-
 static EMPTYMASK: &'static str = "1";
 
 /***************************************************************
@@ -39,24 +31,26 @@ Following are function from tpm_initialize.py program
  *     content key in tpmdata
  * Return:
  *     Value string
- *     KeylimeTpmError
+ *     keylime_error::KeylimeTpmError
  *
  * Getting the tpm data struct and convert it to a json value object to
  * retrive a particular value by the given key inside the tpm data.
  */
-fn get_tpm_metadata_content(key: &str) -> Result<String, KeylimeTpmError> {
+fn get_tpm_metadata_content(
+    key: &str,
+) -> Result<String, keylime_error::KeylimeTpmError> {
     let tpm_data = read_tpm_data()?;
     let remove: &[_] = &['"', ' ', '/'];
     tpm_data.get(key).map_or_else(
         || {
-            Err(KeylimeTpmError::new_tpm_rust_error(
+            Err(keylime_error::KeylimeTpmError::new_tpm_rust_error(
                 format!("Key: {} is missing in tpmdata.json", key).as_str(),
             ))
         },
         |content| {
             content.as_str().map_or_else(
                 || {
-                    Err(KeylimeTpmError::new_tpm_rust_error(
+                    Err(keylime_error::KeylimeTpmError::new_tpm_rust_error(
                         "Failed to convert Value to stirng.",
                     ))
                 },
@@ -72,7 +66,7 @@ fn get_tpm_metadata_content(key: &str) -> Result<String, KeylimeTpmError> {
  *      tpm data value
  * Return:
  *      success
- *      KeylimeTpmError
+ *      keylime_error::KeylimeTpmError
  *
  * Set the corresponding tpm data key with new value and save the new content
  * to tpmdata.json. This version remove global tpmdata variable. Read the
@@ -81,12 +75,12 @@ fn get_tpm_metadata_content(key: &str) -> Result<String, KeylimeTpmError> {
 fn set_tpm_metadata_content(
     key: &str,
     value: &str,
-) -> Result<(), KeylimeTpmError> {
+) -> Result<(), keylime_error::KeylimeTpmError> {
     let mut tpm_data = read_tpm_data()?;
     match tpm_data.get_mut(key) {
         Some(ptr) => *ptr = json!(value),
         None => {
-            return Err(KeylimeTpmError::new_tpm_rust_error(
+            return Err(keylime_error::KeylimeTpmError::new_tpm_rust_error(
                 format!("Key: {} is missing in tpmdata.json", key).as_str(),
             ));
         }
@@ -99,14 +93,14 @@ fn set_tpm_metadata_content(
 /*
  * Return:
  *     TPM data
- *     KeylimeTpmError
+ *     keylime_error::KeylimeTpmError
  *
  * Read in tpmdata.json file and convert it to a pre-defined struct. Now its
  * using the sample tpmdata.json in the crate root directory for testing. The
  * format the same as the original python version. Result is returned to
  * caller for error handling.
  */
-fn read_tpm_data() -> Result<Value, KeylimeTpmError> {
+fn read_tpm_data() -> Result<Value, keylime_error::KeylimeTpmError> {
     let file = File::open("tpmdata.json")?;
     let data: Value = serde_json::from_reader(file)?;
     Ok(data)
@@ -116,7 +110,7 @@ fn read_tpm_data() -> Result<Value, KeylimeTpmError> {
  * Input: tpmdata in Value type
  * Return:
  *     success
- *     KeylimeTpmError
+ *     keylime_error::KeylimeTpmError
  *
  * Write the tpmdata to tpmdata.json file with result indicating execution
  * result. Different implementation than the original python version, which
@@ -124,7 +118,7 @@ fn read_tpm_data() -> Result<Value, KeylimeTpmError> {
  * could read the data before write instead of using a static type to store
  * it globally.
  */
-fn write_tpm_data(data: Value) -> Result<(), KeylimeTpmError> {
+fn write_tpm_data(data: Value) -> Result<(), keylime_error::KeylimeTpmError> {
     let mut buffer = BufWriter::new(File::create("tpmdata.json")?);
     let data_string = serde_json::to_string_pretty(&data)?;
     buffer.write(data_string.as_bytes())?;
@@ -157,13 +151,14 @@ pub fn is_vtpm() -> bool {
 /*
  * Return:
  *     manufacture information
- *     KeylimeTpmError
+ *     keylime_error::KeylimeTpmError
  *
  * getting the tpm manufacturer information
  * is_vtpm helper method
  */
-fn get_tpm_manufacturer() -> Result<String, KeylimeTpmError> {
-    let (return_output, _) = run("getcapability -cap 1a".to_string(), None)?;
+fn get_tpm_manufacturer() -> Result<String, keylime_error::KeylimeTpmError> {
+    let (return_output, _) =
+        cmd_exec::run("getcapability -cap 1a".to_string(), None)?;
     let lines: Vec<&str> = return_output.split("\n").collect();
     let mut manufacturer = String::new();
     for line in lines {
@@ -175,7 +170,7 @@ fn get_tpm_manufacturer() -> Result<String, KeylimeTpmError> {
             }
         }
     }
-    Err(KeylimeTpmError::new_tpm_rust_error(
+    Err(keylime_error::KeylimeTpmError::new_tpm_rust_error(
         "TPM manufacture information is missing.",
     ))
 }
@@ -193,7 +188,7 @@ Following are function from tpm_quote.py program
  *
  * Output:
  *     quote from tpm pcr
- *     KeylimeTpmError
+ *     keylime_error::KeylimeTpmError
  *
  * Getting quote form tpm, same implementation as the original python version.
  */
@@ -201,11 +196,11 @@ pub fn create_quote(
     nonce: String,
     data: String,
     mut pcrmask: String,
-) -> Result<String, KeylimeTpmError> {
+) -> Result<String, keylime_error::KeylimeTpmError> {
     let temp_file = NamedTempFile::new()?;
     let quote_path = match temp_file.path().to_str() {
         None => {
-            return Err(KeylimeTpmError::new_tpm_rust_error(
+            return Err(keylime_error::KeylimeTpmError::new_tpm_rust_error(
                 "Can't retrieve temp file path.",
             ));
         }
@@ -226,7 +221,7 @@ pub fn create_quote(
         let mut command = format!("pcrreset -ix {}", common::TPM_DATA_PCR);
 
         // RUN
-        run(command, None)?;
+        cmd_exec::run(command, None)?;
 
         // Use SHA1 to hash the data
         let mut hasher = sha::Sha1::new();
@@ -240,7 +235,7 @@ pub fn create_quote(
         );
 
         // RUN
-        run(command, None)?;
+        cmd_exec::run(command, None)?;
     }
 
     // store quote into the temp file that will be extracted later
@@ -249,7 +244,7 @@ pub fn create_quote(
         key_handle, aik_password, pcrmask, nonce, quote_path,
     );
 
-    let (_, quote_raw) = run(command, Some(quote_path))?;
+    let (_, quote_raw) = cmd_exec::run(command, Some(quote_path))?;
     let mut quote_return = String::from("r");
     quote_return.push_str(&base64_zlib_encode(quote_raw)?);
     Ok(quote_return)
@@ -263,7 +258,7 @@ pub fn create_quote(
  *
  * Output:
  *     deep quote string from tpm pcr
- *     KeylimeTpmError
+ *     keylime_error::KeylimeTpmError
  *
  * Getting deep quote form tpm, same implementation as the original python
  * version. Same  procedures as quote by this is a deep quote.
@@ -273,11 +268,11 @@ pub fn create_deep_quote(
     data: String,
     mut pcrmask: String,
     mut vpcrmask: String,
-) -> Result<String, KeylimeTpmError> {
+) -> Result<String, keylime_error::KeylimeTpmError> {
     let temp_file = NamedTempFile::new()?;
     let quote_path = match temp_file.path().to_str() {
         None => {
-            return Err(KeylimeTpmError::new_tpm_rust_error(
+            return Err(keylime_error::KeylimeTpmError::new_tpm_rust_error(
                 "Can't retieve temp file path.",
             ));
         }
@@ -302,7 +297,7 @@ pub fn create_deep_quote(
         let mut command = format!("pcrreset -ix {}", common::TPM_DATA_PCR);
 
         //RUN
-        run(command, None)?;
+        cmd_exec::run(command, None)?;
         let mut hasher = sha::Sha1::new();
         hasher.update(data.as_bytes());
         let data_sha1_hash = hasher.finish();
@@ -314,7 +309,7 @@ pub fn create_deep_quote(
         );
 
         //RUN
-        run(command, None)?;
+        cmd_exec::run(command, None)?;
     }
 
     // store quote into the temp file that will be extracted later
@@ -330,7 +325,7 @@ pub fn create_deep_quote(
     );
 
     // RUN
-    let (_, quote_raw) = run(command, Some(quote_path))?;
+    let (_, quote_raw) = cmd_exec::run(command, Some(quote_path))?;
     let mut quote_return = String::from("d");
     quote_return.push_str(&quote_raw);
     Ok(quote_return)
@@ -340,7 +335,7 @@ pub fn create_deep_quote(
  * Input: string to be encoded
  * Output:
  *     encoded string output
- *     KeylimeTpmError
+ *     keylime_error::KeylimeTpmError
  *
  * Use zlib to compression the input and encoded with base64 encoding
  * method
@@ -349,7 +344,9 @@ pub fn create_deep_quote(
  * decode the hex output and give back the original text message. No able
  * to test with identical python function output string.
  */
-fn base64_zlib_encode(data: String) -> Result<String, KeylimeTpmError> {
+fn base64_zlib_encode(
+    data: String,
+) -> Result<String, keylime_error::KeylimeTpmError> {
     let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
     encoder.write_all(data.as_bytes())?;
     let compressed_bytes = encoder.finish()?;
@@ -411,221 +408,6 @@ Following are function from tpm_exec.py program
 *****************************************************************/
 
 /*
- * Input:
- *     command: command to be executed
- *     output_path: file output location
- * return:
- *     execution return output and file output
- *     KeylimeTpmError
- *
- * Set up execution envrionment to execute tpm command through shell commands
- * and return the execution result in a tuple. Based on the latest update of
- * python keylime this function implement the functionality of cmd_exec
- * script in the python keylime repo. RaiseOnError, return code and lock are
- * dropped due to different error handling in Rust. Returned output string are
- * preprocessed to before returning for code efficient.
- */
-pub fn run<'a>(
-    command: String,
-    output_path: Option<&str>,
-) -> Result<(String, String), KeylimeTpmError> {
-    let mut file_output = String::new();
-    let mut output: Output;
-
-    // tokenize input command
-    let words: Vec<&str> = command.split(" ").collect();
-    let mut number_tries = 0;
-    let args = &words[1..words.len()];
-    let cmd = &words[0];
-
-    // setup environment variable
-    let mut env_vars: HashMap<String, String> = HashMap::new();
-    for (key, value) in env::vars() {
-        env_vars.insert(key.to_string(), value.to_string());
-    }
-    env_vars.insert("TPM_SERVER_PORT".to_string(), "9998".to_string());
-    env_vars.insert("TPM_SERVER_NAME".to_string(), "localhost".to_string());
-    match env_vars.get_mut("PATH") {
-        Some(v) => v.push_str(common::TPM_TOOLS_PATH),
-        None => {
-            return Err(KeylimeTpmError::new_tpm_rust_error(
-                "PATH envrionment variable dosen't exist.",
-            ));
-        }
-    }
-
-    // main loop
-    'exec: loop {
-        // Start time stamp
-        let t0 = SystemTime::now();
-
-        output = Command::new(&cmd).args(args).envs(&env_vars).output()?;
-
-        // measure execution time
-        let t_diff = t0.duration_since(t0)?;
-        info!("Time cost: {}", t_diff.as_secs());
-
-        // assume the system is linux
-        println!("number tries: {:?}", number_tries);
-
-        match output.status.code() {
-            Some(TPM_IO_ERROR) => {
-                number_tries += 1;
-                if number_tries >= MAX_TRY {
-                    return Err(KeylimeTpmError::new_tpm_error(
-                        TPM_IO_ERROR,
-                        "TPM appears to be in use by another application. 
-                         Keylime is incompatible with other TPM TSS 
-                         applications like trousers/tpm-tools. Please 
-                         uninstall or disable.",
-                    ));
-                }
-
-                info!(
-                    "Failed to call TPM {}/{} times, trying again in {} secs.",
-                    number_tries,
-                    MAX_TRY,
-                    RETRY,
-                );
-
-                thread::sleep(RETRY_SLEEP);
-            }
-
-            _ => break 'exec,
-        }
-    }
-
-    let return_output = String::from_utf8(output.stdout)?;
-    match output.status.code() {
-        None => {
-            return Err(KeylimeTpmError::new_tpm_rust_error(
-                "Execution return code is None.",
-            ));
-        }
-        Some(0) => info!("Successfully executed TPM command."),
-        Some(c) => {
-            return Err(KeylimeTpmError::new_tpm_error(
-                c,
-                format!(
-                    "Command: {} returned {}, output {}",
-                    command, c, return_output,
-                )
-                .as_str(),
-            ));
-        }
-    }
-
-    // Retrive data from output path file
-    if let Some(p) = output_path {
-        file_output = read_file_output_path(p.to_string())?;
-    }
-
-    Ok((return_output, file_output))
-}
-
-/*
- * Input: file name
- * Return: the content of the file int Result<>
- *
- * run method helper method
- * read in the file and  return the content of the file into a Result enum
- */
-fn read_file_output_path(output_path: String) -> std::io::Result<String> {
-    let mut file = File::open(output_path)?;
-    let mut contents = String::new();
-    file.read_to_string(&mut contents)?;
-    Ok(contents)
-}
-
-/*
- * Custom Error type for tpm execution error. It contains both error from the
- * TPM command execution result or error cause by rust function. Potential
- * rust error are map to this error by implemented From<> trait.
- */
-#[derive(Debug)]
-pub enum KeylimeTpmError {
-    TpmRustError { details: String },
-    TpmError { code: i32, details: String },
-}
-
-impl KeylimeTpmError {
-    fn new_tpm_error(err_code: i32, err_msg: &str) -> KeylimeTpmError {
-        KeylimeTpmError::TpmError {
-            code: err_code,
-            details: err_msg.to_string(),
-        }
-    }
-
-    fn new_tpm_rust_error(err_msg: &str) -> KeylimeTpmError {
-        KeylimeTpmError::TpmRustError {
-            details: err_msg.to_string(),
-        }
-    }
-}
-
-impl Error for KeylimeTpmError {
-    fn description(&self) -> &str {
-        match &self {
-            KeylimeTpmError::TpmError {
-                ref details,
-                ref code,
-            } => details,
-            KeylimeTpmError::TpmRustError { ref details } => details,
-        }
-    }
-}
-
-impl fmt::Display for KeylimeTpmError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match *self {
-            KeylimeTpmError::TpmError {
-                ref code,
-                ref details,
-            } => write!(
-                f,
-                "Execute TPM command failed with Error Code: [{}] and 
-                Error Message [{}].",
-                code, details,
-            ),
-            KeylimeTpmError::TpmRustError { ref details } => write!(
-                f,
-                "Error occur in TPM rust interface with message [{}].",
-                details,
-            ),
-        }
-    }
-}
-
-impl From<std::io::Error> for KeylimeTpmError {
-    fn from(e: std::io::Error) -> KeylimeTpmError {
-        KeylimeTpmError::new_tpm_rust_error(e.description())
-    }
-}
-
-impl From<std::time::SystemTimeError> for KeylimeTpmError {
-    fn from(e: std::time::SystemTimeError) -> KeylimeTpmError {
-        KeylimeTpmError::new_tpm_rust_error(e.description())
-    }
-}
-
-impl From<std::string::FromUtf8Error> for KeylimeTpmError {
-    fn from(e: std::string::FromUtf8Error) -> KeylimeTpmError {
-        KeylimeTpmError::new_tpm_rust_error(e.description())
-    }
-}
-
-impl From<serde_json::error::Error> for KeylimeTpmError {
-    fn from(e: serde_json::error::Error) -> KeylimeTpmError {
-        KeylimeTpmError::new_tpm_rust_error(e.description())
-    }
-}
-
-impl From<std::num::ParseIntError> for KeylimeTpmError {
-    fn from(e: std::num::ParseIntError) -> KeylimeTpmError {
-        KeylimeTpmError::new_tpm_rust_error(e.description())
-    }
-}
-/*
  * These test are for Centos and tpm4720 elmulator install environment. It
  * test tpm command before execution.
  */
@@ -634,15 +416,6 @@ mod tests {
     use super::*;
     use std::error::Error;
     use std::fs;
-
-    #[test]
-    fn test_read_file_output_path() {
-        assert_eq!(
-            read_file_output_path("test-data/test_input.txt".to_string())
-                .unwrap(),
-            "Hello World!\n"
-        );
-    }
 
     #[test]
     fn test_is_deep_quote() {
@@ -663,23 +436,6 @@ mod tests {
     fn test_get_manufacturer() {
         match command_exist("getcapability") {
             true => assert_eq!(get_tpm_manufacturer().unwrap(), "IBM"),
-            false => assert!(true),
-        }
-    }
-
-    #[test]
-    fn test_run_command() {
-        match command_exist("getrandom") {
-            true => {
-                let command = "getrandom -size 8 -out foo.out".to_string();
-                run(command, None);
-                let p = Path::new("foo.out");
-                assert_eq!(p.exists(), true);
-                match fs::remove_file("foo.out") {
-                    Ok(_) => {}
-                    Err(_) => {}
-                }
-            }
             false => assert!(true),
         }
     }
