@@ -20,8 +20,10 @@ extern crate rustc_serialize;
 extern crate serde;
 extern crate tempfile;
 
+mod cmd_exec;
 mod common;
 mod crypto;
+mod keylime_error;
 mod secure_mount;
 mod tpm;
 
