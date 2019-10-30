@@ -28,7 +28,7 @@ fn check_mount(secure_dir: &str) -> Result<bool, Box<String>> {
 
     // Check mount list for secure directory
     for line in lines {
-        let tokens: Vec<&str> = line.split('/').collect();
+        let tokens: Vec<&str> = line.split(' ').collect();
 
         if tokens.len() < 3 {
             continue;
@@ -36,9 +36,19 @@ fn check_mount(secure_dir: &str) -> Result<bool, Box<String>> {
 
         if tokens[2] == secure_dir {
             if tokens[0] != "tmpfs" {
-                return emsg(format!("secure storage location {} already mounted on wrong file system type: {}.  Unmount to continue.", secure_dir, tokens[0]).as_str(), None::<String>);
+                return emsg(
+                    format!(
+                        "secure storage location {} already mounted on wrong file system type: {}.  Unmount to continue.", 
+                        secure_dir,
+                        tokens[0]).as_str(),
+                        None::<String>
+                    );
+            } else {
+                info!(
+                    "Using existing secure storage tmpsfs mount {}",
+                    secure_dir
+                );
             }
-
             return Ok(true);
         }
     }
@@ -54,7 +64,7 @@ fn check_mount(secure_dir: &str) -> Result<bool, Box<String>> {
  * implementation as the original python version, but the chown/geteuid
  * functions are unsafe function in Rust to use.
  */
-fn mount() -> Result<String, Box<String>> {
+pub fn mount() -> Result<String, Box<String>> {
     // Use /tmpfs-dev directory if MOUNT_SECURE flag is set, which doesn't
     // mount to the system. This is for developement envrionment. No need to
     // mount to file system.
@@ -83,6 +93,7 @@ fn mount() -> Result<String, Box<String>> {
     let secure_dir = format!("{}/secure", common::WORK_DIR);
     let secure_size =
         config_get("/etc/keylime.conf", "cloud_agent", "secure_size");
+
     match check_mount(&secure_dir) {
         Ok(false) => {
             // If the directory is not mount to file system, mount the directory to
@@ -92,6 +103,7 @@ fn mount() -> Result<String, Box<String>> {
 
             // Create directory if the directory is not exist. The
             // directory permission is set to 448.
+
             if !secure_dir_path.exists() {
                 if let Err(e) = fs::create_dir(secure_dir_path) {
                     return emsg("Failed to create directory.", Some(e));
