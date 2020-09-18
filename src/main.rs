@@ -24,6 +24,7 @@ mod cmd_exec;
 mod common;
 mod crypto;
 mod hash;
+mod hashlist;
 mod keylime_error;
 mod secure_mount;
 mod tpm;
