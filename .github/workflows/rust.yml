@@ -21,4 +21,4 @@ jobs:
     - name: Run tests
       run: cargo test
     - name: No Panic
-      run: ./.travis/nopanic.py
+      run: ./.ci/nopanic.py
