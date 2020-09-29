@@ -51,9 +51,9 @@ fn main() {
     pretty_env_logger::init();
 
     let cloudagent_ip =
-        config_get("/etc/keylime.conf", "general", "cloudagent_ip");
+        config_get("/etc/keylime.conf", "cloud_agent", "cloudagent_ip");
     let cloudagent_port =
-        config_get("/etc/keylime.conf", "general", "cloudagent_port");
+        config_get("/etc/keylime.conf", "cloud_agent", "cloudagent_port");
     let endpoint = format!("{}:{}", cloudagent_ip, cloudagent_port);
 
     info!("Starting server...");
