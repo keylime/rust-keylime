@@ -1,7 +1,7 @@
 [package]
 name = "keylime_agent"
 version = "0.1.0"
-authors = ["Pei Jia <leojia@bu.edu>"]
+authors = ["Keylime Authors"]
 
 [dependencies]
 futures = "0.1.24"
