@@ -2,7 +2,7 @@ use hyper::header::HeaderValue;
 use hyper::{header, Body, Response, StatusCode};
 use ini::Ini;
 use log::*;
-use serde_json::{Map, Value, json};
+use serde_json::{json, Map, Value};
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::path::Path;
