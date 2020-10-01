@@ -1,24 +1,24 @@
 #[macro_use]
-extern crate log;
+use log::*;
 
 #[macro_use]
-extern crate serde_derive;
+use serde_derive;
 
 #[macro_use]
-extern crate serde_json;
+use serde_json;
 
-extern crate base64;
-extern crate flate2;
-extern crate futures;
-extern crate hex;
-extern crate hyper;
-extern crate ini;
-extern crate libc;
-extern crate openssl;
-extern crate pretty_env_logger;
-extern crate rustc_serialize;
-extern crate serde;
-extern crate tempfile;
+use base64;
+use flate2;
+use futures;
+use hex;
+use hyper;
+use ini;
+use libc;
+use openssl;
+use pretty_env_logger;
+use rustc_serialize;
+use serde;
+use tempfile;
 
 mod cmd_exec;
 mod common;
@@ -49,6 +49,8 @@ static NOTFOUND: &[u8] = b"Not Found";
 
 fn main() {
     pretty_env_logger::init();
+    // Get a context to work with the TPM
+    let mut ctx = tpm::get_tpm2_ctx();
 
     let cloudagent_ip =
         config_get("/etc/keylime.conf", "cloud_agent", "cloudagent_ip");
@@ -170,346 +172,345 @@ fn get_request_handler(
     info!("GET invoked");
 
     // Invalid request handling
-    if parameters.is_empty() {
-        if let Err(e) = set_response_content(
-            400,
-            "Not Implemented: Use /v2/keys/ or /v2/quotes/ interfaces.",
-            Map::new(),
-            my_response,
-        ) {
-            return emsg(
-                "Failed to edit response content. Error {}.",
-                Some(e),
-            );
-        }
-        return emsg(
-            "Error: Invalid API request. Abort the handling process.",
-            None::<String>,
-        );
-    }
+    // if parameters.is_empty() {
+    //     if let Err(e) = set_response_content(
+    //         400,
+    //         "Not Implemented: Use /v2/keys/ or /v2/quotes/ interfaces.",
+    //         Map::new(),
+    //         my_response,
+    //     ) {
+    //         return emsg(
+    //             "Failed to edit response content. Error {}.",
+    //             Some(e),
+    //         );
+    //     }
+    //     return emsg(
+    //         "Error: Invalid API request. Abort the handling process.",
+    //         None::<String>,
+    //     );
+    // }
 
-    if parameters.contains_key("keys") {
-        let mut response_map = Map::new();
+    // if parameters.contains_key("keys") {
+    //     let mut response_map = Map::new();
 
-        match parameters.get(&"keys") {
-            // Check K value is available to use the do_hmac function
-            // Crypto request will do hmac for the challenge
-            // PYthon version function : crypto.do_hmac(self.server.K, challenge)
-            Some(&"verify") => {
-                // Sample request: /keys/verify/challenge/foo
-                // retrieve challenge from the request body
-                let challenge = match parameters.get(&"challenge") {
-                    Some(c) => c,
-                    None => {
-                        if let Err(e) = set_response_content(
-                            400,
-                            "Challenge is missing.",
-                            response_map,
-                            my_response,
-                        ) {
-                            return emsg(
-                                "Failed to edit response content.",
-                                Some(e),
-                            );
-                        }
-                        return emsg("Error: Challenge is missing for verify reqeust. Abort the handling process.", None::<String>);
-                    }
-                };
+    //     match parameters.get(&"keys") {
+    //         // Check K value is available to use the do_hmac function
+    //         // Crypto request will do hmac for the challenge
+    //         // PYthon version function : crypto.do_hmac(self.server.K, challenge)
+    //         Some(&"verify") => {
+    //             // Sample request: /keys/verify/challenge/foo
+    //             // retrieve challenge from the request body
+    //             let challenge = match parameters.get(&"challenge") {
+    //                 Some(c) => c,
+    //                 None => {
+    //                     if let Err(e) = set_response_content(
+    //                         400,
+    //                         "Challenge is missing.",
+    //                         response_map,
+    //                         my_response,
+    //                     ) {
+    //                         return emsg(
+    //                             "Failed to edit response content.",
+    //                             Some(e),
+    //                         );
+    //                     }
+    //                     return emsg("Error: Challenge is missing for verify reqeust. Abort the handling process.", None::<String>);
+    //                 }
+    //             };
 
-                // create hmac for the challenge
-                match crypto::do_hmac(
-                    common::KEY.to_string(),
-                    challenge.to_string(),
-                ) {
-                    Ok(hmac) => {
-                        response_map.insert("hmac".into(), hmac.into());
-                        if let Err(e) = set_response_content(
-                            200,
-                            "Success",
-                            response_map,
-                            my_response,
-                        ) {
-                            return emsg(
-                                "Failed to edit response content.",
-                                Some(e),
-                            );
-                        }
-                    }
+    //             // create hmac for the challenge
+    //             match crypto::do_hmac(
+    //                 common::KEY.to_string(),
+    //                 challenge.to_string(),
+    //             ) {
+    //                 Ok(hmac) => {
+    //                     response_map.insert("hmac".into(), hmac.into());
+    //                     if let Err(e) = set_response_content(
+    //                         200,
+    //                         "Success",
+    //                         response_map,
+    //                         my_response,
+    //                     ) {
+    //                         return emsg(
+    //                             "Failed to edit response content.",
+    //                             Some(e),
+    //                         );
+    //                     }
+    //                 }
 
-                    Err(e) => {
-                        if let Err(e) = set_response_content(
-                            400,
-                            "HMAC failed.",
-                            Map::new(),
-                            my_response,
-                        ) {
-                            return emsg(
-                                "Failed to edit response content. Error {}.",
-                                Some(e),
-                            );
-                        }
-                    }
-                }
-            }
+    //                 Err(e) => {
+    //                     if let Err(e) = set_response_content(
+    //                         400,
+    //                         "HMAC failed.",
+    //                         Map::new(),
+    //                         my_response,
+    //                     ) {
+    //                         return emsg(
+    //                             "Failed to edit response content. Error {}.",
+    //                             Some(e),
+    //                         );
+    //                     }
+    //                 }
+    //             }
+    //         }
 
-            // Verify pubkey which is the exported rsa pub key
-            // Python version: self.server.rsapublickey_exportable
-            Some(&"pubkey") => {
-                // GET /keys/pubkey/
-                response_map.insert(
-                    "pubkey".into(),
-                    common::RSA_PUBLICKEY_EXPORTABLE.into(),
-                );
+    //         // Verify pubkey which is the exported rsa pub key
+    //         // Python version: self.server.rsapublickey_exportable
+    //         Some(&"pubkey") => {
+    //             // GET /keys/pubkey/
+    //             response_map.insert(
+    //                 "pubkey".into(),
+    //                 common::RSA_PUBLICKEY_EXPORTABLE.into(),
+    //             );
 
-                if let Err(e) = set_response_content(
-                    200,
-                    "Success",
-                    response_map,
-                    my_response,
-                ) {
-                    return emsg(
-                        "Failed to edit the response content body.",
-                        Some(e),
-                    );
-                }
-            }
+    //             if let Err(e) = set_response_content(
+    //                 200,
+    //                 "Success",
+    //                 response_map,
+    //                 my_response,
+    //             ) {
+    //                 return emsg(
+    //                     "Failed to edit the response content body.",
+    //                     Some(e),
+    //                 );
+    //             }
+    //         }
 
-            _ => {
-                if let Err(e) = set_response_content(
-                    400,
-                    "Invalid request for keys",
-                    response_map,
-                    my_response,
-                ) {
-                    return emsg(
-                        "Failed to edit the response content. Error {}.",
-                        Some(e),
-                    );
-                }
-            }
-        }
+    //         _ => {
+    //             if let Err(e) = set_response_content(
+    //                 400,
+    //                 "Invalid request for keys",
+    //                 response_map,
+    //                 my_response,
+    //             ) {
+    //                 return emsg(
+    //                     "Failed to edit the response content. Error {}.",
+    //                     Some(e),
+    //                 );
+    //             }
+    //         }
+    //     }
 
-    // quote request: response include quote and ima_measurement_list
-    } else if parameters.contains_key("quotes") {
-        // Only one of these two is available, the other one is None\
-        let pcr_mask = parameters.get(&"mask");
-        let vpcr_mask = parameters.get(&"vmask");
-        let mut response_map = Map::new();
-        let mut ima_mask: String;
-        let nonce = parameters.get(&"nonce");
+    // // quote request: response include quote and ima_measurement_list
+    // } else if parameters.contains_key("quotes") {
+    //     // Only one of these two is available, the other one is None\
+    //     let pcr_mask = parameters.get(&"mask");
+    //     let vpcr_mask = parameters.get(&"vmask");
+    //     let mut response_map = Map::new();
+    //     let mut ima_mask: String;
+    //     let nonce = parameters.get(&"nonce");
 
-        // If nonce is not available, it is an invalid request
-        if let None = nonce {
-            if let Err(e) = set_response_content(
-                400,
-                "Invalid reqeust",
-                response_map,
-                my_response,
-            ) {
-                return emsg("Failed to edit response content.", Some(e));
-            }
-            return emsg(
-                "GET quote returning 400 response. Nonce is not avaiable.",
-                None::<String>,
-            );
-        }
+    //     // If nonce is not available, it is an invalid request
+    //     if let None = nonce {
+    //         if let Err(e) = set_response_content(
+    //             400,
+    //             "Invalid reqeust",
+    //             response_map,
+    //             my_response,
+    //         ) {
+    //             return emsg("Failed to edit response content.", Some(e));
+    //         }
+    //         return emsg(
+    //             "GET quote returning 400 response. Nonce is not avaiable.",
+    //             None::<String>,
+    //         );
+    //     }
 
-        // verify all parameters is available inside the request body
-        let (n, p, v) = match (nonce, pcr_mask, vpcr_mask) {
-            (Some(n), Some(p), Some(v)) => (n, p, v),
-            _ => {
-                if let Err(e) = set_response_content(
-                    400,
-                    "Bad request",
-                    response_map,
-                    my_response,
-                ) {
-                    return emsg("Failed to edit response content.", Some(e));
-                }
-                return emsg("GET quote return 400 response. Bad request: nonce, pcr_mask, vpcr_mask can't be None.", None::<String>);
-            }
-        };
+    //     // verify all parameters is available inside the request body
+    //     let (n, p, v) = match (nonce, pcr_mask, vpcr_mask) {
+    //         (Some(n), Some(p), Some(v)) => (n, p, v),
+    //         _ => {
+    //             if let Err(e) = set_response_content(
+    //                 400,
+    //                 "Bad request",
+    //                 response_map,
+    //                 my_response,
+    //             ) {
+    //                 return emsg("Failed to edit response content.", Some(e));
+    //             }
+    //             return emsg("GET quote return 400 response. Bad request: nonce, pcr_mask, vpcr_mask can't be None.", None::<String>);
+    //         }
+    //     };
 
-        let nonce_isalnum = n.chars().all(char::is_alphanumeric);
-        let pcr_mask_isalnum = p.chars().all(char::is_alphanumeric);
-        let vpcr_mask_isalnum = v.chars().all(char::is_alphanumeric);
+    //     let nonce_isalnum = n.chars().all(char::is_alphanumeric);
+    //     let pcr_mask_isalnum = p.chars().all(char::is_alphanumeric);
+    //     let vpcr_mask_isalnum = v.chars().all(char::is_alphanumeric);
 
-        if !(nonce_isalnum
-            && (pcr_mask == None || pcr_mask_isalnum)
-            && (vpcr_mask == None || vpcr_mask_isalnum))
-        {
-            if let Err(e) = set_response_content(
-                 400,
-                 "Bad Request. Parameters should be strictly alphanumeric string.",
-                 response_map,
-                 my_response,
-                 ) {
-                 return emsg("Failed to edit the response content body.", Some(e));
-             }
+    //     if !(nonce_isalnum
+    //         && (pcr_mask == None || pcr_mask_isalnum)
+    //         && (vpcr_mask == None || vpcr_mask_isalnum))
+    //     {
+    //         if let Err(e) = set_response_content(
+    //              400,
+    //              "Bad Request. Parameters should be strictly alphanumeric string.",
+    //              response_map,
+    //              my_response,
+    //              ) {
+    //              return emsg("Failed to edit the response content body.", Some(e));
+    //          }
 
-            return emsg("GET quote return 400 response. Parameters should all be strictly alphanumeric.", None::<String>);
-        }
+    //         return emsg("GET quote return 400 response. Parameters should all be strictly alphanumeric.", None::<String>);
+    //     }
 
-        let mut quote: String;
-        let vtpm_flag = tpm::is_vtpm();
-        let quotes = match parameters.get(&"quotes") {
-            Some(q) => q,
-            None => {
-                if let Err(e) = set_response_content(
-                    400,
-                    "Quote is missing in request.",
-                    response_map,
-                    my_response,
-                ) {
-                    return emsg(
-                        "Failed to edit response content body.",
-                        Some(e),
-                    );
-                }
-                return emsg(
-                    "Bad Request. Quote is missing in request.",
-                    None::<String>,
-                );
-            }
-        };
+    //     let mut quote: String;
+    //     let quotes = match parameters.get(&"quotes") {
+    //         Some(q) => q,
+    //         None => {
+    //             if let Err(e) = set_response_content(
+    //                 400,
+    //                 "Quote is missing in request.",
+    //                 response_map,
+    //                 my_response,
+    //             ) {
+    //                 return emsg(
+    //                     "Failed to edit response content body.",
+    //                     Some(e),
+    //                 );
+    //             }
+    //             return emsg(
+    //                 "Bad Request. Quote is missing in request.",
+    //                 None::<String>,
+    //             );
+    //         }
+    //     };
 
-        // identtity quotes are always shallow
-        if !vtpm_flag || quotes == &"identity" {
-            quote = match tpm::create_quote(
-                n.to_string(),
-                common::RSA_PUBLICKEY_EXPORTABLE.to_string(),
-                p.to_string(),
-            ) {
-                Ok(q) => q,
-                Err(err) => {
-                    if let Err(e) = set_response_content(
-                        400,
-                        "Failed to crate quote from TPM.",
-                        response_map,
-                        my_response,
-                    ) {
-                        return emsg(
-                            "Faild to edit the response content body.",
-                            Some(e),
-                        );
-                    }
-                    return emsg(
-                        "TPM error. Failed to create quote from TPM.",
-                        Some(err.description().to_string()),
-                    );
-                }
-            };
+    //     // identtity quotes are always shallow
+    //     if !vtpm_flag || quotes == &"identity" {
+    //         quote = match tpm::create_quote(
+    //             n.to_string(),
+    //             common::RSA_PUBLICKEY_EXPORTABLE.to_string(),
+    //             p.to_string(),
+    //         ) {
+    //             Ok(q) => q,
+    //             Err(err) => {
+    //                 if let Err(e) = set_response_content(
+    //                     400,
+    //                     "Failed to use quote from TPM.",
+    //                     response_map,
+    //                     my_response,
+    //                 ) {
+    //                     return emsg(
+    //                         "Faild to edit the response content body.",
+    //                         Some(e),
+    //                     );
+    //                 }
+    //                 return emsg(
+    //                     "TPM error. Failed to create quote from TPM.",
+    //                     Some(err.description().to_string()),
+    //                 );
+    //             }
+    //         };
 
-            ima_mask = p.to_string();
-        } else {
-            quote = match tpm::create_deep_quote(
-                n.to_string(),
-                common::RSA_PUBLICKEY_EXPORTABLE.to_string(),
-                v.to_string(),
-                p.to_string(),
-            ) {
-                Ok(q) => q,
-                Err(err) => {
-                    if let Err(e) = set_response_content(
-                        400,
-                        "Failed to create deep quote from TPM.",
-                        response_map,
-                        my_response,
-                    ) {
-                        return emsg(
-                            "Failed to edit response content body.",
-                            Some(e),
-                        );
-                    }
-                    return emsg(
-                        "TPM error. Failed to create deep quote from TPM.",
-                        Some(err.description().to_string()),
-                    );
-                }
-            };
+    //         ima_mask = p.to_string();
+    //     } else {
+    //         quote = match tpm::create_deep_quote(
+    //             n.to_string(),
+    //             common::RSA_PUBLICKEY_EXPORTABLE.to_string(),
+    //             v.to_string(),
+    //             p.to_string(),
+    //         ) {
+    //             Ok(q) => q,
+    //             Err(err) => {
+    //                 if let Err(e) = set_response_content(
+    //                     400,
+    //                     "Failed to create deep quote from TPM.",
+    //                     response_map,
+    //                     my_response,
+    //                 ) {
+    //                     return emsg(
+    //                         "Failed to edit response content body.",
+    //                         Some(e),
+    //                     );
+    //                 }
+    //                 return emsg(
+    //                     "TPM error. Failed to create deep quote from TPM.",
+    //                     Some(err.description().to_string()),
+    //                 );
+    //             }
+    //         };
 
-            ima_mask = v.to_string();
-        }
+    //         ima_mask = v.to_string();
+    //     }
 
-        if parameters.contains_key(&"partial")
-            && parameters.get(&"partial") == None
-            || parameters.get(&"partial") == Some(&"1")
-        {
-            response_map.insert("quote".into(), quote.into());
-        } else {
-            response_map.insert("quote".into(), quote.into());
-            response_map.insert(
-                "pubkey".into(),
-                common::RSA_PUBLICKEY_EXPORTABLE.into(),
-            );
-        }
+    //     if parameters.contains_key(&"partial")
+    //         && parameters.get(&"partial") == None
+    //         || parameters.get(&"partial") == Some(&"1")
+    //     {
+    //         response_map.insert("quote".into(), quote.into());
+    //     } else {
+    //         response_map.insert("quote".into(), quote.into());
+    //         response_map.insert(
+    //             "pubkey".into(),
+    //             common::RSA_PUBLICKEY_EXPORTABLE.into(),
+    //         );
+    //     }
 
-        if tpm::check_mask(ima_mask.to_string(), common::IMA_PCR) {
-            match common::STUB_IMA {
-                true => {
-                    let temp_path = Path::new(common::IMA_ML_STUB);
-                    if !temp_path.exists() {
-                        return emsg(
-                            "IMA measurement list not available.",
-                            None::<String>,
-                        );
-                    }
-                    let buffer =
-                        match read_in_file(common::IMA_ML_STUB.to_string()) {
-                            Ok(b) => b,
-                            Err(e) => {
-                                return emsg(
-                                    "Failed to read IMA_ML_STUB file.",
-                                    Some(e),
-                                );
-                            }
-                        };
+    //     if tpm::check_mask(ima_mask.to_string(), common::IMA_PCR) {
+    //         match common::STUB_IMA {
+    //             true => {
+    //                 let temp_path = Path::new(common::IMA_ML_STUB);
+    //                 if !temp_path.exists() {
+    //                     return emsg(
+    //                         "IMA measurement list not available.",
+    //                         None::<String>,
+    //                     );
+    //                 }
+    //                 let buffer =
+    //                     match read_in_file(common::IMA_ML_STUB.to_string()) {
+    //                         Ok(b) => b,
+    //                         Err(e) => {
+    //                             return emsg(
+    //                                 "Failed to read IMA_ML_STUB file.",
+    //                                 Some(e),
+    //                             );
+    //                         }
+    //                     };
 
-                    let mut contents = String::new();
-                }
-                false => {
-                    let temp_path = Path::new(common::IMA_ML);
-                    if !temp_path.exists() {
-                        return emsg(
-                            "IMA measurement list not available.",
-                            None::<String>,
-                        );
-                    }
-                    let buffer =
-                        match read_in_file(common::IMA_ML.to_string()) {
-                            Ok(b) => b,
-                            Err(e) => {
-                                return emsg(
-                                    "Failed to read IMA_ML file.",
-                                    Some(e),
-                                );
-                            }
-                        };
+    //                 let mut contents = String::new();
+    //             }
+    //             false => {
+    //                 let temp_path = Path::new(common::IMA_ML);
+    //                 if !temp_path.exists() {
+    //                     return emsg(
+    //                         "IMA measurement list not available.",
+    //                         None::<String>,
+    //                     );
+    //                 }
+    //                 let buffer =
+    //                     match read_in_file(common::IMA_ML.to_string()) {
+    //                         Ok(b) => b,
+    //                         Err(e) => {
+    //                             return emsg(
+    //                                 "Failed to read IMA_ML file.",
+    //                                 Some(e),
+    //                             );
+    //                         }
+    //                     };
 
-                    response_map
-                        .insert("ima_measurement_list".into(), buffer.into());
-                }
-            }
-        }
-        if let Err(e) =
-            set_response_content(200, "Success", response_map, my_response)
-        {
-            return emsg(
-                "Failed to edit the response content body.",
-                Some(e),
-            );
-        }
-    } else {
-        if let Err(e) =
-            set_response_content(400, "Bad Request.", Map::new(), my_response)
-        {
-            return emsg(
-                "Failed to edit the response content body.",
-                Some(e),
-            );
-        }
-        return emsg("Bad Request. Invalid request content.", None::<String>);
-    }
+    //                 response_map
+    //                     .insert("ima_measurement_list".into(), buffer.into());
+    //             }
+    //         }
+    //     }
+    //     if let Err(e) =
+    //         set_response_content(200, "Success", response_map, my_response)
+    //     {
+    //         return emsg(
+    //             "Failed to edit the response content body.",
+    //             Some(e),
+    //         );
+    //     }
+    // } else {
+    //     if let Err(e) =
+    //         set_response_content(400, "Bad Request.", Map::new(), my_response)
+    //     {
+    //         return emsg(
+    //             "Failed to edit the response content body.",
+    //             Some(e),
+    //         );
+    //     }
+    //     return emsg("Bad Request. Invalid request content.", None::<String>);
+    // }
     Ok(())
 }
 
