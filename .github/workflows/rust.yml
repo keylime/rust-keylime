@@ -16,6 +16,8 @@ jobs:
 
     steps:
     - uses: actions/checkout@v2
+    - name: Install build dependencies
+      run: sudo apt-get install libtss-dev
     - name: fmt
       run: cargo fmt --all -- --check
     - name: Run tests
