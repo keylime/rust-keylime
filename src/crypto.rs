@@ -1,7 +1,7 @@
-extern crate hex;
-extern crate openssl;
+
 
 // use super::*;
+use hex;
 use openssl::error::ErrorStack;
 use openssl::hash::MessageDigest;
 use openssl::pkcs5;

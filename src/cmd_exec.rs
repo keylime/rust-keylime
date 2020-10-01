@@ -1,6 +1,5 @@
-extern crate base64;
-
 use super::*;
+use base64;
 use keylime_error;
 use std::env;
 use std::process::Command;

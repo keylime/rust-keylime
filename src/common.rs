@@ -1,12 +1,8 @@
-extern crate futures;
-extern crate hyper;
-extern crate ini;
-extern crate serde_json;
-
 use hyper::header::HeaderValue;
 use hyper::{header, Body, Response, StatusCode};
 use ini::Ini;
-use serde_json::{Map, Value};
+use log::*;
+use serde_json::{Map, Value, json};
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::path::Path;
