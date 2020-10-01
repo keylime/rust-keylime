@@ -1,5 +1,3 @@
-
-
 // use super::*;
 use hex;
 use openssl::error::ErrorStack;
