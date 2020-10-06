@@ -47,10 +47,6 @@ type BoxFut = Box<Future<Item = Response<Body>, Error = hyper::Error> + Send>;
 
 static NOTFOUND: &[u8] = b"Not Found";
 
-fn print_type_of<T>(_: &T) {
-    println!("{}", std::any::type_name::<T>())
-}
-
 fn main() {
     pretty_env_logger::init();
     //  Retreive the TPM Vendor, this allows us to warn if someone is using a
