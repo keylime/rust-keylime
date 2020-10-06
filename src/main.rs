@@ -47,10 +47,23 @@ type BoxFut = Box<Future<Item = Response<Body>, Error = hyper::Error> + Send>;
 
 static NOTFOUND: &[u8] = b"Not Found";
 
+fn print_type_of<T>(_: &T) {
+    println!("{}", std::any::type_name::<T>())
+}
+
 fn main() {
     pretty_env_logger::init();
-    // Get a context to work with the TPM
-    let mut ctx = tpm::get_tpm2_ctx();
+    //  Retreive the TPM Vendor, this allows us to warn if someone is using a
+    // Software TPM ("SW")
+    let tpm_vendor = match tpm::get_tpm_vendor() {
+        Ok(content) => content,
+        Err(e) => panic!("{:?}", e),
+    };
+    if tpm_vendor.contains("SW") {
+        warn!("INSECURE: Keylime is using a software TPM emulator rather than a real hardware TPM.");
+        warn!("INSECURE: The security of Keylime is NOT linked to a hardware root of trust.");
+        warn!("INSECURE: Only use Keylime in this mode for testing or debugging purposes.");
+    };
 
     let cloudagent_ip =
         config_get("/etc/keylime.conf", "cloud_agent", "cloudagent_ip");
