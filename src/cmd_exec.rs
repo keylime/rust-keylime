@@ -1,6 +1,6 @@
 use super::*;
+use crate::error::{Error, Result};
 use base64;
-use keylime_error;
 use std::env;
 use std::process::Command;
 use std::process::Output;
@@ -30,10 +30,10 @@ static EMPTYMASK: &'static str = "1";
  * dropped due to different error handling in Rust. Returned output string are
  * preprocessed to before returning for code efficient.
  */
-pub fn run<'a>(
+pub(crate) fn run<'a>(
     command: String,
     output_path: Option<&str>,
-) -> Result<(String, String), keylime_error::KeylimeTpmError> {
+) -> Result<(String, String)> {
     let mut file_output = String::new();
     let mut output: Output;
 
@@ -53,8 +53,8 @@ pub fn run<'a>(
     match env_vars.get_mut("PATH") {
         Some(v) => v.push_str(common::TPM_TOOLS_PATH),
         None => {
-            return Err(keylime_error::KeylimeTpmError::new_tpm_rust_error(
-                "PATH envrionment variable dosen't exist.",
+            return Err(Error::Configuration(
+                "PATH environment variable doesn't exist".to_string(),
             ));
         }
     }
@@ -67,7 +67,7 @@ pub fn run<'a>(
         output = Command::new(&cmd).args(args).envs(&env_vars).output()?;
 
         // measure execution time
-        let t_diff = t0.duration_since(t0)?;
+        let t_diff = t0.duration_since(t0).unwrap_or(Duration::new(0, 0));
         info!("Time cost: {}", t_diff.as_secs());
 
         // assume the system is linux
@@ -77,13 +77,7 @@ pub fn run<'a>(
             Some(TPM_IO_ERROR) => {
                 number_tries += 1;
                 if number_tries >= MAX_TRY {
-                    return Err(keylime_error::KeylimeTpmError::new_tpm_error(
-                        TPM_IO_ERROR,
-                        "TPM appears to be in use by another application. 
-                         Keylime is incompatible with other TPM TSS 
-                         applications like trousers/tpm-tools. Please 
-                         uninstall or disable.",
-                    ));
+                    return Err(Error::TPMInUse);
                 }
 
                 info!(
@@ -101,23 +95,10 @@ pub fn run<'a>(
     }
 
     let return_output = String::from_utf8(output.stdout)?;
-    match output.status.code() {
-        None => {
-            return Err(keylime_error::KeylimeTpmError::new_tpm_rust_error(
-                "Execution return code is None.",
-            ));
-        }
-        Some(0) => info!("Successfully executed TPM command."),
-        Some(c) => {
-            return Err(keylime_error::KeylimeTpmError::new_tpm_error(
-                c,
-                format!(
-                    "Command: {} returned {}, output {}",
-                    command, c, return_output,
-                )
-                .as_str(),
-            ));
-        }
+    if output.status.success() {
+        info!("Successfully executed TPM command");
+    } else {
+        return Err(Error::Execution(output.status.code(), return_output));
     }
 
     // Retrive data from output path file
@@ -145,7 +126,6 @@ fn read_file_output_path(output_path: String) -> std::io::Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::error::Error;
     use std::fs;
 
     #[test]
