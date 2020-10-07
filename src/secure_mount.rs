@@ -1,8 +1,8 @@
 use super::*;
 
+use crate::cmd_exec;
+use crate::error::{Error, Result};
 use common::config_get;
-use common::emsg;
-use std::error::Error;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::process::Command;
@@ -15,14 +15,10 @@ use std::process::Command;
  * Check the mount status of the secure mount directory. Same
  * implementation as the original python version.
  */
-fn check_mount(secure_dir: &str) -> Result<bool, Box<String>> {
-    let output = Command::new("mount").output().map_err(|e| {
-        Box::new(format!("Failed to execute mount command. Error {}.", e))
-    })?;
+fn check_mount(secure_dir: &str) -> Result<bool> {
+    let output = Command::new("mount").output()?;
 
-    let mount_result = String::from_utf8(output.stdout).map_err(|e| {
-        Box::new(format!("Failed to get output to string. Error {}.", e))
-    })?;
+    let mount_result = String::from_utf8(output.stdout)?;
 
     let lines: Vec<&str> = mount_result.split("\n").collect();
 
@@ -36,13 +32,8 @@ fn check_mount(secure_dir: &str) -> Result<bool, Box<String>> {
 
         if tokens[2] == secure_dir {
             if tokens[0] != "tmpfs" {
-                return emsg(
-                    format!(
-                        "secure storage location {} already mounted on wrong file system type: {}.  Unmount to continue.", 
-                        secure_dir,
-                        tokens[0]).as_str(),
-                        None::<String>
-                    );
+                error!("secure storage location {} already mounted as wrong file system type: {}. Unmount to continue", secure_dir, tokens[0]);
+                return Err(Error::SecureMount);
             } else {
                 info!(
                     "Using existing secure storage tmpsfs mount {}",
@@ -64,7 +55,7 @@ fn check_mount(secure_dir: &str) -> Result<bool, Box<String>> {
  * implementation as the original python version, but the chown/geteuid
  * functions are unsafe function in Rust to use.
  */
-pub fn mount() -> Result<String, Box<String>> {
+pub(crate) fn mount() -> Result<String> {
     // Use /tmpfs-dev directory if MOUNT_SECURE flag is set, which doesn't
     // mount to the system. This is for developement envrionment. No need to
     // mount to file system.
@@ -72,30 +63,25 @@ pub fn mount() -> Result<String, Box<String>> {
         let secure_dir = format!("{}{}", common::WORK_DIR, "/tmpfs-dev");
         let secure_dir_path = Path::new(secure_dir.as_str());
         if !secure_dir_path.exists() {
-            match fs::create_dir(secure_dir_path) {
-                Ok(()) => {
-                    info!("Directory {:?} created.", secure_dir_path);
-                }
-                Err(e) => {
-                    return emsg("Failed to create directory.", Some(e));
-                }
-            }
+            fs::create_dir(secure_dir_path)
+                .map_err(|_| Error::SecureMount)?;
+            info!("Directory {:?} created.", secure_dir_path);
         }
 
         if let Some(s) = secure_dir_path.to_str() {
             return Ok(s.to_string());
         }
 
-        return emsg("Failed to get the path string.", None::<String>);
+        return Err(Error::SecureMount);
     }
 
     // Mount the directory to file system
     let secure_dir = format!("{}/secure", common::WORK_DIR);
     let secure_size =
-        config_get("/etc/keylime.conf", "cloud_agent", "secure_size");
+        config_get("/etc/keylime.conf", "cloud_agent", "secure_size")?;
 
-    match check_mount(&secure_dir) {
-        Ok(false) => {
+    match check_mount(&secure_dir)? {
+        false => {
             // If the directory is not mount to file system, mount the directory to
             // file system.
             let secure_dir_clone = secure_dir.clone();
@@ -105,18 +91,12 @@ pub fn mount() -> Result<String, Box<String>> {
             // directory permission is set to 448.
 
             if !secure_dir_path.exists() {
-                if let Err(e) = fs::create_dir(secure_dir_path) {
-                    return emsg("Failed to create directory.", Some(e));
-                }
+                fs::create_dir(secure_dir_path)
+                    .map_err(|_| Error::SecureMount)?;
 
                 info!("Directory {:?} created.", secure_dir_path);
-                let metadata =
-                    fs::metadata(secure_dir_path).map_err(|e| {
-                        Box::new(format!(
-                            "Failed to get file metadata. Error {}",
-                            e
-                        ))
-                    })?;
+                let metadata = fs::metadata(secure_dir_path)
+                    .map_err(|_| Error::SecureMount)?;
                 metadata.permissions().set_mode(488);
             }
 
@@ -129,12 +109,7 @@ pub fn mount() -> Result<String, Box<String>> {
                         .map(|path| {
                             info!("Changed path {} owner to root.", path);
                         })
-                        .map_err(|e| {
-                            format!(
-                            "Failed to change path owner with error code {}.",
-                            e
-                        )
-                        })?;
+                        .map_err(|_| Error::SecureMount)?;
 
                     // mount tmpfs with secure directory
                     cmd_exec::run(
@@ -144,18 +119,14 @@ pub fn mount() -> Result<String, Box<String>> {
                         ),
                         None,
                     )
-                    .map_err(|e| e.description().to_string())?;
+                    .map_err(|_| Error::SecureMount)?;
 
                     Ok(s.to_string())
                 }
-                None => emsg(
-                    "Failed to get path to String for mount the file system.",
-                    None::<String>,
-                ),
+                None => Err(Error::SecureMount),
             }
         }
 
-        Ok(true) => Ok(secure_dir),
-        Err(e) => emsg("Failed to check file system mount.", Some(e)),
+        true => Ok(secure_dir),
     }
 }

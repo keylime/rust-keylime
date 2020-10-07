@@ -23,56 +23,57 @@ use tempfile;
 mod cmd_exec;
 mod common;
 mod crypto;
+mod error;
 mod hash;
-mod keylime_error;
 mod secure_mount;
 mod tpm;
 
 use common::config_get;
-use common::emsg;
 use common::set_response_content;
-use futures::future;
-use hyper::rt::Future;
-use hyper::service::service_fn;
+use hyper::service::{make_service_fn, service_fn};
 use hyper::{Body, Method, Request, Response, Server, StatusCode};
 use serde_json::Map;
 use std::collections::HashMap;
-use std::error::Error;
 use std::fs::File;
 use std::io::BufReader;
 use std::io::Read;
 use std::path::Path;
 
-type BoxFut = Box<Future<Item = Response<Body>, Error = hyper::Error> + Send>;
+use error::{Error, Result};
 
 static NOTFOUND: &[u8] = b"Not Found";
 
-fn main() {
+#[tokio::main]
+async fn main() -> Result<()> {
     pretty_env_logger::init();
     // Get a context to work with the TPM
-    let mut ctx = tpm::get_tpm2_ctx();
+    let mut ctx = tpm::get_tpm2_ctx()?;
 
     let cloudagent_ip =
-        config_get("/etc/keylime.conf", "cloud_agent", "cloudagent_ip");
+        config_get("/etc/keylime.conf", "cloud_agent", "cloudagent_ip")?;
     let cloudagent_port =
-        config_get("/etc/keylime.conf", "cloud_agent", "cloudagent_port");
+        config_get("/etc/keylime.conf", "cloud_agent", "cloudagent_port")?;
     let endpoint = format!("{}:{}", cloudagent_ip, cloudagent_port);
 
     info!("Starting server...");
 
     let addr = (endpoint).parse().expect("Cannot parse IP & Port");
 
-    let server = Server::bind(&addr)
-        .serve(|| service_fn(response_function))
-        .map_err(|e| error!("server error: {}", e));
+    let service = make_service_fn(|_| async {
+        Ok::<_, Error>(service_fn(response_function))
+    });
+    let server = Server::bind(&addr).serve(service);
 
     info!("Listening on http://{}", addr);
 
     // run server forever
-    hyper::rt::run(server);
+    //hyper::rt::run(server);
+    server.await?;
+
+    Ok(())
 }
 
-fn response_function(req: Request<Body>) -> BoxFut {
+async fn response_function(req: Request<Body>) -> Result<Response<Body>> {
     let mut my_response: Response<Body> =
         Response::new("Nothing here.".into());
 
@@ -83,26 +84,11 @@ fn response_function(req: Request<Body>) -> BoxFut {
     // Exit: Encounter error early exit or exit at the end to the scope
     match req.method() {
         &Method::GET => {
-            match get_request_handler(&mut my_response, parameters) {
-                Ok(()) => {
-                    info!("Get request handled successfully.");
-                }
-
-                Err(e) => {
-                    error!("Failed to handle get request with error {}.", e);
-                }
-            }
+            get_request_handler(&mut my_response, parameters)?;
         }
 
         &Method::POST => {
-            match post_request_handler(&mut my_response, parameters) {
-                Ok(()) => {
-                    info!("Post request handled successfully.");
-                }
-                Err(e) => {
-                    error!("Failed to handle post request with error {}.", e);
-                }
-            }
+            post_request_handler(&mut my_response, parameters)?;
         }
 
         _ => {
@@ -111,56 +97,42 @@ fn response_function(req: Request<Body>) -> BoxFut {
         }
     }
 
-    Box::new(future::ok(my_response))
+    Ok(my_response)
+    //Box::new(future::ok(my_response))
 }
 
 fn post_request_handler(
     my_response: &mut Response<Body>,
     parameters: HashMap<&str, &str>,
-) -> Result<(), Box<String>> {
+) -> Result<()> {
     let mut response_map = Map::new();
     match parameters.get(&"keys") {
         Some(&"ukey") => {
-            if let Err(e) = set_response_content(
+            set_response_content(
                 200,
                 "Add u key",
                 response_map,
                 my_response,
-            ) {
-                return emsg(
-                    "Failed to edit the response content body.",
-                    Some(e),
-                );
-            }
+            )?;
             Ok(())
         }
         Some(&"vkey") => {
-            if let Err(e) = set_response_content(
+            set_response_content(
                 200,
                 "Add v key",
                 response_map,
                 my_response,
-            ) {
-                return emsg(
-                    "Failed to edit the response content body.",
-                    Some(e),
-                );
-            }
+            )?;
             Ok(())
         }
         _ => {
-            if let Err(e) = set_response_content(
+            set_response_content(
                 400,
                 "Bad Request",
                 response_map,
                 my_response,
-            ) {
-                return emsg(
-                    "Failed to edit the response content body.",
-                    Some(e),
-                );
-            }
-            emsg("Bad Request. Invalid post request.", None::<String>)
+            )?;
+            Err(Error::InvalidRequest)
         }
     }
 }
@@ -168,7 +140,7 @@ fn post_request_handler(
 fn get_request_handler(
     my_response: &mut Response<Body>,
     parameters: HashMap<&str, &str>,
-) -> Result<(), Box<String>> {
+) -> Result<()> {
     info!("GET invoked");
 
     // Invalid request handling
