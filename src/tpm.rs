@@ -6,7 +6,7 @@ use tss_esapi::tss2_esys::{ESYS_TR, ESYS_TR_NONE, ESYS_TR_RH_OWNER};
 use tss_esapi::Context;
 use tss_esapi::Tcti;
 
-fn int_to_str(num: u32) -> String {
+fn int_to_string(num: u32) -> String {
     let mut num = num;
     let mut result = String::new();
 
@@ -53,8 +53,8 @@ pub(crate) fn get_tpm2_ctx() -> Result<tss_esapi::Context, tss_esapi::Error> {
  * to perform opertions, such as understand the host is using a
  * software TPM as opposed to hardware TPM.
  */
-pub fn get_tpm_vendor() -> Result<String, tss_esapi::Error> {
-    let mut ctx = get_tpm2_ctx()?;
+pub fn get_tpm_vendor(ctx: &mut tss_esapi::Context) -> Result<String, tss_esapi::Error> {
+    // let mut ctx = get_tpm2_ctx()?;
 
     let mut allprops = HashMap::new();
     let (capabs, more) = ctx.get_capabilities(
@@ -76,6 +76,14 @@ pub fn get_tpm_vendor() -> Result<String, tss_esapi::Error> {
         }
     }
 
+    // * Use a set of constants (TPM2_PT_VENDOR_STRING_{1,2,3,4}) as lookup indexes
+    // into allprops, to get all the values from there where they're set.
+    // * Remove the values that don't exist (is_some)
+    // * Remove the Option<_> wrappers (unwrap())
+    // * Remove the items that are actually a value (i.e. != && 0)
+    // * Put the individual parts through int_to_str to get a Vec<String>
+    // * Make a single string from them (.join("")).
+    // * Remove any whitespace on the end resulting string
     let mut vend_strs: String = [
         TPM2_PT_VENDOR_STRING_1,
         TPM2_PT_VENDOR_STRING_2,
@@ -87,7 +95,7 @@ pub fn get_tpm_vendor() -> Result<String, tss_esapi::Error> {
     .filter(|x| x.is_some())
     .map(|x| x.unwrap())
     .filter(|x| x != &&0)
-    .map(|x| int_to_str(*x))
+    .map(|x| int_to_string(*x))
     .collect::<Vec<String>>()
     .join("");
     Ok(vend_strs.split_whitespace().collect())

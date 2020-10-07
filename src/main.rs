@@ -49,9 +49,10 @@ static NOTFOUND: &[u8] = b"Not Found";
 
 fn main() {
     pretty_env_logger::init();
+    let mut ctx = tpm::get_tpm2_ctx()?;
     //  Retreive the TPM Vendor, this allows us to warn if someone is using a
     // Software TPM ("SW")
-    let tpm_vendor = match tpm::get_tpm_vendor() {
+    let tpm_vendor = match tpm::get_tpm_vendor(&mut ctx) {
         Ok(content) => content,
         Err(e) => panic!("{:?}", e),
     };
