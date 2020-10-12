@@ -1,6 +1,7 @@
 use super::*;
 use crate::error::{Error, Result};
 use base64;
+use std::collections::HashMap;
 use std::env;
 use std::process::Command;
 use std::process::Output;
