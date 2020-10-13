@@ -18,8 +18,11 @@ pub(crate) enum Error {
 
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        // TODO
-        write!(f, "todo: {:?}", self)
+        match self {
+            Error::Ini(err) => write!(f, "Error loading configuration: {}", err),
+            Error::TPM(err) => write!(f, "TPM Error encountered: {}", err),
+            anything => write!(f, "Another error: {:?}", anything),
+        }
     }
 }
 

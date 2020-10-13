@@ -30,6 +30,16 @@ static NOTFOUND: &[u8] = b"Not Found";
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    match run().await {
+        Ok(_) => Ok(()),
+        Err(e) => {
+            println!("Error occured: {}", e);
+            std::process::exit(1);
+        }
+    }
+}
+
+async fn run() -> Result<()> {
     pretty_env_logger::init();
     // Get a context to work with the TPM
     let mut ctx = tpm::get_tpm2_ctx()?;
