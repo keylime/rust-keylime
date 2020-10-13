@@ -13,14 +13,15 @@ integrity monitoring system that has the following features:
   identities
 * Securely monitors system integrity
 
-For more information, see the original [keylime website](https://keylime.dev)
-and paper in the References section.
+For more information, visit the [keylime website](https://keylime.dev)
 
 For now, this project is focusing on the keylime agent component, which is a
 HTTP server running on the machine that executes keylime operations.
 Most keylime operations rely on TPM co-processor; therefore, the server needs
 a physical TPM chip (or a TPM emulator) to perform keylime operations.  The
 TPM emulator is a program that runs in the deamon to mimic TPM commands.
+
+The rust keylime agent is in early development and not ready for production use.
 
 ## Prerequisites
 
@@ -29,12 +30,12 @@ The rust-keylime agent requires the following packages for both compile and run 
 
 For Fedora, use the following command
 ```
-$ dnf install openssl-devel gcc
+$ dnf install openssl-devel gcc tpm2-tss-devel
 ```
 
 For Ubuntu OS, use the following command
 ```
-$ apt-get install openssl-dev gcc
+$ apt-get install openssl-dev gcc libtss-dev
 ```
 
 ### Rust
@@ -56,6 +57,3 @@ Unit tests are gating in CI for new code submission.  To run them:
 ```
 $ cargo test
 ```
-
-## References
-1. Keylime Paper: [here](https://github.com/keylime/keylime/blob/master/doc/tci-acm.pdf)
