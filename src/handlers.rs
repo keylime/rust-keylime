@@ -13,8 +13,8 @@ use std::collections::HashMap;
 use error::{Error, Result};
 
 pub(crate) async fn response_function(
-    req: Request<Body>),
-    -> Result<Response<Body>> {
+    req: Request<Body>,
+) -> Result<Response<Body>> {
     let mut my_response: Response<Body> =
         Response::new("Nothing here.".into());
 
