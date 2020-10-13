@@ -2,6 +2,7 @@
 use log::*;
 
 #[macro_use]
+use futures::try_join;
 use hyper;
 use ini;
 use pretty_env_logger;
@@ -44,6 +45,16 @@ async fn run() -> Result<()> {
     // Get a context to work with the TPM
     let mut ctx = tpm::get_tpm2_ctx()?;
 
+    // queue up future events
+    let server = runWebServer();
+    let revoker = runRevocationService();
+
+    // run future events
+    try_join!(server, revoker)?;
+    Ok(())
+}
+
+async fn runWebServer() -> Result<()> {
     let cloudagent_ip =
         config_get("/etc/keylime.conf", "cloud_agent", "cloudagent_ip")?;
     let cloudagent_port =
@@ -61,10 +72,12 @@ async fn run() -> Result<()> {
 
     info!("Listening on http://{}", addr);
 
-    // run server forever
-    //hyper::rt::run(server);
     server.await?;
+    Ok(())
+}
 
+async fn runRevocationService() -> Result<()> {
+    // revoker.await?;
     Ok(())
 }
 
