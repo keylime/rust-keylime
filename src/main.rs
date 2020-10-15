@@ -42,6 +42,7 @@ mod error;
 mod hash;
 mod keys_handler;
 mod quotes_handler;
+mod revocation;
 mod secure_mount;
 mod tpm;
 
@@ -95,11 +96,7 @@ async fn main() -> Result<()> {
     .run()
     .map_err(|x| x.into());
     info!("Listening on http://{}:{}", cloudagent_ip, cloudagent_port);
-    try_join!(actix_server, run_revocation_service())?;
-    Ok(())
-}
-
-async fn run_revocation_service() -> Result<()> {
+    try_join!(actix_server, revocation::run_revocation_service())?;
     Ok(())
 }
 
