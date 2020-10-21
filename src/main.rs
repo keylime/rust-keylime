@@ -2,8 +2,7 @@
 use log::*;
 
 #[macro_use]
-use futures::try_join;
-use hyper;
+use futures::future::try_join;
 use ini;
 use pretty_env_logger;
 
@@ -11,15 +10,14 @@ mod cmd_exec;
 mod common;
 mod crypto;
 mod error;
-mod handlers;
 mod hash;
+mod keys_handler;
+mod quotes_handler;
 mod secure_mount;
 mod tpm;
 
+use actix_web::{web, App, HttpServer};
 use common::config_get;
-use common::set_response_content;
-use hyper::service::{make_service_fn, service_fn};
-use hyper::{Body, Method, Request, Response, Server, StatusCode};
 use std::fs::File;
 use std::io::BufReader;
 use std::io::Read;
@@ -29,54 +27,36 @@ use error::{Error, Result};
 
 static NOTFOUND: &[u8] = b"Not Found";
 
-#[tokio::main]
+#[actix_web::main]
 async fn main() -> Result<()> {
-    match run().await {
-        Ok(_) => Ok(()),
-        Err(e) => {
-            println!("Error occured: {}", e);
-            std::process::exit(1);
-        }
-    }
-}
-
-async fn run() -> Result<()> {
-    pretty_env_logger::init();
-    // Get a context to work with the TPM
-    let mut ctx = tpm::get_tpm2_ctx()?;
-
-    // queue up future events
-    let server = runWebServer();
-    let revoker = runRevocationService();
-
-    // run future events
-    try_join!(server, revoker)?;
-    Ok(())
-}
-
-async fn runWebServer() -> Result<()> {
     let cloudagent_ip =
         config_get("/etc/keylime.conf", "cloud_agent", "cloudagent_ip")?;
     let cloudagent_port =
         config_get("/etc/keylime.conf", "cloud_agent", "cloudagent_port")?;
     let endpoint = format!("{}:{}", cloudagent_ip, cloudagent_port);
-
     info!("Starting server...");
-
-    let addr = (endpoint).parse().expect("Cannot parse IP & Port");
-
-    let service = make_service_fn(|_| async {
-        Ok::<_, Error>(service_fn(handlers::response_function))
-    });
-    let server = Server::bind(&addr).serve(service);
-
-    info!("Listening on http://{}", addr);
-
-    server.await?;
+    let server = HttpServer::new(move || {
+        App::new()
+            .service(
+                web::resource("/keys/verify")
+                    .route(web::get().to(keys_handler::verify)),
+            )
+            .service(
+                web::resource("/keys/ukey")
+                    .route(web::post().to(keys_handler::ukey)),
+            )
+            .service(
+                web::resource("/quotes/identity")
+                    .route(web::get().to(quotes_handler::identity)),
+            )
+    })
+    .bind("127.0.0.1:8080")?
+    .run();
+    try_join(server, run_revocation_service()).await?;
     Ok(())
 }
 
-async fn runRevocationService() -> Result<()> {
+async fn run_revocation_service() -> Result<()> {
     // revoker.await?;
     Ok(())
 }

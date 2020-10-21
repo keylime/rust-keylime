@@ -5,11 +5,11 @@ name = "keylime_agent"
 version = "0.1.0"
 
 [dependencies]
+actix-web = "3"
 base64 = "0.9.3"
 flate2 = "1.0.4"
 futures = "0.3.6"
 hex = "0.3.2"
-hyper = "0.13"
 libc = "0.2.43"
 log = "0.4"
 openssl = "0.10.15"
