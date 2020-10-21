@@ -3,6 +3,7 @@ use log::*;
 
 #[macro_use]
 use futures::try_join;
+use futures::future::TryFutureExt;
 use ini;
 use pretty_env_logger;
 
@@ -29,13 +30,14 @@ static NOTFOUND: &[u8] = b"Not Found";
 
 #[actix_web::main]
 async fn main() -> Result<()> {
+    pretty_env_logger::init();
+    let mut ctx = tpm::get_tpm2_ctx()?;
     let cloudagent_ip =
         config_get("/etc/keylime.conf", "cloud_agent", "cloudagent_ip")?;
     let cloudagent_port =
         config_get("/etc/keylime.conf", "cloud_agent", "cloudagent_port")?;
-    let endpoint = format!("{}:{}", cloudagent_ip, cloudagent_port);
     info!("Starting server...");
-    let server = HttpServer::new(move || {
+    let actix_server = HttpServer::new(move || {
         App::new()
             .service(
                 web::resource("/keys/verify")
@@ -50,14 +52,15 @@ async fn main() -> Result<()> {
                     .route(web::get().to(quotes_handler::identity)),
             )
     })
-    .bind("127.0.0.1:8080")?
-    .run();
-    try_join(server, run_revocation_service()).await?;
+    .bind(format!("{}:{}", cloudagent_ip, cloudagent_port))?
+    .run()
+    .map_err(|x| x.into());
+    info!("Listening on http://{}:{}", cloudagent_ip, cloudagent_port);
+    try_join!(actix_server, run_revocation_service())?;
     Ok(())
 }
 
 async fn run_revocation_service() -> Result<()> {
-    // revoker.await?;
     Ok(())
 }
 
