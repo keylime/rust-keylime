@@ -2,7 +2,7 @@
 use log::*;
 
 #[macro_use]
-use futures::future::try_join;
+use futures::try_join;
 use ini;
 use pretty_env_logger;
 
