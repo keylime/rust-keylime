@@ -2,8 +2,8 @@ use std::fmt;
 
 #[derive(Debug)]
 pub(crate) enum Error {
+    ActixWeb(actix_web::Error),
     TPM(tss_esapi::Error),
-    Hyper(hyper::Error),
     InvalidRequest,
     Ini(ini::ini::Error),
     Configuration(String),
@@ -23,6 +23,7 @@ impl fmt::Display for Error {
                 write!(f, "Error loading configuration: {}", err)
             }
             Error::TPM(err) => write!(f, "TPM Error encountered: {}", err),
+            Error::ActixWeb(err) => write!(f, "HttpServer({})", err),
             anything => write!(f, "Another error: {:?}", anything),
         }
     }
@@ -40,9 +41,9 @@ impl From<tss_esapi::Error> for Error {
     }
 }
 
-impl From<hyper::Error> for Error {
-    fn from(err: hyper::Error) -> Self {
-        Error::Hyper(err)
+impl From<actix_web::Error> for Error {
+    fn from(err: actix_web::Error) -> Self {
+        Error::ActixWeb(err)
     }
 }
 
