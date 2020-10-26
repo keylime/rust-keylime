@@ -6,6 +6,8 @@ use tss_esapi::tss2_esys::{ESYS_TR, ESYS_TR_NONE, ESYS_TR_RH_OWNER};
 use tss_esapi::Context;
 use tss_esapi::Tcti;
 
+mod highlevel;
+
 /*
  * Input: None
  * Return: Connection context
