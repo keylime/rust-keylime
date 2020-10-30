@@ -1,11 +1,16 @@
-#[macro_use]
-use log::*;
-
-#[macro_use]
-use futures::try_join;
+use actix_web::{web, App, HttpServer};
+use common::config_get;
+use error::{Error, Result};
 use futures::future::TryFutureExt;
+use futures::try_join;
 use ini;
+use log::*;
 use pretty_env_logger;
+use std::fs::File;
+use std::io::BufReader;
+use std::io::Read;
+use std::path::Path;
+use uuid::Uuid;
 
 mod cmd_exec;
 mod common;
@@ -14,29 +19,53 @@ mod error;
 mod hash;
 mod keys_handler;
 mod quotes_handler;
+//mod registrar_agent;
 mod secure_mount;
 mod tpm;
-
-use actix_web::{web, App, HttpServer};
-use common::config_get;
-use std::fs::File;
-use std::io::BufReader;
-use std::io::Read;
-use std::path::Path;
-
-use error::{Error, Result};
 
 static NOTFOUND: &[u8] = b"Not Found";
 
 #[actix_web::main]
 async fn main() -> Result<()> {
+    // Initialise Logger
     pretty_env_logger::init();
+
+    // Initialise TPM connection
     let mut ctx = tpm::get_tpm2_ctx()?;
+
+    // Set up config params required
     let cloudagent_ip =
         config_get("/etc/keylime.conf", "cloud_agent", "cloudagent_ip")?;
     let cloudagent_port =
         config_get("/etc/keylime.conf", "cloud_agent", "cloudagent_port")?;
-    info!("Starting server...");
+    let registrar_ip =
+        config_get("/etc/keylime.conf", "registrar", "registrar_ip")?;
+    let registrar_port =
+        config_get("/etc/keylime.conf", "registrar", "registrar_port")?;
+    let agent_uuid_confg =
+        config_get("/etc/keylime.conf", "cloud_agent", "agent_uuid")?;
+
+    // Setup the Agents UUID
+    let section = match agent_uuid_confg.as_str() {
+        "openstack" => {
+            info!("Openstack placeholder...");
+        }
+        "hash_ek" => {
+            info!("hash_ek placeholder...");
+        }
+        "generate" => {
+            let agent_uuid = Uuid::new_v4();
+            info!("Generated a new UUID: {}", &agent_uuid);
+        }
+        _ => {
+            if Uuid::parse_str(&agent_uuid_confg).is_ok() == false {
+                error!("Invalid UUID: {:?}", &agent_uuid_confg);
+                let agent_uuid = Uuid::new_v4();
+                info!("Generated a new UUID: {}", &agent_uuid);
+            }
+        }
+    };
+
     let actix_server = HttpServer::new(move || {
         App::new()
             .service(
