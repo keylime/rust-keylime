@@ -2103,8 +2103,7 @@ dependencies = [
 [[package]]
 name = "tss-esapi"
 version = "4.0.9-alpha.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a09d4314f5c2e87e86838a56363c35a941004a64a89af135ab9e2d0b6bddc5f4"
+source = "git+https://github.com/parallaxsecond/rust-tss-esapi?rev=743b3a63385dd9960013e26f6a35d34d64b16498#743b3a63385dd9960013e26f6a35d34d64b16498"
 dependencies = [
  "bindgen",
  "bitfield",
