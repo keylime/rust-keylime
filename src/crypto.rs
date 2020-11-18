@@ -3,7 +3,7 @@ use openssl::hash::MessageDigest;
 use openssl::pkcs5;
 use openssl::pkey::{PKey, Private, Public};
 use openssl::rsa::{Padding, Rsa};
-use openssl::sign::Signer;
+use openssl::sign::{Signer, Verifier};
 use std::fs::File;
 use std::io::Read;
 use std::string::String;
@@ -123,12 +123,28 @@ fn to_hex_string(bytes: Vec<u8>) -> String {
     strs.join("")
 }
 
+/*
+ * Input: Local rsa cert, and remote message and signature
+ * Output: true if they are verified, otherwise false
+ *
+ * Verify a remote message and signature against a local rsa cert
+ */
+pub(crate) fn rsa_verify(
+    rsa_key: Rsa<Public>,
+    message: &str,
+    signature: &str,
+) -> Result<bool> {
+    let keypair = PKey::from_rsa(rsa_key)?;
+    let mut verifier = Verifier::new(MessageDigest::sha256(), &keypair)?;
+    verifier.update(message.as_bytes())?;
+    Ok(verifier.verify(&signature.as_bytes())?)
+}
+
 // Unit Testing
 #[cfg(test)]
 mod tests {
     use super::*;
     use openssl::rsa::Rsa;
-    use openssl::sign::Verifier;
 
     // compare with the result from python output
     #[test]
