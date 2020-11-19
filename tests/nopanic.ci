@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 '''
-To prevent CI failing for approved instance of banned words, add a comment: #[allow_ci]
+To prevent CI failing for approved instance of banned words, add a comment: //#[allow_ci]
 '''
 
 import os
@@ -16,7 +16,7 @@ for f in srcs:
     with open("src/" + f) as src_file:
         for line_no, line in enumerate(src_file):
             for b in banned:
-                if b not in line or "#[allow_ci]" in line:
+                if b not in line or "//#[allow_ci]" in line:
                     continue
                 failed = True
                 print("File %s on line number  %s calls banned function: %s)" % (f, line_no + 1, b))
