@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
 
+'''
+To prevent CI failing for approved instance of banned words, add a comment: #[allow_ci]
+'''
+
 import os
 
 banned = ["unwrap(", "panic!("]
@@ -9,14 +13,12 @@ print("Files to check: %s" % srcs)
 
 failed = False
 for f in srcs:
-    print("Checking file %s" % f)
-    contents = open("src/%s" % f, "r").read().split("#[cfg(test)]")[0]
-    for b in banned:
-        if b not in contents:
-            continue
-
-        failed = True
-        print("File %s calls banned function: %s)" % (f, b))
-    pass
-
+    with open("src/" + f) as src_file:
+        for line_no, line in enumerate(src_file):
+            for b in banned:
+                if b not in line or "#[allow_ci]" in line:
+                    continue
+                failed = True
+                print("File %s on line number  %s calls banned function: %s)" % (f, line_no + 1, b))
+            pass
 exit(failed)
