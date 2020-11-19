@@ -198,7 +198,7 @@ mod tests {
                 "b8558314f515931c8d9b329805978fe77b9bb020b05406c0e",
                 "f189d89846ff8f5f0ca10e387d2c424358171df7f896f9f"
             ),
-            mac.unwrap()
+            mac.unwrap() #[allow_ci]
         );
     }
 
@@ -212,30 +212,30 @@ mod tests {
         assert_eq!(
             "8a6de415abb8b27de5c572c8137bd14e5658395f9a2346e0b1ad8b9d8b9028af"
                 .to_string(),
-            key.unwrap()
+            key.unwrap() #[allow_ci]
         );
     }
 
     #[test]
     fn test_hmac_verification() {
         // Generate a keypair
-        let keypair = Rsa::generate(2048).unwrap();
-        let keypair = PKey::from_rsa(keypair).unwrap();
+        let keypair = Rsa::generate(2048).unwrap(); #[allow_ci]
+        let keypair = PKey::from_rsa(keypair).unwrap(); #[allow_ci]
         let data = b"hello, world!";
         let data2 = b"hola, mundo!";
 
         // Sign the data
         let mut signer =
-            Signer::new(MessageDigest::sha256(), &keypair).unwrap();
-        signer.update(data).unwrap();
-        signer.update(data2).unwrap();
-        let signature = signer.sign_to_vec().unwrap();
+            Signer::new(MessageDigest::sha256(), &keypair).unwrap(); #[allow_ci]
+        signer.update(data).unwrap(); #[allow_ci]
+        signer.update(data2).unwrap(); #[allow_ci]
+        let signature = signer.sign_to_vec().unwrap(); #[allow_ci]
 
         // Verify the data
         let mut verifier =
-            Verifier::new(MessageDigest::sha256(), &keypair).unwrap();
-        verifier.update(data).unwrap();
-        verifier.update(data2).unwrap();
-        assert!(verifier.verify(&signature).unwrap());
+            Verifier::new(MessageDigest::sha256(), &keypair).unwrap(); #[allow_ci]
+        verifier.update(data).unwrap(); #[allow_ci]
+        verifier.update(data2).unwrap(); #[allow_ci]
+        assert!(verifier.verify(&signature).unwrap()); #[allow_ci]
     }
 }

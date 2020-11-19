@@ -68,7 +68,7 @@ pub(crate) fn run<'a>(
         output = Command::new(&cmd).args(args).envs(&env_vars).output()?;
 
         // measure execution time
-        let t_diff = t0.duration_since(t0).unwrap_or(Duration::new(0, 0));
+        let t_diff = t0.duration_since(t0).unwrap_or(Duration::new(0, 0)); #[allow_ci]
         info!("Time cost: {}", t_diff.as_secs());
 
         // assume the system is linux
@@ -133,7 +133,7 @@ mod tests {
     fn test_read_file_output_path() {
         assert_eq!(
             read_file_output_path("test-data/test_input.txt".to_string())
-                .unwrap(),
+                .unwrap(), #[allow_ci]
             "Hello World!\n"
         );
     }
