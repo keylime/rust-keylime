@@ -72,7 +72,7 @@ pub(crate) fn create_ek(
             &mut offset,
         );
         if res != 0 {
-            panic!("out of memory or invalid data received from TPM");
+            panic!("out of memory or invalid data received from TPM"); //#[allow_ci]
         }
         tpm_pub_vec.set_len(offset as usize);
     }
