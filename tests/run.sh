@@ -30,4 +30,4 @@ echo "-------- Building"
 RUST_BACKTRACE=1 cargo build
 
 echo "-------- Testing"
-TEST_TCTI=tabrmd:bus_type=session RUST_BACKTRACE=1 RUST_LOG=info cargo test -- --nocapture
+TCTI=tabrmd:bus_type=session RUST_BACKTRACE=1 RUST_LOG=info cargo test -- --nocapture
