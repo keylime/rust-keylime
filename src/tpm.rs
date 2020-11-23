@@ -16,13 +16,17 @@ use tss_esapi::{
  * let mut ctx = tpm::get_tpm2_ctx();
  */
 pub(crate) fn get_tpm2_ctx() -> Result<tss_esapi::Context> {
-    let tcti_path = if std::path::Path::new("/dev/tpmrm0").exists() {
-        "device:/dev/tpmrm0"
-    } else {
-        "device:/dev/tpm0"
+    let tcti_path = match std::env::var("TCTI") {
+        Ok(val) => val,
+        Err(_) => if std::path::Path::new("/dev/tpmrm0").exists() {
+            "device:/dev/tpmrm0"
+        } else {
+            "device:/dev/tpm0"
+        }
+        .to_string(),
     };
 
-    let tcti = Tcti::from_str(tcti_path)?;
+    let tcti = Tcti::from_str(&tcti_path)?;
     unsafe { Context::new(tcti) }.map_err(|e| e.into())
 }
 
