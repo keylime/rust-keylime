@@ -19,7 +19,7 @@ mod error;
 mod hash;
 mod keys_handler;
 mod quotes_handler;
-//mod registrar_agent;
+mod registrar_agent;
 mod secure_mount;
 mod tpm;
 
@@ -65,6 +65,11 @@ async fn main() -> Result<()> {
             }
         }
     };
+    // TODO: before we registar the agent, we require artifacts from the TPM (such as ek, aik etc)
+    // register the agent
+    // let keyblob = registrar_agent::doRegisterAgent(registrar_ip, registrar_port, agent_uuid, ek, ekcert, aik, ek_tpm, aik_name).await?;
+    // TODO: After keyblob is returned we need to activate indentity
+    // key = tpm.activate_identity(keyblob)
 
     let actix_server = HttpServer::new(move || {
         App::new()
