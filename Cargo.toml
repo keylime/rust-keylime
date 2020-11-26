@@ -23,7 +23,6 @@ serde_json = "1.0"
 tempfile = "3.0.4"
 tokio = {version = "0.2", features = ["full"]}
 tokio-io = "0.1"
-tss-esapi = "4.0.9-alpha.1"
 uuid = {version = "0.8", features = ["v4"]}
 validators = "0.22.2"
 validators-derive = "0.21.6"

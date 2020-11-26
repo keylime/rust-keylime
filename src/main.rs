@@ -10,6 +10,7 @@ use std::fs::File;
 use std::io::BufReader;
 use std::io::Read;
 use std::path::Path;
+use tss_esapi::constants::algorithm::AsymmetricAlgorithm;
 use uuid::Uuid;
 
 mod cmd_exec;
@@ -19,7 +20,7 @@ mod error;
 mod hash;
 mod keys_handler;
 mod quotes_handler;
-mod registrar_agent;
+// mod registrar_agent;
 mod secure_mount;
 mod tpm;
 
@@ -40,6 +41,11 @@ async fn main() -> Result<()> {
         warn!("INSECURE: The security of Keylime is NOT linked to a hardware root of trust.");
         warn!("INSECURE: Only use Keylime in this mode for testing or debugging purposes.");
     }
+
+    // Request keyblob material
+    let (key, cert, tpm_pub) = tpm::create_ek(&mut ctx, Some(AsymmetricAlgorithm::Rsa))?;
+
+
     // Set up config params required
     let cloudagent_ip =
         config_get("/etc/keylime.conf", "cloud_agent", "cloudagent_ip")?;
