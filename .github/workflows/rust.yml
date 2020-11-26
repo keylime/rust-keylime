@@ -10,17 +10,22 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  build:
-
-    runs-on: ubuntu-20.04
-
+  static:
+    name: Static code checks
+    runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v2
-    - name: Install build dependencies
-      run: sudo apt-get install libtss2-dev
-    - name: fmt
+    - name: Check formatting
       run: cargo fmt --all -- --check
-    - name: Run tests
-      run: cargo test
-    - name: No Panic
-      run: ./.ci/nopanic.py
+    - name: Check for panics
+      run: ./tests/nopanic.ci
+
+  tests:
+    name: Fedora tests
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+    - name: Build the container
+      run: docker build -t testimage tests/
+    - name: Run the container
+      run: docker run -v $(pwd):/tmp/code_under_test -w /tmp/code_under_test testimage dbus-run-session -- /tmp/code_under_test/tests/run.sh

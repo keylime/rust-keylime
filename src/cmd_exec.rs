@@ -133,7 +133,7 @@ mod tests {
     fn test_read_file_output_path() {
         assert_eq!(
             read_file_output_path("test-data/test_input.txt".to_string())
-                .unwrap(),
+                .unwrap(), //#[allow_ci]
             "Hello World!\n"
         );
     }

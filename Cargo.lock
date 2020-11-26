@@ -1517,9 +1517,9 @@ dependencies = [
 
 [[package]]
 name = "num-integer"
-version = "0.1.43"
+version = "0.1.44"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8d59457e662d541ba17869cf51cf177c0b5f0cbf476c66bdc90bf1edac4f875b"
+checksum = "d2cc698a63b549a70bc047073d2949cce27cd1c7b0a4a862d08a8031bc2801db"
 dependencies = [
  "autocfg",
  "num-traits",
@@ -1527,9 +1527,9 @@ dependencies = [
 
 [[package]]
 name = "num-traits"
-version = "0.2.12"
+version = "0.2.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ac267bcc07f48ee5f8935ab0d24f316fb722d7a1292e2913f0cc196b29ffd611"
+checksum = "9a64b1ec5cda2586e284722486d802acf1f7dbdc623e2bfc57e65ca1cd099290"
 dependencies = [
  "autocfg",
 ]
@@ -2497,8 +2497,7 @@ checksum = "59547bce71d9c38b83d9c0e92b6066c4253371f15005def0c30d9657f50c7642"
 [[package]]
 name = "tss-esapi"
 version = "4.0.9-alpha.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a09d4314f5c2e87e86838a56363c35a941004a64a89af135ab9e2d0b6bddc5f4"
+source = "git+https://github.com/parallaxsecond/rust-tss-esapi?rev=743b3a63385dd9960013e26f6a35d34d64b16498#743b3a63385dd9960013e26f6a35d34d64b16498"
 dependencies = [
  "bindgen",
  "bitfield",

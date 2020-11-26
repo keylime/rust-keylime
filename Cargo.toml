@@ -27,3 +27,6 @@ tss-esapi = "4.0.9-alpha.1"
 uuid = {version = "0.8", features = ["v4"]}
 validators = "0.22.2"
 validators-derive = "0.21.6"
+# While functions are being added, we use the git repo version for now
+# tss-esapi = "4.0.9-alpha.1"
+tss-esapi = { git = "https://github.com/parallaxsecond/rust-tss-esapi", rev = "743b3a63385dd9960013e26f6a35d34d64b16498" }
