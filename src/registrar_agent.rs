@@ -1,56 +1,92 @@
-// use reqwest::header::*;
-// use serde::{Deserialize, Serialize};
-// // https://docs.rs/reqwest/0.9.2/reqwest/
+use crate::error::Error;
+use reqwest::header::*;
+use serde::{Deserialize, Serialize};
+use serde_json::Number;
 
-// /* calling
-// ek:  <class 'bytes'>
-// ekcert:  <class 'str'>
-// ek_tpm:  <class 'bytes'>
-// aik:  <class 'bytes'>
-// aik_name:  <class 'str'>
+fn serialize_as_base64<S>(
+    bytes: &[u8],
+    serializer: S,
+) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    serializer.serialize_str(&base64::encode(bytes))
+}
 
-// # register it and get back a blob
-// keyblob = registrar_client.doRegisterAgent(
-//     registrar_ip, registrar_port, agent_uuid, tpm_version, ek, ekcert, aik, ek_tpm, aik_name)
-// */
+fn deserialize_as_base64<'de, D>(deserializer: D) -> Result<Vec<u8>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    String::deserialize(deserializer).and_then(|string| {
+        base64::decode(&string).map_err(serde::de::Error::custom)
+    })
+}
 
-// #[derive(Debug, Serialize, Deserialize)]
-// struct Register {
-//     ek: Vec<u8>,
-//     ekcert: String,
-//     ek_tpm: Vec<u8>,
-//     aik: Vec<u8>,
-//     aik_name: String,
-// }
+pub fn deserialize_maybe_base64<'de, D>(
+    deserializer: D,
+) -> Result<Option<Vec<u8>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Option::<WrappedBase64Encoded>::deserialize(deserializer)
+        .map(|wrapped| wrapped.map(|wrapped| wrapped.0))
+}
 
-// pub async fn payload_bearer_request(
-//     path: &str,
-//     payload: serde_json::Value,
-//     token: &str,
-// ) -> Result<reqwest::Response, reqwest::Error> {
-//     let client = reqwest::Client::new();
-//     client
-//         .post(path)
-//         .bearer_auth(token.to_string())
-//         .header(CONTENT_TYPE, HeaderValue::from_static("application/json"))
-//         .json(&payload)
-//         .send()
-//         .await?.error_for_status()
-// }
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Register<'a> {
+    ek: &'a str,
+    #[serde(serialize_with = "serialize_as_base64")]
+    ekcert: &'a [u8],
+    #[serde(serialize_with = "serialize_as_base64")]
+    ek_tpm: &'a [u8],
+    aik: &'a str,
+    aik_name: &'a str,
+    tpm_version: u8,
+}
 
+#[derive(Debug, Serialize, Deserialize)]
+pub struct RegisterResponseResults {
+    #[serde(deserialize_with = "deserialize_maybe_base64")]
+    blob: Option<Vec<u8>>,
+}
 
-// pub async fn doRegisterAgent(
-//     registrar_ip: &str,
-//     registrar_port: &str,
-//     agent_uuid: &str,
-// ) -> Result<(keyblob: Vec<u8>), reqwest::Error> {
-// }
+#[derive(Debug, Serialize, Deserialize)]
+pub struct RegisterResponse {
+    code: Number,
+    status: String,
+    results: RegisterResponseResults,
+}
 
-// /*
-// retval = registrar_client.doActivateAgent(
-//             registrar_ip, registrar_port, agent_uuid, key)
-// */
-// // async fn doActivateAgent() -> Result<()> {
-// //     // revoker.await?;
-// //     Ok(())
-// // }
+#[derive(Debug, Deserialize)]
+struct WrappedBase64Encoded(
+    #[serde(deserialize_with = "deserialize_as_base64")] Vec<u8>,
+);
+
+pub(crate) async fn do_register_agent (
+    registrar_ip: &str,
+    registrar_port: &str,
+    agent_uuid: &str,
+    ek: &str,
+    ekcert: &[u8],
+    aik: &str,
+    ek_tpm: &[u8],
+    aik_name: &str,
+) -> Result<RegisterResponse, Error> {
+    let data = Register {
+        ek: ek,
+        ekcert: ekcert,
+        ek_tpm: ek_tpm,
+        aik: aik,
+        aik_name: aik_name,
+        tpm_version: 2,
+    };
+    reqwest::Client::new()
+        .post("http://127.0.0.1:8890/agents/D432FBB3-D2F1-4A97-9EF7-75BD81C00000")
+        .json(&data)
+        .send()
+        .await?
+        .json()
+        .await
+        .map_err(|e|e.into())
+}
+

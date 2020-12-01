@@ -60,9 +60,7 @@ pub(crate) fn create_ek(
 
     // Retrieve EK handle, EK pub cert, and TPM pub object
     let handle = ek::create_ek_object(context, alg)?;
-    println!("{:?}", handle);
     let cert = ek::retrieve_ek_pubcert(context, alg)?;
-    println!("{:?}", cert);
     let tpm_pub = context.read_public(handle)?;
 
     // Convert TPM pub object to Vec<u8>

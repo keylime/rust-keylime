@@ -7,6 +7,7 @@ pub(crate) enum Error {
     InvalidRequest,
     Ini(ini::ini::Error),
     Configuration(String),
+    Reqwest(reqwest::Error),
     Serde(serde_json::Error),
     Permission,
     IO(std::io::Error),
@@ -66,6 +67,12 @@ impl From<serde_json::Error> for Error {
 impl From<std::io::Error> for Error {
     fn from(err: std::io::Error) -> Self {
         Error::IO(err)
+    }
+}
+
+impl From<reqwest::Error> for Error {
+    fn from(err: reqwest::Error) -> Self {
+        Error::Reqwest(err)
     }
 }
 
