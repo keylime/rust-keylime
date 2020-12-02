@@ -26,6 +26,49 @@ mod tpm;
 
 static NOTFOUND: &[u8] = b"Not Found";
 
+fn get_uuid(agent_uuid_config: &str) -> String {
+    match agent_uuid_config {
+        "openstack" => {
+            info!("Openstack placeholder...");
+            "openstack".into()
+        }
+        "hash_ek" => {
+            info!("hash_ek placeholder...");
+            "hash_ek".into()
+        }
+        "generate" => {
+            let agent_uuid = Uuid::new_v4();
+            info!("Generated a new UUID: {}", &agent_uuid);
+            agent_uuid.to_string()
+        }
+        uuid_config => match Uuid::parse_str(uuid_config) {
+            Ok(uuid_config) => uuid_config.to_string(),
+            Err(_) => {
+                info!("Misformatted UUID: {}", &uuid_config);
+                let agent_uuid = Uuid::new_v4();
+                agent_uuid.to_string()
+            }
+        },
+    }
+}
+
+#[test]
+fn test_get_uuid() {
+    assert_eq!(get_uuid("openstack"), "openstack");
+    assert_eq!(get_uuid("hash_ek"), "hash_ek");
+    Uuid::parse_str(&get_uuid("generate")).unwrap();
+    assert_eq!(
+        get_uuid("D432FBB3-D2F1-4A97-9EF7-75BD81C00000"),
+        "d432fbb3-d2f1-4a97-9ef7-75bd81c00000"
+    );
+    assert_ne!(
+        get_uuid("D432FBB3-D2F1-4A97-9EF7-75BD81C0000X"),
+        "d432fbb3-d2f1-4a97-9ef7-75bd81c0000X"
+    );
+    Uuid::parse_str(&get_uuid("D432FBB3-D2F1-4A97-9EF7-75BD81C0000X"))
+        .unwrap();
+}
+
 #[actix_web::main]
 async fn main() -> Result<()> {
     // Initialise Logger
@@ -55,30 +98,11 @@ async fn main() -> Result<()> {
         config_get("/etc/keylime.conf", "registrar", "registrar_ip")?;
     let registrar_port =
         config_get("/etc/keylime.conf", "registrar", "registrar_port")?;
-    let agent_uuid_confg =
+    let agent_uuid_config =
         config_get("/etc/keylime.conf", "cloud_agent", "agent_uuid")?;
 
-    // Setup the Agents UUID
-    let section = match agent_uuid_confg.as_str() {
-        "openstack" => {
-            info!("Openstack placeholder...");
-        }
-        "hash_ek" => {
-            info!("hash_ek placeholder...");
-        }
-        "generate" => {
-            let agent_uuid = Uuid::new_v4();
-            info!("Generated a new UUID: {}", &agent_uuid);
-        }
-        _ => {
-            if Uuid::parse_str(&agent_uuid_confg).is_ok() == false {
-                error!("Invalid UUID: {:?}", &agent_uuid_confg);
-                let agent_uuid = Uuid::new_v4();
-                info!("Generated a new UUID: {}", &agent_uuid);
-            }
-        }
-    };
-
+    let agent_uuid = get_uuid(&agent_uuid_config);
+    println!("{}", agent_uuid);
     // Placeholder BEGIN
     // The following will be removed on the final commit, these are just placeholders for now
     let ek = "-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAmYicaAAArcin6fRZmzkc\nssyW5VFDWuB+FXF1HdEmJR4jEMdhlp8H9uAMwExY/+6aujElLJgBSKYPPeC7d/nI\nUIYc71oBxQEn6l3DTJO+1Nl1Wq6xYvlGrJMcuAFlznJCo0IF3MVLd45zEgdDmG5T\ntQ+EMAl64eC+aIG9Zp6InLbuZd3oisjE16TiK4Rg5dHAnfU6YSo9CIVSGw6PuCqX\n3aEyeikKNLGwX7ENp+fIVxj9Y00I5JoxDgD9ufLF7V55JVXKdZ0F51NghMyJRSt+\nkyEiqHPRRVTHw+248uziY4ioaDb3EBNKjnC/xcAdUoNxE4I1W8IW8UF/4td/AU11\nfwIDAQAB\n-----END PUBLIC KEY-----\n";
@@ -88,12 +112,11 @@ async fn main() -> Result<()> {
     let ek_tpm = "AToAAQALAAMAsgAgg3GXZ0SEs/gakMyNRqXXJP1S124GUgtk8qHaGzMUaaoABgCAAEMAEAgAAAAAAAEAmYicaAAArcin6fRZmzkcssyW5VFDWuB+FXF1HdEmJR4jEMdhlp8H9uAMwExY/+6aujElLJgBSKYPPeC7d/nIUIYc71oBxQEn6l3DTJO+1Nl1Wq6xYvlGrJMcuAFlznJCo0IF3MVLd45zEgdDmG5TtQ+EMAl64eC+aIG9Zp6InLbuZd3oisjE16TiK4Rg5dHAnfU6YSo9CIVSGw6PuCqX3aEyeikKNLGwX7ENp+fIVxj9Y00I5JoxDgD9ufLF7V55JVXKdZ0F51NghMyJRSt+kyEiqHPRRVTHw+248uziY4ioaDb3EBNKjnC/xcAdUoNxE4I1W8IW8UF/4td/AU11fw==";
     let ek_tpm = base64::decode(ek_tpm).unwrap();
     let aik_name = "000bb35615c533f39df1f1a30d35a42c2f9dc5b8a6a3c5332ec59e702d8e04a288fa";
-    let agent_uuid_tmp = "D432FBB3-D2F1-4A97-9EF7-75BD81C00000";
     // placeholder END
     let mut keyblob = registrar_agent::do_register_agent(
         &registrar_ip,
         &registrar_port,
-        &agent_uuid_tmp,
+        &agent_uuid,
         &ek,
         &ekcert,
         &aik,

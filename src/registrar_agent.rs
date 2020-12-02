@@ -62,7 +62,7 @@ struct WrappedBase64Encoded(
     #[serde(deserialize_with = "deserialize_as_base64")] Vec<u8>,
 );
 
-pub(crate) async fn do_register_agent (
+pub(crate) async fn do_register_agent(
     registrar_ip: &str,
     registrar_port: &str,
     agent_uuid: &str,
@@ -81,12 +81,14 @@ pub(crate) async fn do_register_agent (
         tpm_version: 2,
     };
     reqwest::Client::new()
-        .post("http://127.0.0.1:8890/agents/D432FBB3-D2F1-4A97-9EF7-75BD81C00000")
+        .post(&format!(
+            "http://{}:{}/agents/{}",
+            registrar_ip, registrar_port, agent_uuid
+        ))
         .json(&data)
         .send()
         .await?
         .json()
         .await
-        .map_err(|e|e.into())
+        .map_err(|e| e.into())
 }
-
