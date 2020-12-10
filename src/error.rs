@@ -32,6 +32,8 @@ pub(crate) enum Error {
     NumParse(std::num::ParseIntError),
     #[error("Crypto error: {0}")]
     OpenSSL(openssl::error::ErrorStack),
+    #[error("ZMQ error: {0}")]
+    ZMQ(zmq::Error),
 }
 
 impl From<tss_esapi::Error> for Error {
@@ -79,6 +81,12 @@ impl From<std::num::ParseIntError> for Error {
 impl From<openssl::error::ErrorStack> for Error {
     fn from(err: openssl::error::ErrorStack) -> Self {
         Error::OpenSSL(err)
+    }
+}
+
+impl From<zmq::Error> for Error {
+    fn from(err: zmq::Error) -> Self {
+        Error::ZMQ(err)
     }
 }
 
