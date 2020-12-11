@@ -12,8 +12,7 @@ RUN dnf install -y \
     libtpms \
     swtpm \
     swtpm-tools \
-    tpm2-tss-devel
-
-# Install Rust
-RUN curl https://sh.rustup.rs -sSf | bash -s -- -y
-RUN echo 'source $HOME/.cargo/env' >> $HOME/.bashrc
+    tpm2-tss-devel \
+    rust clippy cargo \
+    llvm llvm-devel \
+    pkg-config
