@@ -61,7 +61,7 @@ pub(crate) fn create_ek(
     // Retrieve EK handle, EK pub cert, and TPM pub object
     let handle = ek::create_ek_object(context, alg)?;
     let cert = ek::retrieve_ek_pubcert(context, alg)?;
-    let tpm_pub = context.read_public(handle)?;
+    let (tpm_pub, _, _) = context.read_public(handle)?;
 
     // Convert TPM pub object to Vec<u8>
     // See: https://github.com/fedora-iot/clevis-pin-tpm2/blob/master/src/tpm_objects.rs#L64
