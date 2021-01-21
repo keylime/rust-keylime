@@ -7,12 +7,14 @@ pub(crate) enum Error {
     InvalidRequest,
     Ini(ini::ini::Error),
     Configuration(String),
+    Reqwest(reqwest::Error),
     Serde(serde_json::Error),
     Permission,
     IO(std::io::Error),
     Utf8(std::string::FromUtf8Error),
     SecureMount,
     TPMInUse,
+    UUIDError(uuid::Error),
     Execution(Option<i32>, String),
     NumParse(std::num::ParseIntError),
 }
@@ -25,6 +27,9 @@ impl fmt::Display for Error {
             }
             Error::TPM(err) => write!(f, "TPM Error encountered: {}", err),
             Error::ActixWeb(err) => write!(f, "HttpServer({})", err),
+            Error::UUIDError(err) => {
+                write!(f, "TPM Error encountered: {}", err)
+            }
             anything => write!(f, "Another error: {:?}", anything),
         }
     }
@@ -63,6 +68,18 @@ impl From<serde_json::Error> for Error {
 impl From<std::io::Error> for Error {
     fn from(err: std::io::Error) -> Self {
         Error::IO(err)
+    }
+}
+
+impl From<reqwest::Error> for Error {
+    fn from(err: reqwest::Error) -> Self {
+        Error::Reqwest(err)
+    }
+}
+
+impl From<uuid::Error> for Error {
+    fn from(err: uuid::Error) -> Self {
+        Error::UUIDError(err)
     }
 }
 
