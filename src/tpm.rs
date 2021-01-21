@@ -61,7 +61,7 @@ pub(crate) fn create_ek(
     // Retrieve EK handle, EK pub cert, and TPM pub object
     let handle = ek::create_ek_object(context, alg)?;
     let cert = ek::retrieve_ek_pubcert(context, alg)?;
-    let tpm_pub = context.read_public(handle)?;
+    let (tpm_pub, _, _) = context.read_public(handle)?;
 
     // Convert TPM pub object to Vec<u8>
     // See: https://github.com/fedora-iot/clevis-pin-tpm2/blob/master/src/tpm_objects.rs#L64
@@ -82,4 +82,38 @@ pub(crate) fn create_ek(
     }
 
     Ok((handle, cert, tpm_pub_vec))
+}
+
+/* Converts a hex value in the form of a string (ex. from keylime.conf's
+ * ek_handle) to a key handle.
+ *
+ * Input: &str
+ * Return: Key handle
+ *
+ * Example call:
+ * let ek_handle = tpm::ek_from_hex_str("0x81000000");
+ */
+pub(crate) fn ek_from_hex_str(val: &str) -> Result<KeyHandle> {
+    let val = val.trim_start_matches("0x");
+    Ok(KeyHandle::from(u32::from_str_radix(val, 16)?))
+}
+
+#[test]
+fn ek_from_hex() {
+    assert_eq!(
+        ek_from_hex_str("0x81000000").unwrap(), //#[allow_ci]
+        ek_from_hex_str("81000000").unwrap()    //#[allow_ci]
+    );
+    assert_eq!(
+        ek_from_hex_str("0xdeadbeef").unwrap(), //#[allow_ci]
+        ek_from_hex_str("deadbeef").unwrap()    //#[allow_ci]
+    );
+
+    assert!(ek_from_hex_str("a").is_ok());
+    assert!(ek_from_hex_str("18bb9").is_ok());
+
+    assert!(ek_from_hex_str("qqq").is_err());
+    assert!(ek_from_hex_str("0xqqq").is_err());
+    assert!(ek_from_hex_str("0xdeadbeefqwerty").is_err());
+    assert!(ek_from_hex_str("0x0x0x").is_err());
 }

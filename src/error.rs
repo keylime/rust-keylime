@@ -16,6 +16,7 @@ pub(crate) enum Error {
     TPMInUse,
     UUIDError(uuid::Error),
     Execution(Option<i32>, String),
+    NumParse(std::num::ParseIntError),
 }
 
 impl fmt::Display for Error {
@@ -85,6 +86,12 @@ impl From<uuid::Error> for Error {
 impl From<std::string::FromUtf8Error> for Error {
     fn from(err: std::string::FromUtf8Error) -> Self {
         Error::Utf8(err)
+    }
+}
+
+impl From<std::num::ParseIntError> for Error {
+    fn from(err: std::num::ParseIntError) -> Self {
+        Error::NumParse(err)
     }
 }
 
