@@ -1,0 +1,70 @@
+version: '3.6'
+services:
+  keylime-verifier:
+    build:
+      context: ./docker/fedora/
+      dockerfile: keylime_py.Dockerfile
+    image: keylime_py
+    hostname: 'keylime-verifier'
+    user: root
+    volumes:
+      - secure-volume:/var/lib/keylime
+    ports:
+        - "8881:8881"
+    command: [
+      "/usr/local/bin/keylime_verifier"
+    ]
+  keylime-registrar:
+    build:
+      context: ./docker/fedora/
+      dockerfile: keylime_py.Dockerfile
+    image: keylime_py
+    hostname: 'keylime-verifier' # this is a bit of poor workaround, will fix in python code
+    user: root
+    volumes:
+      - secure-volume:/var/lib/keylime
+    ports:
+        - "8891:8891"
+    command: ["/root/wait.sh", "/var/lib/keylime/cv_ca/client-cert.crt", "keylime_registrar"]
+  keylime_agent:
+    build:
+      context: ./docker/fedora/
+      dockerfile: keylime_rust.Dockerfile
+    image: keylime_rust
+    hostname: 'keylime-agent'
+    user: root
+    volumes:
+      - ./target/debug/:/rust-keylime
+    ports:
+        - "9002:9002"
+    environment:
+    - TCTI=tabrmd:bus_type=system
+    command:
+      - /bin/bash
+      - -c
+      - |
+        mkdir /tmp/tpmdir
+        rm -rf /var/run/dbus
+        mkdir /var/run/dbus
+        dbus-daemon --system
+        ls /etc/dbus-1/system.d/
+        swtpm_setup --tpm2 \
+            --tpmstate /tmp/tpmdir \
+            --createek --allow-signing --decryption --create-ek-cert \
+            --create-platform-cert \
+            --display
+        swtpm socket --tpm2 \
+            --tpmstate dir=/tmp/tpmdir \
+            --flags startup-clear \
+            --ctrl type=tcp,port=2322 \
+            --server type=tcp,port=2321 \
+            --daemon
+        tpm2-abrmd \
+            --logger=stdout \
+            --tcti=swtpm: \
+            --allow-root \
+            --flush-all &
+        RUST_LOG=keylime_agent=trace /rust-keylime/keylime_agent
+volumes:
+  secure-volume:
+
