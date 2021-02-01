@@ -16,6 +16,10 @@ pub(crate) enum Error {
     Ini(ini::ini::Error),
     #[error("Configuration error: {0}")]
     Configuration(String),
+    #[error("Reqwest error: {0}")]
+    Reqwest(reqwest::Error),
+    #[error("Registrar error: received {code} from {addr}")]
+    Registrar { addr: String, code: u16 },
     #[error("Serialization/deserialization error: {0}")]
     Serde(serde_json::Error),
     #[error("Permission error")]
@@ -29,6 +33,8 @@ pub(crate) enum Error {
     SecureMount,
     #[error("TPM in use")]
     TPMInUse,
+    #[error("UUID error")]
+    UUID(uuid::Error),
     #[error("Execution error: {0:?}, {1}")]
     Execution(Option<i32>, String),
     #[error("Error executing script {0}: {1:?}, {2}")]
@@ -44,11 +50,21 @@ pub(crate) enum Error {
 }
 
 impl Error {
-    pub(crate) fn code(&self) -> Result<Option<i32>> {
+    pub(crate) fn http_code(&self) -> Result<u16> {
+        match self {
+            Error::Registrar { addr, code } => Ok(*code),
+            other => Err(Error::Other(format!(
+                "cannot get http code for Error type {}",
+                other
+            ))),
+        }
+    }
+
+    pub(crate) fn exe_code(&self) -> Result<Option<i32>> {
         match self {
             Error::Execution(code, _) => Ok(code.to_owned()),
             other => Err(Error::Other(format!(
-                "cannot get code for Error type {}",
+                "cannot get execution status code for Error type {}",
                 other
             ))),
         }
@@ -125,6 +141,18 @@ impl From<openssl::error::ErrorStack> for Error {
 impl From<zmq::Error> for Error {
     fn from(err: zmq::Error) -> Self {
         Error::ZMQ(err)
+    }
+}
+
+impl From<reqwest::Error> for Error {
+    fn from(err: reqwest::Error) -> Self {
+        Error::Reqwest(err)
+    }
+}
+
+impl From<uuid::Error> for Error {
+    fn from(err: uuid::Error) -> Self {
+        Error::UUID(err)
     }
 }
 

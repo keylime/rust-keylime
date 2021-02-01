@@ -99,7 +99,7 @@ pub(crate) fn run_revocation_actions(json: Value) -> Result<Vec<Output>> {
                         error!("{}", msg);
                         return Err(Error::Script(
                             String::from(action),
-                            e.code()?,
+                            e.exe_code()?,
                             e.stderr()?,
                         ));
                     }
