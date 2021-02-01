@@ -1082,6 +1082,7 @@ dependencies = [
  "serde_derive",
  "serde_json",
  "tempfile",
+ "thiserror",
  "tokio",
  "tokio-io",
  "tss-esapi",
