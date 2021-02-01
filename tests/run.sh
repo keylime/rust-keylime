@@ -23,8 +23,8 @@ tpm2-abrmd \
     --flush-all &
 
 echo "-------- Running clippy"
-# The denies are currently disabled, because that will require a bunch of code cleanup
-cargo clippy --all-targets --all-features #  -- -D clippy::all -D clippy::cargo
+# The cargo denies are currently disabled, because that will require a bunch of dep cleanup
+cargo clippy --all-targets --all-features -- -D clippy::all  # -D clippy::cargo
 
 echo "-------- Building"
 RUST_BACKTRACE=1 cargo build

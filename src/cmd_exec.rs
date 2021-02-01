@@ -1,6 +1,5 @@
 use super::*;
 use crate::error::{Error, Result};
-use base64;
 use std::collections::HashMap;
 use std::env;
 use std::process::Command;
@@ -14,7 +13,6 @@ const MAX_TRY: usize = 10;
 const RETRY_SLEEP: Duration = Duration::from_millis(50);
 const TPM_IO_ERROR: i32 = 5;
 const RETRY: usize = 4;
-static EMPTYMASK: &'static str = "1";
 
 /*
  * Input:
@@ -31,7 +29,7 @@ static EMPTYMASK: &'static str = "1";
  * dropped due to different error handling in Rust. Returned output string are
  * preprocessed to before returning for code efficient.
  */
-pub(crate) fn run<'a>(
+pub(crate) fn run(
     command: String,
     output_path: Option<&str>,
 ) -> Result<(String, String)> {
@@ -39,7 +37,7 @@ pub(crate) fn run<'a>(
     let mut output: Output;
 
     // tokenize input command
-    let words: Vec<&str> = command.split(" ").collect();
+    let words: Vec<&str> = command.split(' ').collect();
     let mut number_tries = 0;
     let args = &words[1..words.len()];
     let cmd = &words[0];
@@ -47,10 +45,12 @@ pub(crate) fn run<'a>(
     // setup environment variable
     let mut env_vars: HashMap<String, String> = HashMap::new();
     for (key, value) in env::vars() {
-        env_vars.insert(key.to_string(), value.to_string());
+        let _ = env_vars.insert(key.to_string(), value.to_string());
     }
-    env_vars.insert("TPM_SERVER_PORT".to_string(), "9998".to_string());
-    env_vars.insert("TPM_SERVER_NAME".to_string(), "localhost".to_string());
+    let _ =
+        env_vars.insert("TPM_SERVER_PORT".to_string(), "9998".to_string());
+    let _ = env_vars
+        .insert("TPM_SERVER_NAME".to_string(), "localhost".to_string());
     match env_vars.get_mut("PATH") {
         Some(v) => v.push_str(common::TPM_TOOLS_PATH),
         None => {
@@ -68,7 +68,9 @@ pub(crate) fn run<'a>(
         output = Command::new(&cmd).args(args).envs(&env_vars).output()?;
 
         // measure execution time
-        let t_diff = t0.duration_since(t0).unwrap_or(Duration::new(0, 0));
+        let t_diff = t0
+            .duration_since(t0)
+            .unwrap_or_else(|_| Duration::new(0, 0));
         info!("Time cost: {}", t_diff.as_secs());
 
         // assume the system is linux
@@ -120,7 +122,7 @@ pub(crate) fn run<'a>(
 fn read_file_output_path(output_path: String) -> std::io::Result<String> {
     let mut file = File::open(output_path)?;
     let mut contents = String::new();
-    file.read_to_string(&mut contents)?;
+    let _ = file.read_to_string(&mut contents)?;
     Ok(contents)
 }
 
@@ -143,15 +145,12 @@ mod tests {
         match command_exist("getrandom") {
             true => {
                 let command = "getrandom -size 8 -out foo.out".to_string();
-                cmd_exec::run(command, None);
+                run(command, None);
                 let p = Path::new("foo.out");
                 assert_eq!(p.exists(), true);
-                match fs::remove_file("foo.out") {
-                    Ok(_) => {}
-                    Err(_) => {}
-                }
+                let _ = fs::remove_file("foo.out");
             }
-            false => assert!(true),
+            false => {}
         }
     }
     /*
@@ -163,7 +162,7 @@ mod tests {
      */
     fn command_exist(command: &str) -> bool {
         if let Ok(path) = env::var("PATH") {
-            for pp in path.split(":") {
+            for pp in path.split(':') {
                 let command_path = format!("{}/{}", pp, command);
                 if fs::metadata(command_path).is_ok() {
                     return true;

@@ -1,11 +1,9 @@
 // use super::*;
-use hex;
 use openssl::hash::MessageDigest;
 use openssl::pkcs5;
 use openssl::pkey::{PKey, Private, Public};
 use openssl::rsa::{Padding, Rsa};
 use openssl::sign::Signer;
-use std::fmt;
 use std::fs::File;
 use std::io::Read;
 use std::string::String;
@@ -43,7 +41,7 @@ pub(crate) fn rsa_import_pubkey(
 ) -> Result<Rsa<Public>> {
     let mut key_buffer = vec![0; 1];
     let mut input_key = File::open(input_key_path)?;
-    input_key.read_to_end(&mut key_buffer)?;
+    let _ = input_key.read_to_end(&mut key_buffer)?;
     Ok(Rsa::public_key_from_pem(&key_buffer)?)
 }
 

@@ -1,11 +1,6 @@
 use crate::error::{Error, Result};
 use ini::Ini;
 use log::*;
-use serde_json::{json, Map, Value};
-use std::collections::HashMap;
-use std::fmt::Debug;
-use std::path::Path;
-use std::process;
 
 /*
  * Constants and static variables
@@ -14,14 +9,13 @@ pub const STUB_VTPM: bool = false;
 pub const STUB_IMA: bool = true;
 pub const TPM_DATA_PCR: usize = 16;
 pub const IMA_PCR: usize = 10;
-pub static RSA_PUBLICKEY_EXPORTABLE: &'static str = "rsa placeholder";
-pub static TPM_TOOLS_PATH: &'static str = "/usr/local/bin/";
-pub static IMA_ML_STUB: &'static str =
-    "../scripts/ima/ascii_runtime_measurements";
-pub static IMA_ML: &'static str =
+pub static RSA_PUBLICKEY_EXPORTABLE: &str = "rsa placeholder";
+pub static TPM_TOOLS_PATH: &str = "/usr/local/bin/";
+pub static IMA_ML_STUB: &str = "../scripts/ima/ascii_runtime_measurements";
+pub static IMA_ML: &str =
     "/sys/kernel/security/ima/ascii_runtime_measurements";
-pub static KEY: &'static str = "secret";
-pub static WORK_DIR: &'static str = "/tmp";
+pub static KEY: &str = "secret";
+pub static WORK_DIR: &str = "/tmp";
 
 // Secure mount of tpmfs (False is generally used for development environments)
 pub static MOUNT_SECURE: bool = true;

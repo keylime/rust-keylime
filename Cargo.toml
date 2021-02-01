@@ -3,10 +3,13 @@ authors = ["Keylime Authors"]
 edition = "2018"
 name = "keylime_agent"
 version = "0.1.0"
+license = "Apache-2.0"
+description = "Rust agent for Keylime"
+repository = "https://github.com/keylime/rust-keylime"
 
 [dependencies]
 actix-web = "3"
-base64 = "0.9.3"
+base64 = "0.12"
 flate2 = "1.0.4"
 futures = "0.3.6"
 hex = "0.3.2"

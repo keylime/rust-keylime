@@ -5,7 +5,7 @@ use crate::{common::config_get, Error as KeylimeError, Result};
 use tss_esapi::{
     abstraction::ek, constants::algorithm::AsymmetricAlgorithm,
     handles::KeyHandle, tss2_esys::Tss2_MU_TPM2B_PUBLIC_Marshal, Context,
-    Error as TssError, Tcti,
+    Tcti,
 };
 
 /*
@@ -15,7 +15,7 @@ use tss_esapi::{
  * Example call:
  * let mut ctx = tpm::get_tpm2_ctx();
  */
-pub(crate) fn get_tpm2_ctx() -> Result<tss_esapi::Context> {
+pub(crate) fn get_tpm2_ctx() -> Result<Context> {
     let tcti_path = match std::env::var("TCTI") {
         Ok(val) => val,
         Err(_) => if std::path::Path::new("/dev/tpmrm0").exists() {

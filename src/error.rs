@@ -1,5 +1,3 @@
-use std::fmt;
-
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -9,6 +7,7 @@ pub(crate) enum Error {
     #[error("TPM Error: {0}")]
     TPM(tss_esapi::Error),
     #[error("Invalid request")]
+    #[allow(unused)]
     InvalidRequest,
     #[error("Configuration loading error: {0}")]
     Ini(ini::ini::Error),
@@ -23,6 +22,7 @@ pub(crate) enum Error {
     #[error("Text decoding error: {0}")]
     Utf8(std::string::FromUtf8Error),
     #[error("Secure Mount error")]
+    #[allow(unused)]
     SecureMount,
     #[error("TPM in use")]
     TPMInUse,
@@ -31,7 +31,7 @@ pub(crate) enum Error {
     #[error("Number parsing error: {0}")]
     NumParse(std::num::ParseIntError),
     #[error("Crypto error: {0}")]
-    OpenSSLError(openssl::error::ErrorStack),
+    OpenSSL(openssl::error::ErrorStack),
 }
 
 impl From<tss_esapi::Error> for Error {
@@ -78,7 +78,7 @@ impl From<std::num::ParseIntError> for Error {
 
 impl From<openssl::error::ErrorStack> for Error {
     fn from(err: openssl::error::ErrorStack) -> Self {
-        Error::OpenSSLError(err)
+        Error::OpenSSL(err)
     }
 }
 
