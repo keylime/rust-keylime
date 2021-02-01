@@ -1,17 +1,16 @@
 // use super::*;
 use hex;
-use openssl::error::ErrorStack;
 use openssl::hash::MessageDigest;
 use openssl::pkcs5;
 use openssl::pkey::{PKey, Private, Public};
 use openssl::rsa::{Padding, Rsa};
 use openssl::sign::Signer;
-use std::error::Error;
 use std::fmt;
 use std::fs::File;
-use std::io::Error as StdIOError;
 use std::io::Read;
 use std::string::String;
+
+use crate::Result;
 
 /*
  * Inputs: secret key
@@ -20,10 +19,10 @@ use std::string::String;
  *
  * Sign message and return HMAC result string
  */
-pub fn do_hmac(
+pub(crate) fn do_hmac(
     input_key: String,
     input_message: String,
-) -> Result<String, KeylimeCryptoError> {
+) -> Result<String> {
     let key = PKey::hmac(input_key.as_bytes())?;
     let message = input_message.as_bytes();
     let mut signer = Signer::new(MessageDigest::sha384(), &key)?;
@@ -39,9 +38,9 @@ pub fn do_hmac(
  * Import a PEM-encoded RSA public key and return a callable OpenSSL RSA key
  * object.
  */
-pub fn rsa_import_pubkey(
+pub(crate) fn rsa_import_pubkey(
     input_key_path: String,
-) -> Result<Rsa<Public>, KeylimeCryptoError> {
+) -> Result<Rsa<Public>> {
     let mut key_buffer = vec![0; 1];
     let mut input_key = File::open(input_key_path)?;
     input_key.read_to_end(&mut key_buffer)?;
@@ -54,9 +53,7 @@ pub fn rsa_import_pubkey(
  *
  * Randomly generate a callable OpenSSL RSA key object with desired key size.
  */
-pub fn rsa_generate(
-    key_size: u32,
-) -> Result<Rsa<Private>, KeylimeCryptoError> {
+pub(crate) fn rsa_generate(key_size: u32) -> Result<Rsa<Private>> {
     Ok(Rsa::generate(key_size)?)
 }
 
@@ -68,10 +65,10 @@ pub fn rsa_generate(
  * Take in an RSA-encrypted ciphertext and an RSA private key and decrypt the
  * ciphertext based on PKCS1 OAEP. Parameters match that of Python-Keylime.
  */
-pub fn rsa_decrypt(
+pub(crate) fn rsa_decrypt(
     private_key: Rsa<Private>,
     ciphertext: String,
-) -> Result<String, KeylimeCryptoError> {
+) -> Result<String> {
     let mut dec_result = vec![0; private_key.size() as usize];
     let dec_len = private_key.private_decrypt(
         ciphertext.as_bytes(),
@@ -95,10 +92,10 @@ pub fn rsa_decrypt(
  * PBKDF2 function defaults to SHA-1 unless otherwise specified, and
  * Python-Keylime uses this default.
  */
-pub fn kdf(
+pub(crate) fn kdf(
     input_password: String,
     input_salt: String,
-) -> Result<String, KeylimeCryptoError> {
+) -> Result<String> {
     let password = input_password.as_bytes();
     let salt = input_salt.as_bytes();
     let count = 2000;
@@ -126,57 +123,6 @@ fn to_hex_string(bytes: Vec<u8>) -> String {
     let strs: Vec<String> =
         bytes.iter().map(|b| format!("{:02x}", b)).collect();
     strs.join("")
-}
-
-/*
- * KeylimeCryptoError: Custom error type to be thrown by functions in
- * crypto.rs. Wraps I/O errors and OpenSSL ErrorStack structs together into
- * one thing.
- */
-#[derive(Debug)]
-pub enum KeylimeCryptoError {
-    IOError { details: String },
-    OpenSSLError { stack: ErrorStack },
-}
-
-impl fmt::Display for KeylimeCryptoError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match *self {
-            KeylimeCryptoError::IOError { ref details } => {
-                f.write_str(&format!("{:?}", details))
-            }
-            KeylimeCryptoError::OpenSSLError { ref stack } => {
-                f.write_str(&format!("{:?}", stack))
-            }
-        }
-    }
-}
-
-impl Error for KeylimeCryptoError {
-    fn description(&self) -> &str {
-        match *self {
-            KeylimeCryptoError::IOError { ref details } => {
-                ("Error reading file")
-            }
-            KeylimeCryptoError::OpenSSLError { ref stack } => {
-                ("OpenSSL library error")
-            }
-        }
-    }
-}
-
-impl From<ErrorStack> for KeylimeCryptoError {
-    fn from(e: ErrorStack) -> Self {
-        KeylimeCryptoError::OpenSSLError { stack: e }
-    }
-}
-
-impl From<StdIOError> for KeylimeCryptoError {
-    fn from(e: StdIOError) -> Self {
-        KeylimeCryptoError::IOError {
-            details: format!("{:?}", e),
-        }
-    }
 }
 
 // Unit Testing
