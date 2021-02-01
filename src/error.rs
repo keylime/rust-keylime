@@ -1,39 +1,35 @@
 use std::fmt;
 
-#[derive(Debug)]
+use thiserror::Error;
+
+#[derive(Error, Debug)]
 pub(crate) enum Error {
+    #[error("HttpServer error: {0}")]
     ActixWeb(actix_web::Error),
+    #[error("TPM Error: {0}")]
     TPM(tss_esapi::Error),
+    #[error("Invalid request")]
     InvalidRequest,
+    #[error("Configuration loading error: {0}")]
     Ini(ini::ini::Error),
+    #[error("Configuration error: {0}")]
     Configuration(String),
+    #[error("Serialization/deserialization error: {0}")]
     Serde(serde_json::Error),
+    #[error("Permission error")]
     Permission,
+    #[error("IO error: {0}")]
     IO(std::io::Error),
+    #[error("Text decoding error: {0}")]
     Utf8(std::string::FromUtf8Error),
+    #[error("Secure Mount error")]
     SecureMount,
+    #[error("TPM in use")]
     TPMInUse,
+    #[error("Execution error: {0:?}, {1}")]
     Execution(Option<i32>, String),
+    #[error("Number parsing error: {0}")]
     NumParse(std::num::ParseIntError),
-}
-
-impl fmt::Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            Error::Ini(err) => {
-                write!(f, "Error loading configuration: {}", err)
-            }
-            Error::TPM(err) => write!(f, "TPM Error encountered: {}", err),
-            Error::ActixWeb(err) => write!(f, "HttpServer({})", err),
-            anything => write!(f, "Another error: {:?}", anything),
-        }
-    }
-}
-
-impl std::error::Error for Error {
-    fn description(&self) -> &str {
-        "Keylime Error"
-    }
 }
 
 impl From<tss_esapi::Error> for Error {

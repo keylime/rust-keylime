@@ -23,3 +23,4 @@ tempfile = "3.0.4"
 tokio = {version = "0.2", features = ["full"]}
 tokio-io = "0.1"
 tss-esapi = "4.0.10-alpha.2"
+thiserror = "1.0"
