@@ -56,10 +56,37 @@ use std::fs::File;
 use std::io::BufReader;
 use std::io::Read;
 use std::path::Path;
+use uuid::Uuid;
 
 use error::{Error, Result};
 
 static NOTFOUND: &[u8] = b"Not Found";
+
+fn get_uuid(agent_uuid_config: &str) -> String {
+    match agent_uuid_config {
+        "openstack" => {
+            info!("Openstack placeholder...");
+            "openstack".into()
+        }
+        "hash_ek" => {
+            info!("hash_ek placeholder...");
+            "hash_ek".into()
+        }
+        "generate" => {
+            let agent_uuid = Uuid::new_v4();
+            info!("Generated a new UUID: {}", &agent_uuid);
+            agent_uuid.to_string()
+        }
+        uuid_config => match Uuid::parse_str(uuid_config) {
+            Ok(uuid_config) => uuid_config.to_string(),
+            Err(_) => {
+                info!("Misformatted UUID: {}", &uuid_config);
+                let agent_uuid = Uuid::new_v4();
+                agent_uuid.to_string()
+            }
+        },
+    }
+}
 
 #[actix_web::main]
 async fn main() -> Result<()> {
@@ -136,5 +163,24 @@ mod tests {
                 .expect("File doesn't exist"),
             String::from("Hello World!\n")
         );
+    }
+
+    #[test]
+    fn test_get_uuid() {
+        assert_eq!(get_uuid("openstack"), "openstack");
+        assert_eq!(get_uuid("hash_ek"), "hash_ek");
+        let _ = Uuid::parse_str(&get_uuid("generate")).unwrap(); //#[allow_ci]
+        assert_eq!(
+            get_uuid("D432FBB3-D2F1-4A97-9EF7-75BD81C00000"),
+            "d432fbb3-d2f1-4a97-9ef7-75bd81c00000"
+        );
+        assert_ne!(
+            get_uuid("D432FBB3-D2F1-4A97-9EF7-75BD81C0000X"),
+            "d432fbb3-d2f1-4a97-9ef7-75bd81c0000X"
+        );
+        let _ = Uuid::parse_str(&get_uuid(
+            "D432FBB3-D2F1-4A97-9EF7-75BD81C0000X",
+        ))
+        .unwrap(); //#[allow_ci]
     }
 }
