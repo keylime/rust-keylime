@@ -30,6 +30,8 @@ pub(crate) enum Error {
     Execution(Option<i32>, String),
     #[error("Number parsing error: {0}")]
     NumParse(std::num::ParseIntError),
+    #[error("Crypto error: {0}")]
+    OpenSSLError(openssl::error::ErrorStack),
 }
 
 impl From<tss_esapi::Error> for Error {
@@ -71,6 +73,12 @@ impl From<std::string::FromUtf8Error> for Error {
 impl From<std::num::ParseIntError> for Error {
     fn from(err: std::num::ParseIntError) -> Self {
         Error::NumParse(err)
+    }
+}
+
+impl From<openssl::error::ErrorStack> for Error {
+    fn from(err: openssl::error::ErrorStack) -> Self {
+        Error::OpenSSLError(err)
     }
 }
 
