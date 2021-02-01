@@ -1,11 +1,39 @@
-#[macro_use]
+#![deny(
+    nonstandard_style,
+    const_err,
+    dead_code,
+    improper_ctypes,
+    non_shorthand_field_patterns,
+    no_mangle_generic_items,
+    overflowing_literals,
+    path_statements,
+    patterns_in_fns_without_body,
+    private_in_public,
+    unconditional_recursion,
+    unused,
+    while_true,
+    missing_copy_implementations,
+    missing_debug_implementations,
+    missing_docs,
+    trivial_casts,
+    trivial_numeric_casts,
+    unused_allocation,
+    unused_comparisons,
+    unused_parens,
+    unused_extern_crates,
+    unused_import_braces,
+    unused_qualifications,
+    unused_results
+)]
+// Temporarily allow these until they can be fixed
+//  unused: there is a lot of code that's for now unused because this codebase is still in development
+//  missing_docs: there is many functions missing documentations for now
+#![allow(unused, missing_docs)]
+
 use log::*;
 
-#[macro_use]
-use futures::try_join;
 use futures::future::TryFutureExt;
-use ini;
-use pretty_env_logger;
+use futures::try_join;
 
 mod cmd_exec;
 mod common;
@@ -84,7 +112,7 @@ fn read_in_file(path: String) -> std::io::Result<String> {
     let file = File::open(path)?;
     let mut buf_reader = BufReader::new(file);
     let mut contents = String::new();
-    buf_reader.read_to_string(&mut contents)?;
+    let _ = buf_reader.read_to_string(&mut contents)?;
     Ok(contents)
 }
 
@@ -96,7 +124,6 @@ mod tests {
     fn init_logger() {
         pretty_env_logger::init();
         info!("Initialized logger for testing suite.");
-        assert!(true);
     }
 
     #[test]
