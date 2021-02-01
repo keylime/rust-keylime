@@ -30,3 +30,4 @@ tss-esapi = "4.0.10-alpha.2"
 thiserror = "1.0"
 zmq = "0.9.2"
 uuid = {version = "0.8", features = ["v4"]}
+wiremock = "0.5"

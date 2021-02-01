@@ -45,6 +45,7 @@ mod error;
 mod hash;
 mod keys_handler;
 mod quotes_handler;
+mod registrar_agent;
 mod revocation;
 mod secure_mount;
 mod tpm;
