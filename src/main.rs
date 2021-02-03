@@ -58,6 +58,10 @@ async fn main() -> Result<()> {
                 web::resource("/quotes/identity")
                     .route(web::get().to(quotes_handler::identity)),
             )
+            .service(
+                web::resource("/quotes/integrity")
+                    .route(web::get().to(quotes_handler::integrity)),
+            )
     })
     .bind(format!("{}:{}", cloudagent_ip, cloudagent_port))?
     .run()
