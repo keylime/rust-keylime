@@ -20,7 +20,7 @@ fn check_mount(secure_dir: &str) -> Result<bool> {
 
     let mount_result = String::from_utf8(output.stdout)?;
 
-    let lines: Vec<&str> = mount_result.split("\n").collect();
+    let lines: Vec<&str> = mount_result.split('\n').collect();
 
     // Check mount list for secure directory
     for line in lines {
@@ -112,7 +112,7 @@ pub(crate) fn mount() -> Result<String> {
                         .map_err(|_| Error::SecureMount)?;
 
                     // mount tmpfs with secure directory
-                    cmd_exec::run(
+                    let _ = cmd_exec::run(
                         format!(
                             "mount -t tmpfs -o size={},mode=0700 tmpfs {}",
                             secure_size, s,
