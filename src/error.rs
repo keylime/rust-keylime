@@ -34,6 +34,8 @@ pub(crate) enum Error {
     OpenSSL(openssl::error::ErrorStack),
     #[error("ZMQ error: {0}")]
     ZMQ(zmq::Error),
+    #[error("{0}")]
+    Other(String),
 }
 
 impl From<tss_esapi::Error> for Error {
