@@ -5,4 +5,5 @@ RUN dnf install -y \
 	swtpm swtpm-tools \
 	rust clippy cargo \
 	llvm llvm-devel clang pkg-config \
-	dbus-daemon czmq-devel
+	dbus-daemon czmq-devel \
+	python3
