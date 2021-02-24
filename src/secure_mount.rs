@@ -80,8 +80,7 @@ pub(crate) fn mount() -> Result<String> {
 
     // Mount the directory to file system
     let secure_dir = format!("{}/secure", common::WORK_DIR);
-    let secure_size =
-        config_get("/etc/keylime.conf", "cloud_agent", "secure_size")?;
+    let secure_size = config_get("cloud_agent", "secure_size")?;
 
     match check_mount(&secure_dir)? {
         false => {

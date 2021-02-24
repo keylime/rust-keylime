@@ -130,13 +130,8 @@ pub(crate) async fn run_revocation_service() -> Result<()> {
 
     mysock.set_subscribe(b"")?;
 
-    let revocation_ip =
-        config_get("/etc/keylime.conf", "general", "receive_revocation_ip")?;
-    let revocation_port = config_get(
-        "/etc/keylime.conf",
-        "general",
-        "receive_revocation_port",
-    )?;
+    let revocation_ip = config_get("general", "receive_revocation_ip")?;
+    let revocation_port = config_get("general", "receive_revocation_port")?;
     let endpoint = format!("{}:{}", revocation_ip, revocation_port);
 
     mysock.connect(endpoint.as_str())?;

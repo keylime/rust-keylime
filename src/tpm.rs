@@ -48,7 +48,6 @@ pub(crate) fn create_ek(
         Some(a) => a,
         None => {
             match config_get(
-                "/etc/keylime.conf",
                 "cloud_agent",
                 "tpm_encryption_alg",
             )?
