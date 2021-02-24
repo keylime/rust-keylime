@@ -71,10 +71,8 @@ async fn main() -> Result<()> {
         warn!("INSECURE: The security of Keylime is NOT linked to a hardware root of trust.");
         warn!("INSECURE: Only use Keylime in this mode for testing or debugging purposes.");
     }
-    let cloudagent_ip =
-        config_get("/etc/keylime.conf", "cloud_agent", "cloudagent_ip")?;
-    let cloudagent_port =
-        config_get("/etc/keylime.conf", "cloud_agent", "cloudagent_port")?;
+    let cloudagent_ip = config_get("cloud_agent", "cloudagent_ip")?;
+    let cloudagent_port = config_get("cloud_agent", "cloudagent_port")?;
     info!("Starting server...");
     let actix_server = HttpServer::new(move || {
         App::new()

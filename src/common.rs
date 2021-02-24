@@ -4,6 +4,7 @@
 use crate::error::{Error, Result};
 use ini::Ini;
 use log::*;
+use std::env;
 
 /*
  * Constants and static variables
@@ -12,6 +13,7 @@ pub const STUB_VTPM: bool = false;
 pub const STUB_IMA: bool = true;
 pub const TPM_DATA_PCR: usize = 16;
 pub const IMA_PCR: usize = 10;
+pub static DEFAULT_CONFIG: &str = "/etc/keylime.conf";
 pub static RSA_PUBLICKEY_EXPORTABLE: &str = "rsa placeholder";
 pub static TPM_TOOLS_PATH: &str = "/usr/local/bin/";
 pub static IMA_ML_STUB: &str = "../scripts/ima/ascii_runtime_measurements";
@@ -24,18 +26,36 @@ pub static WORK_DIR: &str = "/tmp";
 pub static MOUNT_SECURE: bool = true;
 
 /*
- * Input: config file location (e.g. /etc/keylime.conf), [section] and key
+ * Return: Returns the configuration file provided in the environment variable
+ * KEYLIME_CONFIG or defaults to /etc/keylime.conf
+ *
+ * Example call:
+ * let config = config_file_get();
+ */
+pub(crate) fn config_file_get() -> String {
+    match env::var("KEYLIME_CONFIG") {
+        Ok(cfg) => {
+            // The variable length must be larger than 0 to accept
+            if !cfg.is_empty() {
+                cfg
+            } else {
+                String::from(DEFAULT_CONFIG)
+            }
+        }
+        _ => String::from(DEFAULT_CONFIG),
+    }
+}
+
+/*
+ * Input: [section] and key
  * Return: Returns the matched key
  *
  * Example call:
- * let port = common::config_get("/etc/keylime.conf""general","cloudagent_port");
+ * let port = common::config_get("general","cloudagent_port");
  */
-pub(crate) fn config_get(
-    conf_name: &str,
-    section: &str,
-    key: &str,
-) -> Result<String> {
-    let conf = Ini::load_from_file(conf_name)?;
+pub(crate) fn config_get(section: &str, key: &str) -> Result<String> {
+    let conf_name = config_file_get();
+    let conf = Ini::load_from_file(&conf_name)?;
     let section = match conf.section(Some(section.to_owned())) {
         Some(section) => section,
         None =>
@@ -100,5 +120,18 @@ mod tests {
     fn test_config_get_parameters_exist() {
         //let result = config_get("keylime.conf", "general", "cloudagent_port");
         //assert_eq!(result, "9002");
+    }
+
+    #[test]
+    fn test_config_file_get() {
+        // Test with no environment variable
+        env::set_var("KEYLIME_CONFIG", "");
+        assert_eq!(config_file_get(), String::from("/etc/keylime.conf"));
+
+        // Test with an environment variable
+        env::set_var("KEYLIME_CONFIG", "/tmp/testing.conf");
+        assert_eq!(config_file_get(), String::from("/tmp/testing.conf"));
+        // Reset environment
+        env::set_var("KEYLIME_CONFIG", "");
     }
 }
