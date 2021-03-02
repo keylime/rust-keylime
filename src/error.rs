@@ -28,6 +28,8 @@ pub(crate) enum Error {
     TPMInUse,
     #[error("Execution error: {0:?}, {1}")]
     Execution(Option<i32>, String),
+    #[error("Error executing script {0}: {1:?}, {2}")]
+    Script(String, Option<i32>, String),
     #[error("Number parsing error: {0}")]
     NumParse(std::num::ParseIntError),
     #[error("Crypto error: {0}")]
@@ -36,6 +38,37 @@ pub(crate) enum Error {
     ZMQ(zmq::Error),
     #[error("{0}")]
     Other(String),
+}
+
+impl Error {
+    pub(crate) fn code(&self) -> Result<Option<i32>> {
+        match self {
+            Error::Execution(code, _) => Ok(code.to_owned()),
+            other => Err(Error::Other(format!(
+                "cannot get code for Error type {}",
+                other
+            ))),
+        }
+    }
+
+    pub(crate) fn stderr(&self) -> Result<String> {
+        match self {
+            Error::Execution(_, stderr) => Ok(stderr.to_owned()),
+            other => Err(Error::Other(format!(
+                "cannot get stderr for Error type {}",
+                other
+            ))),
+        }
+    }
+}
+
+impl std::convert::TryFrom<std::process::Output> for Error {
+    type Error = Error;
+    fn try_from(output: std::process::Output) -> Result<Self> {
+        let code = output.status.code();
+        let stderr = String::from_utf8(output.stderr)?;
+        Ok(Error::Execution(code, stderr))
+    }
 }
 
 impl From<tss_esapi::Error> for Error {

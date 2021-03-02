@@ -3,10 +3,10 @@ use log::*;
 
 use crate::common::config_get;
 use crate::crypto;
-use crate::error;
-use crate::error::{Error, Result};
+use crate::error::*;
 use crate::secure_mount;
 
+use std::convert::TryInto;
 use std::io::Write;
 use std::path::Path;
 use std::process::{Child, Command, Output, Stdio};
@@ -21,86 +21,28 @@ pub(crate) fn run_action(
 ) -> Result<Output> {
     let raw_json = serde_json::value::to_raw_value(&json)?;
 
-    let mut child = match Command::new(format!("{}{}", "./", script))
+    let mut child = Command::new(format!("{}{}", "./", script))
         .current_dir(dir)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        .spawn()
-    {
-        Ok(child) => child,
-        Err(e) => {
-            let msg = format!(
-                "ERROR: failed to run revocation action: {}, received: {}",
-                script, e
-            );
-            error!("{}", msg);
-            return Err(Error::Other(msg));
-        }
-    };
+        .spawn()?;
 
-    let msg = format!(
-        "ERROR: failed writing to stdin on revocation action: {:?}",
-        script
-    );
-    if let Err(e) = child
+    child
         .stdin
         .as_mut()
-        .expect(&msg)
-        .write_all(raw_json.get().as_bytes())
-    {
-        error!("{}", msg);
-        return Err(Error::Other(msg));
-    }
+        .unwrap_or_else(|| {
+            panic!( //#[allow_ci]
+            "unable to get mut ref to child stdin in {}",
+            script
+        )
+        })
+        .write_all(raw_json.get().as_bytes());
 
-    let output = match child.wait_with_output() {
-        Ok(output) => output,
-        Err(e) => {
-            let msg = format!("ERROR: failed to wait on child process while running revocation action: {:?}", script);
-            error!("{}", msg);
-            return Err(Error::Other(msg));
-        }
-    };
+    let output = child.wait_with_output()?;
 
     if !output.status.success() {
-        let code = match output.status.code() {
-            Some(code) => code.to_string(),
-            None => {
-                "no code; process likely terminated by signal".to_string()
-            }
-        };
-        let stdout = String::from_utf8(output.stdout)?;
-        let stderr = String::from_utf8(output.stderr)?;
-
-        let mut msg = format!(
-            "ERROR: revocation action {} returned with {}\n",
-            script, code
-        );
-
-        if !stdout.is_empty() {
-            msg = format!(
-                "{}{}",
-                msg,
-                format!(
-                    "ERROR: revocation action {} stdout: {:?}",
-                    script, stdout
-                )
-            );
-        }
-
-        if !stderr.is_empty() {
-            msg = format!(
-                "{}{}",
-                msg,
-                format!(
-                    "ERROR: revocation action {} stderr: {:?}",
-                    script, stderr
-                )
-            );
-        }
-
-        error!("{}", msg);
-        return Err(Error::Other(msg));
+        return Err(output.try_into()?);
     }
 
     info!(
@@ -111,9 +53,11 @@ pub(crate) fn run_action(
 }
 
 /// Runs revocation actions received from tenant post-attestation
-pub(crate) fn run_revocation_actions(
-    json: Value,
-) -> Result<Vec<Result<Output>>> {
+///
+/// An OK result indicates all actions were run successfully.
+/// Otherwise, an Error will be returned from the first action that
+/// did not run successfully.
+pub(crate) fn run_revocation_actions(json: Value) -> Result<Vec<Output>> {
     #[cfg(not(test))]
     pretty_env_logger::init();
 
@@ -139,9 +83,24 @@ pub(crate) fn run_revocation_actions(
 
         if !action_list.is_empty() {
             for action in action_list {
-                let output =
-                    run_action(&Path::new(&unzipped), action, json.clone());
-                outputs.push(output);
+                match run_action(&Path::new(&unzipped), action, json.clone())
+                {
+                    Ok(output) => {
+                        outputs.push(output);
+                    }
+                    Err(e) => {
+                        let msg = format!(
+                            "error executing revocation script {}: {:?}",
+                            action, e
+                        );
+                        error!("{}", msg);
+                        return Err(Error::Script(
+                            String::from(action),
+                            e.code()?,
+                            e.stderr()?,
+                        ));
+                    }
+                }
             }
         } else {
             warn!("WARNING: no actions found in revocation action list");
@@ -149,6 +108,7 @@ pub(crate) fn run_revocation_actions(
     } else {
         warn!("WARNING: no action_list found in secure directory");
     }
+
     Ok(outputs)
 }
 
@@ -189,14 +149,14 @@ pub(crate) async fn run_revocation_service() -> Result<()> {
         match crypto::rsa_import_pubkey(revocation_cert_path) {
             Ok(v) => v,
             Err(e) => {
-                return Err(error::Error::Configuration(String::from(
+                return Err(Error::Configuration(String::from(
                     "Can not load pubkey",
                 )))
             }
         }
     } else {
         error!("Path for the 0mq socket socket doesn't exist");
-        return Err(error::Error::Configuration(String::from(
+        return Err(Error::Configuration(String::from(
             "Path for the 0mq socket socket doesn't exist",
         )));
     };
@@ -274,9 +234,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn revocation_scripts() {
-        let json_file =
-            concat!(env!("CARGO_MANIFEST_DIR"), "/tests/unzipped/test.json");
+    fn revocation_scripts_ok() {
+        let json_file = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/unzipped/test_ok.json"
+        );
         let json_str = std::fs::read_to_string(json_file).unwrap(); //#[allow_ci]
         let json = serde_json::from_str(&json_str).unwrap(); //#[allow_ci]
 
@@ -286,12 +248,23 @@ mod tests {
         assert!(outputs.len() == 2);
 
         for output in outputs {
-            assert!(output.is_ok());
-            let output = output.unwrap(); //#[allow_ci]
             assert_eq!(
                 String::from_utf8(output.stdout).unwrap(), //#[allow_ci]
                 "there\n"
             );
         }
+    }
+
+    #[test]
+    fn revocation_scripts_err() {
+        let json_file = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/unzipped/test_err.json"
+        );
+        let json_str = std::fs::read_to_string(json_file).unwrap(); //#[allow_ci]
+        let json = serde_json::from_str(&json_str).unwrap(); //#[allow_ci]
+
+        let outputs = run_revocation_actions(json);
+        assert!(outputs.is_err());
     }
 }

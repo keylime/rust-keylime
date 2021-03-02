@@ -6,6 +6,6 @@ import json
 input_data = sys.stdin.read()
 input_json = json.loads(input_data)
 
-value = input_json.get('hello')
+value = input_json['hello']
 
 print(value)
