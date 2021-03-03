@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2021 Keylime Authors
+
 use std::str::FromStr;
 
 use crate::{common::config_get, Error as KeylimeError, Result};

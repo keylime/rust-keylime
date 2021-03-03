@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2021 Keylime Authors
+
 // use super::*;
 use openssl::hash::MessageDigest;
 use openssl::pkcs5;
