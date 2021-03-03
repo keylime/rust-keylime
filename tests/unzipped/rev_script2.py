@@ -1,4 +1,8 @@
 #!/usr/bin/python3
+'''
+SPDX-License-Identifier: Apache-2.0
+Copyright 2021 Keylime Authors
+'''
 
 import sys
 import json

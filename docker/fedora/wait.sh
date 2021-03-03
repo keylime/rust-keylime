@@ -1,4 +1,7 @@
 #!/bin/sh
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2021 Keylime Authors
+#
 # wait.sh
 
 set -e

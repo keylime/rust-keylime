@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
-
 '''
+SPDX-License-Identifier: Apache-2.0
+Copyright 2021 Keylime Authors
+
 To prevent CI failing for approved instance of banned words, add a comment: //#[allow_ci]
 '''
 

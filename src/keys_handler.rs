@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2021 Keylime Authors
+
 use actix_web::{web, HttpResponse, Responder};
 use serde::Deserialize;
 

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2021 Keylime Authors
+
 /// Code ported from Hash_Algorithms at https://github.com/keylime/keylime/blob/master/keylime/tpm/tpm_abstract.py
 
 #[derive(Debug)]
