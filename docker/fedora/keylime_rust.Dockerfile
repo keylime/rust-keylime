@@ -10,6 +10,7 @@ LABEL version="2.0.1" description="Keylime - Bootstrapping and Maintaining Trust
 
 # environment variables
 ARG BRANCH=master
+ENV KEYLIME_HOME ${HOME}/keylime
 ENV container docker
 COPY dbus-policy.conf /etc/dbus-1/system.d/
 
@@ -26,6 +27,7 @@ dbus \
 dbus-daemon \
 dbus-devel \
 dnf-plugins-core \
+efivar-devel \
 gcc \
 git \
 glib2-devel \
@@ -47,10 +49,16 @@ tpm2-abrmd \
 tpm2-tools \
 tpm2-tss \
 tpm2-tss-devel \
-uthash-devel"
+uthash-devel \
+czmq-devel"
 
 RUN dnf makecache && \
   dnf -y install $PKGS_DEPS && \
   dnf clean all && \
   rm -rf /var/cache/dnf/*
 
+# Move keylime.conf to expected location in /etc/
+WORKDIR ${KEYLIME_HOME}
+RUN git clone https://github.com/keylime/keylime.git && \
+cd keylime && \
+cp keylime.conf /etc/keylime.conf
