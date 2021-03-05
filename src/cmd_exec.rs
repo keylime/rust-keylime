@@ -77,7 +77,7 @@ pub(crate) fn run(
         info!("Time cost: {}", t_diff.as_secs());
 
         // assume the system is linux
-        println!("number tries: {:?}", number_tries);
+        info!("Number tries: {:?}", number_tries);
 
         match output.status.code() {
             Some(TPM_IO_ERROR) => {
