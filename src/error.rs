@@ -28,9 +28,9 @@ pub(crate) enum Error {
     IO(std::io::Error),
     #[error("Text decoding error: {0}")]
     Utf8(std::string::FromUtf8Error),
-    #[error("Secure Mount error")]
+    #[error("Secure Mount error: {0})")]
     #[allow(unused)]
-    SecureMount,
+    SecureMount(String),
     #[error("TPM in use")]
     TPMInUse,
     #[error("UUID error")]

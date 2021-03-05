@@ -35,8 +35,9 @@ fn check_mount(secure_dir: &str) -> Result<bool> {
 
         if tokens[2] == secure_dir {
             if tokens[0] != "tmpfs" {
-                error!("secure storage location {} already mounted as wrong file system type: {}. Unmount to continue", secure_dir, tokens[0]);
-                return Err(Error::SecureMount);
+                let msg = format!("secure storage location {} already mounted as wrong file system type: {}. Unmount to continue", secure_dir, tokens[0]);
+                error!("{}", msg);
+                return Err(Error::SecureMount(msg));
             } else {
                 info!(
                     "Using existing secure storage tmpsfs mount {}",
@@ -59,23 +60,23 @@ fn check_mount(secure_dir: &str) -> Result<bool> {
  * functions are unsafe function in Rust to use.
  */
 pub(crate) fn mount() -> Result<String> {
-    // Use /tmpfs-dev directory if MOUNT_SECURE flag is set, which doesn't
-    // mount to the system. This is for developement envrionment. No need to
-    // mount to file system.
+    // Use /tmpfs-dev directory if MOUNT_SECURE flag is not set. This
+    // is for development environment and does not mount to the system.
     if !common::MOUNT_SECURE {
+        info!("Using /tmpfs-dev (dev environment)");
         let secure_dir = format!("{}{}", common::WORK_DIR, "/tmpfs-dev");
         let secure_dir_path = Path::new(secure_dir.as_str());
         if !secure_dir_path.exists() {
-            fs::create_dir(secure_dir_path)
-                .map_err(|_| Error::SecureMount)?;
+            fs::create_dir(secure_dir_path).map_err(|e| {
+                Error::SecureMount(format!(
+                    "unable to create secure dir path: {:?}",
+                    e
+                ))
+            })?;
             info!("Directory {:?} created.", secure_dir_path);
         }
 
-        if let Some(s) = secure_dir_path.to_str() {
-            return Ok(s.to_string());
-        }
-
-        return Err(Error::SecureMount);
+        return Ok(secure_dir_path.to_str().unwrap().to_string()); //#[allow_ci] : because this is an Option
     }
 
     // Mount the directory to file system
@@ -93,12 +94,18 @@ pub(crate) fn mount() -> Result<String> {
             // directory permission is set to 448.
 
             if !secure_dir_path.exists() {
-                fs::create_dir(secure_dir_path)
-                    .map_err(|_| Error::SecureMount)?;
+                fs::create_dir(secure_dir_path).map_err(|e| {
+                    Error::SecureMount(format!(
+                        "unable to create secure dir path: {:?}",
+                        e
+                    ))
+                })?;
 
                 info!("Directory {:?} created.", secure_dir_path);
-                let metadata = fs::metadata(secure_dir_path)
-                    .map_err(|_| Error::SecureMount)?;
+                let metadata =
+                    fs::metadata(secure_dir_path).map_err(|e| {
+                        Error::SecureMount(format!("unable to get metadata for secure dir path: {:?}", e))
+                    })?;
                 metadata.permissions().set_mode(488);
             }
 
@@ -107,25 +114,41 @@ pub(crate) fn mount() -> Result<String> {
                     info!("Mounting secure storage location {} on tmpfs.", s);
 
                     // change the secure path directory owner to root
-                    common::chownroot(s.to_string())
-                        .map(|path| {
+                    if let Err(e) =
+                        common::chownroot(s.to_string()).map(|path| {
                             info!("Changed path {} owner to root.", path);
                         })
-                        .map_err(|_| Error::SecureMount)?;
+                    {
+                        return Err(Error::SecureMount(
+                                format!(
+                                    "unable to change secure path dir owner to root: received exit code {}",
+                                    e.exe_code()?.unwrap() //#[allow_ci] : because this is an Option
+                                ),
+                            ));
+                    }
 
                     // mount tmpfs with secure directory
-                    let _ = cmd_exec::run(
+                    if let Err(e) = cmd_exec::run(
                         format!(
                             "mount -t tmpfs -o size={},mode=0700 tmpfs {}",
                             secure_size, s,
                         ),
                         None,
-                    )
-                    .map_err(|_| Error::SecureMount)?;
+                    ) {
+                        return Err(Error::SecureMount(
+                            format!(
+                                "unable to mount tmpfs with secure dir: received exit code {}",
+                                e.exe_code()?.unwrap() //#[allow_ci] : because this is an Option
+                            ),
+                        ));
+                    }
 
                     Ok(s.to_string())
                 }
-                None => Err(Error::SecureMount),
+                None => Err(Error::SecureMount(
+                    "Error mounting secure storage location on tmpfs"
+                        .to_string(),
+                )),
             }
         }
 
