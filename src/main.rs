@@ -46,17 +46,17 @@ mod secure_mount;
 mod tpm;
 
 use actix_web::{web, App, HttpServer};
-use common::config_get;
+use common::*;
 use error::{Error, Result};
-use futures::future::TryFutureExt;
-use futures::try_join;
+use futures::{future::TryFutureExt, try_join};
 use log::*;
 use openssl::{hash::MessageDigest, pkey::PKey, sign::Signer};
-use std::convert::TryFrom;
-use std::fs::File;
-use std::io::BufReader;
-use std::io::Read;
-use std::path::Path;
+use std::{
+    convert::TryFrom,
+    fs::File,
+    io::{BufReader, Read},
+    path::Path,
+};
 use tss_esapi::{
     constants::algorithm::AsymmetricAlgorithm,
     interface_types::resource_handles::Hierarchy,
@@ -117,10 +117,10 @@ async fn main() -> Result<()> {
         tpm::create_ak(&mut ctx, ek_handle)?;
 
     // Gather configs
-    let cloudagent_ip = config_get("cloud_agent", "cloudagent_ip")?;
-    let cloudagent_port = config_get("cloud_agent", "cloudagent_port")?;
-    let registrar_ip = config_get("registrar", "registrar_ip")?;
-    let registrar_port = config_get("registrar", "registrar_port")?;
+    let cloudagent_ip = cloudagent_ip_get()?;
+    let cloudagent_port = cloudagent_port_get()?;
+    let registrar_ip = registrar_ip_get()?;
+    let registrar_port = registrar_port_get()?;
     let agent_uuid_config = config_get("cloud_agent", "agent_uuid")?;
     let agent_uuid = get_uuid(&agent_uuid_config);
 

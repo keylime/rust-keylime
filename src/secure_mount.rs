@@ -62,9 +62,9 @@ fn check_mount(secure_dir: &str) -> Result<bool> {
 pub(crate) fn mount() -> Result<String> {
     // Use /tmpfs-dev directory if MOUNT_SECURE flag is not set. This
     // is for development environment and does not mount to the system.
-    if !common::MOUNT_SECURE {
+    if !MOUNT_SECURE {
         info!("Using /tmpfs-dev (dev environment)");
-        let secure_dir = format!("{}{}", common::WORK_DIR, "/tmpfs-dev");
+        let secure_dir = format!("{}{}", WORK_DIR, "/tmpfs-dev");
         let secure_dir_path = Path::new(secure_dir.as_str());
         if !secure_dir_path.exists() {
             fs::create_dir(secure_dir_path).map_err(|e| {
@@ -80,7 +80,7 @@ pub(crate) fn mount() -> Result<String> {
     }
 
     // Mount the directory to file system
-    let secure_dir = format!("{}/secure", common::WORK_DIR);
+    let secure_dir = format!("{}/secure", WORK_DIR);
     let secure_size = config_get("cloud_agent", "secure_size")?;
 
     match check_mount(&secure_dir)? {
@@ -114,11 +114,9 @@ pub(crate) fn mount() -> Result<String> {
                     info!("Mounting secure storage location {} on tmpfs.", s);
 
                     // change the secure path directory owner to root
-                    if let Err(e) =
-                        common::chownroot(s.to_string()).map(|path| {
-                            info!("Changed path {} owner to root.", path);
-                        })
-                    {
+                    if let Err(e) = chownroot(s.to_string()).map(|path| {
+                        info!("Changed path {} owner to root.", path);
+                    }) {
                         return Err(Error::SecureMount(
                                 format!(
                                     "unable to change secure path dir owner to root: received exit code {}",
