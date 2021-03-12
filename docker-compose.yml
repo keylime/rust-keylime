@@ -10,7 +10,7 @@ services:
     volumes:
       - secure-volume:/var/lib/keylime
     ports:
-        - "8881:8881"
+        - "8892:8892"
     command: [
       "/usr/local/bin/keylime_verifier"
     ]
@@ -25,6 +25,7 @@ services:
       - secure-volume:/var/lib/keylime
     ports:
         - "8891:8891"
+        - "8890:8890"
     command: ["/root/wait.sh", "/var/lib/keylime/cv_ca/client-cert.crt", "keylime_registrar"]
   keylime_agent:
     build:
@@ -35,6 +36,7 @@ services:
     user: root
     volumes:
       - ./target/debug/:/rust-keylime
+    network_mode: host
     ports:
         - "9002:9002"
     environment:
