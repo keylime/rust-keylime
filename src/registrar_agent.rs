@@ -134,6 +134,9 @@ pub(crate) async fn do_register_agent(
         "http://{}:{}/agents/{}",
         registrar_ip, registrar_port, agent_uuid
     );
+
+    info!("Sending data to {}", addr);
+
     let resp = reqwest::Client::new()
         .post(&addr)
         .json(&data)

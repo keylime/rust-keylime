@@ -55,7 +55,7 @@ pub(crate) fn run(
     let _ = env_vars
         .insert("TPM_SERVER_NAME".to_string(), "localhost".to_string());
     match env_vars.get_mut("PATH") {
-        Some(v) => v.push_str(common::TPM_TOOLS_PATH),
+        Some(v) => v.push_str(TPM_TOOLS_PATH),
         None => {
             return Err(Error::Configuration(
                 "PATH environment variable doesn't exist".to_string(),
