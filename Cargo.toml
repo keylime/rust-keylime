@@ -31,3 +31,7 @@ thiserror = "1.0"
 zmq = "0.9.2"
 uuid = {version = "0.8", features = ["v4"]}
 wiremock = "0.5"
+
+[features]
+# this should change to dev-dependencies when we have integration testing
+testing = []
