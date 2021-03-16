@@ -63,7 +63,7 @@ pub(crate) fn mount() -> Result<String> {
     // Use /tmpfs-dev directory if MOUNT_SECURE flag is not set. This
     // is for development environment and does not mount to the system.
     if !MOUNT_SECURE {
-        info!("Using /tmpfs-dev (dev environment)");
+        warn!("Using /tmpfs-dev (dev environment)");
         let secure_dir = format!("{}{}", WORK_DIR, "/tmpfs-dev");
         let secure_dir_path = Path::new(secure_dir.as_str());
         if !secure_dir_path.exists() {
