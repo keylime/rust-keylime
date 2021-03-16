@@ -135,6 +135,8 @@ async fn main() -> Result<()> {
             &ak_tpm2b_pub,
         )
         .await?;
+        info!("SUCCESS: agent registered");
+
         let key = tpm::activate_credential(
             &mut ctx, keyblob, ak_handle, ek_handle,
         )?;
@@ -152,6 +154,7 @@ async fn main() -> Result<()> {
             &auth_tag,
         )
         .await?;
+        info!("SUCCESS: agent activated");
     }
 
     let actix_server = HttpServer::new(move || {

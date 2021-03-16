@@ -2,13 +2,21 @@
 // Copyright 2021 Keylime Authors
 
 use thiserror::Error;
+use tss_esapi::{
+    constants::response_code::Tss2ResponseCodeKind,
+    Error::{Tss2Error, WrapperError},
+};
 
 #[derive(Error, Debug)]
 pub(crate) enum Error {
     #[error("HttpServer error: {0}")]
     ActixWeb(actix_web::Error),
-    #[error("TPM Error: {0}")]
-    TPM(tss_esapi::Error),
+    #[error("TPM Error: {err:?}, kind: {kind:?}, {message}")]
+    TPM {
+        err: tss_esapi::Error,
+        kind: Option<Tss2ResponseCodeKind>,
+        message: String,
+    },
     #[error("Invalid request")]
     #[allow(unused)]
     InvalidRequest,
@@ -92,7 +100,14 @@ impl std::convert::TryFrom<std::process::Output> for Error {
 
 impl From<tss_esapi::Error> for Error {
     fn from(err: tss_esapi::Error) -> Self {
-        Error::TPM(err)
+        let kind = if let Tss2Error(tss2_rc) = err {
+            tss2_rc.kind()
+        } else {
+            None
+        };
+        let message = format!("{}", err);
+
+        Error::TPM { err, kind, message }
     }
 }
 

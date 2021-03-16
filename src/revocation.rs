@@ -155,9 +155,13 @@ pub(crate) async fn run_revocation_service() -> Result<()> {
             }
         }
     } else {
-        error!("Path for the 0mq socket socket doesn't exist");
-        return Err(Error::Configuration(String::from(
-            "Path for the 0mq socket socket doesn't exist",
+        error!(
+            "Path {} for the 0mq socket doesn't exist",
+            revocation_cert_path
+        );
+        return Err(Error::Configuration(format!(
+            "Path {} for the 0mq socket socket doesn't exist",
+            revocation_cert_path,
         )));
     };
 
