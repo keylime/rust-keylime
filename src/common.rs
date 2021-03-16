@@ -23,7 +23,11 @@ pub static KEY: &str = "secret";
 pub static WORK_DIR: &str = "/tmp";
 
 // Secure mount of tpmfs (False is generally used for development environments)
+#[cfg(not(feature = "testing"))]
 pub static MOUNT_SECURE: bool = true;
+
+#[cfg(feature = "testing")]
+pub static MOUNT_SECURE: bool = false;
 
 /*
  * Return: Returns the configuration file provided in the environment variable
