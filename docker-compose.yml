@@ -37,8 +37,6 @@ services:
     volumes:
       - ./target/debug/:/rust-keylime
     network_mode: host
-    ports:
-        - "9002:9002"
     environment:
     - TCTI=tabrmd:bus_type=system
     command:
