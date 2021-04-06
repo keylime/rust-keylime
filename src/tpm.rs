@@ -7,19 +7,16 @@ use std::str::FromStr;
 use crate::{common::config_get, Error as KeylimeError, Result};
 
 use tss_esapi::{
-    abstraction::{ak, ek},
-    constants::{
-        algorithm::{
-            AsymmetricAlgorithm, Cipher, HashingAlgorithm,
-            RsaSignatureScheme, SignatureScheme,
-        },
-        types::session::SessionType,
+    abstraction::{ak, cipher::Cipher, ek, DefaultKey},
+    attributes::session::SessionAttributesBuilder,
+    constants::session_type::SessionType,
+    handles::{AuthHandle, KeyHandle, SessionHandle},
+    interface_types::{
+        algorithm::{AsymmetricAlgorithm, HashingAlgorithm, SignatureScheme},
+        session_handles::AuthSession,
     },
-    handles::{AuthHandle, KeyHandle},
-    session::Session,
     structures::{Digest, EncryptedSecret, IDObject, Name},
     tss2_esys::{Tss2_MU_TPM2B_PUBLIC_Marshal, TPM2B_PUBLIC},
-    utils::TpmaSessionBuilder,
     Context, Tcti,
 };
 
@@ -73,7 +70,7 @@ pub(crate) fn create_ek(
     };
 
     // Retrieve EK handle, EK pub cert, and TPM pub object
-    let handle = ek::create_ek_object(context, alg)?;
+    let handle = ek::create_ek_object(context, alg, DefaultKey)?;
     let cert = ek::retrieve_ek_pubcert(context, alg)?;
     let (tpm_pub, _, _) = context.read_public(handle)?;
 
@@ -150,8 +147,9 @@ pub(crate) fn create_ak(
         ctx,
         handle,
         HashingAlgorithm::Sha256,
-        SignatureScheme::Rsa(RsaSignatureScheme::RsaSsa),
+        SignatureScheme::RsaSsa,
         None,
+        DefaultKey,
     )?;
     let ak_tpm2b_pub = ak.out_public;
     let tpm2_pub_vec = tpm_pub_to_vec(ak_tpm2b_pub);
@@ -198,17 +196,20 @@ fn parse_cred_and_secret(
 fn create_empty_session(
     ctx: &mut Context,
     ses_type: SessionType,
-) -> Result<Session> {
+) -> Result<AuthSession> {
     let session = ctx.start_auth_session(
         None,
         None,
         None,
         ses_type,
-        Cipher::aes_128_cfb(),
+        Cipher::aes_128_cfb().try_into()?,
         HashingAlgorithm::Sha256,
     )?;
-    let session_attr = TpmaSessionBuilder::new().build();
-    ctx.tr_sess_set_attributes(session.unwrap(), session_attr)?; //#[allow_ci]
+    let (ses_attrs, ses_attrs_mask) = SessionAttributesBuilder::new()
+        .with_encrypt(true)
+        .with_decrypt(true)
+        .build();
+    ctx.tr_sess_set_attributes(session.unwrap(), ses_attrs, ses_attrs_mask)?; //#[allow_ci]
     Ok(session.unwrap()) //#[allow_ci]
 }
 
@@ -225,7 +226,7 @@ pub(crate) fn activate_credential(
     // We authorize ses2 with PolicySecret(ENDORSEMENT) as per PolicyA
     let _ = ctx.execute_with_nullauth_session(|context| {
         context.policy_secret(
-            ek_auth,
+            ek_auth.try_into()?,
             AuthHandle::Endorsement,
             Default::default(),
             Default::default(),
@@ -235,7 +236,7 @@ pub(crate) fn activate_credential(
     })?;
 
     ctx.execute_with_sessions(
-        (Some(Session::Password), Some(ek_auth), None),
+        (Some(AuthSession::Password), Some(ek_auth), None),
         |context| context.activate_credential(ak, ek, credential, secret),
     )
     .map_err(KeylimeError::from)
