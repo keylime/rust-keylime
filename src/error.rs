@@ -21,38 +21,38 @@ pub(crate) enum Error {
     #[allow(unused)]
     InvalidRequest,
     #[error("Configuration loading error: {0}")]
-    Ini(ini::ini::Error),
+    Ini(#[from] ini::ini::Error),
     #[error("Configuration error: {0}")]
     Configuration(String),
     #[error("Reqwest error: {0}")]
-    Reqwest(reqwest::Error),
+    Reqwest(#[from] reqwest::Error),
     #[error("Registrar error: received {code} from {addr}")]
     Registrar { addr: String, code: u16 },
     #[error("Serialization/deserialization error: {0}")]
-    Serde(serde_json::Error),
+    Serde(#[from] serde_json::Error),
     #[error("Permission error")]
     Permission,
     #[error("IO error: {0}")]
-    Io(std::io::Error),
+    Io(#[from] std::io::Error),
     #[error("Text decoding error: {0}")]
-    Utf8(std::string::FromUtf8Error),
+    Utf8(#[from] std::string::FromUtf8Error),
     #[error("Secure Mount error: {0})")]
     #[allow(unused)]
     SecureMount(String),
     #[error("TPM in use")]
     TpmInUse,
     #[error("UUID error")]
-    Uuid(uuid::Error),
+    Uuid(#[from] uuid::Error),
     #[error("Execution error: {0:?}, {1}")]
     Execution(Option<i32>, String),
     #[error("Error executing script {0}: {1:?}, {2}")]
     Script(String, Option<i32>, String),
     #[error("Number parsing error: {0}")]
-    NumParse(std::num::ParseIntError),
+    NumParse(#[from] std::num::ParseIntError),
     #[error("Crypto error: {0}")]
-    Crypto(openssl::error::ErrorStack),
+    Crypto(#[from] openssl::error::ErrorStack),
     #[error("ZMQ error: {0}")]
-    Zmq(zmq::Error),
+    Zmq(#[from] zmq::Error),
     #[error("{0}")]
     Other(String),
 }
@@ -108,66 +108,6 @@ impl From<tss_esapi::Error> for Error {
         let message = format!("{}", err);
 
         Error::Tpm { err, kind, message }
-    }
-}
-
-impl From<actix_web::Error> for Error {
-    fn from(err: actix_web::Error) -> Self {
-        Error::ActixWeb(err)
-    }
-}
-
-impl From<ini::ini::Error> for Error {
-    fn from(err: ini::ini::Error) -> Self {
-        Error::Ini(err)
-    }
-}
-
-impl From<serde_json::Error> for Error {
-    fn from(err: serde_json::Error) -> Self {
-        Error::Serde(err)
-    }
-}
-
-impl From<std::io::Error> for Error {
-    fn from(err: std::io::Error) -> Self {
-        Error::Io(err)
-    }
-}
-
-impl From<std::string::FromUtf8Error> for Error {
-    fn from(err: std::string::FromUtf8Error) -> Self {
-        Error::Utf8(err)
-    }
-}
-
-impl From<std::num::ParseIntError> for Error {
-    fn from(err: std::num::ParseIntError) -> Self {
-        Error::NumParse(err)
-    }
-}
-
-impl From<openssl::error::ErrorStack> for Error {
-    fn from(err: openssl::error::ErrorStack) -> Self {
-        Error::Crypto(err)
-    }
-}
-
-impl From<zmq::Error> for Error {
-    fn from(err: zmq::Error) -> Self {
-        Error::ZMQ(err)
-    }
-}
-
-impl From<reqwest::Error> for Error {
-    fn from(err: reqwest::Error) -> Self {
-        Error::Reqwest(err)
-    }
-}
-
-impl From<uuid::Error> for Error {
-    fn from(err: uuid::Error) -> Self {
-        Error::Uuid(err)
     }
 }
 
