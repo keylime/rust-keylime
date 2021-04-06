@@ -83,7 +83,7 @@ pub(crate) fn run(
             Some(TPM_IO_ERROR) => {
                 number_tries += 1;
                 if number_tries >= MAX_TRY {
-                    return Err(Error::TPMInUse);
+                    return Err(Error::TpmInUse);
                 }
 
                 info!(

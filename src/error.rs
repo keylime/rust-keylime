@@ -12,7 +12,7 @@ pub(crate) enum Error {
     #[error("HttpServer error: {0}")]
     ActixWeb(actix_web::Error),
     #[error("TPM Error: {err:?}, kind: {kind:?}, {message}")]
-    TPM {
+    Tpm {
         err: tss_esapi::Error,
         kind: Option<Tss2ResponseCodeKind>,
         message: String,
@@ -33,16 +33,16 @@ pub(crate) enum Error {
     #[error("Permission error")]
     Permission,
     #[error("IO error: {0}")]
-    IO(std::io::Error),
+    Io(std::io::Error),
     #[error("Text decoding error: {0}")]
     Utf8(std::string::FromUtf8Error),
     #[error("Secure Mount error: {0})")]
     #[allow(unused)]
     SecureMount(String),
     #[error("TPM in use")]
-    TPMInUse,
+    TpmInUse,
     #[error("UUID error")]
-    UUID(uuid::Error),
+    Uuid(uuid::Error),
     #[error("Execution error: {0:?}, {1}")]
     Execution(Option<i32>, String),
     #[error("Error executing script {0}: {1:?}, {2}")]
@@ -50,9 +50,9 @@ pub(crate) enum Error {
     #[error("Number parsing error: {0}")]
     NumParse(std::num::ParseIntError),
     #[error("Crypto error: {0}")]
-    OpenSSL(openssl::error::ErrorStack),
+    Crypto(openssl::error::ErrorStack),
     #[error("ZMQ error: {0}")]
-    ZMQ(zmq::Error),
+    Zmq(zmq::Error),
     #[error("{0}")]
     Other(String),
 }
@@ -107,7 +107,7 @@ impl From<tss_esapi::Error> for Error {
         };
         let message = format!("{}", err);
 
-        Error::TPM { err, kind, message }
+        Error::Tpm { err, kind, message }
     }
 }
 
@@ -131,7 +131,7 @@ impl From<serde_json::Error> for Error {
 
 impl From<std::io::Error> for Error {
     fn from(err: std::io::Error) -> Self {
-        Error::IO(err)
+        Error::Io(err)
     }
 }
 
@@ -149,7 +149,7 @@ impl From<std::num::ParseIntError> for Error {
 
 impl From<openssl::error::ErrorStack> for Error {
     fn from(err: openssl::error::ErrorStack) -> Self {
-        Error::OpenSSL(err)
+        Error::Crypto(err)
     }
 }
 
@@ -167,7 +167,7 @@ impl From<reqwest::Error> for Error {
 
 impl From<uuid::Error> for Error {
     fn from(err: uuid::Error) -> Self {
-        Error::UUID(err)
+        Error::Uuid(err)
     }
 }
 
