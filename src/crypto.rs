@@ -4,7 +4,7 @@
 // use super::*;
 use openssl::hash::MessageDigest;
 use openssl::pkcs5;
-use openssl::pkey::{PKey, Private, Public};
+use openssl::pkey::{PKey, PKeyRef, Private, Public};
 use openssl::rsa::{Padding, Rsa};
 use openssl::sign::{Signer, Verifier};
 use std::fs::File;
@@ -127,17 +127,16 @@ fn to_hex_string(bytes: Vec<u8>) -> String {
 }
 
 /*
- * Input: Local rsa cert, and remote message and signature
+ * Input: Trusted public key, and remote message and signature
  * Output: true if they are verified, otherwise false
  *
  * Verify a remote message and signature against a local rsa cert
  */
-pub(crate) fn rsa_verify(
-    rsa_key: Rsa<Public>,
+pub(crate) fn asym_verify(
+    keypair: &PKeyRef<Public>,
     message: &str,
     signature: &str,
 ) -> Result<bool> {
-    let keypair = PKey::from_rsa(rsa_key)?;
     let mut verifier = Verifier::new(MessageDigest::sha256(), &keypair)?;
     verifier.update(message.as_bytes())?;
     Ok(verifier.verify(&signature.as_bytes())?)
