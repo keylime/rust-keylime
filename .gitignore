@@ -2,3 +2,4 @@
 **/*.rs.bk
 .auditing-0
 tpmdata.json
+/Cargo.lock

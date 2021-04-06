@@ -58,12 +58,10 @@ use std::{
     path::Path,
 };
 use tss_esapi::{
-    constants::algorithm::AsymmetricAlgorithm,
-    interface_types::resource_handles::Hierarchy,
-    utils::{
-        self, AsymSchemeUnion, ObjectAttributes, Tpm2BPublicBuilder,
-        TpmsEccParmsBuilder,
+    interface_types::{
+        algorithm::AsymmetricAlgorithm, resource_handles::Hierarchy,
     },
+    utils,
 };
 use uuid::Uuid;
 
