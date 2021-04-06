@@ -14,6 +14,7 @@ use std::io::Write;
 use std::path::Path;
 use std::process::{Child, Command, Output, Stdio};
 
+use openssl::pkey::PKey;
 use serde_json::Value;
 
 /// Runs a script with a json value as argument (used for revocation actions)
@@ -164,6 +165,7 @@ pub(crate) async fn run_revocation_service() -> Result<()> {
             revocation_cert_path,
         )));
     };
+    let cert_key = PKey::from_rsa(cert_key)?;
 
     info!("Waiting for revocation messages on 0mq {}", endpoint);
 
@@ -205,8 +207,7 @@ pub(crate) async fn run_revocation_service() -> Result<()> {
         };
 
         // Verify the message and signature with our key
-        let mut verified =
-            crypto::rsa_verify(cert_key.clone(), message, signature);
+        let mut verified = crypto::asym_verify(&cert_key, message, signature);
 
         match verified {
             Ok(true) => {
