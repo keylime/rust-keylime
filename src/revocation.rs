@@ -165,7 +165,6 @@ pub(crate) async fn run_revocation_service() -> Result<()> {
             revocation_cert_path,
         )));
     };
-    let cert_key = PKey::from_rsa(cert_key)?;
 
     info!("Waiting for revocation messages on 0mq {}", endpoint);
 
