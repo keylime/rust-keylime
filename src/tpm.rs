@@ -6,17 +6,25 @@ use std::str::FromStr;
 
 use crate::{common::config_get, Error as KeylimeError, Result};
 
+use openssl::{
+    pkey::{Id, PKeyRef, Public},
+    rsa::Rsa,
+};
+
 use tss_esapi::{
     abstraction::{ak, cipher::Cipher, ek, DefaultKey},
     attributes::session::SessionAttributesBuilder,
-    constants::session_type::SessionType,
+    constants::{session_type::SessionType, tss::TPM2_ALG_NULL},
     handles::{AuthHandle, KeyHandle, SessionHandle},
     interface_types::{
         algorithm::{AsymmetricAlgorithm, HashingAlgorithm, SignatureScheme},
         session_handles::AuthSession,
     },
-    structures::{Digest, EncryptedSecret, IDObject, Name},
-    tss2_esys::{Tss2_MU_TPM2B_PUBLIC_Marshal, TPM2B_PUBLIC},
+    structures::{Digest, DigestValues, EncryptedSecret, IDObject, Name},
+    tss2_esys::{
+        Tss2_MU_TPM2B_PUBLIC_Marshal, TPM2B_PUBLIC, TPMS_SCHEME_HASH,
+        TPMT_SIG_SCHEME, TPMU_SIG_SCHEME,
+    },
     Context, Tcti,
 };
 
@@ -240,6 +248,71 @@ pub(crate) fn activate_credential(
         |context| context.activate_credential(ak, ek, credential, secret),
     )
     .map_err(KeylimeError::from)
+}
+
+// Returns TSS struct corresponding to an algorithm specified as a string, ex.
+// the string from the keylime.conf file.
+pub(crate) fn get_hash_alg(alg: String) -> Result<HashingAlgorithm> {
+    match alg.as_str() {
+        "Sha256" => Ok(HashingAlgorithm::Sha256),
+        other => {
+            Err(KeylimeError::Other(format!("{:?} not implemented", alg)))
+        }
+    }
+}
+
+#[derive(Debug)]
+pub(crate) enum TpmSigScheme {
+    AlgNull,
+}
+
+impl Default for TpmSigScheme {
+    fn default() -> Self {
+        TpmSigScheme::AlgNull
+    }
+}
+
+// Returns TSS struct corresponding to a signature scheme.
+pub(crate) fn get_sig_scheme(
+    scheme: TpmSigScheme,
+) -> Result<TPMT_SIG_SCHEME> {
+    match scheme {
+        // The TPM2_ALG_NULL sig scheme can be filled out with placeholder data
+        // in the details field.
+        TpmSigScheme::AlgNull => Ok(TPMT_SIG_SCHEME {
+            scheme: TPM2_ALG_NULL,
+            details: TPMU_SIG_SCHEME {
+                any: TPMS_SCHEME_HASH {
+                    hashAlg: TPM2_ALG_NULL,
+                },
+            },
+        }),
+        _ => Err(KeylimeError::Other(format!(
+            "The signature scheme {:?} is not implemented",
+            scheme
+        ))),
+    }
+}
+
+// Takes a public PKey and returns a DigestValue of it.
+pub(crate) fn pubkey_to_tpm_digest(
+    pubkey: &PKeyRef<Public>,
+    algo: HashingAlgorithm,
+) -> Result<DigestValues> {
+    match pubkey.id() {
+        Id::RSA => {
+            let mut keydigest = DigestValues::new();
+            keydigest
+                .set(algo, pubkey.rsa()?.public_key_to_pem()?.try_into()?);
+            Ok(keydigest)
+        }
+        id => {
+            return Err(KeylimeError::Other(format!(
+            "Converting to digest value for key type {:?} is not yet implemented",
+            id
+            )));
+        }
+    }
 }
 
 #[test]
