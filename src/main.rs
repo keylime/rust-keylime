@@ -155,12 +155,10 @@ async fn main() -> Result<()> {
         info!("SUCCESS: agent activated");
     }
 
-    let actix_server = HttpServer::new(move || {
+    // Service identity quote requests from the tenant
+    let identity_server = HttpServer::new(move || {
         App::new()
-            .service(
-                web::resource("/keys/verify")
-                    .route(web::get().to(keys_handler::verify)),
-            )
+            .data(crate::crypto::rsa_generate(2048).unwrap()) //#[allow_ci]
             .service(
                 web::resource("/keys/ukey")
                     .route(web::post().to(keys_handler::ukey)),
@@ -169,6 +167,16 @@ async fn main() -> Result<()> {
                 web::resource("/quotes/identity")
                     .route(web::get().to(quotes_handler::identity)),
             )
+    })
+    .bind(format!("{}:{}", cloudagent_ip, cloudagent_port))?
+    .run()
+    .map_err(|x| x.into());
+
+    // Service integrity quote requests from the verifier
+    let integrity_server = HttpServer::new(move || {
+        App::new()
+            .data(crate::crypto::rsa_generate(2048).unwrap()) //#[allow_ci]
+            // todo: add vkey request service
             .service(
                 web::resource("/quotes/integrity")
                     .route(web::get().to(quotes_handler::integrity)),
@@ -177,8 +185,25 @@ async fn main() -> Result<()> {
     .bind(format!("{}:{}", cloudagent_ip, cloudagent_port))?
     .run()
     .map_err(|x| x.into());
+
+    // Other
+    let verify_server = HttpServer::new(move || {
+        App::new().service(
+            web::resource("/keys/verify")
+                .route(web::get().to(keys_handler::verify)),
+        )
+    })
+    .bind(format!("{}:{}", cloudagent_ip, cloudagent_port))?
+    .run()
+    .map_err(|x| x.into());
+
     info!("Listening on http://{}:{}", cloudagent_ip, cloudagent_port);
-    try_join!(actix_server, revocation::run_revocation_service())?;
+    try_join!(
+        identity_server,
+        integrity_server,
+        verify_server,
+        revocation::run_revocation_service()
+    )?;
     Ok(())
 }
 
