@@ -4,14 +4,14 @@
 // use super::*;
 use openssl::hash::MessageDigest;
 use openssl::pkcs5;
-use openssl::pkey::{PKey, PKeyRef, Private, Public};
+use openssl::pkey::{Id, PKey, PKeyRef, Private, Public};
 use openssl::rsa::{Padding, Rsa};
 use openssl::sign::{Signer, Verifier};
 use std::fs::File;
 use std::io::Read;
 use std::string::String;
 
-use crate::Result;
+use crate::{Error, Result};
 
 /*
  * Inputs: secret key
@@ -41,21 +41,45 @@ pub(crate) fn do_hmac(
  */
 pub(crate) fn rsa_import_pubkey(
     input_key_path: String,
-) -> Result<Rsa<Public>> {
+) -> Result<PKey<Public>> {
     let mut key_buffer = vec![0; 1];
     let mut input_key = File::open(input_key_path)?;
     let _ = input_key.read_to_end(&mut key_buffer)?;
-    Ok(Rsa::public_key_from_pem(&key_buffer)?)
+    PKey::from_rsa(Rsa::public_key_from_pem(&key_buffer)?)
+        .map_err(Error::Crypto)
 }
 
-/*
- * Input: desired key size
- * Output: OpenSSL RSA key object
- *
- * Randomly generate a callable OpenSSL RSA key object with desired key size.
- */
-pub(crate) fn rsa_generate(key_size: u32) -> Result<Rsa<Private>> {
-    Ok(Rsa::generate(key_size)?)
+pub(crate) fn rsa_generate(key_size: u32) -> Result<PKey<Private>> {
+    PKey::from_rsa(Rsa::generate(key_size)?).map_err(Error::Crypto)
+}
+
+pub(crate) fn rsa_generate_pair(
+    key_size: u32,
+) -> Result<(PKey<Public>, PKey<Private>)> {
+    let private = rsa_generate(key_size)?;
+    let public = pkey_pub_from_priv(private.clone())?;
+    Ok((public, private))
+}
+
+pub(crate) fn pkey_pub_from_priv(
+    privkey: PKey<Private>,
+) -> Result<PKey<Public>> {
+    match privkey.id() {
+        Id::RSA => {
+            let rsa = Rsa::from_public_components(
+                privkey.rsa()?.n().to_owned()?,
+                privkey.rsa()?.e().to_owned()?,
+            )
+            .map_err(Error::Crypto)?;
+            PKey::from_rsa(rsa).map_err(Error::Crypto)
+        }
+        id => {
+            return Err(Error::Other(format!(
+                "pkey_pub_from_priv not yet implemented for key type {:?}",
+                id
+            )));
+        }
+    }
 }
 
 /*
