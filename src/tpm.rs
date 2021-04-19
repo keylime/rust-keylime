@@ -3,11 +3,16 @@
 
 use std::convert::{TryFrom, TryInto};
 use std::str::FromStr;
+use std::sync::Mutex;
 
-use crate::{common::config_get, Error as KeylimeError, Result};
+use crate::{
+    common::config_get, quotes_handler::Quote, Error as KeylimeError,
+    QuoteData, Result,
+};
 
+use actix_web::web;
 use openssl::{
-    pkey::{Id, PKeyRef, Public},
+    pkey::{Id, PKey, PKeyRef, Public},
     rsa::Rsa,
 };
 
@@ -15,12 +20,15 @@ use tss_esapi::{
     abstraction::{ak, cipher::Cipher, ek, DefaultKey},
     attributes::session::SessionAttributesBuilder,
     constants::{session_type::SessionType, tss::TPM2_ALG_NULL},
-    handles::{AuthHandle, KeyHandle, SessionHandle},
+    handles::{AuthHandle, KeyHandle, PcrHandle, SessionHandle},
     interface_types::{
         algorithm::{AsymmetricAlgorithm, HashingAlgorithm, SignatureScheme},
         session_handles::AuthSession,
     },
-    structures::{Digest, DigestValues, EncryptedSecret, IDObject, Name},
+    structures::{
+        pcr_selection_list::PcrSelectionListBuilder, Data, Digest,
+        DigestValues, EncryptedSecret, IDObject, Name, PcrSlot,
+    },
     tss2_esys::{
         Tss2_MU_TPM2B_PUBLIC_Marshal, TPM2B_PUBLIC, TPMS_SCHEME_HASH,
         TPMT_SIG_SCHEME, TPMU_SIG_SCHEME,
@@ -315,6 +323,126 @@ pub(crate) fn pubkey_to_tpm_digest(
     }
 }
 
+// reads a mask in the form of some hex value, ex. "0x408000",
+// translating bits that are set to pcrs to include in the list.
+//
+// todo: do we know that on the tenant / verifier side, the LSB
+// is used to indicate PCR0 and MSB used to indicate pcr23?
+//
+// todo: would this method be useful in the TSS ESAPI?
+pub(crate) fn read_mask(mask: &str) -> Result<Vec<PcrSlot>> {
+    let mut pcrs = Vec::new();
+
+    let num = u32::from_str_radix(mask.trim_start_matches("0x"), 16)?;
+
+    // check which bits are set
+    for i in 0..32 {
+        if num & (1 << i) != 0 {
+            pcrs.push(
+                match i {
+                    0 => PcrSlot::Slot0,
+                    1 => PcrSlot::Slot1,
+                    2 => PcrSlot::Slot2,
+                    3 => PcrSlot::Slot3,
+                    4 => PcrSlot::Slot4,
+                    5 => PcrSlot::Slot5,
+                    6 => PcrSlot::Slot6,
+                    7 => PcrSlot::Slot7,
+                    8 => PcrSlot::Slot8,
+                    9 => PcrSlot::Slot9,
+                    10 => PcrSlot::Slot10,
+                    11 => PcrSlot::Slot11,
+                    12 => PcrSlot::Slot12,
+                    13 => PcrSlot::Slot13,
+                    14 => PcrSlot::Slot14,
+                    15 => PcrSlot::Slot15,
+                    16 => PcrSlot::Slot16,
+                    17 => PcrSlot::Slot17,
+                    18 => PcrSlot::Slot18,
+                    19 => PcrSlot::Slot19,
+                    20 => PcrSlot::Slot20,
+                    21 => PcrSlot::Slot21,
+                    22 => PcrSlot::Slot22,
+                    23 => PcrSlot::Slot23,
+                    bit => return Err(KeylimeError::Other(format!("malformed mask in integrity quote: only pcrs 0-23 can be included, but mask included pcr {:?}", bit))),
+                },
+            )
+        }
+    }
+
+    Ok(pcrs)
+}
+
+pub(crate) fn quote<'a>(
+    nonce: &[u8],
+    mask: Option<&str>,
+    data: web::Data<QuoteData>,
+) -> Result<Quote<'a>> {
+    let hash_alg = get_hash_alg(config_get("cloud_agent", "tpm_hash_alg")?)?;
+
+    let (key, _) = &data.keypair;
+    let nk_digest = pubkey_to_tpm_digest(&key, hash_alg)?;
+
+    // lock TPM context and regenerate AIK handle
+    let mut context = data.tpmcontext.lock().unwrap(); //#[allow_ci] (see https://github.com/rust-lang-nursery/failure/issues/192)
+    let (ek_handle, _, _) =
+        create_ek(&mut context, Some(AsymmetricAlgorithm::Rsa))?;
+    let (ak_handle, _, _) = create_ak(&mut context, ek_handle)?;
+
+    // TODO: does the pcr need to be reset before it is extended? (seems like no?)
+    // ex: https://github.com/keylime/keylime/blob/master/keylime/tpm/tpm_main.py#L953
+
+    // extend digest of our public key into pcr16
+    context.pcr_extend(PcrHandle::Pcr16, nk_digest);
+
+    // translate mask to vec of pcrs
+    let mut pcrs = match mask {
+        Some(m) => read_mask(m)?,
+        None => Vec::new(),
+    };
+
+    // add pcr16 if it isn't in the vec already
+    if !pcrs.iter().any(|&pcr| pcr == PcrSlot::Slot16) {
+        let mut slot16 = vec![PcrSlot::Slot16];
+        pcrs.append(&mut slot16);
+    }
+
+    // reader's note: this hashing algorithm further specifies the PCR;
+    // it is NOT re-hashing the contents of the PCR.
+    let pcrlist = PcrSelectionListBuilder::new()
+        .with_selection(hash_alg, &pcrs)
+        .build();
+
+    let sig_scheme = get_sig_scheme(TpmSigScheme::default())?;
+
+    let (attestation, sig) = context.quote(
+        ak_handle,
+        &nonce.try_into()?,
+        sig_scheme,
+        pcrlist.clone(),
+    )?;
+
+    // this is the pcrblob expected by the verifier and tenant
+    let (_, pcrs_read, pcr_data) = context.pcr_read(&pcrlist)?;
+    if pcrs_read != pcrlist {
+        return Err(KeylimeError::Other(format!(
+            "could not read all pcrs; requested: {:?}, read: {:?}",
+            pcrlist, pcrs_read
+        )));
+    }
+
+    // todo: is PEM the expected encoding?
+    let nk_pub = key.public_key_to_pem()?;
+
+    Ok(Quote {
+        // todo: can we turn the TSS ESAPI's TPM2B_ATTEST, Signature, and PcrData into &[u8]?
+        quote: "placeholderquote".as_bytes(), // this will be TPM2B_ATTEST as &[u8]
+        signature: "placeholdersig".as_bytes(), // this will be Signature as &[u8]
+        pcrblob: "placeholderpcrblob".as_bytes(), // this will be pcr_data as &[u8]
+        nk_pub: "placeholderkey".as_bytes(), // this will be nk_pub as &[u8]
+    })
+}
+
 #[test]
 fn ek_from_hex() {
     assert_eq!(
@@ -333,4 +461,59 @@ fn ek_from_hex() {
     assert!(ek_from_hex_str("0xqqq").is_err());
     assert!(ek_from_hex_str("0xdeadbeefqwerty").is_err());
     assert!(ek_from_hex_str("0x0x0x").is_err());
+}
+
+#[test]
+fn mask() {
+    assert_eq!(read_mask("0x0").unwrap(), vec![]); //#[allow_ci]
+
+    assert_eq!(read_mask("0x1").unwrap(), vec![PcrSlot::Slot0]); //#[allow_ci]
+
+    assert_eq!(read_mask("0x2").unwrap(), vec![PcrSlot::Slot1]); //#[allow_ci]
+
+    assert_eq!(read_mask("0x4").unwrap(), vec![PcrSlot::Slot2]); //#[allow_ci]
+
+    assert_eq!(
+        read_mask("0x5").unwrap(), //#[allow_ci]
+        vec![PcrSlot::Slot0, PcrSlot::Slot2]
+    );
+
+    assert_eq!(
+        read_mask("0x6").unwrap(), //#[allow_ci]
+        vec![PcrSlot::Slot1, PcrSlot::Slot2]
+    );
+
+    assert_eq!(read_mask("0x800000").unwrap(), vec![PcrSlot::Slot23]); //#[allow_ci]
+
+    assert_eq!(
+        read_mask("0xffffff").unwrap(), //#[allow_ci]
+        vec![
+            PcrSlot::Slot0,
+            PcrSlot::Slot1,
+            PcrSlot::Slot2,
+            PcrSlot::Slot3,
+            PcrSlot::Slot4,
+            PcrSlot::Slot5,
+            PcrSlot::Slot6,
+            PcrSlot::Slot7,
+            PcrSlot::Slot8,
+            PcrSlot::Slot9,
+            PcrSlot::Slot10,
+            PcrSlot::Slot11,
+            PcrSlot::Slot12,
+            PcrSlot::Slot13,
+            PcrSlot::Slot14,
+            PcrSlot::Slot15,
+            PcrSlot::Slot16,
+            PcrSlot::Slot17,
+            PcrSlot::Slot18,
+            PcrSlot::Slot19,
+            PcrSlot::Slot20,
+            PcrSlot::Slot21,
+            PcrSlot::Slot22,
+            PcrSlot::Slot23
+        ]
+    );
+
+    assert!(read_mask("0x1ffffff").is_err());
 }

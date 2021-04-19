@@ -5,7 +5,7 @@ use reqwest::header::*;
 use serde::{Deserialize, Serialize};
 use serde_json::Number;
 
-fn serialize_as_base64<S>(
+pub(crate) fn serialize_as_base64<S>(
     bytes: &[u8],
     serializer: S,
 ) -> Result<S::Ok, S::Error>

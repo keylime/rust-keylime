@@ -1,8 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2021 Keylime Authors
 
+use crate::{
+    error::Error, registrar_agent::serialize_as_base64, tpm, QuoteData,
+};
 use actix_web::{web, HttpResponse, Responder};
-use serde::Deserialize;
+use log::*;
+use openssl::pkey::{PKey, Private, Public};
+use serde::{Deserialize, Serialize};
+use std::{convert::TryInto, sync::Mutex};
+use tss_esapi::Context;
 
 #[derive(Deserialize)]
 pub struct Ident {
@@ -17,7 +24,28 @@ pub struct Integ {
     partial: String,
 }
 
-pub async fn identity(param: web::Query<Ident>) -> impl Responder {
+// TODO: Is this how things will be parsed on the tenant side?
+// Reference: https://github.com/keylime/keylime/blob/master/keylime/tpm/tpm_main.py#L1014
+// TODO: What is the PCR blob supposed to be?
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Quote<'a> {
+    #[serde(serialize_with = "serialize_as_base64")]
+    pub quote: &'a [u8],
+    #[serde(serialize_with = "serialize_as_base64")]
+    pub signature: &'a [u8],
+    #[serde(serialize_with = "serialize_as_base64")]
+    pub pcrblob: &'a [u8],
+    #[serde(serialize_with = "serialize_as_base64")]
+    pub nk_pub: &'a [u8],
+}
+
+// This is a Quote request from the tenant, which does not check
+// integrity measurement. It should return this data:
+// { QuoteAIK(nonce, 16:H(NK_pub)), NK_pub }
+pub async fn identity(
+    param: web::Query<Ident>,
+    data: web::Data<QuoteData>,
+) -> impl Responder {
     // nonce can only be in alphanumerical format
     if !param.nonce.chars().all(char::is_alphanumeric) {
         HttpResponse::BadRequest()
@@ -27,17 +55,23 @@ pub async fn identity(param: web::Query<Ident>) -> impl Responder {
             ))
             .await
     } else {
-        // place holder for identity quote code
-        HttpResponse::Ok()
-            .body(format!(
-                "Calling Identity Quote with nonce: {}",
-                param.nonce
-            ))
-            .await
+        info!("Calling Identity Quote with nonce: {}", param.nonce);
+
+        let idquote = tpm::quote(param.nonce.as_bytes(), None, data)?;
+
+        HttpResponse::Ok().json(idquote).await
     }
 }
 
-pub async fn integrity(param: web::Query<Integ>) -> impl Responder {
+// This is a Quote request from the cloud verifier, which will check
+// integrity measurement. The PCRs inclued in the Quote will be specified
+// by the mask, vmask. It should return this data:
+// { QuoteAIK(nonce, 16:H(NK_pub), xi:yi), NK_pub}
+// where xi:yi are additional PCRs to be included in the quote.
+pub async fn integrity(
+    param: web::Query<Integ>,
+    data: web::Data<QuoteData>,
+) -> impl Responder {
     // nonce, mask, vmask can only be in alphanumerical format
     if !param.nonce.chars().all(char::is_alphanumeric) {
         HttpResponse::BadRequest()
@@ -61,12 +95,12 @@ pub async fn integrity(param: web::Query<Integ>) -> impl Responder {
             ))
             .await
     } else {
-        // place holder for integrity quote code
-        HttpResponse::Ok()
-            .body(format!(
-                "Calling Integrity Quote with nonce: {}",
-                param.nonce
-            ))
-            .await
+        info!("Calling Itegrity Quote with nonce: {}", param.nonce);
+
+        // todo: mask or vmask?
+        let integrityquote =
+            tpm::quote(param.nonce.as_bytes(), Some(&param.mask), data)?;
+
+        HttpResponse::Ok().json(integrityquote).await
     }
 }

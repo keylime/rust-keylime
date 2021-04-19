@@ -111,4 +111,6 @@ impl From<tss_esapi::Error> for Error {
     }
 }
 
+impl actix_web::ResponseError for Error {}
+
 pub(crate) type Result<T> = std::result::Result<T, Error>;
