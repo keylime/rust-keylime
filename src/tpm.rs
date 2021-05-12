@@ -20,7 +20,9 @@ use tss_esapi::{
         algorithm::{AsymmetricAlgorithm, HashingAlgorithm, SignatureScheme},
         session_handles::AuthSession,
     },
-    structures::{Digest, DigestValues, EncryptedSecret, IDObject, Name},
+    structures::{
+        Digest, DigestValues, EncryptedSecret, IDObject, Name, PcrSlot,
+    },
     tss2_esys::{
         Tss2_MU_TPM2B_PUBLIC_Marshal, TPM2B_PUBLIC, TPMS_SCHEME_HASH,
         TPMT_SIG_SCHEME, TPMU_SIG_SCHEME,
@@ -338,6 +340,62 @@ pub(crate) fn pubkey_to_tpm_digest(
     }
 }
 
+// Reads a mask in the form of some hex value, ex. "0x408000",
+// translating bits that are set to pcrs to include in the list.
+//
+// The masks are sent from the tenant and cloud verifier to indicate
+// the PCRs to include in a Quote. The LSB in the mask corresponds to
+// PCR0. For example, keylime.conf specifies PCRs 15 and 22 under
+// [tenant][tpm_policy]. As a bit mask, this would be represented as
+// 0b010000001000000000000000, which translates to 0x408000.
+//
+// The mask is a string because it is sent as a string from the tenant
+// and verifier. The output from this function can be used to call a
+// Quote from the TSS ESAPI.
+//
+pub(crate) fn read_mask(mask: &str) -> Result<Vec<PcrSlot>> {
+    let mut pcrs = Vec::new();
+
+    let num = u32::from_str_radix(mask.trim_start_matches("0x"), 16)?;
+
+    // check which bits are set
+    for i in 0..32 {
+        if num & (1 << i) != 0 {
+            pcrs.push(
+                match i {
+                    0 => PcrSlot::Slot0,
+                    1 => PcrSlot::Slot1,
+                    2 => PcrSlot::Slot2,
+                    3 => PcrSlot::Slot3,
+                    4 => PcrSlot::Slot4,
+                    5 => PcrSlot::Slot5,
+                    6 => PcrSlot::Slot6,
+                    7 => PcrSlot::Slot7,
+                    8 => PcrSlot::Slot8,
+                    9 => PcrSlot::Slot9,
+                    10 => PcrSlot::Slot10,
+                    11 => PcrSlot::Slot11,
+                    12 => PcrSlot::Slot12,
+                    13 => PcrSlot::Slot13,
+                    14 => PcrSlot::Slot14,
+                    15 => PcrSlot::Slot15,
+                    16 => PcrSlot::Slot16,
+                    17 => PcrSlot::Slot17,
+                    18 => PcrSlot::Slot18,
+                    19 => PcrSlot::Slot19,
+                    20 => PcrSlot::Slot20,
+                    21 => PcrSlot::Slot21,
+                    22 => PcrSlot::Slot22,
+                    23 => PcrSlot::Slot23,
+                    bit => return Err(KeylimeError::Other(format!("malformed mask in integrity quote: only pcrs 0-23 can be included, but mask included pcr {:?}", bit))),
+                },
+            )
+        }
+    }
+
+    Ok(pcrs)
+}
+
 #[ignore] // This will only work as an integration test because it needs keylime.conf
 #[test]
 fn pubkey_to_digest() {
@@ -367,4 +425,59 @@ fn ek_from_hex() {
     assert!(ek_from_hex_str("0xqqq").is_err());
     assert!(ek_from_hex_str("0xdeadbeefqwerty").is_err());
     assert!(ek_from_hex_str("0x0x0x").is_err());
+}
+
+#[test]
+fn mask() {
+    assert_eq!(read_mask("0x0").unwrap(), vec![]); //#[allow_ci]
+
+    assert_eq!(read_mask("0x1").unwrap(), vec![PcrSlot::Slot0]); //#[allow_ci]
+
+    assert_eq!(read_mask("0x2").unwrap(), vec![PcrSlot::Slot1]); //#[allow_ci]
+
+    assert_eq!(read_mask("0x4").unwrap(), vec![PcrSlot::Slot2]); //#[allow_ci]
+
+    assert_eq!(
+        read_mask("0x5").unwrap(), //#[allow_ci]
+        vec![PcrSlot::Slot0, PcrSlot::Slot2]
+    );
+
+    assert_eq!(
+        read_mask("0x6").unwrap(), //#[allow_ci]
+        vec![PcrSlot::Slot1, PcrSlot::Slot2]
+    );
+
+    assert_eq!(read_mask("0x800000").unwrap(), vec![PcrSlot::Slot23]); //#[allow_ci]
+
+    assert_eq!(
+        read_mask("0xffffff").unwrap(), //#[allow_ci]
+        vec![
+            PcrSlot::Slot0,
+            PcrSlot::Slot1,
+            PcrSlot::Slot2,
+            PcrSlot::Slot3,
+            PcrSlot::Slot4,
+            PcrSlot::Slot5,
+            PcrSlot::Slot6,
+            PcrSlot::Slot7,
+            PcrSlot::Slot8,
+            PcrSlot::Slot9,
+            PcrSlot::Slot10,
+            PcrSlot::Slot11,
+            PcrSlot::Slot12,
+            PcrSlot::Slot13,
+            PcrSlot::Slot14,
+            PcrSlot::Slot15,
+            PcrSlot::Slot16,
+            PcrSlot::Slot17,
+            PcrSlot::Slot18,
+            PcrSlot::Slot19,
+            PcrSlot::Slot20,
+            PcrSlot::Slot21,
+            PcrSlot::Slot22,
+            PcrSlot::Slot23
+        ]
+    );
+
+    assert!(read_mask("0x1ffffff").is_err());
 }
