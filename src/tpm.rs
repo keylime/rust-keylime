@@ -243,18 +243,24 @@ pub(crate) fn activate_credential(
         )
     })?;
 
-    ctx.execute_with_sessions(
-        (Some(AuthSession::Password), Some(ek_auth), None),
-        |context| context.activate_credential(ak, ek, credential, secret),
-    )
-    .map_err(KeylimeError::from)
+    let resp = ctx
+        .execute_with_sessions(
+            (Some(AuthSession::Password), Some(ek_auth), None),
+            |context| context.activate_credential(ak, ek, credential, secret),
+        )
+        .map_err(KeylimeError::from);
+
+    ctx.flush_context(ak.into())?;
+    ctx.flush_context(ek.into())?;
+
+    resp
 }
 
 // Returns TSS struct corresponding to an algorithm specified as a string, ex.
 // the string from the keylime.conf file.
 pub(crate) fn get_hash_alg(alg: String) -> Result<HashingAlgorithm> {
     match alg.as_str() {
-        "Sha256" => Ok(HashingAlgorithm::Sha256),
+        "sha256" => Ok(HashingAlgorithm::Sha256),
         other => {
             Err(KeylimeError::Other(format!("{:?} not implemented", alg)))
         }
@@ -302,17 +308,45 @@ pub(crate) fn pubkey_to_tpm_digest(
     match pubkey.id() {
         Id::RSA => {
             let mut keydigest = DigestValues::new();
-            keydigest
-                .set(algo, pubkey.rsa()?.public_key_to_pem()?.try_into()?);
-            Ok(keydigest)
+            let rsa = pubkey.rsa()?.public_key_to_pem()?;
+
+            match algo {
+                HashingAlgorithm::Sha256 => {
+                    let mut hasher = openssl::sha::Sha256::new();
+                    hasher.update(&rsa);
+                    let hash = hasher.finish();
+                    let mut hashvec = Vec::new();
+                    hashvec.extend(&hash);
+
+                    let digest = Digest::try_from(hashvec)?;
+                    keydigest.set(algo, digest);
+                    Ok(keydigest)
+                }
+                other_alg => {
+                    return Err(KeylimeError::Other(format!(
+                        "Algorithm {:?} not yet supported in pubkey to digest conversion", other_alg   
+                    )));
+                }
+            }
         }
-        id => {
+        other_id => {
             return Err(KeylimeError::Other(format!(
             "Converting to digest value for key type {:?} is not yet implemented",
-            id
+            other_id
             )));
         }
     }
+}
+
+#[ignore] // This will only work as an integration test because it needs keylime.conf
+#[test]
+fn pubkey_to_digest() {
+    let (key, _) = crate::crypto::rsa_generate_pair(2048).unwrap(); //#[allow_ci]
+    let hash_alg =
+        get_hash_alg(config_get("cloud_agent", "tpm_hash_alg").unwrap()) //#[allow_ci]
+            .unwrap(); //#[allow_ci]
+
+    let digest = pubkey_to_tpm_digest(&key, hash_alg).unwrap(); //#[allow_ci]
 }
 
 #[test]
