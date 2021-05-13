@@ -50,22 +50,35 @@ use common::*;
 use error::{Error, Result};
 use futures::{future::TryFutureExt, try_join};
 use log::*;
-use openssl::{hash::MessageDigest, pkey::PKey, sign::Signer};
+use openssl::{
+    hash::MessageDigest,
+    pkey::{PKey, Private, Public},
+    sign::Signer,
+};
 use std::{
     convert::TryFrom,
     fs::File,
     io::{BufReader, Read},
     path::Path,
+    sync::Mutex,
 };
 use tss_esapi::{
     interface_types::{
         algorithm::AsymmetricAlgorithm, resource_handles::Hierarchy,
     },
-    utils,
+    utils, Context,
 };
 use uuid::Uuid;
 
 static NOTFOUND: &[u8] = b"Not Found";
+
+// This data is passed in to the actix httpserver threads that
+// handle quotes.
+#[derive(Debug)]
+pub struct QuoteData {
+    tpmcontext: Mutex<Context>,
+    keypair: (PKey<Public>, PKey<Private>),
+}
 
 fn get_uuid(agent_uuid_config: &str) -> String {
     match agent_uuid_config {
@@ -155,8 +168,23 @@ async fn main() -> Result<()> {
         info!("SUCCESS: agent activated");
     }
 
+    // Generate key pair for secure transmission of u, v keys. The u, v
+    // keys are two halves of the key used to decrypt the workload after
+    // the Identity and Integrity Quotes sent by the agent are validated
+    // by the Tenant and Cloud Verifier, respectively.
+    //
+    // Since we store the u key in memory, discarding this key, which
+    // safeguards u and v keys in transit, is not part of the threat model.
+    let nk_keypair = crypto::rsa_generate_pair(2048)?;
+
+    let quotedata = web::Data::new(QuoteData {
+        tpmcontext: Mutex::new(ctx),
+        keypair: nk_keypair,
+    });
+
     let actix_server = HttpServer::new(move || {
         App::new()
+            .app_data(quotedata.clone())
             .service(
                 web::resource("/keys/verify")
                     .route(web::get().to(keys_handler::verify)),
