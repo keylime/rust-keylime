@@ -21,12 +21,16 @@ use tss_esapi::{
         session_handles::AuthSession,
     },
     structures::{
-        Digest, DigestValues, EncryptedSecret, IDObject, Name, PcrSlot,
+        Digest, DigestValues, EncryptedSecret, IDObject, Name,
+        PcrSelectionList, PcrSlot,
     },
     tss2_esys::{
-        Tss2_MU_TPM2B_PUBLIC_Marshal, TPM2B_PUBLIC, TPMS_SCHEME_HASH,
+        Tss2_MU_TPM2B_DIGEST_Marshal, Tss2_MU_TPM2B_PUBLIC_Marshal,
+        Tss2_MU_TPMT_SIGNATURE_Marshal, TPM2B_PUBLIC, TPML_DIGEST,
+        TPML_PCR_SELECTION, TPMS_SCHEME_HASH, TPMT_SIGNATURE,
         TPMT_SIG_SCHEME, TPMU_SIG_SCHEME,
     },
+    utils::{PcrData, Signature},
     Context, Tcti,
 };
 
@@ -83,26 +87,85 @@ pub(crate) fn create_ek(
     let handle = ek::create_ek_object(context, alg, DefaultKey)?;
     let cert = ek::retrieve_ek_pubcert(context, alg)?;
     let (tpm_pub, _, _) = context.read_public(handle)?;
-
-    // Convert TPM pub object to Vec<u8>
-    // See: https://github.com/fedora-iot/clevis-pin-tpm2/blob/master/src/tpm_objects.rs#L64
-    let mut offset = 0u64;
-    let mut tpm_pub_vec = Vec::with_capacity((tpm_pub.size + 4) as usize);
-
-    unsafe {
-        let res = Tss2_MU_TPM2B_PUBLIC_Marshal(
-            &tpm_pub,
-            tpm_pub_vec.as_mut_ptr(),
-            tpm_pub_vec.capacity() as u64,
-            &mut offset,
-        );
-        if res != 0 {
-            panic!("out of memory or invalid data received from TPM"); //#[allow_ci]
-        }
-        tpm_pub_vec.set_len(offset as usize);
-    }
+    let tpm_pub_vec = pub_to_vec(tpm_pub);
 
     Ok((handle, cert, tpm_pub_vec))
+}
+
+// Multiple TPM objects need to be marshaled for Quoting. This macro will
+// create the appropriate functions when called below. The macro is intended
+// to help with any future similar marshaling functions.
+macro_rules! create_marshal_fn {
+    ($func:ident, $tpmobj:ty, $marshal:ident) => {
+        fn $func(t: $tpmobj) -> Vec<u8> {
+            let mut offset = 0u64;
+            let size = std::mem::size_of::<$tpmobj>();
+
+            let mut tpm_vec = Vec::with_capacity(size);
+            unsafe {
+                let res = $marshal(
+                    &t,
+                    tpm_vec.as_mut_ptr(),
+                    tpm_vec.capacity() as u64,
+                    &mut offset,
+                );
+                if res != 0 {
+                    panic!("out of memory or invalid data from TPM"); //#[allow_ci]
+                }
+
+                // offset is a buffer, so after marshaling function is called it holds the
+                // number of bytes written to the vector
+                tpm_vec.set_len(offset as usize);
+            }
+
+            tpm_vec
+        }
+    };
+}
+
+// These marshaling functions use the macro above and are based on this format:
+// https://github.com/fedora-iot/clevis-pin-tpm2/blob/main/src/tpm_objects.rs#L64
+// ... and on these marshaling functions:
+// https://github.com/parallaxsecond/rust-tss-esapi/blob/main/tss-esapi-sys/src/ \
+// bindings/x86_64-unknown-linux-gnu.rs#L16010
+//
+// Functions can be created using the following form:
+// create_marshal_fn!(name_of_function_to_create, struct_to_be_marshaled, marshaling_function);
+//
+create_marshal_fn!(pub_to_vec, TPM2B_PUBLIC, Tss2_MU_TPM2B_PUBLIC_Marshal);
+create_marshal_fn!(
+    sig_to_vec,
+    TPMT_SIGNATURE,
+    Tss2_MU_TPMT_SIGNATURE_Marshal
+);
+
+// Recreate how tpm2-tools creates the PCR out file. Roughly, this is a
+// TPML_PCR_SELECTION + number of TPML_DIGESTS + TPML_DIGESTs.
+// Reference:
+// https://github.com/tpm2-software/tpm2-tools/blob/master/tools/tpm2_quote.c#L47-L91
+//
+// Note: tpm2-tools does not use its own documented marshaling functions for this output,
+// so the below code recreates the idiosyncratic format tpm2-tools expects. The lengths
+// of the vectors were determined by introspection into running tpm2-tools code. This is
+// not ideal, and we should aim to move away from it if possible.
+pub(crate) fn pcrdata_to_vec(
+    selection_list: PcrSelectionList,
+    pcrdata: PcrData,
+) -> Vec<u8> {
+    let pcrsel: TPML_PCR_SELECTION = selection_list.into();
+    let pcrsel_vec: [u8; 132] = unsafe { std::mem::transmute(pcrsel) };
+
+    let digest: TPML_DIGEST = pcrdata.into();
+    let digest_vec: [u8; 532] = unsafe { std::mem::transmute(digest) };
+
+    let mut data_vec =
+        Vec::with_capacity(pcrsel_vec.len() + 4 + digest_vec.len());
+
+    data_vec.extend(&pcrsel_vec);
+    data_vec.extend(&1u32.to_le_bytes());
+    data_vec.extend(&digest_vec);
+
+    data_vec
 }
 
 /* Converts a hex value in the form of a string (ex. from keylime.conf's
@@ -117,29 +180,6 @@ pub(crate) fn create_ek(
 pub(crate) fn ek_from_hex_str(val: &str) -> Result<KeyHandle> {
     let val = val.trim_start_matches("0x");
     Ok(KeyHandle::from(u32::from_str_radix(val, 16)?))
-}
-
-/* Convert TPM pub object to Vec<u8>
- * https://github.com/fedora-iot/clevis-pin-tpm2/blob/master/src/tpm_objects.rs#L64
-*/
-pub(crate) fn tpm_pub_to_vec(tpm_pub: TPM2B_PUBLIC) -> Vec<u8> {
-    let mut offset = 0u64;
-    let mut tpm_pub_vec = Vec::with_capacity((tpm_pub.size + 4) as usize);
-
-    unsafe {
-        let res = Tss2_MU_TPM2B_PUBLIC_Marshal(
-            &tpm_pub,
-            tpm_pub_vec.as_mut_ptr(),
-            tpm_pub_vec.capacity() as u64,
-            &mut offset,
-        );
-        if res != 0 {
-            panic!("out of memory or invalid data received from TPM"); //#[allow_ci]
-        }
-        tpm_pub_vec.set_len(offset as usize);
-    }
-
-    tpm_pub_vec
 }
 
 /* Creates AK and returns a tuple of its handle, name, and tpm2b_public as a vector.
@@ -162,7 +202,7 @@ pub(crate) fn create_ak(
         DefaultKey,
     )?;
     let ak_tpm2b_pub = ak.out_public;
-    let tpm2_pub_vec = tpm_pub_to_vec(ak_tpm2b_pub);
+    let tpm2_pub_vec = pub_to_vec(ak_tpm2b_pub);
     let ak_handle =
         ak::load_ak(ctx, handle, None, ak.out_private, ak.out_public)?;
     let (_, name, _) = ctx.read_public(ak_handle)?;
