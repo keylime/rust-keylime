@@ -2,7 +2,7 @@
 // Copyright 2021 Keylime Authors
 
 use actix_web::{web, HttpResponse, Responder};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 #[derive(Deserialize)]
 pub struct Ident {
@@ -15,6 +15,29 @@ pub struct Integ {
     mask: String,
     vmask: String,
     partial: String,
+}
+
+// The fields of this struct and their default values must
+// match what is expected by Python Keylime.
+#[derive(Serialize, Debug)]
+pub(crate) struct KeylimeIdQuote {
+    pub quote: String, // 'r' + quote + sig + pcrblob
+    pub hash_alg: String,
+    pub enc_alg: String,
+    pub sign_alg: String,
+    pub pubkey: String,
+}
+
+impl Default for KeylimeIdQuote {
+    fn default() -> Self {
+        KeylimeIdQuote {
+            quote: String::from("r"),
+            hash_alg: String::from("sha256"),
+            enc_alg: String::from("rsa"),
+            sign_alg: String::from("rsassa"),
+            pubkey: String::from(""),
+        }
+    }
 }
 
 pub async fn identity(param: web::Query<Ident>) -> impl Responder {

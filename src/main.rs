@@ -63,6 +63,7 @@ use std::{
     sync::Mutex,
 };
 use tss_esapi::{
+    handles::KeyHandle,
     interface_types::{
         algorithm::AsymmetricAlgorithm, resource_handles::Hierarchy,
     },
@@ -77,7 +78,9 @@ static NOTFOUND: &[u8] = b"Not Found";
 #[derive(Debug)]
 pub struct QuoteData {
     tpmcontext: Mutex<Context>,
-    keypair: (PKey<Public>, PKey<Private>),
+    priv_key: PKey<Private>,
+    pub_key: PKey<Public>,
+    ak_handle: KeyHandle,
 }
 
 fn get_uuid(agent_uuid_config: &str) -> String {
@@ -175,11 +178,13 @@ async fn main() -> Result<()> {
     //
     // Since we store the u key in memory, discarding this key, which
     // safeguards u and v keys in transit, is not part of the threat model.
-    let nk_keypair = crypto::rsa_generate_pair(2048)?;
+    let (nk_pub, nk_priv) = crypto::rsa_generate_pair(2048)?;
 
     let quotedata = web::Data::new(QuoteData {
         tpmcontext: Mutex::new(ctx),
-        keypair: nk_keypair,
+        priv_key: nk_priv,
+        pub_key: nk_pub,
+        ak_handle,
     });
 
     let actix_server = HttpServer::new(move || {
