@@ -2,33 +2,40 @@
 // Copyright 2021 Keylime Authors
 
 use std::convert::{TryFrom, TryInto};
+use std::io::prelude::*;
 use std::str::FromStr;
 
-use crate::{common::config_get, Error as KeylimeError, Result};
+use crate::{
+    common::config_get, quotes_handler::KeylimeIdQuote,
+    Error as KeylimeError, QuoteData, Result,
+};
+
+use actix_web::web::Data;
 
 use openssl::{
     pkey::{Id, PKeyRef, Public},
     rsa::Rsa,
 };
 
+use flate2::{write::ZlibEncoder, Compression};
+
 use tss_esapi::{
     abstraction::{ak, cipher::Cipher, ek, DefaultKey},
     attributes::session::SessionAttributesBuilder,
     constants::{session_type::SessionType, tss::TPM2_ALG_NULL},
-    handles::{AuthHandle, KeyHandle, SessionHandle},
+    handles::{AuthHandle, KeyHandle, PcrHandle, SessionHandle},
     interface_types::{
         algorithm::{AsymmetricAlgorithm, HashingAlgorithm, SignatureScheme},
         session_handles::AuthSession,
     },
     structures::{
         Digest, DigestValues, EncryptedSecret, IDObject, Name,
-        PcrSelectionList, PcrSlot,
+        PcrSelectionList, PcrSelectionListBuilder, PcrSlot,
     },
     tss2_esys::{
-        Tss2_MU_TPM2B_DIGEST_Marshal, Tss2_MU_TPM2B_PUBLIC_Marshal,
-        Tss2_MU_TPMT_SIGNATURE_Marshal, TPM2B_PUBLIC, TPML_DIGEST,
-        TPML_PCR_SELECTION, TPMS_SCHEME_HASH, TPMT_SIGNATURE,
-        TPMT_SIG_SCHEME, TPMU_SIG_SCHEME,
+        Tss2_MU_TPM2B_PUBLIC_Marshal, Tss2_MU_TPMT_SIGNATURE_Marshal,
+        TPM2B_ATTEST, TPM2B_PUBLIC, TPML_DIGEST, TPML_PCR_SELECTION,
+        TPMS_SCHEME_HASH, TPMT_SIGNATURE, TPMT_SIG_SCHEME, TPMU_SIG_SCHEME,
     },
     utils::{PcrData, Signature},
     Context, Tcti,
@@ -434,6 +441,157 @@ pub(crate) fn read_mask(mask: &str) -> Result<Vec<PcrSlot>> {
     }
 
     Ok(pcrs)
+}
+
+// This encodes a quote string as input to Python Keylime's quote checking functionality.
+// The quote, signature, and pcr blob are concatenated with ':' separators. To match the
+// expected format, the quote, signature, and pcr blob must be individually compressed
+// with zlib at the default compression level and then base64 encoded before concatenation.
+//
+// Reference:
+// https://github.com/keylime/keylime/blob/2dd9e5c968f33bf77110092af9268d13db1806c6 \
+// /keylime/tpm/tpm_main.py#L964-L975
+pub(crate) fn encode_quote_string(
+    att: TPM2B_ATTEST,
+    sig: Signature,
+    pcrs_read: PcrSelectionList,
+    pcr_data: PcrData,
+) -> Result<String> {
+    // marshal structs to vec in expected formats. these formats are
+    // dictated by tpm2_tools.
+    let att_vec = &att.attestationData[0..att.size as usize];
+    let sig_vec = sig_to_vec(sig.try_into()?);
+    let pcr_vec = pcrdata_to_vec(pcrs_read, pcr_data);
+
+    // zlib compression
+    let mut att_comp = ZlibEncoder::new(Vec::new(), Compression::default());
+    att_comp.write_all(&att_vec);
+    let att_comp_finished = att_comp.finish()?;
+
+    let mut sig_comp = ZlibEncoder::new(Vec::new(), Compression::default());
+    sig_comp.write_all(&sig_vec);
+    let sig_comp_finished = sig_comp.finish()?;
+
+    let mut pcr_comp = ZlibEncoder::new(Vec::new(), Compression::default());
+    pcr_comp.write_all(&pcr_vec);
+    let pcr_comp_finished = pcr_comp.finish()?;
+
+    // base64 encoding
+    let att_str = base64::encode(att_comp_finished);
+    let sig_str = base64::encode(sig_comp_finished);
+    let pcr_str = base64::encode(pcr_comp_finished);
+
+    // create concatenated string
+    let mut quote = String::new();
+    quote.push_str(&att_str);
+    quote.push(':');
+    quote.push_str(&sig_str);
+    quote.push(':');
+    quote.push_str(&pcr_str);
+
+    Ok(quote)
+}
+
+// This function extends Pcr16 with the digest, then creates a PcrList
+// from the given mask and pcr16.
+pub(crate) fn build_pcr_list(
+    context: &mut Context,
+    hash_alg: HashingAlgorithm,
+    digest: DigestValues,
+    mask: Option<&str>,
+) -> Result<PcrSelectionList> {
+    // extend digest into pcr16
+    context.execute_with_nullauth_session(|ctx| {
+        ctx.pcr_reset(PcrHandle::Pcr16)?;
+        ctx.pcr_extend(PcrHandle::Pcr16, digest)
+    })?;
+
+    // translate mask to vec of pcrs
+    let mut pcrs = match mask {
+        Some(m) => read_mask(m)?,
+        None => Vec::new(),
+    };
+
+    // add pcr16 if it isn't in the vec already
+    if !pcrs.iter().any(|&pcr| pcr == PcrSlot::Slot16) {
+        let mut slot16 = vec![PcrSlot::Slot16];
+        pcrs.append(&mut slot16);
+    }
+
+    let pcrlist = PcrSelectionListBuilder::new()
+        .with_selection(hash_alg, &pcrs)
+        .build();
+
+    Ok(pcrlist)
+}
+
+// The pcr blob corresponds to the pcr out file that records the list of PCR values,
+// specified by tpm2tools, ex. 'tpm2_quote ... -o <pcrfilename>'. Read more here:
+// https://github.com/tpm2-software/tpm2-tools/blob/master/man/tpm2_quote.1.md
+//
+// It is required by Python Keylime's check_quote functionality. For how the quote is
+// checked, see:
+// https://github.com/keylime/keylime/blob/2dd9e5c968f33bf77110092af9268d13db1806c6/ \
+// keylime/tpm/tpm_main.py#L990
+//
+// For how the quote is created, see:
+// https://github.com/keylime/keylime/blob/2dd9e5c968f33bf77110092af9268d13db1806c6/ \
+// keylime/tpm/tpm_main.py#L965
+//
+pub(crate) fn make_pcr_blob(
+    context: &mut Context,
+    pcrlist: PcrSelectionList,
+) -> Result<(PcrSelectionList, PcrData)> {
+    let (_, pcrs_read, pcr_data) =
+        context.execute_without_session(|ctx| ctx.pcr_read(&pcrlist))?;
+    if pcrs_read != pcrlist {
+        return Err(KeylimeError::Other(format!(
+            "could not read all pcrs; requested: {:?}, read: {:?}",
+            pcrlist, pcrs_read
+        )));
+    }
+
+    Ok((pcrs_read, pcr_data))
+}
+
+// Despite the return type, this function is used for both Identity and
+// Integrity Quotes. The Quote handler will add additional information to
+// turn an Identity Quote into an Integrity Quote.
+pub(crate) fn quote(
+    nonce: &[u8],
+    mask: Option<&str>,
+    data: Data<QuoteData>,
+) -> Result<KeylimeIdQuote> {
+    let hash_alg = get_hash_alg(config_get("cloud_agent", "tpm_hash_alg")?)?;
+    let nk_digest = pubkey_to_tpm_digest(&data.pub_key, hash_alg)?;
+
+    // must unwrap here due to lock mechanism
+    // https://github.com/rust-lang-nursery/failure/issues/192
+    let mut context = data.tpmcontext.lock().unwrap(); //#[allow_ci]
+
+    let pcrlist = build_pcr_list(&mut context, hash_alg, nk_digest, mask)?;
+    let sig_scheme = get_sig_scheme(TpmSigScheme::default())?;
+
+    // create quote
+    let (attestation, sig) =
+        context.execute_with_nullauth_session(|ctx| {
+            ctx.quote(
+                data.ak_handle,
+                &nonce.try_into()?,
+                sig_scheme,
+                pcrlist.clone(),
+            )
+        })?;
+
+    // TSS ESAPI quote does not create pcr blob, so create it separately
+    let (pcrs_read, pcr_data) = make_pcr_blob(&mut context, pcrlist)?;
+
+    let quote = encode_quote_string(attestation, sig, pcrs_read, pcr_data)?;
+
+    let mut keylimequote = KeylimeIdQuote::default();
+    keylimequote.quote.push_str(&quote);
+
+    Ok(keylimequote)
 }
 
 #[ignore] // This will only work as an integration test because it needs keylime.conf
