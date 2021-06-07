@@ -57,6 +57,8 @@ pub(crate) enum Error {
     Other(String),
 }
 
+impl actix_web::ResponseError for Error {}
+
 impl Error {
     pub(crate) fn http_code(&self) -> Result<u16> {
         match self {
