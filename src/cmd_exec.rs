@@ -150,7 +150,7 @@ mod tests {
                 let command = "getrandom -size 8 -out foo.out".to_string();
                 run(command, None);
                 let p = Path::new("foo.out");
-                assert_eq!(p.exists(), true);
+                assert!(p.exists());
                 let _ = fs::remove_file("foo.out");
             }
             false => {}

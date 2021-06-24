@@ -161,9 +161,9 @@ pub(crate) fn asym_verify(
     message: &str,
     signature: &str,
 ) -> Result<bool> {
-    let mut verifier = Verifier::new(MessageDigest::sha256(), &keypair)?;
+    let mut verifier = Verifier::new(MessageDigest::sha256(), keypair)?;
     verifier.update(message.as_bytes())?;
-    Ok(verifier.verify(&signature.as_bytes())?)
+    Ok(verifier.verify(signature.as_bytes())?)
 }
 
 // Unit Testing

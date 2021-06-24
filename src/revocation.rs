@@ -87,8 +87,7 @@ pub(crate) fn run_revocation_actions(json: Value) -> Result<Vec<Output>> {
 
         if !action_list.is_empty() {
             for action in action_list {
-                match run_action(&Path::new(&unzipped), action, json.clone())
-                {
+                match run_action(Path::new(&unzipped), action, json.clone()) {
                     Ok(output) => {
                         outputs.push(output);
                     }

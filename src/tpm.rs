@@ -465,7 +465,7 @@ pub(crate) fn encode_quote_string(
 
     // zlib compression
     let mut att_comp = ZlibEncoder::new(Vec::new(), Compression::default());
-    att_comp.write_all(&att_vec);
+    att_comp.write_all(att_vec);
     let att_comp_finished = att_comp.finish()?;
 
     let mut sig_comp = ZlibEncoder::new(Vec::new(), Compression::default());

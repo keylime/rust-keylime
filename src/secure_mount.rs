@@ -106,7 +106,7 @@ pub(crate) fn mount() -> Result<String> {
                     fs::metadata(secure_dir_path).map_err(|e| {
                         Error::SecureMount(format!("unable to get metadata for secure dir path: {:?}", e))
                     })?;
-                metadata.permissions().set_mode(488);
+                metadata.permissions().set_mode(0o750); // decimal 488
             }
 
             match secure_dir_path.to_str() {

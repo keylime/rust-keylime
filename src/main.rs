@@ -155,7 +155,7 @@ async fn main() -> Result<()> {
             &mut ctx, keyblob, ak_handle, ek_handle,
         )?;
         let mackey = base64::encode(key.value());
-        let mackey = PKey::hmac(&mackey.as_bytes())?;
+        let mackey = PKey::hmac(mackey.as_bytes())?;
         let mut signer = Signer::new(MessageDigest::sha384(), &mackey)?;
         signer.update(agent_uuid.as_bytes());
         let auth_tag = signer.sign_to_vec()?;
