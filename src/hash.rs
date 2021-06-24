@@ -45,10 +45,9 @@ mod tests {
     #[test]
     fn test_is_recognized() {
         assert!(HashAlgorithms::is_recognized(String::from("sha256")));
-        assert_eq!(
-            HashAlgorithms::is_recognized(String::from("wubalubadubdub")),
-            false
-        );
+        assert!(!HashAlgorithms::is_recognized(String::from(
+            "wubalubadubdub"
+        )));
     }
 
     #[test]

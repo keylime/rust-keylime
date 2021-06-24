@@ -188,7 +188,7 @@ mod tests {
 
         let mock_data = [0u8; 1];
         let response = do_register_agent(
-            &uri[0], uri[1], "uuid", &mock_data, &mock_data, &mock_data,
+            uri[0], uri[1], "uuid", &mock_data, &mock_data, &mock_data,
         )
         .await;
         assert!(response.is_ok());
@@ -213,7 +213,7 @@ mod tests {
 
         let mock_data = [0u8; 1];
         let response = do_register_agent(
-            &uri[0], uri[1], "uuid", &mock_data, &mock_data, &mock_data,
+            uri[0], uri[1], "uuid", &mock_data, &mock_data, &mock_data,
         )
         .await;
         assert!(response.is_err());
@@ -241,8 +241,7 @@ mod tests {
 
         let addr = format!("http://{}:{}", uri[0], uri[1]);
 
-        let response =
-            do_activate_agent(&uri[0], uri[1], "uuid", "tag").await;
+        let response = do_activate_agent(uri[0], uri[1], "uuid", "tag").await;
         assert!(response.is_ok());
     }
 
@@ -263,8 +262,7 @@ mod tests {
 
         let addr = format!("http://{}:{}", uri[0], uri[1]);
 
-        let response =
-            do_activate_agent(&uri[0], uri[1], "uuid", "tag").await;
+        let response = do_activate_agent(uri[0], uri[1], "uuid", "tag").await;
         assert!(response.is_err());
         assert_eq!(response.err().unwrap().http_code().unwrap(), 404); //#[allow_ci]
     }
