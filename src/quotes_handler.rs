@@ -140,7 +140,7 @@ pub async fn identity(
 }
 
 // This is a Quote request from the cloud verifier, which will check
-// integrity measurement. The PCRs inclued in the Quote will be specified
+// integrity measurement. The PCRs included in the Quote will be specified
 // by the mask, vmask. It should return this data:
 // { QuoteAIK(nonce, 16:H(NK_pub), xi:yi), NK_pub}
 // where xi:yi are additional PCRs to be included in the quote.

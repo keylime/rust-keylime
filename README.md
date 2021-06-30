@@ -19,7 +19,7 @@ For now, this project is focusing on the keylime agent component, which is a
 HTTP server running on the machine that executes keylime operations.
 Most keylime operations rely on TPM co-processor; therefore, the server needs
 a physical TPM chip (or a TPM emulator) to perform keylime operations.  The
-TPM emulator is a program that runs in the deamon to mimic TPM commands.
+TPM emulator is a program that runs in the daemon to mimic TPM commands.
 
 The rust keylime agent is in early development and not ready for production use.
 

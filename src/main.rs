@@ -113,7 +113,7 @@ fn get_uuid(agent_uuid_config: &str) -> String {
 async fn main() -> Result<()> {
     pretty_env_logger::init();
     let mut ctx = tpm::get_tpm2_ctx()?;
-    //  Retreive the TPM Vendor, this allows us to warn if someone is using a
+    //  Retrieve the TPM Vendor, this allows us to warn if someone is using a
     // Software TPM ("SW")
     if tss_esapi::utils::get_tpm_vendor(&mut ctx)?.contains("SW") {
         warn!("INSECURE: Keylime is using a software TPM emulator rather than a real hardware TPM.");
@@ -221,7 +221,7 @@ async fn main() -> Result<()> {
  *
  * Helper function to help the keylime agent read file and get the file
  * content. It is not from the original python version. Because rust needs
- * to handle error in result, it is good to keep this function seperate from
+ * to handle error in result, it is good to keep this function separate from
  * the main function.
  */
 fn read_in_file(path: String) -> std::io::Result<String> {
