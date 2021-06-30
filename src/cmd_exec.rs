@@ -25,7 +25,7 @@ const RETRY: usize = 4;
  *     execution return output and file output
  *     KeylimeTpmError
  *
- * Set up execution envrionment to execute tpm command through shell commands
+ * Set up execution environment to execute tpm command through shell commands
  * and return the execution result in a tuple. Based on the latest update of
  * python keylime this function implement the functionality of cmd_exec
  * script in the python keylime repo. RaiseOnError, return code and lock are
@@ -107,7 +107,7 @@ pub(crate) fn run(
         return Err(Error::Execution(output.status.code(), return_output));
     }
 
-    // Retrive data from output path file
+    // Retrieve data from output path file
     if let Some(p) = output_path {
         file_output = read_file_output_path(p.to_string())?;
     }

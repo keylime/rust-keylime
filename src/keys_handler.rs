@@ -11,7 +11,7 @@ pub struct Verify {
 
 #[derive(Deserialize)]
 pub struct UkeyJson {
-    b64_encrypted_key: String, // this will be handled as a blog once wired in
+    b64_encrypted_key: String, // this will be handled as a blob once wired in
     auth_tag: String,
 }
 

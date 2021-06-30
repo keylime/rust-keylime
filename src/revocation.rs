@@ -225,7 +225,7 @@ pub(crate) async fn run_revocation_service() -> Result<()> {
                 let _ = run_revocation_actions(msg_payload)?;
             }
             _ => {
-                error!("Invalid revocation message siganture {}", body);
+                error!("Invalid revocation message signature {}", body);
             }
         }
     }
