@@ -30,12 +30,12 @@ The rust-keylime agent requires the following packages for both compile and run 
 
 For Fedora, use the following command
 ```
-$ dnf install openssl-devel gcc tpm2-tss-devel
+$ dnf install openssl-devel gcc tpm2-tss-devel zeromq-devel
 ```
 
 For Ubuntu OS, use the following command
 ```
-$ apt-get install openssl-dev gcc libtss-dev
+$ apt-get install openssl-dev gcc libtss-dev libzmq3-dev
 ```
 
 ### Rust
