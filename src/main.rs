@@ -47,7 +47,9 @@ mod tpm;
 
 use actix_web::{web, App, HttpServer};
 use common::*;
+use compress_tools::*;
 use error::{Error, Result};
+use flate2::read::DeflateDecoder;
 use futures::{future::TryFutureExt, try_join};
 use log::*;
 use openssl::{
@@ -59,8 +61,13 @@ use openssl::{
 use std::{
     convert::TryFrom,
     fs,
-    io::{BufReader, Read},
+    io::{prelude::*, BufReader, Read, Write},
+    os::{
+        linux::fs::MetadataExt,
+        unix::fs::{OpenOptionsExt, PermissionsExt},
+    },
     path::Path,
+    process::{Command, Stdio},
     str::FromStr,
     sync::{Arc, Mutex},
     time::Duration,
@@ -146,6 +153,116 @@ pub(crate) fn decrypt_payload(
 
     info!("Successfully decrypted payload");
     Ok(decrypted)
+}
+
+// sets up unzipped directory in secure mount location in preparation for
+// writing out symmetric key and encrypted payload. returns file paths for
+// both.
+pub(crate) fn setup_unzipped() -> Result<(String, String, String)> {
+    let mount = secure_mount::mount()?;
+    let unzipped = format!("{}/unzipped", mount);
+
+    // clear any old data
+    if Path::new(&unzipped).exists() {
+        fs::remove_dir_all(&unzipped)?;
+    }
+
+    let dec_payload_filename = config_get("cloud_agent", "dec_payload_file")?;
+    let dec_payload_path = format!("{}/{}", unzipped, dec_payload_filename);
+
+    let key_filename = config_get("cloud_agent", "enc_keyname")?;
+    let key_path = format!("{}/{}", unzipped, key_filename);
+
+    fs::create_dir(&unzipped)?;
+
+    Ok((unzipped, dec_payload_path, key_path))
+}
+
+// write symm key data and decrypted payload data out to specified files
+pub(crate) fn write_out_key_and_payload(
+    dec_payload: &[u8],
+    dec_payload_path: &str,
+    key: Arc<Mutex<[u8; KEY_LEN]>>,
+    key_path: &str,
+) -> Result<()> {
+    let symm_key = key.lock().unwrap(); //#[allow_ci]
+
+    let mut key_file = fs::File::create(key_path)?;
+    let bytes = key_file.write(&symm_key[..])?;
+    if bytes != symm_key.len() {
+        return Err(Error::Other(format!("Error writing symm key to {:?}: key len is {}, but {} bytes were written", key_path, symm_key.len(), bytes)));
+    }
+    info!("Wrote payload decryption key to {:?}", key_path);
+
+    let mut dec_payload_file = fs::File::create(dec_payload_path)?;
+    let bytes = dec_payload_file.write(dec_payload)?;
+    if bytes != dec_payload.len() {
+        return Err(Error::Other(format!("Error writing decrypted payload to {:?}: payload len is {}, but {} bytes were written", dec_payload_path, dec_payload.len(), bytes)));
+    }
+    info!("Wrote decrypted payload to {:?}", dec_payload_path);
+
+    Ok(())
+}
+
+// run a script (such as the init script, if any) and check the status
+pub(crate) fn run(dir: &str, script: &str, agent_uuid: &str) -> Result<()> {
+    let script_location = format!("{}/{}", dir, script);
+    info!("Running script: {:?}", script_location);
+
+    let script_path = Path::new(&script_location);
+    if !script_path.exists() {
+        return Err(Error::Other(format!("{} not found", script_location)));
+    }
+
+    if let Err(e) = Command::new("chmod")
+        .current_dir(dir)
+        .arg("u+x")
+        .arg(&script_location)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .status()
+    {
+        return Err(Error::Other(format!(
+            "unable to set {} as executable",
+            script_location
+        )));
+    }
+
+    match Command::new(&script_location)
+        .current_dir(dir)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .status()
+    {
+        Ok(_) => {
+            info!("{:?} ran successfully", script_location);
+            Ok(())
+        }
+        Err(e) => Err(Error::Other(format!(
+            "{:?} failed during run: {}",
+            script_location, e
+        ))),
+    }
+}
+
+// checks if keylime.conf indicates the payload should be unzipped, and does so if needed.
+// the input string is the directory where the unzipped file(s) should be stored.
+pub(crate) fn optional_unzip_payload(unzipped: &str) -> Result<()> {
+    let is_zip = config_get("cloud_agent", "extract_payload_zip")?;
+    if bool::from_str(&is_zip.to_lowercase())? {
+        let zipped_payload = config_get("cloud_agent", "dec_payload_file")?;
+        let zipped_payload_path = format!("{}/{}", unzipped, zipped_payload);
+
+        info!("Unzipping payload {} to {}", &zipped_payload, &unzipped);
+
+        let mut source = fs::File::open(&zipped_payload_path)?;
+        let dest = Path::new(&unzipped);
+        uncompress_archive(&mut source, dest, Ownership::Preserve)?;
+    }
+
+    Ok(())
 }
 
 #[actix_web::main]
@@ -282,7 +399,29 @@ async fn main() -> Result<()> {
         }
     }
 
-    let dec_payload = decrypt_payload(payload, symm_key)?;
+    let dec_payload = decrypt_payload(payload, symm_key.clone())?;
+
+    let (unzipped, dec_payload_path, key_path) = setup_unzipped()?;
+
+    write_out_key_and_payload(
+        &dec_payload,
+        &dec_payload_path,
+        symm_key,
+        &key_path,
+    )?;
+
+    optional_unzip_payload(&unzipped)?;
+
+    // there may also be also a separate init script
+    match config_get("cloud_agent", "payload_script")?.as_str() {
+        "" => {
+            info!("No payload script specified, skipping");
+        }
+        script => {
+            info!("Payload init script indicated: {}", script);
+            run(&unzipped, script, &agent_uuid)?;
+        }
+    }
 
     // as the payload may set up revocation certificates, etc., the revocation
     // service should be run only after the agent quotes have been validated
