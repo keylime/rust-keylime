@@ -54,13 +54,16 @@ use openssl::{
     hash::MessageDigest,
     pkey::{PKey, Private, Public},
     sign::Signer,
+    symm::{decrypt_aead, Cipher},
 };
 use std::{
     convert::TryFrom,
-    fs::File,
+    fs,
     io::{BufReader, Read},
     path::Path,
+    str::FromStr,
     sync::{Arc, Mutex},
+    time::Duration,
 };
 use tss_esapi::{
     handles::KeyHandle,
@@ -112,6 +115,37 @@ fn get_uuid(agent_uuid_config: &str) -> String {
             }
         },
     }
+}
+
+// Parameters are based on Python codebase:
+// https://github.com/keylime/keylime/blob/1ed43ac8f75d5c3bc3a3bbbbb5037f20cf3c5a6a/ \
+// keylime/crypto.py#L189
+pub(crate) fn decrypt_payload(
+    encr: Arc<Mutex<Vec<u8>>>,
+    key: Arc<Mutex<[u8; KEY_LEN]>>,
+) -> Result<Vec<u8>> {
+    let symm_key = key.lock().unwrap(); //#[allow_ci]
+    let payload = encr.lock().unwrap(); //#[allow_ci]
+
+    // parse out payload iv, tag, ciphertext
+    let (iv, rest) = payload.split_at(AES_BLOCK_SIZE);
+    let (ciphertext, tag) = rest.split_at(rest.len() - AES_BLOCK_SIZE);
+    let cipher = match symm_key.len() {
+        16 => Cipher::aes_128_gcm(),
+        32 => Cipher::aes_256_gcm(),
+        other => {
+            return Err(Error::Other(format!(
+                "key length {} does not correspond to valid GCM cipher",
+                other
+            )))
+        }
+    };
+
+    let decrypted =
+        decrypt_aead(cipher, &*symm_key, Some(iv), &[], ciphertext, tag)?;
+
+    info!("Successfully decrypted payload");
+    Ok(decrypted)
 }
 
 #[actix_web::main]
@@ -231,9 +265,34 @@ async fn main() -> Result<()> {
     })
     .bind(format!("{}:{}", cloudagent_ip, cloudagent_port))?
     .run()
-    .map_err(|x| x.into());
+    .map_err(Error::from);
     info!("Listening on http://{}:{}", cloudagent_ip, cloudagent_port);
-    try_join!(actix_server, revocation::run_revocation_service())?;
+
+    // do nothing until actix server's handlers have updated the symmetric key
+    loop {
+        let key = symm_key.lock().unwrap(); //#[allow_ci]
+
+        // if key is still empty, unlock resource by dropping and sleep for 1 sec
+        if *key == [0u8; KEY_LEN] {
+            drop(key);
+            std::thread::sleep(Duration::from_millis(1000));
+            continue;
+        } else {
+            break;
+        }
+    }
+
+    let dec_payload = decrypt_payload(payload, symm_key)?;
+
+    // as the payload may set up revocation certificates, etc., the revocation
+    // service should be run only after the agent quotes have been validated
+    // and the payload has been decrypted and run. also, this service can be
+    // turned off in configuration.
+    let run_revocation = config_get("cloud_agent", "listen_notfications")?;
+    if bool::from_str(&run_revocation.to_lowercase())? {
+        try_join!(revocation::run_revocation_service())?;
+    }
+
     Ok(())
 }
 
@@ -247,7 +306,7 @@ async fn main() -> Result<()> {
  * the main function.
  */
 fn read_in_file(path: String) -> std::io::Result<String> {
-    let file = File::open(path)?;
+    let file = fs::File::open(path)?;
     let mut buf_reader = BufReader::new(file);
     let mut contents = String::new();
     let _ = buf_reader.read_to_string(&mut contents)?;
