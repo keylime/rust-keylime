@@ -2,10 +2,13 @@
 // Copyright 2021 Keylime Authors
 
 use crate::{
-    common::{AES_BLOCK_SIZE, AGENT_UUID_LEN, AUTH_TAG_LEN, KEY_LEN},
-    Error, Result,
+    common::{
+        config_get, AES_BLOCK_SIZE, AGENT_UUID_LEN, AUTH_TAG_LEN, KEY_LEN,
+    },
+    get_uuid, Error, QuoteData, Result,
 };
-use actix_web::{web, HttpResponse, Responder};
+use actix_web::{web, HttpRequest, HttpResponse, Responder};
+use json::parse;
 use log::*;
 use openssl::{
     encrypt::Decrypter,
@@ -15,17 +18,7 @@ use openssl::{
     sign::Signer,
 };
 use serde::Deserialize;
-
-#[derive(Deserialize)]
-pub struct Verify {
-    challenge: String,
-}
-
-#[derive(Deserialize)]
-pub struct UkeyJson {
-    b64_encrypted_key: String, // this will be handled as a blob once wired in
-    auth_tag: String,
-}
+use std::sync::Mutex;
 
 // Helper function for combining U and V keys and storing output to a buffer.
 pub(crate) fn xor_to_outbuf(
@@ -103,6 +96,7 @@ pub(crate) fn try_combine_keys(
     xor_to_outbuf(&mut symm_key_out[..], &key1[..], &key2[..]);
 
     check_hmac(symm_key_out, uuid, auth_tag)?;
+    info!("Successfully derived symmetric payload decryption key");
 
     Ok(Some(()))
 }
@@ -135,9 +129,99 @@ pub(crate) fn decrypt_u_or_v_key(
     Ok(decrypted)
 }
 
-pub async fn ukey(param: web::Json<UkeyJson>) -> impl Responder {
-    HttpResponse::Ok().body(format!(
-        "b64_encrypted_key: {} auth_tag: {}",
-        param.b64_encrypted_key, param.auth_tag
-    ))
+// struct to hold data and keep track of whether we are processing a u
+// or v key
+pub(crate) struct CurrentKeyInfo<'a> {
+    current_key: &'a Mutex<[u8; KEY_LEN]>,
+    other_key: &'a Mutex<[u8; KEY_LEN]>,
+    keyname: String,
+}
+
+impl<'a> CurrentKeyInfo<'a> {
+    fn new(
+        current_key: &'a Mutex<[u8; KEY_LEN]>,
+        other_key: &'a Mutex<[u8; KEY_LEN]>,
+        keyname: String,
+    ) -> Self {
+        CurrentKeyInfo {
+            current_key,
+            other_key,
+            keyname,
+        }
+    }
+}
+
+// Returns a reference to the U key or the V key in the app data.
+pub(crate) fn find_keytype<'a>(
+    req: &HttpRequest,
+    u: &'a Mutex<[u8; KEY_LEN]>,
+    v: &'a Mutex<[u8; KEY_LEN]>,
+) -> Result<CurrentKeyInfo<'a>> {
+    if req.path().contains("ukey") {
+        info!("Received ukey");
+        Ok(CurrentKeyInfo::new(u, v, "ukey".into()))
+    } else if req.path().contains("vkey") {
+        info!("Received vkey");
+        Ok(CurrentKeyInfo::new(v, u, "vkey".into()))
+    } else {
+        Err(Error::Other("request to keys handler contained neither ukey nor vkey key word".to_string()))
+    }
+}
+
+// b64 decode and remove quotation marks
+pub(crate) fn decode_data(data: &mut String) -> Result<Vec<u8>> {
+    let data = data.replace("\"", "");
+    base64::decode(&data).map_err(Error::from)
+}
+
+pub async fn u_or_v_key(
+    body: web::Bytes,
+    req: HttpRequest,
+    quote_data: web::Data<QuoteData>,
+) -> impl Responder {
+    // determine if the key is the u or the v key
+    let curr_key_info =
+        find_keytype(&req, &quote_data.ukey, &quote_data.vkey)?;
+
+    // must unwrap when using lock
+    // https://github.com/rust-lang-nursery/failure/issues/192
+    let mut global_current_key = curr_key_info.current_key.lock().unwrap(); //#[allow_ci]
+    let mut global_other_key = curr_key_info.other_key.lock().unwrap(); //#[allow_ci]
+    let mut global_symm_key = quote_data.payload_symm_key.lock().unwrap(); //#[allow_ci]
+    let mut global_encr_payload = quote_data.encr_payload.lock().unwrap(); //#[allow_ci]
+    let mut global_auth_tag = quote_data.auth_tag.lock().unwrap(); //#[allow_ci]
+
+    let json_body =
+        parse(&String::from_utf8(body.to_vec()).map_err(Error::from)?)
+            .map_err(Error::from)?;
+
+    // get key and decode it from web data
+    let encrypted_key = decode_data(&mut json_body["encrypted_key"].dump())?;
+    let decrypted_key =
+        decrypt_u_or_v_key(&quote_data.priv_key, encrypted_key)?;
+
+    global_current_key.copy_from_slice(&decrypted_key[..]);
+
+    // only ukey POSTs from tenant have payload and auth_tag data
+    if curr_key_info.keyname == "ukey" {
+        // note: the auth_tag shouldn't be base64 decoded here
+        let mut auth_tag = json_body["auth_tag"].dump();
+        let auth_tag = auth_tag.replace("\"", "");
+        global_auth_tag.copy_from_slice(&auth_tag.into_bytes()[..]);
+
+        let encr_payload = decode_data(&mut json_body["payload"].dump())?;
+        global_encr_payload.extend(encr_payload.iter());
+    }
+
+    let agent_uuid = get_uuid(&config_get("cloud_agent", "agent_uuid")?);
+
+    let _ = try_combine_keys(
+        &global_current_key,
+        &global_other_key,
+        &mut global_symm_key,
+        &agent_uuid.into_bytes(),
+        &global_auth_tag,
+    )?;
+
+    HttpResponse::Ok().await
 }

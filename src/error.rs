@@ -53,6 +53,10 @@ pub(crate) enum Error {
     Crypto(#[from] openssl::error::ErrorStack),
     #[error("ZMQ error: {0}")]
     Zmq(#[from] zmq::Error),
+    #[error("Json error: {0}")]
+    Json(#[from] json::Error),
+    #[error("base64 decode error: {0}")]
+    Base64(#[from] base64::DecodeError),
     #[error("{0}")]
     Other(String),
 }

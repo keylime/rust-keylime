@@ -60,7 +60,7 @@ use std::{
     fs::File,
     io::{BufReader, Read},
     path::Path,
-    sync::Mutex,
+    sync::{Arc, Mutex},
 };
 use tss_esapi::{
     handles::KeyHandle,
@@ -81,6 +81,11 @@ pub struct QuoteData {
     priv_key: PKey<Private>,
     pub_key: PKey<Public>,
     ak_handle: KeyHandle,
+    ukey: Mutex<[u8; KEY_LEN]>,
+    vkey: Mutex<[u8; KEY_LEN]>,
+    payload_symm_key: Arc<Mutex<[u8; KEY_LEN]>>,
+    encr_payload: Arc<Mutex<Vec<u8>>>,
+    auth_tag: Mutex<[u8; AUTH_TAG_LEN]>,
 }
 
 fn get_uuid(agent_uuid_config: &str) -> String {
@@ -181,11 +186,26 @@ async fn main() -> Result<()> {
     // safeguards u and v keys in transit, is not part of the threat model.
     let (nk_pub, nk_priv) = crypto::rsa_generate_pair(2048)?;
 
+    let mut payload_symm_key = [0u8; KEY_LEN];
+    let mut encr_payload = Vec::new();
+
+    let symm_key_arc = Arc::new(Mutex::new(payload_symm_key));
+    let encr_payload_arc = Arc::new(Mutex::new(encr_payload));
+
+    // these allow the arrays to be referenced later in this thread
+    let symm_key = Arc::clone(&symm_key_arc);
+    let payload = Arc::clone(&encr_payload_arc);
+
     let quotedata = web::Data::new(QuoteData {
         tpmcontext: Mutex::new(ctx),
         priv_key: nk_priv,
         pub_key: nk_pub,
         ak_handle,
+        ukey: Mutex::new([0u8; KEY_LEN]),
+        vkey: Mutex::new([0u8; KEY_LEN]),
+        payload_symm_key: symm_key_arc,
+        encr_payload: encr_payload_arc,
+        auth_tag: Mutex::new([0u8; AUTH_TAG_LEN]),
     });
 
     let actix_server = HttpServer::new(move || {
@@ -193,7 +213,12 @@ async fn main() -> Result<()> {
             .app_data(quotedata.clone())
             .service(
                 web::resource("/keys/ukey")
-                    .route(web::post().to(keys_handler::ukey)),
+                    .route(web::post().to(keys_handler::u_or_v_key)),
+            )
+            .service(
+                // the double slash may be a typo on the python side
+                web::resource("//keys/vkey")
+                    .route(web::post().to(keys_handler::u_or_v_key)),
             )
             .service(
                 web::resource("/quotes/identity")
