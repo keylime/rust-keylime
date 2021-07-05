@@ -33,6 +33,11 @@ pub static MOUNT_SECURE: bool = true;
 #[cfg(feature = "testing")]
 pub static MOUNT_SECURE: bool = false;
 
+pub const AGENT_UUID_LEN: usize = 36;
+pub const AUTH_TAG_LEN: usize = 96;
+pub const KEY_LEN: usize = 32;
+pub const AES_BLOCK_SIZE: usize = 16;
+
 /*
  * Return: Returns the configuration file provided in the environment variable
  * KEYLIME_CONFIG or defaults to /etc/keylime.conf
