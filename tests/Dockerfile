@@ -6,4 +6,5 @@ RUN dnf install -y \
 	rust clippy cargo \
 	llvm llvm-devel clang pkg-config \
 	dbus-daemon czmq-devel \
-	python3
+	python3 \
+	libarchive-devel

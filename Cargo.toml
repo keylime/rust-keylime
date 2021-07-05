@@ -10,6 +10,7 @@ repository = "https://github.com/keylime/rust-keylime"
 [dependencies]
 actix-web = "3"
 base64 = "0.12"
+compress-tools = "0.11.2"
 flate2 = "1.0.4"
 futures = "0.3.6"
 hex = "0.3.2"
