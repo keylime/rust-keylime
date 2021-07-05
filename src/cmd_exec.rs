@@ -123,7 +123,7 @@ pub(crate) fn run(
  * read in the file and  return the content of the file into a Result enum
  */
 fn read_file_output_path(output_path: String) -> std::io::Result<String> {
-    let mut file = File::open(output_path)?;
+    let mut file = fs::File::open(output_path)?;
     let mut contents = String::new();
     let _ = file.read_to_string(&mut contents)?;
     Ok(contents)
