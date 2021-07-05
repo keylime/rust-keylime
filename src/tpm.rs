@@ -308,7 +308,6 @@ pub(crate) fn activate_credential(
         )
         .map_err(KeylimeError::from);
 
-    ctx.flush_context(ak.into())?;
     ctx.flush_context(ek.into())?;
 
     resp
