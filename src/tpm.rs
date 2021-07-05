@@ -318,6 +318,7 @@ pub(crate) fn activate_credential(
 pub(crate) fn get_hash_alg(alg: String) -> Result<HashingAlgorithm> {
     match alg.as_str() {
         "sha256" => Ok(HashingAlgorithm::Sha256),
+        "sha1" => Ok(HashingAlgorithm::Sha1),
         other => {
             Err(KeylimeError::Other(format!("{:?} not implemented", alg)))
         }
@@ -358,41 +359,35 @@ pub(crate) fn get_sig_scheme(
 }
 
 // Takes a public PKey and returns a DigestValue of it.
+// Note: Currently, this creates a DigestValue including both SHA256 and
+// SHA1 because these banks are checked by Keylime on the Python side.
 pub(crate) fn pubkey_to_tpm_digest(
     pubkey: &PKeyRef<Public>,
-    algo: HashingAlgorithm,
 ) -> Result<DigestValues> {
-    match pubkey.id() {
-        Id::RSA => {
-            let mut keydigest = DigestValues::new();
-            let rsa = pubkey.rsa()?.public_key_to_pem()?;
+    let mut keydigest = DigestValues::new();
 
-            match algo {
-                HashingAlgorithm::Sha256 => {
-                    let mut hasher = openssl::sha::Sha256::new();
-                    hasher.update(&rsa);
-                    let hash = hasher.finish();
-                    let mut hashvec = Vec::new();
-                    hashvec.extend(&hash);
-
-                    let digest = Digest::try_from(hashvec)?;
-                    keydigest.set(algo, digest);
-                    Ok(keydigest)
-                }
-                other_alg => {
-                    return Err(KeylimeError::Other(format!(
-                        "Algorithm {:?} not yet supported in pubkey to digest conversion", other_alg   
-                    )));
-                }
-            }
-        }
+    let keybytes = match pubkey.id() {
+        Id::RSA => pubkey.rsa()?.public_key_to_pem()?,
         other_id => {
             return Err(KeylimeError::Other(format!(
             "Converting to digest value for key type {:?} is not yet implemented",
             other_id
             )));
         }
-    }
+    };
+
+    // SHA256
+    let mut hasher = openssl::sha::Sha256::new();
+    hasher.update(&keybytes);
+    let mut hashvec: Vec<u8> = hasher.finish().into();
+    keydigest.set(HashingAlgorithm::Sha256, Digest::try_from(hashvec)?);
+    // SHA1
+    let mut hasher = openssl::sha::Sha1::new();
+    hasher.update(&keybytes);
+    let mut hashvec: Vec<u8> = hasher.finish().into();
+    keydigest.set(HashingAlgorithm::Sha1, Digest::try_from(hashvec)?);
+
+    Ok(keydigest)
 }
 
 // Reads a mask in the form of some hex value, ex. "0x408000",
@@ -502,16 +497,17 @@ pub(crate) fn encode_quote_string(
 
 // This function extends Pcr16 with the digest, then creates a PcrList
 // from the given mask and pcr16.
+// Note: Currently, this will build the list for both SHA256 and SHA1 as
+// necessary for the Python components of Keylime.
 pub(crate) fn build_pcr_list(
     context: &mut Context,
-    hash_alg: HashingAlgorithm,
     digest: DigestValues,
     mask: Option<&str>,
 ) -> Result<PcrSelectionList> {
     // extend digest into pcr16
     context.execute_with_nullauth_session(|ctx| {
         ctx.pcr_reset(PcrHandle::Pcr16)?;
-        ctx.pcr_extend(PcrHandle::Pcr16, digest)
+        ctx.pcr_extend(PcrHandle::Pcr16, digest.to_owned())
     })?;
 
     // translate mask to vec of pcrs
@@ -526,11 +522,16 @@ pub(crate) fn build_pcr_list(
         pcrs.append(&mut slot16);
     }
 
-    let pcrlist = PcrSelectionListBuilder::new()
-        .with_selection(hash_alg, &pcrs)
-        .build();
+    let ima_pcr_index = pcrs.iter().position(|&pcr| pcr == PcrSlot::Slot10);
 
-    Ok(pcrlist)
+    let mut pcrlist = PcrSelectionListBuilder::new();
+    pcrlist = pcrlist.with_selection(HashingAlgorithm::Sha1, &pcrs);
+    if let Some(ima_pcr_index) = ima_pcr_index {
+        let _ = pcrs.remove(ima_pcr_index);
+    }
+    pcrlist = pcrlist.with_selection(HashingAlgorithm::Sha256, &pcrs);
+
+    Ok(pcrlist.build())
 }
 
 // The pcr blob corresponds to the pcr out file that records the list of PCR values,
@@ -571,13 +572,13 @@ pub(crate) fn quote(
     data: Data<QuoteData>,
 ) -> Result<KeylimeIdQuote> {
     let hash_alg = get_hash_alg(config_get("cloud_agent", "tpm_hash_alg")?)?;
-    let nk_digest = pubkey_to_tpm_digest(&data.pub_key, hash_alg)?;
+    let nk_digest = pubkey_to_tpm_digest(&data.pub_key)?;
 
     // must unwrap here due to lock mechanism
     // https://github.com/rust-lang-nursery/failure/issues/192
     let mut context = data.tpmcontext.lock().unwrap(); //#[allow_ci]
 
-    let pcrlist = build_pcr_list(&mut context, hash_alg, nk_digest, mask)?;
+    let pcrlist = build_pcr_list(&mut context, nk_digest, mask)?;
     let sig_scheme = get_sig_scheme(TpmSigScheme::default())?;
 
     // create quote
@@ -606,11 +607,7 @@ pub(crate) fn quote(
 #[test]
 fn pubkey_to_digest() {
     let (key, _) = crate::crypto::rsa_generate_pair(2048).unwrap(); //#[allow_ci]
-    let hash_alg =
-        get_hash_alg(config_get("cloud_agent", "tpm_hash_alg").unwrap()) //#[allow_ci]
-            .unwrap(); //#[allow_ci]
-
-    let digest = pubkey_to_tpm_digest(&key, hash_alg).unwrap(); //#[allow_ci]
+    let digest = pubkey_to_tpm_digest(&key).unwrap(); //#[allow_ci]
 }
 
 #[test]
