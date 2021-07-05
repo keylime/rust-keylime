@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2021 Keylime Authors
 
+#[macro_use]
+use log::*;
+
 use std::convert::{TryFrom, TryInto};
 use std::io::prelude::*;
 use std::str::FromStr;
@@ -72,7 +75,7 @@ pub(crate) fn get_tpm2_ctx() -> Result<Context> {
 pub(crate) fn create_ek(
     context: &mut Context,
     alg: Option<AsymmetricAlgorithm>,
-) -> Result<(KeyHandle, Vec<u8>, Vec<u8>)> {
+) -> Result<(KeyHandle, Option<Vec<u8>>, Vec<u8>)> {
     // Set encryption algorithm
     let alg = match alg {
         Some(a) => a,
@@ -92,7 +95,13 @@ pub(crate) fn create_ek(
 
     // Retrieve EK handle, EK pub cert, and TPM pub object
     let handle = ek::create_ek_object(context, alg, DefaultKey)?;
-    let cert = ek::retrieve_ek_pubcert(context, alg)?;
+    let cert = match ek::retrieve_ek_pubcert(context, alg) {
+        Ok(v) => Some(v),
+        Err(_) => {
+            warn!("No EK certificate found in TPM NVRAM");
+            None
+        }
+    };
     let (tpm_pub, _, _) = context.read_public(handle)?;
     let tpm_pub_vec = pub_to_vec(tpm_pub);
 

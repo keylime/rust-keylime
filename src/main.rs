@@ -146,7 +146,7 @@ async fn main() -> Result<()> {
             &registrar_port,
             &agent_uuid,
             &ek_tpm2b_pub,
-            &ek_cert,
+            ek_cert,
             &ak_tpm2b_pub,
         )
         .await?;
