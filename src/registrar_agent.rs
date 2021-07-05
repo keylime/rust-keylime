@@ -24,6 +24,19 @@ where
     })
 }
 
+fn serialize_maybe_base64<S>(
+    value: &Option<Vec<u8>>,
+    serializer: S,
+) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    match *value {
+        Some(ref value) => serializer.serialize_str(&base64::encode(value)),
+        None => serializer.serialize_none(),
+    }
+}
+
 fn deserialize_maybe_base64<'de, D>(
     deserializer: D,
 ) -> Result<Option<Vec<u8>>, D::Error>
@@ -40,11 +53,8 @@ fn is_empty(buf: &[u8]) -> bool {
 
 #[derive(Debug, Serialize, Deserialize)]
 struct Register<'a> {
-    #[serde(
-        serialize_with = "serialize_as_base64",
-        skip_serializing_if = "is_empty"
-    )]
-    ekcert: &'a [u8],
+    #[serde(serialize_with = "serialize_maybe_base64")]
+    ekcert: Option<Vec<u8>>,
     #[serde(
         serialize_with = "serialize_as_base64",
         skip_serializing_if = "is_empty"
@@ -122,7 +132,7 @@ pub(crate) async fn do_register_agent(
     registrar_port: &str,
     agent_uuid: &str,
     ek_tpm: &[u8],
-    ekcert: &[u8],
+    ekcert: Option<Vec<u8>>,
     aik_tpm: &[u8],
 ) -> crate::error::Result<Vec<u8>> {
     let data = Register {
@@ -196,7 +206,41 @@ mod tests {
 
         let mock_data = [0u8; 1];
         let response = do_register_agent(
-            uri[0], uri[1], "uuid", &mock_data, &mock_data, &mock_data,
+            uri[0],
+            uri[1],
+            "uuid",
+            &mock_data,
+            Some((&mock_data).to_vec()),
+            &mock_data,
+        )
+        .await;
+        assert!(response.is_ok());
+    }
+
+    #[tokio::test]
+    async fn mock_register_agent_ok_without_ekcert() {
+        let response: Response<RegisterResponseResults> = Response {
+            code: 200.into(),
+            status: "OK".to_string(),
+            results: RegisterResponseResults { blob: None },
+        };
+
+        let mock_server = MockServer::start().await;
+        let mock = Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(response));
+        mock_server.register(mock).await;
+
+        let uri = mock_server.uri();
+        let uri = uri.split("//").collect::<Vec<&str>>()[1]
+            .split(':')
+            .collect::<Vec<&str>>();
+        assert_eq!(uri.len(), 2);
+
+        let addr = format!("http://{}:{}", uri[0], uri[1]);
+
+        let mock_data = [0u8; 1];
+        let response = do_register_agent(
+            uri[0], uri[1], "uuid", &mock_data, None, &mock_data,
         )
         .await;
         assert!(response.is_ok());
@@ -221,7 +265,12 @@ mod tests {
 
         let mock_data = [0u8; 1];
         let response = do_register_agent(
-            uri[0], uri[1], "uuid", &mock_data, &mock_data, &mock_data,
+            uri[0],
+            uri[1],
+            "uuid",
+            &mock_data,
+            Some((&mock_data).to_vec()),
+            &mock_data,
         )
         .await;
         assert!(response.is_err());
