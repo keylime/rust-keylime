@@ -32,4 +32,17 @@ echo "-------- Building"
 RUST_BACKTRACE=1 cargo build
 
 echo "-------- Testing"
-TCTI=tabrmd:bus_type=session RUST_BACKTRACE=1 RUST_LOG=info cargo test -- --nocapture
+TCTI=tabrmd:bus_type=session RUST_BACKTRACE=1 RUST_LOG=info \
+KEYLIME_CONFIG=$PWD/keylime.conf \
+cargo test --features testing -- --nocapture
+
+echo "-------- Testing with coverage"
+TCTI=tabrmd:bus_type=session RUST_BACKTRACE=1 RUST_LOG=info \
+KEYLIME_CONFIG=$PWD/keylime.conf \
+cargo tarpaulin -v \
+      --target-dir target/tarpaulin \
+      --workspace \
+      --exclude-files 'target/*' \
+      --ignore-panics --ignore-tests \
+      --out Html --out Json \
+      --features testing
