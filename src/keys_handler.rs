@@ -15,10 +15,6 @@ pub struct UkeyJson {
     auth_tag: String,
 }
 
-pub async fn verify(param: web::Query<Verify>) -> impl Responder {
-    HttpResponse::Ok().body(format!("Challenge: {}", param.challenge))
-}
-
 pub async fn ukey(param: web::Json<UkeyJson>) -> impl Responder {
     HttpResponse::Ok().body(format!(
         "b64_encrypted_key: {} auth_tag: {}",
