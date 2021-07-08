@@ -191,10 +191,6 @@ async fn main() -> Result<()> {
         App::new()
             .app_data(quotedata.clone())
             .service(
-                web::resource("/keys/verify")
-                    .route(web::get().to(keys_handler::verify)),
-            )
-            .service(
                 web::resource("/keys/ukey")
                     .route(web::post().to(keys_handler::ukey)),
             )
