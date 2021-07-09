@@ -97,6 +97,11 @@ pub(crate) async fn do_activate_agent(
         registrar_ip, registrar_port, agent_uuid
     );
 
+    info!(
+        "Requesting agent activation from {} for {}",
+        addr, agent_uuid
+    );
+
     let resp = reqwest::Client::new().put(&addr).json(&data).send().await?;
 
     if !resp.status().is_success() {
@@ -135,7 +140,10 @@ pub(crate) async fn do_register_agent(
         registrar_ip, registrar_port, agent_uuid
     );
 
-    info!("Sending data to {}", addr);
+    info!(
+        "Requesting agent registration from {} for {}",
+        addr, agent_uuid
+    );
 
     let resp = reqwest::Client::new()
         .post(&addr)
