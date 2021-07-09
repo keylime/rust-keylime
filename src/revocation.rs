@@ -145,11 +145,11 @@ pub(crate) async fn run_revocation_service() -> Result<()> {
             "Loading the revocation certificate from {}",
             revocation_cert_path
         );
-        match crypto::rsa_import_pubkey(revocation_cert_path) {
+        match crypto::import_x509(revocation_cert_path) {
             Ok(v) => v,
             Err(e) => {
                 return Err(Error::Configuration(String::from(
-                    "Can not load pubkey",
+                    "Cannot load pubkey",
                 )))
             }
         }
