@@ -7,7 +7,8 @@ use openssl::pkcs5;
 use openssl::pkey::{Id, PKey, PKeyRef, Private, Public};
 use openssl::rsa::{Padding, Rsa};
 use openssl::sign::{Signer, Verifier};
-use std::fs::File;
+use openssl::x509::X509;
+use std::fs;
 use std::io::Read;
 use std::string::String;
 
@@ -32,21 +33,21 @@ pub(crate) fn do_hmac(
     Ok(to_hex_string(hmac))
 }
 
-/*
- * Input: path to PEM-encoded RSA public key
- * Output: OpenSSL RSA key object
- *
- * Import a PEM-encoded RSA public key and return a callable OpenSSL RSA key
- * object.
- */
-pub(crate) fn rsa_import_pubkey(
-    input_key_path: String,
-) -> Result<PKey<Public>> {
-    let mut key_buffer = vec![0; 1];
-    let mut input_key = File::open(input_key_path)?;
-    let _ = input_key.read_to_end(&mut key_buffer)?;
-    PKey::from_rsa(Rsa::public_key_from_pem(&key_buffer)?)
-        .map_err(Error::Crypto)
+// Reads an X509 cert chain (provided by the tenant with the --cert command) and outputs
+// its public key.
+pub(crate) fn import_x509(input_key_path: String) -> Result<PKey<Public>> {
+    let contents = fs::read_to_string(&input_key_path[..])?;
+    let mut cert_chain = X509::stack_from_pem(contents.as_bytes())?;
+
+    if cert_chain.len() != 1 {
+        return Err(Error::Other(
+            "More than one public key provided in revocation cert"
+                .to_string(),
+        ));
+    }
+
+    let cert = cert_chain.pop().unwrap(); //#[allow_ci]
+    cert.public_key().map_err(Error::Crypto)
 }
 
 pub(crate) fn rsa_generate(key_size: u32) -> Result<PKey<Private>> {
