@@ -3,7 +3,7 @@
 
 use crate::{tpm, Error as KeylimeError, QuoteData};
 
-use actix_web::{web, HttpResponse, Responder};
+use actix_web::{web, HttpRequest, HttpResponse, Responder};
 use log::*;
 use serde::{Deserialize, Serialize};
 use std::fs::read_to_string;
@@ -111,6 +111,7 @@ impl JsonIntegWrapper {
 // integrity measurement. It should return this data:
 // { QuoteAIK(nonce, 16:H(NK_pub)), NK_pub }
 pub async fn identity(
+    req: HttpRequest,
     param: web::Query<Ident>,
     data: web::Data<QuoteData>,
 ) -> impl Responder {
@@ -123,6 +124,11 @@ pub async fn identity(
             ))
             .await
     } else {
+        info!(
+            "GET invoked from {:?} with uri {}",
+            req.connection_info().remote_addr().unwrap(), //#[allow_ci]
+            req.uri()
+        );
         info!("Calling Identity Quote with nonce: {}", param.nonce);
 
         let mut quote =
@@ -135,6 +141,7 @@ pub async fn identity(
         .map_err(KeylimeError::from)?;
 
         let response = JsonIdWrapper::new(quote);
+        info!("GET identity quote returning 200 response");
         HttpResponse::Ok().json(response).await
     }
 }
@@ -145,6 +152,7 @@ pub async fn identity(
 // { QuoteAIK(nonce, 16:H(NK_pub), xi:yi), NK_pub}
 // where xi:yi are additional PCRs to be included in the quote.
 pub async fn integrity(
+    req: HttpRequest,
     param: web::Query<Integ>,
     data: web::Data<QuoteData>,
 ) -> impl Responder {
@@ -172,6 +180,11 @@ pub async fn integrity(
             ))
             .await
     } else {
+        info!(
+            "GET invoked from {:?} with uri {}",
+            req.connection_info().remote_addr().unwrap(), //#[allow_ci]
+            req.uri()
+        );
         info!("Calling Integrity Quote with nonce: {}", param.nonce);
 
         let mut quote = tpm::quote(
@@ -193,6 +206,7 @@ pub async fn integrity(
         .map_err(KeylimeError::from)?;
 
         let response = JsonIntegWrapper::new(quote);
+        info!("GET integrity quote returning 200 response");
         HttpResponse::Ok().json(response).await
     }
 }

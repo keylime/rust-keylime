@@ -137,6 +137,7 @@ async fn main() -> Result<()> {
     let registrar_port = registrar_port_get()?;
     let agent_uuid_config = config_get("cloud_agent", "agent_uuid")?;
     let agent_uuid = get_uuid(&agent_uuid_config);
+    info!("Agent UUID: {}", agent_uuid);
 
     {
         // Request keyblob material
@@ -149,7 +150,7 @@ async fn main() -> Result<()> {
             &ak_tpm2b_pub,
         )
         .await?;
-        info!("SUCCESS: agent registered");
+        info!("SUCCESS: Agent {} registered", agent_uuid);
 
         let key = tpm::activate_credential(
             &mut ctx, keyblob, ak_handle, ek_handle,
@@ -168,7 +169,7 @@ async fn main() -> Result<()> {
             &auth_tag,
         )
         .await?;
-        info!("SUCCESS: agent activated");
+        info!("SUCCESS: Agent {} activated", agent_uuid);
     }
 
     // Generate key pair for secure transmission of u, v keys. The u, v
