@@ -18,7 +18,6 @@ pub struct Ident {
 pub struct Integ {
     nonce: String,
     mask: String,
-    vmask: String,
     partial: String,
 }
 
@@ -147,7 +146,7 @@ pub async fn identity(
 
 // This is a Quote request from the cloud verifier, which will check
 // integrity measurement. The PCRs included in the Quote will be specified
-// by the mask, vmask. It should return this data:
+// by the mask. It should return this data:
 // { QuoteAIK(nonce, 16:H(NK_pub), xi:yi), NK_pub}
 // where xi:yi are additional PCRs to be included in the quote.
 pub async fn integrity(
@@ -168,14 +167,6 @@ pub async fn integrity(
             .body(format!(
                 "mask should be strictly alphanumeric: {}",
                 param.mask
-            ))
-            .await
-    // TODO: Will we ever need to use the vmask?
-    } else if !param.vmask.chars().all(char::is_alphanumeric) {
-        HttpResponse::BadRequest()
-            .body(format!(
-                "vmask should be strictly alphanumeric: {}",
-                param.vmask
             ))
             .await
     } else {
