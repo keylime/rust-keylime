@@ -4,7 +4,7 @@
 #[macro_use]
 use log::*;
 
-use crate::common::config_get;
+use crate::common::{config_get, REV_CERT};
 use crate::crypto;
 use crate::error::*;
 use crate::secure_mount;
@@ -121,8 +121,7 @@ pub(crate) fn run_revocation_actions(json: Value) -> Result<Vec<Output>> {
 ///   Function: await_notifications
 pub(crate) async fn run_revocation_service() -> Result<()> {
     let mount = secure_mount::mount()?;
-    let revocation_cert_path =
-        format!("{}/unzipped/RevocationNotifier-cert.crt", mount);
+    let revocation_cert_path = format!("{}/unzipped/{}", mount, REV_CERT);
 
     // Connect to the service via 0mq
     let context = zmq::Context::new();

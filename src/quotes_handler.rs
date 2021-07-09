@@ -3,12 +3,11 @@
 
 use crate::{tpm, Error as KeylimeError, QuoteData};
 
+use crate::common::IMA_ML;
 use actix_web::{web, HttpRequest, HttpResponse, Responder};
 use log::*;
 use serde::{Deserialize, Serialize};
 use std::fs::read_to_string;
-
-const IMA_PATH: &str = "/sys/kernel/security/ima/ascii_runtime_measurements";
 
 #[derive(Deserialize)]
 pub struct Ident {
@@ -195,7 +194,7 @@ pub async fn integrity(
 
         let mut quote = KeylimeIntegrityQuote::from_id_quote(
             quote,
-            read_to_string(IMA_PATH)?,
+            read_to_string(IMA_ML)?,
         );
 
         quote.pubkey = String::from_utf8(
