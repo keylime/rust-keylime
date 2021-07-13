@@ -214,14 +214,8 @@ pub(crate) fn run(dir: &str, script: &str, agent_uuid: &str) -> Result<()> {
         return Err(Error::Other(format!("{} not found", script_location)));
     }
 
-    if let Err(e) = Command::new("chmod")
-        .current_dir(dir)
-        .arg("u+x")
-        .arg(&script_location)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .status()
+    if fs::set_permissions(&script_path, fs::Permissions::from_mode(0o700))
+        .is_err()
     {
         return Err(Error::Other(format!(
             "unable to set {} as executable",
@@ -229,7 +223,9 @@ pub(crate) fn run(dir: &str, script: &str, agent_uuid: &str) -> Result<()> {
         )));
     }
 
-    match Command::new(&script_location)
+    match Command::new("sh")
+        .arg("-c")
+        .arg(&script_location)
         .current_dir(dir)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -488,5 +484,27 @@ mod tests {
             "D432FBB3-D2F1-4A97-9EF7-75BD81C0000X",
         ))
         .unwrap(); //#[allow_ci]
+    }
+
+    #[test]
+    fn test_run() {
+        let dir = tempfile::tempdir().unwrap(); //#[allow_ci]
+        let script_path = dir.path().join("test-script.sh");
+        {
+            let mut script_file = fs::File::create(&script_path).unwrap(); //#[allow_ci]
+            let script = r#"
+#!/bin/sh
+
+echo hello > test-output
+"#;
+            let _ = script_file.write(script.as_bytes()).unwrap(); //#[allow_ci]
+        }
+        run(
+            dir.path().to_str().unwrap(), //#[allow_ci]
+            script_path.file_name().unwrap().to_str().unwrap(), //#[allow_ci]
+            "D432FBB3-D2F1-4A97-9EF7-75BD81C0000X",
+        )
+        .unwrap(); //#[allow_ci]
+        assert!(dir.path().join("test-output").exists());
     }
 }
