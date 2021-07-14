@@ -28,7 +28,8 @@ serde_json = { version = "1.0", features = ["raw_value"] }
 tempfile = "3.0.4"
 tokio = {version = "0.2", features = ["full"]}
 tokio-io = "0.1"
-tss-esapi = "5.0"
+#tss-esapi = "5.0"
+tss-esapi = { git = "https://github.com/puiterwijk/rust-tss-esapi.git", branch = "keylime" }
 thiserror = "1.0"
 zmq = "0.9.2"
 uuid = {version = "0.8", features = ["v4"]}

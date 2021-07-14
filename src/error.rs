@@ -22,6 +22,8 @@ pub(crate) enum Error {
     InvalidRequest,
     #[error("Configuration loading error: {0}")]
     Ini(#[from] ini::ini::Error),
+    #[error("Infallible: {0}")]
+    Infallible(#[from] std::convert::Infallible),
     #[error("Compress tools error: {0}")]
     CompressTools(#[from] compress_tools::Error),
     #[error("Configuration error: {0}")]

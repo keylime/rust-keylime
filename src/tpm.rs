@@ -16,6 +16,8 @@ use crate::{
 use actix_web::web::Data;
 
 use openssl::{
+    hash::{Hasher, MessageDigest},
+    memcmp,
     pkey::{Id, PKeyRef, Public},
     rsa::Rsa,
 };
@@ -25,7 +27,10 @@ use flate2::{write::ZlibEncoder, Compression};
 use tss_esapi::{
     abstraction::{ak, cipher::Cipher, ek, DefaultKey},
     attributes::session::SessionAttributesBuilder,
-    constants::{session_type::SessionType, tss::TPM2_ALG_NULL},
+    constants::{
+        session_type::SessionType,
+        tss::{TPM2_ALG_NULL, TPM2_ST_ATTEST_QUOTE},
+    },
     handles::{AuthHandle, KeyHandle, PcrHandle, SessionHandle},
     interface_types::{
         algorithm::{AsymmetricAlgorithm, HashingAlgorithm, SignatureScheme},
@@ -36,9 +41,10 @@ use tss_esapi::{
         PcrSelectionList, PcrSelectionListBuilder, PcrSlot,
     },
     tss2_esys::{
-        Tss2_MU_TPM2B_PUBLIC_Marshal, Tss2_MU_TPMT_SIGNATURE_Marshal,
-        TPM2B_ATTEST, TPM2B_PUBLIC, TPML_DIGEST, TPML_PCR_SELECTION,
-        TPMS_SCHEME_HASH, TPMT_SIGNATURE, TPMT_SIG_SCHEME, TPMU_SIG_SCHEME,
+        Tss2_MU_TPM2B_PUBLIC_Marshal, Tss2_MU_TPMS_ATTEST_Unmarshal,
+        Tss2_MU_TPMT_SIGNATURE_Marshal, TPM2B_ATTEST, TPM2B_PUBLIC,
+        TPML_DIGEST, TPML_PCR_SELECTION, TPMS_ATTEST, TPMS_SCHEME_HASH,
+        TPMT_SIGNATURE, TPMT_SIG_SCHEME, TPMU_SIG_SCHEME,
     },
     utils::{PcrData, Signature},
     Context, Tcti,
@@ -106,6 +112,25 @@ pub(crate) fn create_ek(
     let tpm_pub_vec = pub_to_vec(tpm_pub);
 
     Ok((handle, cert, tpm_pub_vec))
+}
+
+fn unmarshal_tpms_attest(val: &[u8]) -> Result<TPMS_ATTEST> {
+    let mut resp = TPMS_ATTEST::default();
+    let mut offset = 0u64;
+
+    unsafe {
+        let res = Tss2_MU_TPMS_ATTEST_Unmarshal(
+            val[..].as_ptr(),
+            val.len() as u64,
+            &mut offset,
+            &mut resp,
+        );
+        if res != 0 {
+            panic!("Error converting"); //#[allow_ci]
+        }
+    }
+
+    Ok(resp)
 }
 
 // Multiple TPM objects need to be marshaled for Quoting. This macro will
@@ -525,13 +550,19 @@ pub(crate) fn build_pcr_list(
     let ima_pcr_index = pcrs.iter().position(|&pcr| pcr == PcrSlot::Slot10);
 
     let mut pcrlist = PcrSelectionListBuilder::new();
-    pcrlist = pcrlist.with_selection(HashingAlgorithm::Sha1, &pcrs);
+
+    // remove IMA pcr before selecting for sha256 bank
     if let Some(ima_pcr_index) = ima_pcr_index {
         let _ = pcrs.remove(ima_pcr_index);
+
+        // add only IMA pcr for sha1 bank
+        let mut sha1_pcrs = vec![PcrSlot::Slot10];
+        pcrlist = pcrlist.with_selection(HashingAlgorithm::Sha1, &sha1_pcrs);
     }
     pcrlist = pcrlist.with_selection(HashingAlgorithm::Sha256, &pcrs);
+    let pcrlist = pcrlist.build();
 
-    Ok(pcrlist.build())
+    Ok(pcrlist)
 }
 
 // The pcr blob corresponds to the pcr out file that records the list of PCR values,
@@ -563,6 +594,102 @@ pub(crate) fn make_pcr_blob(
     Ok((pcrs_read, pcr_data))
 }
 
+// Takes a TSS ESAPI HashingAlgorithm and returns the corresponding OpenSSL
+// MessageDigest.
+fn hash_alg_to_message_digest(
+    hash_alg: HashingAlgorithm,
+) -> Result<MessageDigest> {
+    match hash_alg {
+        HashingAlgorithm::Sha256 => Ok(MessageDigest::sha256()),
+        HashingAlgorithm::Sha1 => Ok(MessageDigest::sha1()),
+        other => Err(KeylimeError::Other(format!(
+            "Unsupported hashing algorithm: {:?}",
+            other
+        ))),
+    }
+}
+
+fn check_if_pcr_data_and_attestation_match(
+    hash_algo: HashingAlgorithm,
+    pcr_data: &PcrData,
+    attestation: &TPM2B_ATTEST,
+) -> Result<bool> {
+    let pcr_data = TPML_DIGEST::try_from(pcr_data.clone())?;
+    let attestation = unmarshal_tpms_attest(&attestation.attestationData)?;
+
+    if attestation.type_ != TPM2_ST_ATTEST_QUOTE {
+        return Err(KeylimeError::Other(format!(
+            "Expected attestation type TPM2_ST_ATTEST_QUOTE, got {:?}",
+            attestation.type_
+        )));
+    }
+
+    let quote = unsafe { attestation.attested.quote };
+    let attested_pcr = quote.pcrDigest;
+    let attested_pcr = &attested_pcr.buffer[..attested_pcr.size as usize];
+
+    let mut hasher = Hasher::new(hash_alg_to_message_digest(hash_algo)?)?;
+    for i in 0..pcr_data.count {
+        let pcr = pcr_data.digests[i as usize];
+        hasher.update(&pcr.buffer[..pcr.size as usize])?;
+    }
+    let pcr_digest = hasher.finish()?;
+
+    log::trace!(
+        "Attested to PCR digest: {:?}, read PCR digest: {:?}",
+        attested_pcr,
+        pcr_digest,
+    );
+
+    Ok(memcmp::eq(attested_pcr, &pcr_digest))
+}
+
+const NUM_ATTESTATION_ATTEMPTS: i32 = 5;
+
+fn perform_quote_and_pcr_read(
+    mut context: &mut Context,
+    ak_handle: KeyHandle,
+    nonce: &[u8],
+    pcrlist: PcrSelectionList,
+) -> Result<(TPM2B_ATTEST, Signature, PcrSelectionList, PcrData)> {
+    let sig_scheme = get_sig_scheme(TpmSigScheme::default())?;
+    let nonce = nonce.try_into()?;
+
+    for attempt in 0..NUM_ATTESTATION_ATTEMPTS {
+        // TSS ESAPI quote does not create pcr blob, so create it separately
+        let (pcrs_read, pcr_data) =
+            make_pcr_blob(&mut context, pcrlist.clone())?;
+
+        // create quote
+        let (attestation, sig) = context.quote(
+            ak_handle,
+            &nonce,
+            sig_scheme,
+            pcrs_read.clone(),
+        )?;
+
+        // Check whether the attestation and pcr_data match
+        if (check_if_pcr_data_and_attestation_match(
+            HashingAlgorithm::Sha256,
+            &pcr_data,
+            &attestation,
+        )?) {
+            return Ok((attestation, sig, pcrs_read, pcr_data));
+        }
+
+        log::info!(
+            "PCR data and attestation data mismatched on attempt {}",
+            attempt
+        );
+    }
+
+    log::error!("PCR data and attestation data mismatched on all {} attempts, giving up", NUM_ATTESTATION_ATTEMPTS);
+    Err(KeylimeError::Other(
+        "Consistent race condition: can't make attestation match pcr_data"
+            .to_string(),
+    ))
+}
+
 // Despite the return type, this function is used for both Identity and
 // Integrity Quotes. The Quote handler will add additional information to
 // turn an Identity Quote into an Integrity Quote.
@@ -579,21 +706,16 @@ pub(crate) fn quote(
     let mut context = data.tpmcontext.lock().unwrap(); //#[allow_ci]
 
     let pcrlist = build_pcr_list(&mut context, nk_digest, mask)?;
-    let sig_scheme = get_sig_scheme(TpmSigScheme::default())?;
 
-    // create quote
-    let (attestation, sig) =
-        context.execute_with_nullauth_session(|ctx| {
-            ctx.quote(
+    let (attestation, sig, pcrs_read, pcr_data) = context
+        .execute_with_nullauth_session(|mut ctx| {
+            perform_quote_and_pcr_read(
+                &mut ctx,
                 data.ak_handle,
-                &nonce.try_into()?,
-                sig_scheme,
-                pcrlist.clone(),
+                nonce,
+                pcrlist,
             )
         })?;
-
-    // TSS ESAPI quote does not create pcr blob, so create it separately
-    let (pcrs_read, pcr_data) = make_pcr_blob(&mut context, pcrlist)?;
 
     let quote = encode_quote_string(attestation, sig, pcrs_read, pcr_data)?;
 
