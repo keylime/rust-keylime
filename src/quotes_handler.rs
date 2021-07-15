@@ -220,7 +220,10 @@ pub async fn integrity(
             req.connection_info().remote_addr().unwrap(), //#[allow_ci]
             req.uri()
         );
-        info!("Calling Integrity Quote with nonce: {}", param.nonce);
+        info!(
+            "Calling Integrity Quote with nonce: {}, mask: {}",
+            param.nonce, param.mask
+        );
 
         let mut quote = tpm::quote(
             param.nonce.as_bytes(),
