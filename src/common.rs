@@ -38,6 +38,54 @@ pub const AUTH_TAG_LEN: usize = 96;
 pub const KEY_LEN: usize = 32;
 pub const AES_BLOCK_SIZE: usize = 16;
 
+// symmetric keys as bytes
+pub type KeyBytes = [u8; KEY_LEN];
+
+// a vector holding keys
+#[derive(Debug, Clone)]
+pub struct KeySet {
+    pub set: Vec<SymmKey>,
+}
+
+impl Default for KeySet {
+    fn default() -> Self {
+        let set = Vec::new();
+        KeySet { set }
+    }
+}
+
+impl KeySet {
+    pub fn all_empty(&self) -> bool {
+        self.set.iter().all(|&key| key.is_empty())
+    }
+}
+
+// a key of len KEY_LEN
+#[derive(Debug, Clone, Copy)]
+pub struct SymmKey {
+    pub bytes: KeyBytes,
+}
+
+impl Default for SymmKey {
+    fn default() -> Self {
+        SymmKey {
+            bytes: [0u8; KEY_LEN],
+        }
+    }
+}
+
+impl SymmKey {
+    pub fn is_empty(&self) -> bool {
+        self.bytes == [0u8; KEY_LEN]
+    }
+
+    pub fn from_vec(v: Vec<u8>) -> Self {
+        let mut b = [0u8; KEY_LEN];
+        b.copy_from_slice(&v[..]);
+        SymmKey { bytes: b }
+    }
+}
+
 /*
  * Return: Returns the configuration file provided in the environment variable
  * KEYLIME_CONFIG or defaults to /etc/keylime.conf
