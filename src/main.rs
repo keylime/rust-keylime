@@ -91,9 +91,9 @@ pub struct QuoteData {
     priv_key: PKey<Private>,
     pub_key: PKey<Public>,
     ak_handle: KeyHandle,
-    ukey: Mutex<[u8; KEY_LEN]>,
-    vkey: Mutex<[u8; KEY_LEN]>,
-    payload_symm_key: Arc<Mutex<[u8; KEY_LEN]>>,
+    ukeys: Mutex<KeySet>,
+    vkeys: Mutex<KeySet>,
+    payload_symm_key: Arc<Mutex<SymmKey>>,
     encr_payload: Arc<Mutex<Vec<u8>>>,
     auth_tag: Mutex<[u8; AUTH_TAG_LEN]>,
 }
@@ -129,9 +129,9 @@ fn get_uuid(agent_uuid_config: &str) -> String {
 // keylime/crypto.py#L189
 pub(crate) fn decrypt_payload(
     encr: Arc<Mutex<Vec<u8>>>,
-    key: Arc<Mutex<[u8; KEY_LEN]>>,
+    key: Arc<Mutex<SymmKey>>,
 ) -> Result<Vec<u8>> {
-    let symm_key = key.lock().unwrap(); //#[allow_ci]
+    let symm_key = key.lock().unwrap().bytes; //#[allow_ci]
     let payload = encr.lock().unwrap(); //#[allow_ci]
 
     // parse out payload iv, tag, ciphertext
@@ -149,7 +149,7 @@ pub(crate) fn decrypt_payload(
     };
 
     let decrypted =
-        decrypt_aead(cipher, &*symm_key, Some(iv), &[], ciphertext, tag)?;
+        decrypt_aead(cipher, &symm_key, Some(iv), &[], ciphertext, tag)?;
 
     info!("Successfully decrypted payload");
     Ok(decrypted)
@@ -182,10 +182,10 @@ pub(crate) fn setup_unzipped() -> Result<(String, String, String)> {
 pub(crate) fn write_out_key_and_payload(
     dec_payload: &[u8],
     dec_payload_path: &str,
-    key: Arc<Mutex<[u8; KEY_LEN]>>,
+    key: Arc<Mutex<SymmKey>>,
     key_path: &str,
 ) -> Result<()> {
-    let symm_key = key.lock().unwrap(); //#[allow_ci]
+    let symm_key = key.lock().unwrap().bytes; //#[allow_ci]
 
     let mut key_file = fs::File::create(key_path)?;
     let bytes = key_file.write(&symm_key[..])?;
@@ -333,7 +333,7 @@ async fn main() -> Result<()> {
     // safeguards u and v keys in transit, is not part of the threat model.
     let (nk_pub, nk_priv) = crypto::rsa_generate_pair(2048)?;
 
-    let mut payload_symm_key = [0u8; KEY_LEN];
+    let mut payload_symm_key = SymmKey::default();
     let mut encr_payload = Vec::new();
 
     let symm_key_arc = Arc::new(Mutex::new(payload_symm_key));
@@ -348,8 +348,8 @@ async fn main() -> Result<()> {
         priv_key: nk_priv,
         pub_key: nk_pub,
         ak_handle,
-        ukey: Mutex::new([0u8; KEY_LEN]),
-        vkey: Mutex::new([0u8; KEY_LEN]),
+        ukeys: Mutex::new(KeySet::default()),
+        vkeys: Mutex::new(KeySet::default()),
         payload_symm_key: symm_key_arc,
         encr_payload: encr_payload_arc,
         auth_tag: Mutex::new([0u8; AUTH_TAG_LEN]),
@@ -386,7 +386,7 @@ async fn main() -> Result<()> {
         let key = symm_key.lock().unwrap(); //#[allow_ci]
 
         // if key is still empty, unlock resource by dropping and sleep for 1 sec
-        if *key == [0u8; KEY_LEN] {
+        if key.is_empty() {
             drop(key);
             std::thread::sleep(Duration::from_millis(1000));
             continue;

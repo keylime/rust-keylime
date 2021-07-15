@@ -236,7 +236,7 @@ pub async fn integrity(
         // it's the first quote request by seeing if the symmetric key has been
         // derived (which happens after both u and v key are received once).
         let symm_key = data.payload_symm_key.lock().unwrap(); //#[allow_ci]
-        if *symm_key == [0u8; KEY_LEN] {
+        if symm_key.is_empty() {
             let quote = KeylimeIntegrityQuotePreAttestation::from_id_quote(
                 quote,
                 read_to_string(IMA_ML)?,

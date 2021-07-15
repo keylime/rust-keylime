@@ -3,7 +3,8 @@
 
 use crate::{
     common::{
-        config_get, AES_BLOCK_SIZE, AGENT_UUID_LEN, AUTH_TAG_LEN, KEY_LEN,
+        config_get, KeySet, SymmKey, AES_BLOCK_SIZE, AGENT_UUID_LEN,
+        AUTH_TAG_LEN, KEY_LEN,
     },
     get_uuid, Error, QuoteData, Result,
 };
@@ -41,11 +42,11 @@ pub(crate) fn xor_to_outbuf(
 // Computes HMAC over agent UUID with provided key (payload decryption key) and
 // checks that this matches the provided auth_tag.
 pub(crate) fn check_hmac(
-    key: &[u8; KEY_LEN],
+    key: &SymmKey,
     uuid: &[u8],
     auth_tag: &[u8; AUTH_TAG_LEN],
 ) -> Result<()> {
-    let pkey = PKey::hmac(key)?;
+    let pkey = PKey::hmac(&key.bytes)?;
     let mut signer = Signer::new(MessageDigest::sha384(), &pkey)?;
     signer.update(uuid)?;
     let hmac = signer.sign_to_vec()?;
@@ -76,29 +77,42 @@ pub(crate) fn check_hmac(
 // tag. Returning None is okay here in case we are still waiting on another handler to
 // process data.
 pub(crate) fn try_combine_keys(
-    key1: &[u8; KEY_LEN],
-    key2: &[u8; KEY_LEN],
-    symm_key_out: &mut [u8; KEY_LEN],
+    keyset1: &KeySet,
+    keyset2: &KeySet,
+    symm_key_out: &mut SymmKey,
     uuid: &[u8],
     auth_tag: &[u8; AUTH_TAG_LEN],
 ) -> Result<Option<()>> {
     // U, V keys and auth_tag must be present for this to succeed
-    if key1 == &[0u8; KEY_LEN]
-        || key2 == &[0u8; KEY_LEN]
+    if keyset1.all_empty()
+        || keyset2.all_empty()
         || auth_tag == &[0u8; AUTH_TAG_LEN]
     {
         debug!("Still waiting on u or v key or auth_tag");
         return Ok(None);
     }
 
-    // TODO: u and v keys should be sets
+    for key1 in &keyset1.set {
+        for key2 in &keyset2.set {
+            xor_to_outbuf(
+                &mut symm_key_out.bytes[..],
+                &key1.bytes[..],
+                &key2.bytes[..],
+            );
 
-    xor_to_outbuf(&mut symm_key_out[..], &key1[..], &key2[..]);
+            if let Ok(()) = check_hmac(symm_key_out, uuid, auth_tag) {
+                info!(
+                    "Successfully derived symmetric payload decryption key"
+                );
 
-    check_hmac(symm_key_out, uuid, auth_tag)?;
-    info!("Successfully derived symmetric payload decryption key");
+                return Ok(Some(()));
+            }
+        }
+    }
 
-    Ok(Some(()))
+    Err(Error::Other(
+        "HMAC check failed for all U and V key combinations".to_string(),
+    ))
 }
 
 // Uses NK (key for encrypting data from verifier or tenant to agent in transit) to
@@ -132,20 +146,20 @@ pub(crate) fn decrypt_u_or_v_key(
 // struct to hold data and keep track of whether we are processing a u
 // or v key
 pub(crate) struct CurrentKeyInfo<'a> {
-    current_key: &'a Mutex<[u8; KEY_LEN]>,
-    other_key: &'a Mutex<[u8; KEY_LEN]>,
+    current_keyset: &'a Mutex<KeySet>,
+    other_keyset: &'a Mutex<KeySet>,
     keyname: String,
 }
 
 impl<'a> CurrentKeyInfo<'a> {
     fn new(
-        current_key: &'a Mutex<[u8; KEY_LEN]>,
-        other_key: &'a Mutex<[u8; KEY_LEN]>,
+        current_keyset: &'a Mutex<KeySet>,
+        other_keyset: &'a Mutex<KeySet>,
         keyname: String,
     ) -> Self {
         CurrentKeyInfo {
-            current_key,
-            other_key,
+            current_keyset,
+            other_keyset,
             keyname,
         }
     }
@@ -154,8 +168,8 @@ impl<'a> CurrentKeyInfo<'a> {
 // Returns a reference to the U key or the V key in the app data.
 pub(crate) fn find_keytype<'a>(
     req: &HttpRequest,
-    u: &'a Mutex<[u8; KEY_LEN]>,
-    v: &'a Mutex<[u8; KEY_LEN]>,
+    u: &'a Mutex<KeySet>,
+    v: &'a Mutex<KeySet>,
 ) -> Result<CurrentKeyInfo<'a>> {
     if req.path().contains("ukey") {
         info!("Received ukey");
@@ -181,12 +195,13 @@ pub async fn u_or_v_key(
 ) -> impl Responder {
     // determine if the key is the u or the v key
     let curr_key_info =
-        find_keytype(&req, &quote_data.ukey, &quote_data.vkey)?;
+        find_keytype(&req, &quote_data.ukeys, &quote_data.vkeys)?;
 
     // must unwrap when using lock
     // https://github.com/rust-lang-nursery/failure/issues/192
-    let mut global_current_key = curr_key_info.current_key.lock().unwrap(); //#[allow_ci]
-    let mut global_other_key = curr_key_info.other_key.lock().unwrap(); //#[allow_ci]
+    let mut global_current_keyset =
+        curr_key_info.current_keyset.lock().unwrap(); //#[allow_ci]
+    let mut global_other_keyset = curr_key_info.other_keyset.lock().unwrap(); //#[allow_ci]
     let mut global_symm_key = quote_data.payload_symm_key.lock().unwrap(); //#[allow_ci]
     let mut global_encr_payload = quote_data.encr_payload.lock().unwrap(); //#[allow_ci]
     let mut global_auth_tag = quote_data.auth_tag.lock().unwrap(); //#[allow_ci]
@@ -200,7 +215,9 @@ pub async fn u_or_v_key(
     let decrypted_key =
         decrypt_u_or_v_key(&quote_data.priv_key, encrypted_key)?;
 
-    global_current_key.copy_from_slice(&decrypted_key[..]);
+    global_current_keyset
+        .set
+        .push(SymmKey::from_vec(decrypted_key));
 
     // only ukey POSTs from tenant have payload and auth_tag data
     if curr_key_info.keyname == "ukey" {
@@ -216,8 +233,8 @@ pub async fn u_or_v_key(
     let agent_uuid = get_uuid(&config_get("cloud_agent", "agent_uuid")?);
 
     let _ = try_combine_keys(
-        &global_current_key,
-        &global_other_key,
+        &global_current_keyset,
+        &global_other_keyset,
         &mut global_symm_key,
         &agent_uuid.into_bytes(),
         &global_auth_tag,
