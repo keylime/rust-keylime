@@ -273,7 +273,7 @@ async fn main() -> Result<()> {
         warn!("INSECURE: Only use Keylime in this mode for testing or debugging purposes.");
     }
 
-    info!("Starting server...");
+    info!("Starting server with API version {}...", API_VERSION);
 
     // Gather EK and AK key values and certs
     let (ek_handle, ek_cert, ek_tpm2b_pub) =
@@ -359,20 +359,20 @@ async fn main() -> Result<()> {
         App::new()
             .app_data(quotedata.clone())
             .service(
-                web::resource("/keys/ukey")
+                web::resource(format!("/{}/keys/ukey", API_VERSION))
                     .route(web::post().to(keys_handler::u_or_v_key)),
             )
             .service(
                 // the double slash may be a typo on the python side
-                web::resource("//keys/vkey")
+                web::resource(format!("/{}/keys/vkey", API_VERSION))
                     .route(web::post().to(keys_handler::u_or_v_key)),
             )
             .service(
-                web::resource("/quotes/identity")
+                web::resource(format!("/{}/quotes/identity", API_VERSION))
                     .route(web::get().to(quotes_handler::identity)),
             )
             .service(
-                web::resource("/quotes/integrity")
+                web::resource(format!("/{}/quotes/integrity", API_VERSION))
                     .route(web::get().to(quotes_handler::integrity)),
             )
     })
