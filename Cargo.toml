@@ -7,6 +7,16 @@ license = "Apache-2.0"
 description = "Rust agent for Keylime"
 repository = "https://github.com/keylime/rust-keylime"
 
+[[bin]]
+name = "keylime_agent"
+path = "src/main.rs"
+doc = false
+
+[[bin]]
+name = "keylime_ima_emulator"
+path = "src/ima_emulator.rs"
+doc = false
+
 [dependencies]
 actix-web = "3"
 base64 = "0.12"
