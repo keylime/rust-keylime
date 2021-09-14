@@ -63,6 +63,8 @@ pub(crate) enum Error {
     Base64(#[from] base64::DecodeError),
     #[error("parse bool error: {0}")]
     ParseBool(#[from] std::str::ParseBoolError),
+    #[error("from hex error: {0}")]
+    FromHex(#[from] hex::FromHexError),
     #[error("{0}")]
     Other(String),
 }

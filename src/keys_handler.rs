@@ -14,6 +14,7 @@ use log::*;
 use openssl::{
     encrypt::Decrypter,
     hash::MessageDigest,
+    memcmp,
     pkey::{PKey, Private},
     rsa::Padding,
     sign::Signer,
@@ -50,22 +51,10 @@ pub(crate) fn check_hmac(
     let mut signer = Signer::new(MessageDigest::sha384(), &pkey)?;
     signer.update(uuid)?;
     let hmac = signer.sign_to_vec()?;
-    let hmac = hex::encode(hmac);
 
-    if hmac.len() != auth_tag.len() {
-        return Err(Error::Other(format!(
-            "hmac len {} does not == auth_tag.len() {}",
-            hmac.len(),
-            auth_tag.len()
-        )));
-    }
-
-    let auth_tag_string = String::from_utf8(auth_tag.to_vec())?;
-    if hmac != auth_tag_string {
-        return Err(Error::Other(format!(
-            "hmac check failed: hmac {} != auth_tag {}",
-            hmac, auth_tag_string
-        )));
+    let auth_tag = hex::decode(auth_tag)?;
+    if !memcmp::eq(&hmac, &auth_tag) {
+        return Err(Error::Other("hmac check failed".to_string()));
     }
 
     info!("HMAC check passed");
