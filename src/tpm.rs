@@ -33,12 +33,14 @@ use tss_esapi::{
     },
     handles::{AuthHandle, KeyHandle, PcrHandle, SessionHandle},
     interface_types::{
-        algorithm::{AsymmetricAlgorithm, HashingAlgorithm, SignatureScheme},
+        algorithm::{
+            AsymmetricAlgorithm, HashingAlgorithm, SignatureSchemeAlgorithm,
+        },
         session_handles::AuthSession,
     },
     structures::{
         Digest, DigestValues, EncryptedSecret, IDObject, Name,
-        PcrSelectionList, PcrSelectionListBuilder, PcrSlot,
+        PcrSelectionList, PcrSelectionListBuilder, PcrSlot, Signature,
     },
     tss2_esys::{
         Tss2_MU_TPM2B_PUBLIC_Marshal, Tss2_MU_TPMS_ATTEST_Unmarshal,
@@ -46,7 +48,7 @@ use tss_esapi::{
         TPML_DIGEST, TPML_PCR_SELECTION, TPMS_ATTEST, TPMS_SCHEME_HASH,
         TPMT_SIGNATURE, TPMT_SIG_SCHEME, TPMU_SIG_SCHEME,
     },
-    utils::{PcrData, Signature},
+    utils::PcrData,
     Context, Tcti,
 };
 
@@ -109,7 +111,7 @@ pub(crate) fn create_ek(
         }
     };
     let (tpm_pub, _, _) = context.read_public(handle)?;
-    let tpm_pub_vec = pub_to_vec(tpm_pub);
+    let tpm_pub_vec = pub_to_vec(tpm_pub.into());
 
     Ok((handle, cert, tpm_pub_vec))
 }
@@ -238,12 +240,12 @@ pub(crate) fn create_ak(
         ctx,
         handle,
         HashingAlgorithm::Sha256,
-        SignatureScheme::RsaSsa,
+        SignatureSchemeAlgorithm::RsaSsa,
         None,
         DefaultKey,
     )?;
-    let ak_tpm2b_pub = ak.out_public;
-    let tpm2_pub_vec = pub_to_vec(ak_tpm2b_pub);
+    let ak_tpm2b_pub = ak.out_public.clone();
+    let tpm2_pub_vec = pub_to_vec(ak_tpm2b_pub.into());
     let ak_handle =
         ak::load_ak(ctx, handle, None, ak.out_private, ak.out_public)?;
     let (_, name, _) = ctx.read_public(ak_handle)?;
