@@ -66,8 +66,8 @@ pub(crate) fn check_hmac(
 // tag. Returning None is okay here in case we are still waiting on another handler to
 // process data.
 pub(crate) fn try_combine_keys(
-    keyset1: &KeySet,
-    keyset2: &KeySet,
+    keyset1: &mut KeySet,
+    keyset2: &mut KeySet,
     symm_key_out: &mut SymmKey,
     uuid: &[u8],
     auth_tag: &[u8; AUTH_TAG_LEN],
@@ -94,6 +94,8 @@ pub(crate) fn try_combine_keys(
                     "Successfully derived symmetric payload decryption key"
                 );
 
+                keyset1.clear();
+                keyset2.clear();
                 return Ok(Some(()));
             }
         }
@@ -222,8 +224,8 @@ pub async fn u_or_v_key(
     let agent_uuid = get_uuid(&config_get("cloud_agent", "agent_uuid")?);
 
     let _ = try_combine_keys(
-        &global_current_keyset,
-        &global_other_keyset,
+        &mut global_current_keyset,
+        &mut global_other_keyset,
         &mut global_symm_key,
         &agent_uuid.into_bytes(),
         &global_auth_tag,
