@@ -59,6 +59,10 @@ impl KeySet {
     pub fn all_empty(&self) -> bool {
         self.set.iter().all(|&key| key.is_empty())
     }
+
+    pub fn clear(&mut self) {
+        self.set.clear();
+    }
 }
 
 // a key of len KEY_LEN

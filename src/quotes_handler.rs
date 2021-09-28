@@ -225,18 +225,24 @@ pub async fn integrity(
             param.nonce, param.mask
         );
 
+        let partial = req.uri().query().unwrap(); //#[allow_ci]
+        let partial = if partial.contains("partial=0") {
+            0
+        } else if partial.contains("partial=1") {
+            1
+        } else {
+            return HttpResponse::BadRequest()
+                .body("uri must contain key 'partial' and value '0' or '1'")
+                .await;
+        };
+
         let mut quote = tpm::quote(
             param.nonce.as_bytes(),
             Some(&param.mask),
             data.clone(),
         )?;
 
-        // pubkey should only be sent for the first quote request; otherwise
-        // the verifier will keep sending a v key every time. we check whether
-        // it's the first quote request by seeing if the symmetric key has been
-        // derived (which happens after both u and v key are received once).
-        let symm_key = data.payload_symm_key.lock().unwrap(); //#[allow_ci]
-        if symm_key.is_empty() {
+        if partial == 0 {
             let quote = KeylimeIntegrityQuotePreAttestation::from_id_quote(
                 quote,
                 read_to_string(IMA_ML)?,
