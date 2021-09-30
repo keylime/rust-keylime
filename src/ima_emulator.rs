@@ -105,8 +105,16 @@ fn ml_extend(
 }
 
 fn main() -> std::result::Result<(), ImaEmulatorError> {
-    let tcti = Tcti::from_environment_variable()?;
-    let mut context = unsafe { Context::new(tcti) }?;
+    let tcti =
+        match Tcti::from_environment_variable() {
+            Ok(tcti) => tcti,
+            Err(_) => return Err(ImaEmulatorError::Other(
+                "This stub requires TCTI environment variable set properly"
+                    .to_string(),
+            )),
+        };
+
+    let mut context = Context::new(tcti)?;
 
     if !tss_esapi::utils::get_tpm_vendor(&mut context)?.contains("SW") {
         return Err(ImaEmulatorError::Other(
