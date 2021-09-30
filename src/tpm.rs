@@ -33,23 +33,22 @@ use tss_esapi::{
     },
     handles::{AuthHandle, KeyHandle, PcrHandle, SessionHandle},
     interface_types::{
-        algorithm::{
-            AsymmetricAlgorithm, HashingAlgorithm, SignatureSchemeAlgorithm,
-        },
+        algorithm::{AsymmetricAlgorithm, HashingAlgorithm, SignatureScheme},
         session_handles::AuthSession,
     },
     structures::{
         Digest, DigestValues, EncryptedSecret, IDObject, Name,
-        PcrSelectionList, PcrSelectionListBuilder, PcrSlot, Signature,
+        PcrSelectionList, PcrSelectionListBuilder, PcrSlot,
     },
+    tcti_ldr::TctiNameConf,
     tss2_esys::{
         Tss2_MU_TPM2B_PUBLIC_Marshal, Tss2_MU_TPMS_ATTEST_Unmarshal,
         Tss2_MU_TPMT_SIGNATURE_Marshal, TPM2B_ATTEST, TPM2B_PUBLIC,
         TPML_DIGEST, TPML_PCR_SELECTION, TPMS_ATTEST, TPMS_SCHEME_HASH,
         TPMT_SIGNATURE, TPMT_SIG_SCHEME, TPMU_SIG_SCHEME,
     },
-    utils::PcrData,
-    Context, Tcti,
+    utils::{PcrData, Signature},
+    Context,
 };
 
 /*
@@ -70,8 +69,8 @@ pub(crate) fn get_tpm2_ctx() -> Result<Context> {
         .to_string(),
     };
 
-    let tcti = Tcti::from_str(&tcti_path)?;
-    unsafe { Context::new(tcti) }.map_err(|e| e.into())
+    let tcti = TctiNameConf::from_str(&tcti_path)?;
+    Context::new(tcti).map_err(|e| e.into())
 }
 
 /*
@@ -111,7 +110,7 @@ pub(crate) fn create_ek(
         }
     };
     let (tpm_pub, _, _) = context.read_public(handle)?;
-    let tpm_pub_vec = pub_to_vec(tpm_pub.into());
+    let tpm_pub_vec = pub_to_vec(tpm_pub);
 
     Ok((handle, cert, tpm_pub_vec))
 }
@@ -240,12 +239,12 @@ pub(crate) fn create_ak(
         ctx,
         handle,
         HashingAlgorithm::Sha256,
-        SignatureSchemeAlgorithm::RsaSsa,
+        SignatureScheme::RsaSsa,
         None,
         DefaultKey,
     )?;
-    let ak_tpm2b_pub = ak.out_public.clone();
-    let tpm2_pub_vec = pub_to_vec(ak_tpm2b_pub.into());
+    let ak_tpm2b_pub = ak.out_public;
+    let tpm2_pub_vec = pub_to_vec(ak_tpm2b_pub);
     let ak_handle =
         ak::load_ak(ctx, handle, None, ak.out_private, ak.out_public)?;
     let (_, name, _) = ctx.read_public(ak_handle)?;

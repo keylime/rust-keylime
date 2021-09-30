@@ -231,7 +231,7 @@ pub(crate) fn config_get(section: &str, key: &str) -> Result<String> {
         }
     };
 
-    Ok(value.clone())
+    Ok(value.to_string())
 }
 
 /*
