@@ -63,6 +63,8 @@ struct Register<'a> {
     ek_tpm: &'a [u8],
     #[serde(serialize_with = "serialize_as_base64")]
     aik_tpm: &'a [u8],
+    ip: Option<String>,
+    port: Option<u32>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -135,11 +137,15 @@ pub(crate) async fn do_register_agent(
     ek_tpm: &[u8],
     ekcert: Option<Vec<u8>>,
     aik_tpm: &[u8],
+    ip: Option<String>,
+    port: Option<u32>,
 ) -> crate::error::Result<Vec<u8>> {
     let data = Register {
         ekcert,
         ek_tpm,
         aik_tpm,
+        ip,
+        port,
     };
 
     #[cfg(test)]
@@ -213,6 +219,8 @@ mod tests {
             &mock_data,
             Some((&mock_data).to_vec()),
             &mock_data,
+            None,
+            None,
         )
         .await;
         assert!(response.is_ok());
@@ -241,7 +249,7 @@ mod tests {
 
         let mock_data = [0u8; 1];
         let response = do_register_agent(
-            uri[0], uri[1], "uuid", &mock_data, None, &mock_data,
+            uri[0], uri[1], "uuid", &mock_data, None, &mock_data, None, None,
         )
         .await;
         assert!(response.is_ok());
@@ -272,6 +280,8 @@ mod tests {
             &mock_data,
             Some((&mock_data).to_vec()),
             &mock_data,
+            None,
+            None,
         )
         .await;
         assert!(response.is_err());
