@@ -142,6 +142,36 @@ pub(crate) fn registrar_port_get() -> Result<String> {
     config_get_env("registrar", "registrar_port", "REGISTRAR_PORT")
 }
 
+/// Returns the contact ip for the agent if set
+pub(crate) fn cloudagent_contact_ip_get() -> Option<String> {
+    match config_get_env(
+        "cloud_agent",
+        "agent_contact_ip",
+        "KEYLIME_AGENT_CONTACT_IP",
+    ) {
+        Ok(ip) => Some(ip),
+        Err(_) => None, // Ignore errors because this option might not be set
+    }
+}
+
+/// Returns the contact ip for the agent if set
+pub(crate) fn cloudagent_contact_port_get() -> Result<Option<u32>> {
+    match config_get_env(
+        "cloud_agent",
+        "agent_contact_port",
+        "KEYLIME_AGENT_CONTACT_PORT",
+    ) {
+        Ok(port_str) => match port_str.parse::<u32>() {
+            Ok(port) => Ok(Some(port)),
+            _ => Err(Error::Configuration(format!(
+                "Parse {} to a port number.",
+                port_str
+            ))),
+        },
+        _ => Ok(None), // Ignore errors because this option might not be set
+    }
+}
+
 /*
  * Input: [section] and key
  * Return: Returns the matched key
