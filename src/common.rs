@@ -134,12 +134,12 @@ pub(crate) fn cloudagent_port_get() -> Result<String> {
 
 /// Returns registrar IP from keylime.conf if env var not present
 pub(crate) fn registrar_ip_get() -> Result<String> {
-    config_get_env("registrar", "registrar_ip", "REGISTRAR_IP")
+    config_get_env("cloud_agent", "registrar_ip", "REGISTRAR_IP")
 }
 
 /// Returns registrar port from keylime.conf if env var not present
 pub(crate) fn registrar_port_get() -> Result<String> {
-    config_get_env("registrar", "registrar_port", "REGISTRAR_PORT")
+    config_get_env("cloud_agent", "registrar_port", "REGISTRAR_PORT")
 }
 
 /// Returns the contact ip for the agent if set
