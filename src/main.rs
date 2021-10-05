@@ -261,6 +261,52 @@ pub(crate) fn optional_unzip_payload(unzipped: &str) -> Result<()> {
     Ok(())
 }
 
+async fn run_encrypted_payload(
+    symm_key: Arc<Mutex<SymmKey>>,
+    payload: Arc<Mutex<Vec<u8>>>,
+    agent_uuid: &str,
+) -> Result<()> {
+    // do nothing until actix server's handlers have updated the symmetric key
+    loop {
+        let key = symm_key.lock().unwrap(); //#[allow_ci]
+
+        // if key is still empty, unlock resource by dropping and sleep for 1 sec
+        if key.is_empty() {
+            drop(key);
+            std::thread::sleep(Duration::from_millis(1000));
+            continue;
+        } else {
+            break;
+        }
+    }
+
+    let dec_payload = decrypt_payload(payload, symm_key.clone())?;
+
+    let (unzipped, dec_payload_path, key_path) = setup_unzipped()?;
+
+    write_out_key_and_payload(
+        &dec_payload,
+        &dec_payload_path,
+        symm_key,
+        &key_path,
+    )?;
+
+    optional_unzip_payload(&unzipped)?;
+
+    // there may also be also a separate init script
+    match config_get("cloud_agent", "payload_script")?.as_str() {
+        "" => {
+            info!("No payload script specified, skipping");
+        }
+        script => {
+            info!("Payload init script indicated: {}", script);
+            run(&unzipped, script, agent_uuid)?;
+        }
+    }
+
+    Ok(())
+}
+
 #[actix_web::main]
 async fn main() -> Result<()> {
     pretty_env_logger::init();
@@ -381,51 +427,22 @@ async fn main() -> Result<()> {
     .map_err(Error::from);
     info!("Listening on http://{}:{}", cloudagent_ip, cloudagent_port);
 
-    // do nothing until actix server's handlers have updated the symmetric key
-    loop {
-        let key = symm_key.lock().unwrap(); //#[allow_ci]
-
-        // if key is still empty, unlock resource by dropping and sleep for 1 sec
-        if key.is_empty() {
-            drop(key);
-            std::thread::sleep(Duration::from_millis(1000));
-            continue;
-        } else {
-            break;
-        }
-    }
-
-    let dec_payload = decrypt_payload(payload, symm_key.clone())?;
-
-    let (unzipped, dec_payload_path, key_path) = setup_unzipped()?;
-
-    write_out_key_and_payload(
-        &dec_payload,
-        &dec_payload_path,
-        symm_key,
-        &key_path,
-    )?;
-
-    optional_unzip_payload(&unzipped)?;
-
-    // there may also be also a separate init script
-    match config_get("cloud_agent", "payload_script")?.as_str() {
-        "" => {
-            info!("No payload script specified, skipping");
-        }
-        script => {
-            info!("Payload init script indicated: {}", script);
-            run(&unzipped, script, &agent_uuid)?;
-        }
-    }
-
     // as the payload may set up revocation certificates, etc., the revocation
     // service should be run only after the agent quotes have been validated
     // and the payload has been decrypted and run. also, this service can be
     // turned off in configuration.
     let run_revocation = config_get("cloud_agent", "listen_notfications")?;
     if bool::from_str(&run_revocation.to_lowercase())? {
-        try_join!(revocation::run_revocation_service())?;
+        try_join!(
+            revocation::run_revocation_service(),
+            run_encrypted_payload(symm_key, payload, &agent_uuid),
+            actix_server
+        )?;
+    } else {
+        try_join!(
+            run_encrypted_payload(symm_key, payload, &agent_uuid),
+            actix_server
+        )?;
     }
 
     Ok(())
