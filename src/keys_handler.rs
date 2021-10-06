@@ -233,3 +233,108 @@ pub async fn u_or_v_key(
 
     HttpResponse::Ok().await
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::common::{API_VERSION, KEY_LEN};
+    use actix_web::{http::StatusCode, test, web, App};
+    use openssl::{
+        encrypt::Encrypter,
+        hash::MessageDigest,
+        memcmp,
+        pkey::{PKey, Private},
+        rsa::Padding,
+        sign::Signer,
+    };
+    use serde::{Deserialize, Serialize};
+
+    #[derive(Serialize, Deserialize, Debug)]
+    struct KeylimeUKey {
+        auth_tag: String,
+        encrypted_key: String,
+        payload: Option<String>,
+    }
+
+    #[derive(Serialize, Deserialize, Debug)]
+    struct KeylimeVKey {
+        encrypted_key: String,
+    }
+
+    #[cfg(feature = "testing")]
+    #[actix_rt::test]
+    async fn test_u_or_v_key() {
+        let quotedata = web::Data::new(QuoteData::fixture().unwrap()); //#[allow_ci]
+        let mut app = test::init_service(
+            App::new()
+                .app_data(quotedata.clone())
+                .route(
+                    &format!("/{}/keys/ukey", API_VERSION),
+                    web::post().to(u_or_v_key),
+                )
+                .route(
+                    &format!("/{}/keys/vkey", API_VERSION),
+                    web::post().to(u_or_v_key),
+                ),
+        )
+        .await;
+
+        let mut encrypter = Encrypter::new(&quotedata.pub_key).unwrap(); //#[allow_ci]
+
+        encrypter.set_rsa_padding(Padding::PKCS1_OAEP).unwrap(); //#[allow_ci]
+        encrypter.set_rsa_mgf1_md(MessageDigest::sha1()).unwrap(); //#[allow_ci]
+        encrypter.set_rsa_oaep_md(MessageDigest::sha1()).unwrap(); //#[allow_ci]
+
+        let u: &[u8; KEY_LEN] = b"01234567890123456789012345678901";
+        let v: &[u8; KEY_LEN] = b"ABCDEFGHIJABCDEFGHIJABCDEFGHIJAB";
+        let mut k = vec![0u8; KEY_LEN];
+        xor_to_outbuf(&mut k, u, v).unwrap(); //#[allow_ci]
+
+        let buffer_len = encrypter.encrypt_len(u).unwrap(); //#[allow_ci]
+        let mut encrypted_key = vec![0; buffer_len];
+        let encrypted_len = encrypter.encrypt(u, &mut encrypted_key).unwrap(); //#[allow_ci]
+        encrypted_key.truncate(encrypted_len);
+
+        let agent_uuid =
+            get_uuid(&config_get("cloud_agent", "agent_uuid").unwrap()); //#[allow_ci]
+        let pkey = PKey::hmac(&k).unwrap(); //#[allow_ci]
+        let mut signer = Signer::new(MessageDigest::sha384(), &pkey).unwrap(); //#[allow_ci]
+        signer.update(agent_uuid.as_bytes()).unwrap(); //#[allow_ci]
+        let auth_tag = signer.sign_to_vec().unwrap(); //#[allow_ci]
+
+        let ukey = KeylimeUKey {
+            encrypted_key: base64::encode(&encrypted_key),
+            auth_tag: hex::encode(auth_tag),
+            payload: None,
+        };
+
+        let req = test::TestRequest::post()
+            .uri(&format!("/{}/keys/ukey", API_VERSION,))
+            .set_json(&ukey)
+            .to_request();
+
+        let resp = test::call_service(&mut app, req).await;
+        assert!(resp.status().is_success());
+
+        let buffer_len = encrypter.encrypt_len(v).unwrap(); //#[allow_ci]
+        let mut encrypted_key = vec![0; buffer_len];
+        let encrypted_len = encrypter.encrypt(v, &mut encrypted_key).unwrap(); //#[allow_ci]
+        encrypted_key.truncate(encrypted_len);
+
+        let vkey = KeylimeVKey {
+            encrypted_key: base64::encode(&encrypted_key),
+        };
+
+        let req = test::TestRequest::post()
+            .uri(&format!("/{}/keys/vkey", API_VERSION,))
+            .set_json(&vkey)
+            .to_request();
+
+        let resp = test::call_service(&mut app, req).await;
+        assert!(resp.status().is_success());
+
+        let key = quotedata.payload_symm_key.lock().unwrap(); //#[allow_ci]
+        assert!(!key.is_empty());
+        assert_eq!(key.bytes, k.as_slice());
+    }
+}
