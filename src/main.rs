@@ -465,6 +465,53 @@ fn read_in_file(path: String) -> std::io::Result<String> {
     Ok(contents)
 }
 
+#[cfg(feature = "testing")]
+mod testing {
+    use super::*;
+
+    impl QuoteData {
+        pub(crate) fn fixture() -> Result<Self> {
+            let mut ctx = tpm::get_tpm2_ctx()?;
+
+            // Gather EK and AK key values and certs
+            let (ek_handle, ek_cert, ek_tpm2b_pub) =
+                tpm::create_ek(&mut ctx, Some(AsymmetricAlgorithm::Rsa))?;
+
+            let (ak_handle, ak_name, ak_tpm2b_pub) =
+                tpm::create_ak(&mut ctx, ek_handle)?;
+
+            let rsa_key_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("test-data")
+                .join("test-rsa.pem");
+
+            let (nk_pub, nk_priv) =
+                crypto::testing::rsa_import_pair(&rsa_key_path)?;
+
+            let mut payload_symm_key = SymmKey::default();
+            let mut encr_payload = Vec::new();
+
+            let symm_key_arc = Arc::new(Mutex::new(payload_symm_key));
+            let encr_payload_arc = Arc::new(Mutex::new(encr_payload));
+
+            // these allow the arrays to be referenced later in this thread
+            let symm_key = Arc::clone(&symm_key_arc);
+            let payload = Arc::clone(&encr_payload_arc);
+
+            Ok(QuoteData {
+                tpmcontext: Mutex::new(ctx),
+                priv_key: nk_priv,
+                pub_key: nk_pub,
+                ak_handle,
+                ukeys: Mutex::new(KeySet::default()),
+                vkeys: Mutex::new(KeySet::default()),
+                payload_symm_key: symm_key_arc,
+                encr_payload: encr_payload_arc,
+                auth_tag: Mutex::new([0u8; AUTH_TAG_LEN]),
+            })
+        }
+    }
+}
+
 // Unit Testing
 #[cfg(test)]
 mod tests {

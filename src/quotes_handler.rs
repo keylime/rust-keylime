@@ -3,11 +3,12 @@
 
 use crate::{tpm, Error as KeylimeError, QuoteData};
 
-use crate::common::{IMA_ML, KEY_LEN};
+use crate::common::{ima_ml_path_get, KEY_LEN};
 use actix_web::{web, HttpRequest, HttpResponse, Responder};
 use log::*;
 use serde::{Deserialize, Serialize};
 use std::fs::read_to_string;
+use std::path::Path;
 
 #[derive(Deserialize)]
 pub struct Ident {
@@ -23,7 +24,7 @@ pub struct Integ {
 
 // The fields of this struct and their default values must
 // match what is expected by Python Keylime.
-#[derive(Serialize, Debug)]
+#[derive(Serialize, Deserialize, Debug)]
 pub(crate) struct KeylimeIdQuote {
     pub quote: String, // 'r' + quote + sig + pcrblob
     pub hash_alg: String,
@@ -49,7 +50,7 @@ impl Default for KeylimeIdQuote {
 // verifier resends the vkey based on whether there is a pubkey
 // field included in the returned data, we must use a struct
 // without this field after attestation is complete.
-#[derive(Serialize, Debug)]
+#[derive(Serialize, Deserialize, Debug)]
 pub(crate) struct KeylimeIntegrityQuotePreAttestation {
     pub quote: String, // 'r' + quote + sig + pcrblob
     pub hash_alg: String,
@@ -76,7 +77,7 @@ impl KeylimeIntegrityQuotePreAttestation {
     }
 }
 
-#[derive(Serialize, Debug)]
+#[derive(Serialize, Deserialize, Debug)]
 pub(crate) struct KeylimeIntegrityQuotePostAttestation {
     pub quote: String, // 'r' + quote + sig + pcrblob
     pub hash_alg: String,
@@ -97,7 +98,7 @@ impl KeylimeIntegrityQuotePostAttestation {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 struct JsonIdWrapper {
     code: u32,
     status: String,
@@ -106,14 +107,14 @@ struct JsonIdWrapper {
 
 // The fields of this struct and their default values must
 // match what is expected by Python Keylime.
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 struct JsonIntegWrapperPreAttestation {
     code: u32,
     status: String,
     results: KeylimeIntegrityQuotePreAttestation,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 struct JsonIntegWrapperPostAttestation {
     code: u32,
     status: String,
@@ -242,10 +243,12 @@ pub async fn integrity(
             data.clone(),
         )?;
 
+        let ima_ml_path = ima_ml_path_get();
+
         if partial == 0 {
             let quote = KeylimeIntegrityQuotePreAttestation::from_id_quote(
                 quote,
-                read_to_string(IMA_ML)?,
+                read_to_string(&ima_ml_path)?,
                 String::from_utf8(
                     data.pub_key
                         .public_key_to_pem()
@@ -259,12 +262,123 @@ pub async fn integrity(
         } else {
             let quote = KeylimeIntegrityQuotePostAttestation::from_id_quote(
                 quote,
-                read_to_string(IMA_ML)?,
+                read_to_string(&ima_ml_path)?,
             );
 
             let response = JsonIntegWrapperPostAttestation::new(quote);
             info!("GET integrity quote returning 200 response");
             HttpResponse::Ok().json(response).await
         }
+    }
+}
+
+#[cfg(feature = "testing")]
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        common::{KeySet, SymmKey, API_VERSION, AUTH_TAG_LEN},
+        crypto::testing::pkey_pub_from_pem,
+        testing,
+    };
+    use actix_web::{http::StatusCode, test, web, App};
+    use std::sync::{Arc, Mutex};
+    use tss_esapi::interface_types::algorithm::AsymmetricAlgorithm;
+
+    #[actix_rt::test]
+    async fn test_identity() {
+        let quotedata = web::Data::new(QuoteData::fixture().unwrap()); //#[allow_ci]
+        let mut app =
+            test::init_service(App::new().app_data(quotedata.clone()).route(
+                &format!("/{}/quotes/identity", API_VERSION),
+                web::get().to(identity),
+            ))
+            .await;
+
+        let req = test::TestRequest::get()
+            .uri(&format!(
+                "/{}/quotes/identity?nonce=1234567890ABCDEFHIJ",
+                API_VERSION,
+            ))
+            .to_request();
+
+        let resp = test::call_service(&mut app, req).await;
+        assert!(resp.status().is_success());
+
+        let result: JsonIdWrapper = test::read_body_json(resp).await;
+        assert_eq!(result.results.hash_alg.as_str(), "sha256");
+        assert_eq!(result.results.enc_alg.as_str(), "rsa");
+        assert_eq!(result.results.sign_alg.as_str(), "rsassa");
+        assert!(pkey_pub_from_pem(result.results.pubkey.as_bytes())
+            .unwrap() //#[allow_ci]
+            .public_eq(&quotedata.pub_key));
+        // Could we check quote, e.g., using tpm2_checkquote?
+    }
+
+    #[actix_rt::test]
+    async fn test_integrity_pre() {
+        let quotedata = web::Data::new(QuoteData::fixture().unwrap()); //#[allow_ci]
+        let mut app =
+            test::init_service(App::new().app_data(quotedata.clone()).route(
+                &format!("/{}/quotes/integrity", API_VERSION),
+                web::get().to(integrity),
+            ))
+            .await;
+
+        let req = test::TestRequest::get()
+            .uri(&format!(
+                "/{}/quotes/integrity?nonce=1234567890ABCDEFHIJ&mask=0x408000&vmask=0x808000&partial=0",
+                API_VERSION,
+            ))
+            .to_request();
+
+        let resp = test::call_service(&mut app, req).await;
+        assert!(resp.status().is_success());
+
+        let result: JsonIntegWrapperPreAttestation =
+            test::read_body_json(resp).await;
+        assert_eq!(result.results.hash_alg.as_str(), "sha256");
+        assert_eq!(result.results.enc_alg.as_str(), "rsa");
+        assert_eq!(result.results.sign_alg.as_str(), "rsassa");
+        assert!(pkey_pub_from_pem(result.results.pubkey.as_bytes())
+            .unwrap() //#[allow_ci]
+            .public_eq(&quotedata.pub_key));
+
+        let ima_ml_path = ima_ml_path_get();
+        let ima_ml = read_to_string(&ima_ml_path).unwrap(); //#[allow_ci]
+        assert_eq!(result.results.ima_measurement_list.as_str(), ima_ml);
+        // Could we check quote, e.g., using tpm2_checkquote?
+    }
+
+    #[actix_rt::test]
+    async fn test_integrity_post() {
+        let quotedata = web::Data::new(QuoteData::fixture().unwrap()); //#[allow_ci]
+        let mut app =
+            test::init_service(App::new().app_data(quotedata.clone()).route(
+                &format!("/{}/quotes/integrity", API_VERSION),
+                web::get().to(integrity),
+            ))
+            .await;
+
+        let req = test::TestRequest::get()
+            .uri(&format!(
+                "/{}/quotes/integrity?nonce=1234567890ABCDEFHIJ&mask=0x408000&vmask=0x808000&partial=1",
+                API_VERSION,
+            ))
+            .to_request();
+
+        let resp = test::call_service(&mut app, req).await;
+        assert!(resp.status().is_success());
+
+        let result: JsonIntegWrapperPostAttestation =
+            test::read_body_json(resp).await;
+        assert_eq!(result.results.hash_alg.as_str(), "sha256");
+        assert_eq!(result.results.enc_alg.as_str(), "rsa");
+        assert_eq!(result.results.sign_alg.as_str(), "rsassa");
+
+        let ima_ml_path = ima_ml_path_get();
+        let ima_ml = read_to_string(&ima_ml_path).unwrap(); //#[allow_ci]
+        assert_eq!(result.results.ima_measurement_list.as_str(), ima_ml);
+        // Could we check quote, e.g., using tpm2_checkquote?
     }
 }
