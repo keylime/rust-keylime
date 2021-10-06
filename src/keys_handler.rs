@@ -6,7 +6,6 @@ use crate::{
     get_uuid, Error, QuoteData, Result,
 };
 use actix_web::{web, HttpRequest, HttpResponse, Responder};
-use json::parse;
 use log::*;
 use openssl::{
     encrypt::Decrypter,
@@ -16,7 +15,19 @@ use openssl::{
     rsa::Padding,
     sign::Signer,
 };
-use std::sync::Mutex;
+use serde::{Deserialize, Serialize};
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct KeylimeUKey {
+    auth_tag: String,
+    encrypted_key: String,
+    payload: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct KeylimeVKey {
+    encrypted_key: String,
+}
 
 // Helper function for combining U and V keys and storing output to a buffer.
 pub(crate) fn xor_to_outbuf(
@@ -130,75 +141,24 @@ pub(crate) fn decrypt_u_or_v_key(
     Ok(decrypted)
 }
 
-// struct to hold data and keep track of whether we are processing a u
-// or v key
-pub(crate) struct CurrentKeyInfo<'a> {
-    current_keyset: &'a Mutex<KeySet>,
-    other_keyset: &'a Mutex<KeySet>,
-    keyname: String,
-}
-
-impl<'a> CurrentKeyInfo<'a> {
-    fn new(
-        current_keyset: &'a Mutex<KeySet>,
-        other_keyset: &'a Mutex<KeySet>,
-        keyname: String,
-    ) -> Self {
-        CurrentKeyInfo {
-            current_keyset,
-            other_keyset,
-            keyname,
-        }
-    }
-}
-
-// Returns a reference to the U key or the V key in the app data.
-pub(crate) fn find_keytype<'a>(
-    req: &HttpRequest,
-    u: &'a Mutex<KeySet>,
-    v: &'a Mutex<KeySet>,
-) -> Result<CurrentKeyInfo<'a>> {
-    if req.path().contains("ukey") {
-        info!("Received ukey");
-        Ok(CurrentKeyInfo::new(u, v, "ukey".into()))
-    } else if req.path().contains("vkey") {
-        info!("Received vkey");
-        Ok(CurrentKeyInfo::new(v, u, "vkey".into()))
-    } else {
-        Err(Error::Other("request to keys handler contained neither ukey nor vkey key word".to_string()))
-    }
-}
-
-// b64 decode and remove quotation marks
-pub(crate) fn decode_data(data: &mut String) -> Result<Vec<u8>> {
-    let data = data.replace("\"", "");
-    base64::decode(&data).map_err(Error::from)
-}
-
-pub async fn u_or_v_key(
-    body: web::Bytes,
+pub async fn u_key(
+    key: web::Json<KeylimeUKey>,
     req: HttpRequest,
     quote_data: web::Data<QuoteData>,
 ) -> impl Responder {
-    // determine if the key is the u or the v key
-    let curr_key_info =
-        find_keytype(&req, &quote_data.ukeys, &quote_data.vkeys)?;
+    info!("Received ukey");
 
     // must unwrap when using lock
     // https://github.com/rust-lang-nursery/failure/issues/192
-    let mut global_current_keyset =
-        curr_key_info.current_keyset.lock().unwrap(); //#[allow_ci]
-    let mut global_other_keyset = curr_key_info.other_keyset.lock().unwrap(); //#[allow_ci]
+    let mut global_current_keyset = quote_data.ukeys.lock().unwrap(); //#[allow_ci]
+    let mut global_other_keyset = quote_data.vkeys.lock().unwrap(); //#[allow_ci]
     let mut global_symm_key = quote_data.payload_symm_key.lock().unwrap(); //#[allow_ci]
     let mut global_encr_payload = quote_data.encr_payload.lock().unwrap(); //#[allow_ci]
     let mut global_auth_tag = quote_data.auth_tag.lock().unwrap(); //#[allow_ci]
 
-    let json_body =
-        parse(&String::from_utf8(body.to_vec()).map_err(Error::from)?)
-            .map_err(Error::from)?;
-
     // get key and decode it from web data
-    let encrypted_key = decode_data(&mut json_body["encrypted_key"].dump())?;
+    let encrypted_key =
+        base64::decode(&key.encrypted_key).map_err(Error::from)?;
     let decrypted_key =
         decrypt_u_or_v_key(&quote_data.priv_key, encrypted_key)?;
 
@@ -206,16 +166,51 @@ pub async fn u_or_v_key(
         .set
         .push(SymmKey::from_vec(decrypted_key));
 
-    // only ukey POSTs from tenant have payload and auth_tag data
-    if curr_key_info.keyname == "ukey" {
-        // note: the auth_tag shouldn't be base64 decoded here
-        let mut auth_tag = json_body["auth_tag"].dump();
-        let auth_tag = auth_tag.replace("\"", "");
-        global_auth_tag.copy_from_slice(&auth_tag.into_bytes()[..]);
+    // note: the auth_tag shouldn't be base64 decoded here
+    global_auth_tag.copy_from_slice(key.auth_tag.as_bytes());
 
-        let encr_payload = decode_data(&mut json_body["payload"].dump())?;
+    if let Some(payload) = &key.payload {
+        let encr_payload = base64::decode(&payload).map_err(Error::from)?;
         global_encr_payload.extend(encr_payload.iter());
     }
+
+    let agent_uuid = get_uuid(&config_get("cloud_agent", "agent_uuid")?);
+
+    let _ = try_combine_keys(
+        &mut global_current_keyset,
+        &mut global_other_keyset,
+        &mut global_symm_key,
+        &agent_uuid.into_bytes(),
+        &global_auth_tag,
+    )?;
+
+    HttpResponse::Ok().await
+}
+
+pub async fn v_key(
+    key: web::Json<KeylimeVKey>,
+    req: HttpRequest,
+    quote_data: web::Data<QuoteData>,
+) -> impl Responder {
+    info!("Received vkey");
+
+    // must unwrap when using lock
+    // https://github.com/rust-lang-nursery/failure/issues/192
+    let mut global_current_keyset = quote_data.vkeys.lock().unwrap(); //#[allow_ci]
+    let mut global_other_keyset = quote_data.ukeys.lock().unwrap(); //#[allow_ci]
+    let mut global_symm_key = quote_data.payload_symm_key.lock().unwrap(); //#[allow_ci]
+    let mut global_encr_payload = quote_data.encr_payload.lock().unwrap(); //#[allow_ci]
+    let mut global_auth_tag = quote_data.auth_tag.lock().unwrap(); //#[allow_ci]
+
+    // get key and decode it from web data
+    let encrypted_key =
+        base64::decode(&key.encrypted_key).map_err(Error::from)?;
+    let decrypted_key =
+        decrypt_u_or_v_key(&quote_data.priv_key, encrypted_key)?;
+
+    global_current_keyset
+        .set
+        .push(SymmKey::from_vec(decrypted_key));
 
     let agent_uuid = get_uuid(&config_get("cloud_agent", "agent_uuid")?);
 
@@ -239,19 +234,6 @@ mod tests {
         encrypt::Encrypter, hash::MessageDigest, pkey::PKey, rsa::Padding,
         sign::Signer,
     };
-    use serde::{Deserialize, Serialize};
-
-    #[derive(Serialize, Deserialize, Debug)]
-    struct KeylimeUKey {
-        auth_tag: String,
-        encrypted_key: String,
-        payload: Option<String>,
-    }
-
-    #[derive(Serialize, Deserialize, Debug)]
-    struct KeylimeVKey {
-        encrypted_key: String,
-    }
 
     #[cfg(feature = "testing")]
     #[actix_rt::test]
@@ -262,11 +244,11 @@ mod tests {
                 .app_data(quotedata.clone())
                 .route(
                     &format!("/{}/keys/ukey", API_VERSION),
-                    web::post().to(u_or_v_key),
+                    web::post().to(u_key),
                 )
                 .route(
                     &format!("/{}/keys/vkey", API_VERSION),
-                    web::post().to(u_or_v_key),
+                    web::post().to(v_key),
                 ),
         )
         .await;
