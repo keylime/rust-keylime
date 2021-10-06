@@ -51,14 +51,7 @@ use compress_tools::*;
 use error::{Error, Result};
 use futures::{future::TryFutureExt, try_join};
 use log::*;
-use openssl::{
-    hash::MessageDigest,
-    pkey::{PKey, Private, Public},
-    sign::Signer,
-    symm::{decrypt_aead, Cipher},
-};
-use serde::{Deserialize, Serialize};
-use std::fs::File;
+use openssl::pkey::{PKey, Private, Public};
 use std::{
     convert::TryFrom,
     fs,
@@ -107,22 +100,7 @@ pub(crate) fn decrypt_payload(
     let symm_key = key.lock().unwrap().bytes; //#[allow_ci]
     let payload = encr.lock().unwrap(); //#[allow_ci]
 
-    // parse out payload iv, tag, ciphertext
-    let (iv, rest) = payload.split_at(AES_BLOCK_SIZE);
-    let (ciphertext, tag) = rest.split_at(rest.len() - AES_BLOCK_SIZE);
-    let cipher = match symm_key.len() {
-        16 => Cipher::aes_128_gcm(),
-        32 => Cipher::aes_256_gcm(),
-        other => {
-            return Err(Error::Other(format!(
-                "key length {} does not correspond to valid GCM cipher",
-                other
-            )))
-        }
-    };
-
-    let decrypted =
-        decrypt_aead(cipher, &symm_key, Some(iv), &[], ciphertext, tag)?;
+    let decrypted = crypto::decrypt_aead(&symm_key, &payload)?;
 
     info!("Successfully decrypted payload");
     Ok(decrypted)
@@ -382,10 +360,10 @@ async fn main() -> Result<()> {
             &mut ctx, keyblob, ak_handle, ek_handle,
         )?;
         let mackey = base64::encode(key.value());
-        let mackey = PKey::hmac(mackey.as_bytes())?;
-        let mut signer = Signer::new(MessageDigest::sha384(), &mackey)?;
-        signer.update(config.agent_uuid.as_bytes());
-        let auth_tag = signer.sign_to_vec()?;
+        let auth_tag = crypto::compute_hmac(
+            mackey.as_bytes(),
+            config.agent_uuid.as_bytes(),
+        )?;
         let auth_tag = hex::encode(&auth_tag);
 
         registrar_agent::do_activate_agent(
