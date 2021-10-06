@@ -1,20 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2021 Keylime Authors
 
+use crate::crypto;
 use crate::{
     common::{config_get, KeySet, SymmKey, AUTH_TAG_LEN},
     get_uuid, Error, QuoteData, Result,
 };
 use actix_web::{web, HttpRequest, HttpResponse, Responder};
 use log::*;
-use openssl::{
-    encrypt::Decrypter,
-    hash::MessageDigest,
-    memcmp,
-    pkey::{PKey, Private},
-    rsa::Padding,
-    sign::Signer,
-};
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -47,27 +40,6 @@ pub(crate) fn xor_to_outbuf(
     Ok(())
 }
 
-// Computes HMAC over agent UUID with provided key (payload decryption key) and
-// checks that this matches the provided auth_tag.
-pub(crate) fn check_hmac(
-    key: &SymmKey,
-    uuid: &[u8],
-    auth_tag: &[u8; AUTH_TAG_LEN],
-) -> Result<()> {
-    let pkey = PKey::hmac(&key.bytes)?;
-    let mut signer = Signer::new(MessageDigest::sha384(), &pkey)?;
-    signer.update(uuid)?;
-    let hmac = signer.sign_to_vec()?;
-
-    let auth_tag = hex::decode(auth_tag)?;
-    if !memcmp::eq(&hmac, &auth_tag) {
-        return Err(Error::Other("hmac check failed".to_string()));
-    }
-
-    info!("HMAC check passed");
-    Ok(())
-}
-
 // Attempt to combine U and V keys into the payload decryption key. An HMAC over
 // the agent's UUID using the decryption key must match the provided authentication
 // tag. Returning None is okay here in case we are still waiting on another handler to
@@ -96,7 +68,12 @@ pub(crate) fn try_combine_keys(
                 &key2.bytes[..],
             );
 
-            if let Ok(()) = check_hmac(symm_key_out, uuid, auth_tag) {
+            // Computes HMAC over agent UUID with provided key (payload decryption key) and
+            // checks that this matches the provided auth_tag.
+            let auth_tag = hex::decode(auth_tag)?;
+            if crypto::verify_hmac(&symm_key_out.bytes, uuid, &auth_tag)
+                .is_ok()
+            {
                 info!(
                     "Successfully derived symmetric payload decryption key"
                 );
@@ -111,34 +88,6 @@ pub(crate) fn try_combine_keys(
     Err(Error::Other(
         "HMAC check failed for all U and V key combinations".to_string(),
     ))
-}
-
-// Uses NK (key for encrypting data from verifier or tenant to agent in transit) to
-// decrypt U and V keys, which will be combined into one key that can decrypt the
-// payload.
-//
-// Reference:
-// https://github.com/keylime/keylime/blob/f3c31b411dd3dd971fd9d614a39a150655c6797c/ \
-// keylime/crypto.py#L118
-pub(crate) fn decrypt_u_or_v_key(
-    nk_priv: &PKey<Private>,
-    encrypted_key: Vec<u8>,
-) -> Result<Vec<u8>> {
-    let mut decrypter = Decrypter::new(nk_priv)?;
-
-    decrypter.set_rsa_padding(Padding::PKCS1_OAEP)?;
-    decrypter.set_rsa_mgf1_md(MessageDigest::sha1())?;
-    decrypter.set_rsa_oaep_md(MessageDigest::sha1())?;
-
-    // Create an output buffer
-    let buffer_len = decrypter.decrypt_len(&encrypted_key)?;
-    let mut decrypted = vec![0; buffer_len];
-
-    // Decrypt and truncate the buffer
-    let decrypted_len = decrypter.decrypt(&encrypted_key, &mut decrypted)?;
-    decrypted.truncate(decrypted_len);
-
-    Ok(decrypted)
 }
 
 pub async fn u_key(
@@ -159,8 +108,15 @@ pub async fn u_key(
     // get key and decode it from web data
     let encrypted_key =
         base64::decode(&key.encrypted_key).map_err(Error::from)?;
+    // Uses NK (key for encrypting data from verifier or tenant to agent in transit) to
+    // decrypt U and V keys, which will be combined into one key that can decrypt the
+    // payload.
+    //
+    // Reference:
+    // https://github.com/keylime/keylime/blob/f3c31b411dd3dd971fd9d614a39a150655c6797c/ \
+    // keylime/crypto.py#L118
     let decrypted_key =
-        decrypt_u_or_v_key(&quote_data.priv_key, encrypted_key)?;
+        crypto::rsa_oaep_decrypt(&quote_data.priv_key, &encrypted_key)?;
 
     global_current_keyset
         .set
@@ -205,8 +161,15 @@ pub async fn v_key(
     // get key and decode it from web data
     let encrypted_key =
         base64::decode(&key.encrypted_key).map_err(Error::from)?;
+    // Uses NK (key for encrypting data from verifier or tenant to agent in transit) to
+    // decrypt U and V keys, which will be combined into one key that can decrypt the
+    // payload.
+    //
+    // Reference:
+    // https://github.com/keylime/keylime/blob/f3c31b411dd3dd971fd9d614a39a150655c6797c/ \
+    // keylime/crypto.py#L118
     let decrypted_key =
-        decrypt_u_or_v_key(&quote_data.priv_key, encrypted_key)?;
+        crypto::rsa_oaep_decrypt(&quote_data.priv_key, &encrypted_key)?;
 
     global_current_keyset
         .set
@@ -229,11 +192,10 @@ pub async fn v_key(
 mod tests {
     use super::*;
     use crate::common::{API_VERSION, KEY_LEN};
+    use crate::crypto::compute_hmac;
+    #[cfg(feature = "testing")]
+    use crate::crypto::testing::rsa_oaep_encrypt;
     use actix_web::{test, web, App};
-    use openssl::{
-        encrypt::Encrypter, hash::MessageDigest, pkey::PKey, rsa::Padding,
-        sign::Signer,
-    };
 
     #[cfg(feature = "testing")]
     #[actix_rt::test]
@@ -253,28 +215,16 @@ mod tests {
         )
         .await;
 
-        let mut encrypter = Encrypter::new(&quotedata.pub_key).unwrap(); //#[allow_ci]
-
-        encrypter.set_rsa_padding(Padding::PKCS1_OAEP).unwrap(); //#[allow_ci]
-        encrypter.set_rsa_mgf1_md(MessageDigest::sha1()).unwrap(); //#[allow_ci]
-        encrypter.set_rsa_oaep_md(MessageDigest::sha1()).unwrap(); //#[allow_ci]
-
         let u: &[u8; KEY_LEN] = b"01234567890123456789012345678901";
         let v: &[u8; KEY_LEN] = b"ABCDEFGHIJABCDEFGHIJABCDEFGHIJAB";
         let mut k = vec![0u8; KEY_LEN];
         xor_to_outbuf(&mut k, u, v).unwrap(); //#[allow_ci]
 
-        let buffer_len = encrypter.encrypt_len(u).unwrap(); //#[allow_ci]
-        let mut encrypted_key = vec![0; buffer_len];
-        let encrypted_len = encrypter.encrypt(u, &mut encrypted_key).unwrap(); //#[allow_ci]
-        encrypted_key.truncate(encrypted_len);
+        let encrypted_key = rsa_oaep_encrypt(&quotedata.pub_key, u).unwrap(); //#[allow_ci]
 
         let agent_uuid =
             get_uuid(&config_get("cloud_agent", "agent_uuid").unwrap()); //#[allow_ci]
-        let pkey = PKey::hmac(&k).unwrap(); //#[allow_ci]
-        let mut signer = Signer::new(MessageDigest::sha384(), &pkey).unwrap(); //#[allow_ci]
-        signer.update(agent_uuid.as_bytes()).unwrap(); //#[allow_ci]
-        let auth_tag = signer.sign_to_vec().unwrap(); //#[allow_ci]
+        let auth_tag = compute_hmac(&k, agent_uuid.as_bytes()).unwrap(); //#[allow_ci]
 
         let ukey = KeylimeUKey {
             encrypted_key: base64::encode(&encrypted_key),
@@ -290,10 +240,7 @@ mod tests {
         let resp = test::call_service(&mut app, req).await;
         assert!(resp.status().is_success());
 
-        let buffer_len = encrypter.encrypt_len(v).unwrap(); //#[allow_ci]
-        let mut encrypted_key = vec![0; buffer_len];
-        let encrypted_len = encrypter.encrypt(v, &mut encrypted_key).unwrap(); //#[allow_ci]
-        encrypted_key.truncate(encrypted_len);
+        let encrypted_key = rsa_oaep_encrypt(&quotedata.pub_key, v).unwrap(); //#[allow_ci]
 
         let vkey = KeylimeVKey {
             encrypted_key: base64::encode(&encrypted_key),
