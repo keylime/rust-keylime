@@ -5,6 +5,7 @@ use crate::error::{Error, Result};
 use ini::Ini;
 use log::*;
 use std::env;
+use std::path::{Path, PathBuf};
 
 /*
  * Constants and static variables
@@ -17,7 +18,6 @@ pub const IMA_PCR: usize = 10;
 pub static DEFAULT_CONFIG: &str = "/etc/keylime.conf";
 pub static RSA_PUBLICKEY_EXPORTABLE: &str = "rsa placeholder";
 pub static TPM_TOOLS_PATH: &str = "/usr/local/bin/";
-pub static IMA_ML_STUB: &str = "../scripts/ima/ascii_runtime_measurements";
 pub static IMA_ML: &str =
     "/sys/kernel/security/ima/ascii_runtime_measurements";
 pub static KEY: &str = "secret";
@@ -264,6 +264,21 @@ pub(crate) fn chownroot(path: String) -> Result<String> {
 
         info!("Changed file {} owner to root.", path);
         Ok(path)
+    }
+}
+
+cfg_if::cfg_if! {
+    if #[cfg(feature = "testing")] {
+        pub(crate) fn ima_ml_path_get() -> PathBuf {
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("test-data")
+                .join("ima")
+                .join("ascii_runtime_measurements")
+        }
+    } else {
+        pub(crate) fn ima_ml_path_get() -> PathBuf {
+            Path::new(IMA_ML).to_path_buf()
+        }
     }
 }
 

@@ -10,6 +10,7 @@ use openssl::sign::{Signer, Verifier};
 use openssl::x509::X509;
 use std::fs;
 use std::io::Read;
+use std::path::Path;
 use std::string::String;
 
 use crate::{Error, Result};
@@ -165,6 +166,24 @@ pub(crate) fn asym_verify(
     let mut verifier = Verifier::new(MessageDigest::sha256(), keypair)?;
     verifier.update(message.as_bytes())?;
     Ok(verifier.verify(signature.as_bytes())?)
+}
+
+#[cfg(feature = "testing")]
+pub mod testing {
+    use super::*;
+
+    pub(crate) fn rsa_import_pair(
+        path: impl AsRef<Path>,
+    ) -> Result<(PKey<Public>, PKey<Private>)> {
+        let contents = fs::read_to_string(path)?;
+        let private = PKey::private_key_from_pem(contents.as_bytes())?;
+        let public = pkey_pub_from_priv(private.clone())?;
+        Ok((public, private))
+    }
+
+    pub(crate) fn pkey_pub_from_pem(pem: &[u8]) -> Result<PKey<Public>> {
+        PKey::<Public>::public_key_from_pem(pem).map_err(Error::Crypto)
+    }
 }
 
 // Unit Testing
