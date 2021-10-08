@@ -65,6 +65,8 @@ pub(crate) enum Error {
     FromHex(#[from] hex::FromHexError),
     #[error("Keylime algorithm error: {0}")]
     Algorithm(#[from] algorithms::AlgorithmError),
+    #[error("Error converting number: {0}")]
+    TryFromInt(#[from] std::num::TryFromIntError),
     #[error("{0}")]
     Other(String),
 }

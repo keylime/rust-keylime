@@ -326,7 +326,16 @@ mod tests {
         assert!(pkey_pub_from_pem(result.results.pubkey.as_bytes())
             .unwrap() //#[allow_ci]
             .public_eq(&quotedata.pub_key));
-        // Could we check quote, e.g., using tpm2_checkquote?
+        assert!(result.results.quote.starts_with('r'));
+
+        let mut context = quotedata.tpmcontext.lock().unwrap(); //#[allow_ci]
+        tpm::testing::check_quote(
+            &mut context,
+            quotedata.ak_handle,
+            &result.results.quote,
+            b"1234567890ABCDEFHIJ",
+        )
+        .expect("unable to verify quote");
     }
 
     #[actix_rt::test]
@@ -361,7 +370,16 @@ mod tests {
         let ima_ml_path = ima_ml_path_get();
         let ima_ml = read_to_string(&ima_ml_path).unwrap(); //#[allow_ci]
         assert_eq!(result.results.ima_measurement_list.as_str(), ima_ml);
-        // Could we check quote, e.g., using tpm2_checkquote?
+        assert!(result.results.quote.starts_with('r'));
+
+        let mut context = quotedata.tpmcontext.lock().unwrap(); //#[allow_ci]
+        tpm::testing::check_quote(
+            &mut context,
+            quotedata.ak_handle,
+            &result.results.quote,
+            b"1234567890ABCDEFHIJ",
+        )
+        .expect("unable to verify quote");
     }
 
     #[actix_rt::test]
@@ -393,6 +411,15 @@ mod tests {
         let ima_ml_path = ima_ml_path_get();
         let ima_ml = read_to_string(&ima_ml_path).unwrap(); //#[allow_ci]
         assert_eq!(result.results.ima_measurement_list.as_str(), ima_ml);
-        // Could we check quote, e.g., using tpm2_checkquote?
+        assert!(result.results.quote.starts_with('r'));
+
+        let mut context = quotedata.tpmcontext.lock().unwrap(); //#[allow_ci]
+        tpm::testing::check_quote(
+            &mut context,
+            quotedata.ak_handle,
+            &result.results.quote,
+            b"1234567890ABCDEFHIJ",
+        )
+        .expect("unable to verify quote");
     }
 }

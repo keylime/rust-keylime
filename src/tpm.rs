@@ -680,6 +680,231 @@ pub(crate) fn quote(
     })
 }
 
+#[cfg(test)]
+pub mod testing {
+    use super::*;
+    use flate2::read::ZlibDecoder;
+    use tss_esapi::constants::structure_tags::StructureTag;
+    use tss_esapi::structures::{Attest, AttestBuffer, DigestList, Ticket};
+    use tss_esapi::tss2_esys::Tss2_MU_TPMT_SIGNATURE_Unmarshal;
+
+    macro_rules! create_unmarshal_fn {
+        ($func:ident, $tpmobj:ty, $unmarshal:ident) => {
+            fn $func(val: &[u8]) -> Result<$tpmobj> {
+                let mut resp = <$tpmobj>::default();
+                let mut offset = 0;
+
+                unsafe {
+                    let res = $unmarshal(
+                        val[..].as_ptr(),
+                        val.len().try_into()?,
+                        &mut offset,
+                        &mut resp,
+                    );
+                    if res != 0 {
+                        return Err(KeylimeError::Other(format!(
+                            "Error converting"
+                        )));
+                    }
+                }
+                Ok(resp)
+            }
+        };
+    }
+
+    create_unmarshal_fn!(
+        vec_to_sig,
+        TPMT_SIGNATURE,
+        Tss2_MU_TPMT_SIGNATURE_Unmarshal
+    );
+
+    fn vec_to_pcrdata(val: &[u8]) -> Result<(PcrSelectionList, PcrData)> {
+        const PCRSEL_SIZE: usize = std::mem::size_of::<TPML_PCR_SELECTION>();
+        const DIGEST_SIZE: usize = std::mem::size_of::<TPML_DIGEST>();
+
+        let mut reader = std::io::Cursor::new(val);
+        let mut pcrsel_vec = [0u8; PCRSEL_SIZE];
+        let len = reader.read(&mut pcrsel_vec)?;
+        if len != pcrsel_vec.len() {
+            return Err(KeylimeError::InvalidRequest);
+        }
+        let mut pcrsel = unsafe {
+            std::mem::transmute::<[u8; PCRSEL_SIZE], TPML_PCR_SELECTION>(
+                pcrsel_vec,
+            )
+        };
+        let pcrlist: PcrSelectionList = pcrsel.try_into()?;
+
+        let mut count_vec = [0u8; 4];
+        let len = reader.read(&mut count_vec)?;
+        if len < count_vec.len() {
+            return Err(KeylimeError::InvalidRequest);
+        }
+        let count = u32::from_le_bytes(count_vec);
+        // Always 1 PCR digest should follow
+        if count != 1 {
+            return Err(KeylimeError::InvalidRequest);
+        }
+
+        let mut digest_vec = [0u8; DIGEST_SIZE];
+        let len = reader.read(&mut digest_vec)?;
+        if len != digest_vec.len() {
+            return Err(KeylimeError::InvalidRequest);
+        }
+        let mut digest = unsafe {
+            std::mem::transmute::<[u8; DIGEST_SIZE], TPML_DIGEST>(digest_vec)
+        };
+        let mut digest_list = DigestList::new();
+        for i in 0..digest.count {
+            digest_list.add(digest.digests[i as usize].try_into()?);
+        }
+
+        let pcrdata = PcrData::create(&pcrlist, &digest_list)?;
+        Ok((pcrlist, pcrdata))
+    }
+
+    pub(crate) fn decode_quote_string(
+        quote: &str,
+    ) -> Result<(AttestBuffer, Signature, PcrSelectionList, PcrData)> {
+        if !quote.starts_with('r') {
+            return Err(KeylimeError::InvalidRequest);
+        }
+        // extract components from the concatenated string
+        let mut split = quote[1..].split(':');
+        let att_str = split.next().ok_or(KeylimeError::InvalidRequest)?;
+        let sig_str = split.next().ok_or(KeylimeError::InvalidRequest)?;
+        let pcr_str = split.next().ok_or(KeylimeError::InvalidRequest)?;
+
+        // base64 decoding
+        let att_comp_finished = base64::decode(att_str)?;
+        let sig_comp_finished = base64::decode(sig_str)?;
+        let pcr_comp_finished = base64::decode(pcr_str)?;
+
+        // zlib uncompression
+        let mut att_comp = ZlibDecoder::new(att_comp_finished.as_slice());
+        let mut att_vec = Vec::new();
+        let _ = att_comp.read_to_end(&mut att_vec)?;
+
+        let mut sig_comp = ZlibDecoder::new(sig_comp_finished.as_slice());
+        let mut sig_vec = Vec::new();
+        let _ = sig_comp.read_to_end(&mut sig_vec)?;
+
+        let mut pcr_comp = ZlibDecoder::new(pcr_comp_finished.as_slice());
+        let mut pcr_vec = Vec::new();
+        let _ = pcr_comp.read_to_end(&mut pcr_vec)?;
+
+        let sig: Signature = vec_to_sig(&sig_vec)?.try_into()?;
+        let (pcrsel, pcrdata) = vec_to_pcrdata(&pcr_vec)?;
+
+        let mut att = TPM2B_ATTEST {
+            size: att_vec
+                .len()
+                .try_into()
+                .or(Err(KeylimeError::InvalidRequest))?,
+            ..Default::default()
+        };
+        att.attestationData[0..att_vec.len()].copy_from_slice(&att_vec);
+        Ok((att.try_into()?, sig, pcrsel, pcrdata))
+    }
+
+    // This performs the same checks as in tpm2_checkquote, namely:
+    // signature, nonce, and PCR digests from the quote.
+    //
+    // Reference:
+    // https://github.com/tpm2-software/tpm2-tools/blob/master/tools/tpm2_checkquote.c
+    pub(crate) fn check_quote(
+        context: &mut Context,
+        ak_handle: KeyHandle,
+        quote: &str,
+        nonce: &[u8],
+    ) -> Result<()> {
+        let (att, sig, pcrsel, pcrdata) = decode_quote_string(quote)?;
+
+        // Verify the signature matches message digest. We do not
+        // bother unmarshalling the AK to OpenSSL PKey, but just use
+        // Esys_VerifySignature with loaded AK
+        let mut hasher = Hasher::new(MessageDigest::sha256())?;
+        hasher.update(att.value())?;
+        let digest = hasher.finish()?;
+        let digest: Digest = digest.as_ref().try_into().unwrap(); //#[allow_ci]
+        match context.verify_signature(ak_handle, &digest, sig) {
+            Ok(ticket) if ticket.tag() == StructureTag::Verified => {}
+            _ => {
+                return Err(KeylimeError::Other(
+                    "unable to verify quote signature".to_string(),
+                ))
+            }
+        }
+
+        // Ensure nonce is the same as given
+        let attestation: Attest = att.try_into()?;
+        if attestation.extra_data().value() != nonce {
+            return Err(KeylimeError::Other(
+                "nonce does not match".to_string(),
+            ));
+        }
+
+        // Also ensure digest from quote matches PCR digest
+        let pcrbank =
+            pcrdata.pcr_bank(HashingAlgorithm::Sha256).ok_or_else(|| {
+                KeylimeError::Other("no SHA256 bank".to_string())
+            })?;
+        let mut hasher = Hasher::new(MessageDigest::sha256())?;
+        for &sel in pcrsel.get_selections() {
+            for i in &sel.selected() {
+                if let Some(digest) = pcrbank.get_digest(*i) {
+                    hasher.update(digest.value())?;
+                }
+            }
+        }
+        let digest = hasher.finish()?;
+        let quote_info = match attestation.attested() {
+            AttestInfo::Quote { info } => info,
+            _ => {
+                return Err(KeylimeError::Other(format!(
+                    "Expected attestation type TPM2_ST_ATTEST_QUOTE, got {:?}",
+                    attestation.attestation_type()
+                )));
+            }
+        };
+        if quote_info.pcr_digest().value() != digest.as_ref() {
+            return Err(KeylimeError::Other(
+                "PCR digest does not match".to_string(),
+            ));
+        }
+
+        Ok(())
+    }
+}
+
+#[test]
+fn quote_encode_decode() {
+    use std::fs::File;
+    use std::io::BufReader;
+    use std::path::Path;
+
+    let quote_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("test-data")
+        .join("test-quote.txt");
+
+    let f = File::open(&quote_path).expect("unable to open test-quote.txt");
+    let mut f = BufReader::new(f);
+    let mut buf = String::new();
+    let _ = f.read_line(&mut buf).expect("unable to read quote");
+    let buf = buf.trim_end();
+
+    let (att, sig, pcrsel, pcrdata) =
+        testing::decode_quote_string(buf).expect("unable to decode quote");
+
+    let attestation: Attest =
+        att.try_into().expect("unable to unmarshal attestation");
+
+    let encoded = encode_quote_string(attestation, sig, pcrsel, pcrdata)
+        .expect("unable to encode quote");
+
+    assert_eq!(encoded, buf);
+}
+
 #[ignore] // This will only work as an integration test because it needs keylime.conf
 #[test]
 fn pubkey_to_digest() {
