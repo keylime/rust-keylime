@@ -69,6 +69,9 @@ use tss_esapi::{
 };
 use uuid::Uuid;
 
+#[macro_use]
+extern crate static_assertions;
+
 static NOTFOUND: &[u8] = b"Not Found";
 
 // This data is passed in to the actix httpserver threads that

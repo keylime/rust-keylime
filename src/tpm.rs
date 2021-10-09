@@ -154,6 +154,10 @@ create_marshal_fn!(
 );
 create_marshal_fn!(tpms_att_to_vec, TPMS_ATTEST, Tss2_MU_TPMS_ATTEST_Marshal);
 
+// Ensure that TPML_PCR_SELECTION and TPML_DIGEST have known sizes
+assert_eq_size!(TPML_PCR_SELECTION; TPML_PCR_SELECTION, [u8; 132]);
+assert_eq_size!(TPML_DIGEST; TPML_DIGEST, [u8; 532]);
+
 // Recreate how tpm2-tools creates the PCR out file. Roughly, this is a
 // TPML_PCR_SELECTION + number of TPML_DIGESTS + TPML_DIGESTs.
 // Reference:
@@ -167,16 +171,20 @@ pub(crate) fn pcrdata_to_vec(
     selection_list: PcrSelectionList,
     pcrdata: PcrData,
 ) -> Vec<u8> {
-    let pcrsel: TPML_PCR_SELECTION = selection_list.into();
-    let pcrsel_vec: [u8; 132] = unsafe { std::mem::transmute(pcrsel) };
+    const PCRSEL_SIZE: usize = std::mem::size_of::<TPML_PCR_SELECTION>();
+    const DIGEST_SIZE: usize = std::mem::size_of::<TPML_DIGEST>();
+
+    let mut pcrsel: TPML_PCR_SELECTION = selection_list.into();
+    pcrsel.count = pcrsel.count.to_le();
+    let pcrsel_vec: [u8; PCRSEL_SIZE] =
+        unsafe { std::mem::transmute(pcrsel) };
 
     let digest: Vec<TPML_DIGEST> = pcrdata.into();
     let num_tpml_digests = digest.len() as u32;
-
-    let mut digest_vec = Vec::with_capacity(digest.len() * 532);
+    let mut digest_vec = Vec::with_capacity(digest.len() * DIGEST_SIZE);
 
     for d in digest {
-        let vec: [u8; 532] = unsafe { std::mem::transmute(d) };
+        let vec: [u8; DIGEST_SIZE] = unsafe { std::mem::transmute(d) };
         digest_vec.extend(vec);
     }
 
