@@ -1327,6 +1327,7 @@ dependencies = [
  "serde",
  "serde_derive",
  "serde_json",
+ "static_assertions 0.2.5",
  "tempfile",
  "thiserror",
  "tokio 0.2.25",
@@ -1359,7 +1360,7 @@ dependencies = [
  "bitflags",
  "cfg-if 1.0.0",
  "ryu",
- "static_assertions",
+ "static_assertions 1.1.0",
 ]
 
 [[package]]
@@ -2271,6 +2272,12 @@ checksum = "e113fb6f3de07a243d434a56ec6f186dfd51cb08448239fe7bcae73f87ff28ff"
 dependencies = [
  "version_check",
 ]
+
+[[package]]
+name = "static_assertions"
+version = "0.2.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c19be23126415861cb3a23e501d34a708f7f9b2183c5252d690941c2e69199d5"
 
 [[package]]
 name = "static_assertions"
