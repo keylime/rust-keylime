@@ -52,16 +52,16 @@ pub(crate) fn try_combine_keys(
     auth_tag: &[u8; AUTH_TAG_LEN],
 ) -> Result<Option<()>> {
     // U, V keys and auth_tag must be present for this to succeed
-    if keyset1.all_empty()
-        || keyset2.all_empty()
+    if keyset1.is_empty()
+        || keyset2.is_empty()
         || auth_tag == &[0u8; AUTH_TAG_LEN]
     {
         debug!("Still waiting on u or v key or auth_tag");
         return Ok(None);
     }
 
-    for key1 in &keyset1.set {
-        for key2 in &keyset2.set {
+    for key1 in keyset1.iter() {
+        for key2 in keyset2.iter() {
             xor_to_outbuf(
                 &mut symm_key_out.bytes[..],
                 &key1.bytes[..],
@@ -118,9 +118,7 @@ pub async fn u_key(
     let decrypted_key =
         crypto::rsa_oaep_decrypt(&quote_data.priv_key, &encrypted_key)?;
 
-    global_current_keyset
-        .set
-        .push(SymmKey::from_vec(decrypted_key));
+    global_current_keyset.push(SymmKey::from_vec(decrypted_key));
 
     // note: the auth_tag shouldn't be base64 decoded here
     global_auth_tag.copy_from_slice(key.auth_tag.as_bytes());
@@ -171,9 +169,7 @@ pub async fn v_key(
     let decrypted_key =
         crypto::rsa_oaep_decrypt(&quote_data.priv_key, &encrypted_key)?;
 
-    global_current_keyset
-        .set
-        .push(SymmKey::from_vec(decrypted_key));
+    global_current_keyset.push(SymmKey::from_vec(decrypted_key));
 
     let agent_uuid = get_uuid(&config_get("cloud_agent", "agent_uuid")?);
 
