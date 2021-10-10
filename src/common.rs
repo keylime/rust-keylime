@@ -53,27 +53,7 @@ pub const AES_BLOCK_SIZE: usize = 16;
 pub type KeyBytes = [u8; KEY_LEN];
 
 // a vector holding keys
-#[derive(Debug, Clone)]
-pub struct KeySet {
-    pub set: Vec<SymmKey>,
-}
-
-impl Default for KeySet {
-    fn default() -> Self {
-        let set = Vec::new();
-        KeySet { set }
-    }
-}
-
-impl KeySet {
-    pub fn all_empty(&self) -> bool {
-        self.set.iter().all(|&key| key.is_empty())
-    }
-
-    pub fn clear(&mut self) {
-        self.set.clear();
-    }
-}
+pub type KeySet = Vec<SymmKey>;
 
 // a key of len KEY_LEN
 #[derive(Debug, Clone, Copy)]
