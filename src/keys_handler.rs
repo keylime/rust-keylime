@@ -22,24 +22,6 @@ pub struct KeylimeVKey {
     encrypted_key: String,
 }
 
-// Helper function for combining U and V keys and storing output to a buffer.
-pub(crate) fn xor_to_outbuf(
-    outbuf: &mut [u8],
-    a: &[u8],
-    b: &[u8],
-) -> Result<()> {
-    if a.len() != b.len() {
-        return Err(Error::Other(
-            "cannot xor differing length slices".to_string(),
-        ));
-    }
-    for (out, (x, y)) in outbuf.iter_mut().zip(a.iter().zip(b)) {
-        *out = *x ^ *y;
-    }
-
-    Ok(())
-}
-
 // Attempt to combine U and V keys into the payload decryption key. An HMAC over
 // the agent's UUID using the decryption key must match the provided authentication
 // tag. Returning None is okay here in case we are still waiting on another handler to
@@ -47,10 +29,9 @@ pub(crate) fn xor_to_outbuf(
 pub(crate) fn try_combine_keys(
     keyset1: &mut KeySet,
     keyset2: &mut KeySet,
-    symm_key_out: &mut SymmKey,
     uuid: &[u8],
     auth_tag: &[u8; AUTH_TAG_LEN],
-) -> Result<Option<()>> {
+) -> Result<Option<SymmKey>> {
     // U, V keys and auth_tag must be present for this to succeed
     if keyset1.is_empty()
         || keyset2.is_empty()
@@ -62,11 +43,7 @@ pub(crate) fn try_combine_keys(
 
     for key1 in keyset1.iter() {
         for key2 in keyset2.iter() {
-            xor_to_outbuf(
-                &mut symm_key_out.bytes[..],
-                &key1.bytes[..],
-                &key2.bytes[..],
-            );
+            let symm_key_out = key1.xor(&key2)?;
 
             // Computes HMAC over agent UUID with provided key (payload decryption key) and
             // checks that this matches the provided auth_tag.
@@ -80,7 +57,7 @@ pub(crate) fn try_combine_keys(
 
                 keyset1.clear();
                 keyset2.clear();
-                return Ok(Some(()));
+                return Ok(Some(symm_key_out));
             }
         }
     }
@@ -130,13 +107,14 @@ pub async fn u_key(
 
     let agent_uuid = get_uuid(&config_get("cloud_agent", "agent_uuid")?);
 
-    let _ = try_combine_keys(
+    if let Some(symm_key) = try_combine_keys(
         &mut global_current_keyset,
         &mut global_other_keyset,
-        &mut global_symm_key,
         &agent_uuid.into_bytes(),
         &global_auth_tag,
-    )?;
+    )? {
+        let _ = global_symm_key.replace(symm_key);
+    }
 
     HttpResponse::Ok().await
 }
@@ -173,13 +151,14 @@ pub async fn v_key(
 
     let agent_uuid = get_uuid(&config_get("cloud_agent", "agent_uuid")?);
 
-    let _ = try_combine_keys(
+    if let Some(symm_key) = try_combine_keys(
         &mut global_current_keyset,
         &mut global_other_keyset,
-        &mut global_symm_key,
         &agent_uuid.into_bytes(),
         &global_auth_tag,
-    )?;
+    )? {
+        let _ = global_symm_key.replace(symm_key);
+    }
 
     HttpResponse::Ok().await
 }
@@ -212,15 +191,17 @@ mod tests {
         .await;
 
         let u: &[u8; KEY_LEN] = b"01234567890123456789012345678901";
+        let u = SymmKey::from_vec(u.to_vec());
         let v: &[u8; KEY_LEN] = b"ABCDEFGHIJABCDEFGHIJABCDEFGHIJAB";
-        let mut k = vec![0u8; KEY_LEN];
-        xor_to_outbuf(&mut k, u, v).unwrap(); //#[allow_ci]
+        let v = SymmKey::from_vec(v.to_vec());
+        let k = u.xor(&v).unwrap(); //#[allow_ci]
 
-        let encrypted_key = rsa_oaep_encrypt(&quotedata.pub_key, u).unwrap(); //#[allow_ci]
+        let encrypted_key =
+            rsa_oaep_encrypt(&quotedata.pub_key, &u.bytes).unwrap(); //#[allow_ci]
 
         let agent_uuid =
             get_uuid(&config_get("cloud_agent", "agent_uuid").unwrap()); //#[allow_ci]
-        let auth_tag = compute_hmac(&k, agent_uuid.as_bytes()).unwrap(); //#[allow_ci]
+        let auth_tag = compute_hmac(&k.bytes, agent_uuid.as_bytes()).unwrap(); //#[allow_ci]
 
         let ukey = KeylimeUKey {
             encrypted_key: base64::encode(&encrypted_key),
@@ -236,7 +217,8 @@ mod tests {
         let resp = test::call_service(&mut app, req).await;
         assert!(resp.status().is_success());
 
-        let encrypted_key = rsa_oaep_encrypt(&quotedata.pub_key, v).unwrap(); //#[allow_ci]
+        let encrypted_key =
+            rsa_oaep_encrypt(&quotedata.pub_key, &v.bytes).unwrap(); //#[allow_ci]
 
         let vkey = KeylimeVKey {
             encrypted_key: base64::encode(&encrypted_key),
@@ -251,7 +233,7 @@ mod tests {
         assert!(resp.status().is_success());
 
         let key = quotedata.payload_symm_key.lock().unwrap(); //#[allow_ci]
-        assert!(!key.is_empty());
-        assert_eq!(key.bytes, k.as_slice());
+        assert!(key.is_some());
+        assert_eq!(&key.unwrap().bytes, &k.bytes); //#[allow_ci]
     }
 }

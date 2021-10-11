@@ -60,14 +60,25 @@ impl Default for SymmKey {
 }
 
 impl SymmKey {
-    pub fn is_empty(&self) -> bool {
-        self.bytes == [0u8; KEY_LEN]
-    }
-
     pub fn from_vec(v: Vec<u8>) -> Self {
         let mut b = [0u8; KEY_LEN];
         b.copy_from_slice(&v[..]);
         SymmKey { bytes: b }
+    }
+
+    pub(crate) fn xor(&self, other: &Self) -> Result<Self> {
+        if self.bytes.len() != other.bytes.len() {
+            return Err(Error::Other(
+                "cannot xor differing length slices".to_string(),
+            ));
+        }
+        let mut outbuf = [0u8; KEY_LEN];
+        for (out, (x, y)) in
+            outbuf.iter_mut().zip(self.bytes.iter().zip(other.bytes))
+        {
+            *out = x ^ y;
+        }
+        Ok(Self { bytes: outbuf })
     }
 }
 
