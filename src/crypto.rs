@@ -14,7 +14,9 @@ use openssl::{
 use std::fs;
 use std::string::String;
 
-use crate::{Error, Result, AES_BLOCK_SIZE};
+use crate::{
+    Error, Result, AES_128_KEY_LEN, AES_256_KEY_LEN, AES_BLOCK_SIZE,
+};
 
 // Reads an X509 cert chain (provided by the tenant with the --cert command) and outputs
 // its public key.
@@ -188,8 +190,8 @@ pub(crate) fn verify_hmac(
 
 pub(crate) fn decrypt_aead(key: &[u8], data: &[u8]) -> Result<Vec<u8>> {
     let cipher = match key.len() {
-        16 => Cipher::aes_128_gcm(),
-        32 => Cipher::aes_256_gcm(),
+        AES_128_KEY_LEN => Cipher::aes_128_gcm(),
+        AES_256_KEY_LEN => Cipher::aes_256_gcm(),
         other => {
             return Err(Error::Other(format!(
                 "key length {} does not correspond to valid GCM cipher",
@@ -259,8 +261,8 @@ pub mod testing {
         data: &[u8],
     ) -> Result<Vec<u8>> {
         let cipher = match key.len() {
-            16 => Cipher::aes_128_gcm(),
-            32 => Cipher::aes_256_gcm(),
+            AES_128_KEY_LEN => Cipher::aes_128_gcm(),
+            AES_256_KEY_LEN => Cipher::aes_256_gcm(),
             other => {
                 return Err(Error::Other(format!(
                     "key length {} does not correspond to valid GCM cipher",
