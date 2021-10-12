@@ -19,7 +19,6 @@ use openssl::{
     rsa::Padding,
     sign::Signer,
 };
-use serde::Deserialize;
 use std::sync::Mutex;
 
 // Helper function for combining U and V keys and storing output to a buffer.
@@ -236,13 +235,9 @@ pub async fn u_or_v_key(
 mod tests {
     use super::*;
     use crate::common::{KeylimeConfig, API_VERSION, KEY_LEN};
-    use actix_web::{http::StatusCode, test, web, App};
+    use actix_web::{test, web, App};
     use openssl::{
-        encrypt::Encrypter,
-        hash::MessageDigest,
-        memcmp,
-        pkey::{PKey, Private},
-        rsa::Padding,
+        encrypt::Encrypter, hash::MessageDigest, pkey::PKey, rsa::Padding,
         sign::Signer,
     };
     use serde::{Deserialize, Serialize};

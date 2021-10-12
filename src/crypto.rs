@@ -9,8 +9,6 @@ use openssl::rsa::{Padding, Rsa};
 use openssl::sign::{Signer, Verifier};
 use openssl::x509::X509;
 use std::fs;
-use std::io::Read;
-use std::path::Path;
 use std::string::String;
 
 use crate::{Error, Result};
@@ -171,6 +169,7 @@ pub(crate) fn asym_verify(
 #[cfg(feature = "testing")]
 pub mod testing {
     use super::*;
+    use std::path::Path;
 
     pub(crate) fn rsa_import_pair(
         path: impl AsRef<Path>,

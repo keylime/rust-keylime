@@ -12,9 +12,8 @@ use crate::secure_mount;
 use std::convert::TryInto;
 use std::io::Write;
 use std::path::Path;
-use std::process::{Child, Command, Output, Stdio};
+use std::process::{Command, Output, Stdio};
 
-use openssl::pkey::PKey;
 use serde_json::Value;
 
 /// Runs a script with a json value as argument (used for revocation actions)
