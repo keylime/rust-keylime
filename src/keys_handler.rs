@@ -114,6 +114,7 @@ pub async fn u_key(
         &global_auth_tag,
     )? {
         let _ = global_symm_key.replace(symm_key);
+        quote_data.payload_symm_key_cvar.notify_one();
     }
 
     HttpResponse::Ok().await
@@ -158,6 +159,7 @@ pub async fn v_key(
         &global_auth_tag,
     )? {
         let _ = global_symm_key.replace(symm_key);
+        quote_data.payload_symm_key_cvar.notify_one();
     }
 
     HttpResponse::Ok().await
