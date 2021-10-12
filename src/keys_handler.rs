@@ -3,15 +3,13 @@
 
 use crate::crypto;
 use crate::{
-    common::{
-        KeySet, SymmKey, AES_BLOCK_SIZE, AGENT_UUID_LEN, AUTH_TAG_LEN,
-        KEY_LEN,
-    },
+    common::{KeySet, SymmKey, AES_BLOCK_SIZE, AGENT_UUID_LEN, AUTH_TAG_LEN},
     Error, QuoteData, Result,
 };
 use actix_web::{web, HttpRequest, HttpResponse, Responder};
 use log::*;
 use serde::{Deserialize, Serialize};
+use std::convert::TryInto;
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct KeylimeUKey {
@@ -46,12 +44,12 @@ pub(crate) fn try_combine_keys(
 
     for key1 in keyset1.iter() {
         for key2 in keyset2.iter() {
-            let symm_key_out = key1.xor(&key2)?;
+            let symm_key_out = key1.xor(key2)?;
 
             // Computes HMAC over agent UUID with provided key (payload decryption key) and
             // checks that this matches the provided auth_tag.
             let auth_tag = hex::decode(auth_tag)?;
-            if crypto::verify_hmac(&symm_key_out.bytes, uuid, &auth_tag)
+            if crypto::verify_hmac(symm_key_out.bytes(), uuid, &auth_tag)
                 .is_ok()
             {
                 info!(
@@ -104,7 +102,9 @@ pub async fn u_key(
     let decrypted_key =
         crypto::rsa_oaep_decrypt(&quote_data.priv_key, &encrypted_key)?;
 
-    global_current_keyset.push(SymmKey::from_vec(decrypted_key));
+    let decrypted_key: SymmKey = decrypted_key.as_slice().try_into().unwrap(); //#[allow_ci]
+
+    global_current_keyset.push(decrypted_key);
 
     // note: the auth_tag shouldn't be base64 decoded here
     global_auth_tag.copy_from_slice(key.auth_tag.as_bytes());
@@ -121,6 +121,7 @@ pub async fn u_key(
         &global_auth_tag,
     )? {
         let _ = global_symm_key.replace(symm_key);
+        quote_data.payload_symm_key_cvar.notify_one();
     }
 
     HttpResponse::Ok().await
@@ -160,7 +161,9 @@ pub async fn v_key(
     let decrypted_key =
         crypto::rsa_oaep_decrypt(&quote_data.priv_key, &encrypted_key)?;
 
-    global_current_keyset.push(SymmKey::from_vec(decrypted_key));
+    let decrypted_key: SymmKey = decrypted_key.as_slice().try_into().unwrap(); //#[allow_ci]
+
+    global_current_keyset.push(decrypted_key);
 
     if let Some(symm_key) = try_combine_keys(
         &mut global_current_keyset,
@@ -169,6 +172,7 @@ pub async fn v_key(
         &global_auth_tag,
     )? {
         let _ = global_symm_key.replace(symm_key);
+        quote_data.payload_symm_key_cvar.notify_one();
     }
 
     HttpResponse::Ok().await
@@ -177,7 +181,9 @@ pub async fn v_key(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::common::{KeylimeConfig, API_VERSION, KEY_LEN};
+    use crate::common::{
+        KeylimeConfig, AES_128_KEY_LEN, AES_256_KEY_LEN, API_VERSION,
+    };
     use crate::crypto::compute_hmac;
     #[cfg(feature = "testing")]
     use crate::crypto::testing::rsa_oaep_encrypt;
@@ -188,8 +194,7 @@ mod tests {
     };
 
     #[cfg(feature = "testing")]
-    #[actix_rt::test]
-    async fn test_u_or_v_key() {
+    async fn test_u_or_v_key(key_len: usize) {
         let test_config = KeylimeConfig::default();
         let quotedata = web::Data::new(QuoteData::fixture().unwrap()); //#[allow_ci]
         let mut app = test::init_service(
@@ -206,17 +211,19 @@ mod tests {
         )
         .await;
 
-        let u: &[u8; KEY_LEN] = b"01234567890123456789012345678901";
-        let u = SymmKey::from_vec(u.to_vec());
-        let v: &[u8; KEY_LEN] = b"ABCDEFGHIJABCDEFGHIJABCDEFGHIJAB";
-        let v = SymmKey::from_vec(v.to_vec());
+        // Enough length for testing both AES-128 and AES-256
+        const U: &[u8; AES_256_KEY_LEN] = b"01234567890123456789012345678901";
+        const V: &[u8; AES_256_KEY_LEN] = b"ABCDEFGHIJABCDEFGHIJABCDEFGHIJAB";
+
+        let u: SymmKey = U[..key_len][..].try_into().unwrap(); //#[allow_ci]
+        let v: SymmKey = V[..key_len][..].try_into().unwrap(); //#[allow_ci]
         let k = u.xor(&v).unwrap(); //#[allow_ci]
 
         let encrypted_key =
-            rsa_oaep_encrypt(&quotedata.pub_key, &u.bytes).unwrap(); //#[allow_ci]
+            rsa_oaep_encrypt(&quotedata.pub_key, u.bytes()).unwrap(); //#[allow_ci]
 
         let auth_tag =
-            compute_hmac(&k.bytes, test_config.agent_uuid.as_bytes())
+            compute_hmac(k.bytes(), test_config.agent_uuid.as_bytes())
                 .unwrap(); //#[allow_ci]
 
         let ukey = KeylimeUKey {
@@ -234,7 +241,7 @@ mod tests {
         assert!(resp.status().is_success());
 
         let encrypted_key =
-            rsa_oaep_encrypt(&quotedata.pub_key, &v.bytes).unwrap(); //#[allow_ci]
+            rsa_oaep_encrypt(&quotedata.pub_key, v.bytes()).unwrap(); //#[allow_ci]
 
         let vkey = KeylimeVKey {
             encrypted_key: base64::encode(&encrypted_key),
@@ -250,6 +257,18 @@ mod tests {
 
         let key = quotedata.payload_symm_key.lock().unwrap(); //#[allow_ci]
         assert!(key.is_some());
-        assert_eq!(&key.unwrap().bytes, &k.bytes); //#[allow_ci]
+        assert_eq!(key.as_ref().unwrap().bytes(), k.bytes()); //#[allow_ci]
+    }
+
+    #[cfg(feature = "testing")]
+    #[actix_rt::test]
+    async fn test_u_or_v_key_short() {
+        test_u_or_v_key(AES_128_KEY_LEN).await;
+    }
+
+    #[cfg(feature = "testing")]
+    #[actix_rt::test]
+    async fn test_u_or_v_key_long() {
+        test_u_or_v_key(AES_128_KEY_LEN).await;
     }
 }

@@ -60,7 +60,7 @@ use std::{
     path::Path,
     process::{Command, Stdio},
     str::FromStr,
-    sync::{Arc, Mutex},
+    sync::{Arc, Condvar, Mutex},
     time::Duration,
 };
 use tss_esapi::{
@@ -82,6 +82,7 @@ pub struct QuoteData {
     ukeys: Mutex<KeySet>,
     vkeys: Mutex<KeySet>,
     payload_symm_key: Arc<Mutex<Option<SymmKey>>>,
+    payload_symm_key_cvar: Arc<Condvar>,
     encr_payload: Arc<Mutex<Vec<u8>>>,
     auth_tag: Mutex<[u8; AUTH_TAG_LEN]>,
     hash_alg: algorithms::HashAlgorithm,
@@ -95,13 +96,11 @@ pub struct QuoteData {
 // keylime/crypto.py#L189
 pub(crate) fn decrypt_payload(
     encr: Arc<Mutex<Vec<u8>>>,
-    key: Arc<Mutex<Option<SymmKey>>>,
+    symm_key: &SymmKey,
 ) -> Result<Vec<u8>> {
-    let symm_key = key.lock().unwrap(); //#[allow_ci]
     let payload = encr.lock().unwrap(); //#[allow_ci]
 
-    let symm_key = symm_key.unwrap().bytes; //#[allow_ci]
-    let decrypted = crypto::decrypt_aead(&symm_key, &payload)?;
+    let decrypted = crypto::decrypt_aead(symm_key.bytes(), &payload)?;
 
     info!("Successfully decrypted payload");
     Ok(decrypted)
@@ -134,16 +133,13 @@ pub(crate) fn setup_unzipped(
 pub(crate) fn write_out_key_and_payload(
     dec_payload: &[u8],
     dec_payload_path: &str,
-    key: Arc<Mutex<Option<SymmKey>>>,
+    key: &SymmKey,
     key_path: &str,
 ) -> Result<()> {
-    let symm_key = key.lock().unwrap(); //#[allow_ci]
-
-    let symm_key = symm_key.unwrap().bytes; //#[allow_ci]
     let mut key_file = fs::File::create(key_path)?;
-    let bytes = key_file.write(&symm_key[..])?;
-    if bytes != symm_key.len() {
-        return Err(Error::Other(format!("Error writing symm key to {:?}: key len is {}, but {} bytes were written", key_path, symm_key.len(), bytes)));
+    let bytes = key_file.write(key.bytes())?;
+    if bytes != key.bytes().len() {
+        return Err(Error::Other(format!("Error writing symm key to {:?}: key len is {}, but {} bytes were written", key_path, key.bytes().len(), bytes)));
     }
     info!("Wrote payload decryption key to {:?}", key_path);
 
@@ -218,31 +214,25 @@ pub(crate) fn optional_unzip_payload(
 
 async fn run_encrypted_payload(
     symm_key: Arc<Mutex<Option<SymmKey>>>,
+    symm_key_cvar: Arc<Condvar>,
     payload: Arc<Mutex<Vec<u8>>>,
     config: &KeylimeConfig,
 ) -> Result<()> {
     // do nothing until actix server's handlers have updated the symmetric key
-    loop {
-        let key = symm_key.lock().unwrap(); //#[allow_ci]
-
-        // if key is still empty, unlock resource by dropping and sleep for 1 sec
-        if key.is_none() {
-            drop(key);
-            std::thread::sleep(Duration::from_millis(1000));
-            continue;
-        } else {
-            break;
-        }
+    let mut key = symm_key.lock().unwrap(); //#[allow_ci]
+    while key.is_none() {
+        key = symm_key_cvar.wait(key).unwrap(); //#[allow_ci]
     }
 
-    let dec_payload = decrypt_payload(payload, symm_key.clone())?;
+    let key = key.as_ref().unwrap(); //#[allow_ci]
+    let dec_payload = decrypt_payload(payload, key)?;
 
     let (unzipped, dec_payload_path, key_path) = setup_unzipped(config)?;
 
     write_out_key_and_payload(
         &dec_payload,
         &dec_payload_path,
-        symm_key,
+        key,
         &key_path,
     )?;
 
@@ -390,10 +380,12 @@ async fn main() -> Result<()> {
     let mut encr_payload = Vec::new();
 
     let symm_key_arc = Arc::new(Mutex::new(None));
+    let symm_key_cvar_arc = Arc::new(Condvar::new());
     let encr_payload_arc = Arc::new(Mutex::new(encr_payload));
 
     // these allow the arrays to be referenced later in this thread
     let symm_key = Arc::clone(&symm_key_arc);
+    let symm_key_cvar = Arc::clone(&symm_key_cvar_arc);
     let payload = Arc::clone(&encr_payload_arc);
 
     let quotedata = web::Data::new(QuoteData {
@@ -404,6 +396,7 @@ async fn main() -> Result<()> {
         ukeys: Mutex::new(KeySet::default()),
         vkeys: Mutex::new(KeySet::default()),
         payload_symm_key: symm_key_arc,
+        payload_symm_key_cvar: symm_key_cvar_arc,
         encr_payload: encr_payload_arc,
         auth_tag: Mutex::new([0u8; AUTH_TAG_LEN]),
         hash_alg: config.hash_alg,
@@ -442,7 +435,7 @@ async fn main() -> Result<()> {
     );
 
     try_join!(
-        run_encrypted_payload(symm_key, payload, &config),
+        run_encrypted_payload(symm_key, symm_key_cvar, payload, &config),
         actix_server
     )?;
 
@@ -496,10 +489,12 @@ mod testing {
             let mut encr_payload = Vec::new();
 
             let symm_key_arc = Arc::new(Mutex::new(None));
+            let symm_key_cvar_arc = Arc::new(Condvar::new());
             let encr_payload_arc = Arc::new(Mutex::new(encr_payload));
 
             // these allow the arrays to be referenced later in this thread
             let symm_key = Arc::clone(&symm_key_arc);
+            let symm_key_cvar = Arc::clone(&symm_key_cvar_arc);
             let payload = Arc::clone(&encr_payload_arc);
 
             Ok(QuoteData {
@@ -510,6 +505,7 @@ mod testing {
                 ukeys: Mutex::new(KeySet::default()),
                 vkeys: Mutex::new(KeySet::default()),
                 payload_symm_key: symm_key_arc,
+                payload_symm_key_cvar: symm_key_cvar_arc,
                 encr_payload: encr_payload_arc,
                 auth_tag: Mutex::new([0u8; AUTH_TAG_LEN]),
                 hash_alg: algorithms::HashAlgorithm::Sha256,
