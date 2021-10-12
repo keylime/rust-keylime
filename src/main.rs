@@ -49,7 +49,6 @@ use actix_web::{web, App, HttpServer};
 use common::*;
 use compress_tools::*;
 use error::{Error, Result};
-use flate2::read::DeflateDecoder;
 use futures::{future::TryFutureExt, try_join};
 use log::*;
 use openssl::{
@@ -63,11 +62,8 @@ use std::fs::File;
 use std::{
     convert::TryFrom,
     fs,
-    io::{prelude::*, BufReader, Read, Write},
-    os::{
-        linux::fs::MetadataExt,
-        unix::fs::{OpenOptionsExt, PermissionsExt},
-    },
+    io::{BufReader, Read, Write},
+    os::unix::fs::PermissionsExt,
     path::Path,
     process::{Command, Stdio},
     str::FromStr,
@@ -75,12 +71,8 @@ use std::{
     time::Duration,
 };
 use tss_esapi::{
-    handles::KeyHandle,
-    interface_types::{
-        algorithm::{AsymmetricAlgorithm, HashingAlgorithm},
-        resource_handles::Hierarchy,
-    },
-    utils, Context,
+    handles::KeyHandle, interface_types::algorithm::AsymmetricAlgorithm,
+    Context,
 };
 use uuid::Uuid;
 

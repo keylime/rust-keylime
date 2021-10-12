@@ -3,13 +3,12 @@
 
 use crate::{tpm, Error as KeylimeError, QuoteData};
 
-use crate::common::{ima_ml_path_get, measuredboot_ml_path_get, KEY_LEN};
+use crate::common::{ima_ml_path_get, measuredboot_ml_path_get};
 use crate::serialization::serialize_maybe_base64;
 use actix_web::{web, HttpRequest, HttpResponse, Responder};
 use log::*;
 use serde::{Deserialize, Serialize};
 use std::fs::{read, read_to_string};
-use std::path::Path;
 use tss_esapi::structures::PcrSlot;
 
 #[derive(Deserialize)]
@@ -297,14 +296,8 @@ pub async fn integrity(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        common::{KeySet, SymmKey, API_VERSION, AUTH_TAG_LEN},
-        crypto::testing::pkey_pub_from_pem,
-        testing,
-    };
-    use actix_web::{http::StatusCode, test, web, App};
-    use std::sync::{Arc, Mutex};
-    use tss_esapi::interface_types::algorithm::AsymmetricAlgorithm;
+    use crate::{common::API_VERSION, crypto::testing::pkey_pub_from_pem};
+    use actix_web::{test, web, App};
 
     #[actix_rt::test]
     async fn test_identity() {
