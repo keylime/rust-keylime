@@ -2,10 +2,7 @@
 // Copyright 2021 Keylime Authors
 
 use crate::{
-    common::{
-        config_get, KeySet, SymmKey, AES_BLOCK_SIZE, AGENT_UUID_LEN,
-        AUTH_TAG_LEN, KEY_LEN,
-    },
+    common::{config_get, KeySet, SymmKey, AUTH_TAG_LEN},
     get_uuid, Error, QuoteData, Result,
 };
 use actix_web::{web, HttpRequest, HttpResponse, Responder};
@@ -19,7 +16,6 @@ use openssl::{
     rsa::Padding,
     sign::Signer,
 };
-use serde::Deserialize;
 use std::sync::Mutex;
 
 // Helper function for combining U and V keys and storing output to a buffer.
@@ -238,13 +234,9 @@ pub async fn u_or_v_key(
 mod tests {
     use super::*;
     use crate::common::{API_VERSION, KEY_LEN};
-    use actix_web::{http::StatusCode, test, web, App};
+    use actix_web::{test, web, App};
     use openssl::{
-        encrypt::Encrypter,
-        hash::MessageDigest,
-        memcmp,
-        pkey::{PKey, Private},
-        rsa::Padding,
+        encrypt::Encrypter, hash::MessageDigest, pkey::PKey, rsa::Padding,
         sign::Signer,
     };
     use serde::{Deserialize, Serialize};

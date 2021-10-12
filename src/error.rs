@@ -3,8 +3,7 @@
 
 use thiserror::Error;
 use tss_esapi::{
-    constants::response_code::Tss2ResponseCodeKind,
-    Error::{Tss2Error, WrapperError},
+    constants::response_code::Tss2ResponseCodeKind, Error::Tss2Error,
 };
 
 #[derive(Error, Debug)]

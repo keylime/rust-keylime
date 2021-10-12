@@ -2,7 +2,6 @@ use crate::error::Error;
 
 use crate::common::API_VERSION;
 use log::*;
-use reqwest::header::*;
 use serde::{Deserialize, Serialize};
 use serde_json::Number;
 
