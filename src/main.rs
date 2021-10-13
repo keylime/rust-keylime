@@ -121,7 +121,7 @@ pub(crate) fn decrypt_payload(
 ) -> Result<Vec<u8>> {
     let payload = encr.lock().unwrap(); //#[allow_ci]
 
-    let decrypted = crypto::decrypt_aead(&symm_key.bytes, &payload)?;
+    let decrypted = crypto::decrypt_aead(symm_key.bytes(), &payload)?;
 
     info!("Successfully decrypted payload");
     Ok(decrypted)
@@ -158,9 +158,9 @@ pub(crate) fn write_out_key_and_payload(
     key_path: &str,
 ) -> Result<()> {
     let mut key_file = fs::File::create(key_path)?;
-    let bytes = key_file.write(&key.bytes[..])?;
-    if bytes != key.bytes.len() {
-        return Err(Error::Other(format!("Error writing symm key to {:?}: key len is {}, but {} bytes were written", key_path, key.bytes.len(), bytes)));
+    let bytes = key_file.write(key.bytes())?;
+    if bytes != key.bytes().len() {
+        return Err(Error::Other(format!("Error writing symm key to {:?}: key len is {}, but {} bytes were written", key_path, key.bytes().len(), bytes)));
     }
     info!("Wrote payload decryption key to {:?}", key_path);
 
@@ -243,15 +243,15 @@ async fn run_encrypted_payload(
         key = symm_key_cvar.wait(key).unwrap(); //#[allow_ci]
     }
 
-    let key = key.unwrap(); //#[allow_ci]
-    let dec_payload = decrypt_payload(payload, &key)?;
+    let key = key.as_ref().unwrap(); //#[allow_ci]
+    let dec_payload = decrypt_payload(payload, key)?;
 
     let (unzipped, dec_payload_path, key_path) = setup_unzipped()?;
 
     write_out_key_and_payload(
         &dec_payload,
         &dec_payload_path,
-        &key,
+        key,
         &key_path,
     )?;
 
