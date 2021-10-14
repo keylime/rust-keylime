@@ -304,6 +304,12 @@ async fn run_encrypted_payload(
         }
     }
 
+    // run revocation script, if configured
+    let run_revocation = config_get("cloud_agent", "listen_notfications")?;
+    if bool::from_str(&run_revocation.to_lowercase())? {
+        return revocation::run_revocation_service().await;
+    }
+
     Ok(())
 }
 
@@ -431,23 +437,10 @@ async fn main() -> Result<()> {
     .map_err(Error::from);
     info!("Listening on http://{}:{}", cloudagent_ip, cloudagent_port);
 
-    // as the payload may set up revocation certificates, etc., the revocation
-    // service should be run only after the agent quotes have been validated
-    // and the payload has been decrypted and run. also, this service can be
-    // turned off in configuration.
-    let run_revocation = config_get("cloud_agent", "listen_notfications")?;
-    if bool::from_str(&run_revocation.to_lowercase())? {
-        try_join!(
-            revocation::run_revocation_service(),
-            run_encrypted_payload(symm_key, payload, &agent_uuid),
-            actix_server
-        )?;
-    } else {
-        try_join!(
-            run_encrypted_payload(symm_key, payload, &agent_uuid),
-            actix_server
-        )?;
-    }
+    try_join!(
+        run_encrypted_payload(symm_key, payload, &agent_uuid),
+        actix_server
+    )?;
 
     Ok(())
 }
