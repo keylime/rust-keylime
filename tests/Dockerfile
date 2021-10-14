@@ -8,3 +8,6 @@ RUN dnf install -y \
 	dbus-daemon czmq-devel \
 	python3 \
 	libarchive-devel
+
+RUN cargo install cargo-tarpaulin
+

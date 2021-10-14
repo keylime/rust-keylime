@@ -290,6 +290,8 @@ mod tests {
 
     #[test]
     fn test_config_file_get() {
+        let conf_orig = option_env!("KEYLIME_CONFIG").or(Some("")).unwrap(); //#[allow_ci]
+
         // Test with no environment variable
         env::set_var("KEYLIME_CONFIG", "");
         assert_eq!(config_file_get(), String::from("/etc/keylime.conf"));
@@ -298,6 +300,6 @@ mod tests {
         env::set_var("KEYLIME_CONFIG", "/tmp/testing.conf");
         assert_eq!(config_file_get(), String::from("/tmp/testing.conf"));
         // Reset environment
-        env::set_var("KEYLIME_CONFIG", "");
+        env::set_var("KEYLIME_CONFIG", conf_orig);
     }
 }
