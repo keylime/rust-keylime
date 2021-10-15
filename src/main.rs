@@ -231,7 +231,7 @@ pub(crate) fn optional_unzip_payload(unzipped: &str) -> Result<()> {
     Ok(())
 }
 
-async fn run_encrypted_payload(
+pub(crate) async fn run_encrypted_payload(
     symm_key: Arc<Mutex<Option<SymmKey>>>,
     symm_key_cvar: Arc<Condvar>,
     payload: Arc<Mutex<Vec<u8>>>,
@@ -267,6 +267,18 @@ async fn run_encrypted_payload(
             run(&unzipped, script, agent_uuid)?;
         }
     }
+
+    Ok(())
+}
+
+async fn worker(
+    symm_key: Arc<Mutex<Option<SymmKey>>>,
+    symm_key_cvar: Arc<Condvar>,
+    payload: Arc<Mutex<Vec<u8>>>,
+    agent_uuid: &str,
+) -> Result<()> {
+    run_encrypted_payload(symm_key, symm_key_cvar, payload, agent_uuid)
+        .await?;
 
     // run revocation script, if configured
     let run_revocation = config_get("cloud_agent", "listen_notfications")?;
@@ -402,7 +414,7 @@ async fn main() -> Result<()> {
     info!("Listening on http://{}:{}", cloudagent_ip, cloudagent_port);
 
     try_join!(
-        run_encrypted_payload(symm_key, symm_key_cvar, payload, &agent_uuid),
+        worker(symm_key, symm_key_cvar, payload, &agent_uuid),
         actix_server
     )?;
 

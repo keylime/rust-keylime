@@ -176,11 +176,16 @@ mod tests {
     use crate::common::{AES_128_KEY_LEN, AES_256_KEY_LEN, API_VERSION};
     use crate::crypto::compute_hmac;
     #[cfg(feature = "testing")]
-    use crate::crypto::testing::rsa_oaep_encrypt;
+    use crate::crypto::testing::{encrypt_aead, rsa_oaep_encrypt};
+    use actix_rt::Arbiter;
     use actix_web::{test, web, App};
+    use std::env;
+    use std::fs;
+    use std::path::Path;
+    use std::sync::Arc;
 
     #[cfg(feature = "testing")]
-    async fn test_u_or_v_key(key_len: usize) {
+    async fn test_u_or_v_key(key_len: usize, payload: Option<&[u8]>) {
         let quotedata = web::Data::new(QuoteData::fixture().unwrap()); //#[allow_ci]
         let mut app = test::init_service(
             App::new()
@@ -196,6 +201,34 @@ mod tests {
         )
         .await;
 
+        let agent_uuid =
+            get_uuid(&config_get("cloud_agent", "agent_uuid").unwrap()); //#[allow_ci]
+
+        let arbiter = Arbiter::new();
+
+        let payload_symm_key_clone = Arc::clone(&quotedata.payload_symm_key);
+        let payload_symm_key_cvar_clone =
+            Arc::clone(&quotedata.payload_symm_key_cvar);
+        let encr_payload_clone = Arc::clone(&quotedata.encr_payload);
+        let agent_uuid_clone = agent_uuid.clone();
+
+        assert!(arbiter.spawn(Box::pin(async move {
+            if crate::run_encrypted_payload(
+                payload_symm_key_clone,
+                payload_symm_key_cvar_clone,
+                encr_payload_clone,
+                &agent_uuid_clone,
+            )
+            .await
+            .is_err()
+            {
+                debug!("payload run failed");
+            }
+            if !Arbiter::current().stop() {
+                debug!("couldn't stop current arbiter");
+            }
+        })));
+
         // Enough length for testing both AES-128 and AES-256
         const U: &[u8; AES_256_KEY_LEN] = b"01234567890123456789012345678901";
         const V: &[u8; AES_256_KEY_LEN] = b"ABCDEFGHIJABCDEFGHIJABCDEFGHIJAB";
@@ -204,18 +237,21 @@ mod tests {
         let v: SymmKey = V[..key_len][..].try_into().unwrap(); //#[allow_ci]
         let k = u.xor(&v).unwrap(); //#[allow_ci]
 
+        let payload = payload.map(|payload| {
+            let iv = b"ABCDEFGHIJKLMNOP";
+            encrypt_aead(k.bytes(), &iv[..], payload).unwrap() //#[allow_ci]
+        });
+
         let encrypted_key =
             rsa_oaep_encrypt(&quotedata.pub_key, u.bytes()).unwrap(); //#[allow_ci]
 
-        let agent_uuid =
-            get_uuid(&config_get("cloud_agent", "agent_uuid").unwrap()); //#[allow_ci]
         let auth_tag =
             compute_hmac(k.bytes(), agent_uuid.as_bytes()).unwrap(); //#[allow_ci]
 
         let ukey = KeylimeUKey {
             encrypted_key: base64::encode(&encrypted_key),
             auth_tag: hex::encode(auth_tag),
-            payload: None,
+            payload: payload.map(base64::encode),
         };
 
         let req = test::TestRequest::post()
@@ -238,23 +274,42 @@ mod tests {
             .set_json(&vkey)
             .to_request();
 
-        let resp = test::call_service(&mut app, req).await;
+        let resp = test::call_service(&mut app, req).await; //#[allow_ci]
         assert!(resp.status().is_success());
 
-        let key = quotedata.payload_symm_key.lock().unwrap(); //#[allow_ci]
-        assert!(key.is_some());
-        assert_eq!(key.as_ref().unwrap().bytes(), k.bytes()); //#[allow_ci]
+        {
+            let key = quotedata.payload_symm_key.lock().unwrap(); //#[allow_ci]
+            assert!(key.is_some());
+            assert_eq!(key.as_ref().unwrap().bytes(), k.bytes()); //#[allow_ci]
+        }
+
+        arbiter.join();
     }
 
     #[cfg(feature = "testing")]
     #[actix_rt::test]
     async fn test_u_or_v_key_short() {
-        test_u_or_v_key(AES_128_KEY_LEN).await;
+        test_u_or_v_key(AES_128_KEY_LEN, None).await;
     }
 
     #[cfg(feature = "testing")]
     #[actix_rt::test]
     async fn test_u_or_v_key_long() {
-        test_u_or_v_key(AES_128_KEY_LEN).await;
+        test_u_or_v_key(AES_128_KEY_LEN, None).await;
+    }
+
+    #[cfg(feature = "testing")]
+    #[actix_rt::test]
+    async fn test_u_or_v_key_with_payload() {
+        let payload_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("test-data")
+            .join("payload.zip");
+        let payload =
+            fs::read(&payload_path).expect("unable to read payload");
+        let dir = tempfile::tempdir().unwrap(); //#[allow_ci]
+        env::set_var("KEYLIME_TEST_DIR", dir.path());
+        test_u_or_v_key(AES_128_KEY_LEN, Some(payload.as_slice())).await;
+        let timestamp_path = dir.path().join("timestamp");
+        assert!(timestamp_path.exists());
     }
 }
