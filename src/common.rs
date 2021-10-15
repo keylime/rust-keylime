@@ -127,7 +127,7 @@ impl TpmData {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(crate) struct KeylimeConfig {
     pub agent_ip: String,
     pub agent_port: String,
