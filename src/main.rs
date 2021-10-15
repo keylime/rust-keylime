@@ -212,7 +212,7 @@ pub(crate) fn optional_unzip_payload(
     Ok(())
 }
 
-async fn run_encrypted_payload(
+pub(crate) async fn run_encrypted_payload(
     symm_key: Arc<Mutex<Option<SymmKey>>>,
     symm_key_cvar: Arc<Condvar>,
     payload: Arc<Mutex<Vec<u8>>>,
@@ -248,6 +248,17 @@ async fn run_encrypted_payload(
             run(&unzipped, script, config.agent_uuid.as_str())?;
         }
     }
+
+    Ok(())
+}
+
+async fn worker(
+    symm_key: Arc<Mutex<Option<SymmKey>>>,
+    symm_key_cvar: Arc<Condvar>,
+    payload: Arc<Mutex<Vec<u8>>>,
+    config: &KeylimeConfig,
+) -> Result<()> {
+    run_encrypted_payload(symm_key, symm_key_cvar, payload, config).await?;
 
     if config.run_revocation {
         return revocation::run_revocation_service(config).await;
@@ -435,7 +446,7 @@ async fn main() -> Result<()> {
     );
 
     try_join!(
-        run_encrypted_payload(symm_key, symm_key_cvar, payload, &config),
+        worker(symm_key, symm_key_cvar, payload, &config),
         actix_server
     )?;
 
