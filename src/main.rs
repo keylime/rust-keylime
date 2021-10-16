@@ -82,7 +82,7 @@ pub struct QuoteData {
     vkeys: Mutex<KeySet>,
     payload_symm_key: Arc<Mutex<Option<SymmKey>>>,
     payload_symm_key_cvar: Arc<Condvar>,
-    encr_payload: Arc<Mutex<Vec<u8>>>,
+    encr_payload: Arc<Mutex<Option<Vec<u8>>>>,
     auth_tag: Mutex<[u8; AUTH_TAG_LEN]>,
 }
 
@@ -116,12 +116,10 @@ fn get_uuid(agent_uuid_config: &str) -> String {
 // https://github.com/keylime/keylime/blob/1ed43ac8f75d5c3bc3a3bbbbb5037f20cf3c5a6a/ \
 // keylime/crypto.py#L189
 pub(crate) fn decrypt_payload(
-    encr: Arc<Mutex<Vec<u8>>>,
+    payload: &[u8],
     symm_key: &SymmKey,
 ) -> Result<Vec<u8>> {
-    let payload = encr.lock().unwrap(); //#[allow_ci]
-
-    let decrypted = crypto::decrypt_aead(symm_key.bytes(), &payload)?;
+    let decrypted = crypto::decrypt_aead(symm_key.bytes(), payload)?;
 
     info!("Successfully decrypted payload");
     Ok(decrypted)
@@ -234,7 +232,7 @@ pub(crate) fn optional_unzip_payload(unzipped: &str) -> Result<()> {
 pub(crate) async fn run_encrypted_payload(
     symm_key: Arc<Mutex<Option<SymmKey>>>,
     symm_key_cvar: Arc<Condvar>,
-    payload: Arc<Mutex<Vec<u8>>>,
+    payload: Arc<Mutex<Option<Vec<u8>>>>,
     agent_uuid: &str,
 ) -> Result<()> {
     // do nothing until actix server's handlers have updated the symmetric key
@@ -244,7 +242,14 @@ pub(crate) async fn run_encrypted_payload(
     }
 
     let key = key.as_ref().unwrap(); //#[allow_ci]
-    let dec_payload = decrypt_payload(payload, key)?;
+    let payload = payload.lock().unwrap(); //#[allow_ci]
+
+    if payload.is_none() {
+        debug!("No payload is provided; skipping decryption");
+        return Ok(());
+    }
+
+    let dec_payload = decrypt_payload(payload.as_ref().unwrap(), key)?; //#[allow_ci]
 
     let (unzipped, dec_payload_path, key_path) = setup_unzipped()?;
 
@@ -274,7 +279,7 @@ pub(crate) async fn run_encrypted_payload(
 async fn worker(
     symm_key: Arc<Mutex<Option<SymmKey>>>,
     symm_key_cvar: Arc<Condvar>,
-    payload: Arc<Mutex<Vec<u8>>>,
+    payload: Arc<Mutex<Option<Vec<u8>>>>,
     agent_uuid: &str,
 ) -> Result<()> {
     run_encrypted_payload(symm_key, symm_key_cvar, payload, agent_uuid)
@@ -363,11 +368,9 @@ async fn main() -> Result<()> {
     // safeguards u and v keys in transit, is not part of the threat model.
     let (nk_pub, nk_priv) = crypto::rsa_generate_pair(2048)?;
 
-    let mut encr_payload = Vec::new();
-
     let symm_key_arc = Arc::new(Mutex::new(None));
     let symm_key_cvar_arc = Arc::new(Condvar::new());
-    let encr_payload_arc = Arc::new(Mutex::new(encr_payload));
+    let encr_payload_arc = Arc::new(Mutex::new(None));
 
     // these allow the arrays to be referenced later in this thread
     let symm_key = Arc::clone(&symm_key_arc);
@@ -460,11 +463,9 @@ mod testing {
             let (nk_pub, nk_priv) =
                 crypto::testing::rsa_import_pair(&rsa_key_path)?;
 
-            let mut encr_payload = Vec::new();
-
             let symm_key_arc = Arc::new(Mutex::new(None));
             let symm_key_cvar_arc = Arc::new(Condvar::new());
-            let encr_payload_arc = Arc::new(Mutex::new(encr_payload));
+            let encr_payload_arc = Arc::new(Mutex::new(None));
 
             // these allow the arrays to be referenced later in this thread
             let symm_key = Arc::clone(&symm_key_arc);

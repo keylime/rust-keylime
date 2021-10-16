@@ -105,7 +105,7 @@ pub async fn u_key(
 
     if let Some(payload) = &key.payload {
         let encr_payload = base64::decode(&payload).map_err(Error::from)?;
-        global_encr_payload.extend(encr_payload.iter());
+        let _ = global_encr_payload.replace(encr_payload);
     }
 
     let agent_uuid = get_uuid(&config_get("cloud_agent", "agent_uuid")?);
@@ -135,7 +135,6 @@ pub async fn v_key(
     let mut global_current_keyset = quote_data.vkeys.lock().unwrap(); //#[allow_ci]
     let mut global_other_keyset = quote_data.ukeys.lock().unwrap(); //#[allow_ci]
     let mut global_symm_key = quote_data.payload_symm_key.lock().unwrap(); //#[allow_ci]
-    let mut global_encr_payload = quote_data.encr_payload.lock().unwrap(); //#[allow_ci]
     let mut global_auth_tag = quote_data.auth_tag.lock().unwrap(); //#[allow_ci]
 
     // get key and decode it from web data
