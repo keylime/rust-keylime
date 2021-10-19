@@ -38,6 +38,7 @@ mod common;
 mod crypto;
 mod error;
 mod hash;
+mod ima;
 mod keys_handler;
 mod quotes_handler;
 mod registrar_agent;
@@ -79,6 +80,7 @@ use tss_esapi::{
     },
     utils, Context,
 };
+use ima::ImaMeasurementList;
 use uuid::Uuid;
 
 static NOTFOUND: &[u8] = b"Not Found";
@@ -96,6 +98,7 @@ pub struct QuoteData {
     payload_symm_key: Arc<Mutex<SymmKey>>,
     encr_payload: Arc<Mutex<Vec<u8>>>,
     auth_tag: Mutex<[u8; AUTH_TAG_LEN]>,
+    ima_ml: Mutex<ImaMeasurementList>,
 }
 
 fn get_uuid(agent_uuid_config: &str) -> String {
@@ -409,6 +412,7 @@ async fn main() -> Result<()> {
         payload_symm_key: symm_key_arc,
         encr_payload: encr_payload_arc,
         auth_tag: Mutex::new([0u8; AUTH_TAG_LEN]),
+        ima_ml: Mutex::new(ImaMeasurementList::new()),
     });
 
     let actix_server = HttpServer::new(move || {
@@ -504,6 +508,7 @@ mod testing {
                 payload_symm_key: symm_key_arc,
                 encr_payload: encr_payload_arc,
                 auth_tag: Mutex::new([0u8; AUTH_TAG_LEN]),
+                ima_ml: Mutex::new(ImaMeasurementList::new()),
             })
         }
     }

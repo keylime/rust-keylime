@@ -4,6 +4,8 @@
 use crate::{tpm, Error as KeylimeError, QuoteData};
 
 use crate::common::{ima_ml_path_get, KEY_LEN};
+use crate::ima::read_measurement_list;
+
 use actix_web::{web, HttpRequest, HttpResponse, Responder};
 use log::*;
 use serde::{Deserialize, Serialize};
@@ -58,12 +60,14 @@ pub(crate) struct KeylimeIntegrityQuotePreAttestation {
     pub sign_alg: String,
     pub pubkey: String,
     pub ima_measurement_list: String,
+    pub ima_measurement_list_entry: u64,
 }
 
 impl KeylimeIntegrityQuotePreAttestation {
     fn from_id_quote(
         idquote: KeylimeIdQuote,
         ima: String,
+        ima_measurement_list_entry: u64,
         pubkey: String,
     ) -> Self {
         KeylimeIntegrityQuotePreAttestation {
@@ -73,6 +77,7 @@ impl KeylimeIntegrityQuotePreAttestation {
             sign_alg: idquote.sign_alg,
             pubkey,
             ima_measurement_list: ima,
+            ima_measurement_list_entry: ima_measurement_list_entry,
         }
     }
 }
@@ -84,16 +89,22 @@ pub(crate) struct KeylimeIntegrityQuotePostAttestation {
     pub enc_alg: String,
     pub sign_alg: String,
     pub ima_measurement_list: String,
+    pub ima_measurement_list_entry: u64,
 }
 
 impl KeylimeIntegrityQuotePostAttestation {
-    fn from_id_quote(idquote: KeylimeIdQuote, ima: String) -> Self {
+    fn from_id_quote(
+        idquote: KeylimeIdQuote,
+        ima: String,
+        ima_measurement_list_entry: u64,
+    ) -> Self {
         KeylimeIntegrityQuotePostAttestation {
             quote: idquote.quote,
             hash_alg: idquote.hash_alg,
             enc_alg: idquote.enc_alg,
             sign_alg: idquote.sign_alg,
             ima_measurement_list: ima,
+            ima_measurement_list_entry: ima_measurement_list_entry,
         }
     }
 }
@@ -255,13 +266,15 @@ pub async fn integrity(
             data.clone(),
         )?;
 
-        let ima_ml_path = ima_ml_path_get();
-        let ima_ml = read_to_string(&ima_ml_path)?;
+        let ima_ml_pathbuf = ima_ml_path_get();
+        let (ima_ml, nth_entry, num_entries) =
+            read_measurement_list(&mut data.ima_ml.lock().unwrap(), &ima_ml_pathbuf, nth_entry)?;
 
         if partial == 0 {
             let quote = KeylimeIntegrityQuotePreAttestation::from_id_quote(
                 quote,
                 ima_ml,
+                nth_entry,
                 String::from_utf8(
                     data.pub_key
                         .public_key_to_pem()
@@ -274,7 +287,7 @@ pub async fn integrity(
             HttpResponse::Ok().json(response).await
         } else {
             let quote = KeylimeIntegrityQuotePostAttestation::from_id_quote(
-                quote, ima_ml,
+                quote, ima_ml, nth_entry,
             );
 
             let response = JsonIntegWrapperPostAttestation::new(quote);
