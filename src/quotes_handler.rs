@@ -242,13 +242,24 @@ pub async fn integrity(
                 .await;
         };
 
+        let ima_ml_entry = req.uri().query().unwrap();
+        let nth_entry = match ima_ml_entry.find("ima_ml_entry=") {
+            None => 0,
+            Some(idx) => {
+                let number = &ima_ml_entry[idx + 13..];
+                let last: usize = number
+                    .find(|c: char| !c.is_numeric())
+                    .unwrap_or(number.len());
+                number[..last].parse().unwrap_or(0)
+            }
+        };
+
         let mut quote = tpm::quote(
             param.nonce.as_bytes(),
             Some(&param.mask),
             data.clone(),
         )?;
 
-        let ima_ml_path = &data.ima_ml_path;
         let mut mb_measurement_list = None;
         let measuredboot_ml = read(&data.measuredboot_ml_path);
         // Only add log if a measured boot PCR 0 is actually in the mask
@@ -262,10 +273,12 @@ pub async fn integrity(
             };
         }
 
+        let ima_ml_path = &data.ima_ml_path;
+        let ima_ml = read_to_string(&ima_ml_path)?;
         if partial == 0 {
             let quote = KeylimeIntegrityQuotePreAttestation::from_id_quote(
                 quote,
-                read_to_string(&ima_ml_path)?,
+                ima_ml,
                 String::from_utf8(
                     data.pub_key
                         .public_key_to_pem()
@@ -280,7 +293,7 @@ pub async fn integrity(
         } else {
             let quote = KeylimeIntegrityQuotePostAttestation::from_id_quote(
                 quote,
-                read_to_string(&ima_ml_path)?,
+                ima_ml,
                 mb_measurement_list,
             );
 
