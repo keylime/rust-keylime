@@ -237,6 +237,18 @@ pub async fn integrity(
                 .await;
         };
 
+        let ima_ml_entry = req.uri().query().unwrap();
+        let nth_entry = match ima_ml_entry.find("ima_ml_entry=") {
+            None => 0,
+            Some(idx) => {
+                let number = &ima_ml_entry[idx + 13..];
+                let last: usize = number
+                    .find(|c: char| !c.is_numeric())
+                    .unwrap_or(number.len());
+                number[..last].parse().unwrap_or(0)
+            }
+        };
+
         let mut quote = tpm::quote(
             param.nonce.as_bytes(),
             Some(&param.mask),
@@ -244,11 +256,12 @@ pub async fn integrity(
         )?;
 
         let ima_ml_path = ima_ml_path_get();
+        let ima_ml = read_to_string(&ima_ml_path)?;
 
         if partial == 0 {
             let quote = KeylimeIntegrityQuotePreAttestation::from_id_quote(
                 quote,
-                read_to_string(&ima_ml_path)?,
+                ima_ml,
                 String::from_utf8(
                     data.pub_key
                         .public_key_to_pem()
@@ -261,8 +274,7 @@ pub async fn integrity(
             HttpResponse::Ok().json(response).await
         } else {
             let quote = KeylimeIntegrityQuotePostAttestation::from_id_quote(
-                quote,
-                read_to_string(&ima_ml_path)?,
+                quote, ima_ml,
             );
 
             let response = JsonIntegWrapperPostAttestation::new(quote);
