@@ -4,6 +4,7 @@
 use crate::{tpm, Error as KeylimeError, QuoteData};
 
 use crate::serialization::serialize_maybe_base64;
+use crate::ima::read_measurement_list;
 use actix_web::{web, HttpRequest, HttpResponse, Responder};
 use log::*;
 use serde::{Deserialize, Serialize};
@@ -51,6 +52,7 @@ pub(crate) struct KeylimeIntegrityQuotePreAttestation {
         skip_serializing_if = "Option::is_none"
     )]
     pub mb_measurement_list: Option<Vec<u8>>,
+    pub ima_measurement_list_entry: u64,
 }
 
 impl KeylimeIntegrityQuotePreAttestation {
@@ -59,6 +61,7 @@ impl KeylimeIntegrityQuotePreAttestation {
         ima: String,
         pubkey: String,
         mb: Option<Vec<u8>>,
+        ima_measurement_list_entry: u64,
     ) -> Self {
         KeylimeIntegrityQuotePreAttestation {
             quote: idquote.quote,
@@ -68,6 +71,7 @@ impl KeylimeIntegrityQuotePreAttestation {
             pubkey,
             ima_measurement_list: ima,
             mb_measurement_list: mb,
+            ima_measurement_list_entry,
         }
     }
 }
@@ -84,6 +88,7 @@ pub(crate) struct KeylimeIntegrityQuotePostAttestation {
         skip_serializing_if = "Option::is_none"
     )]
     pub mb_measurement_list: Option<Vec<u8>>,
+    pub ima_measurement_list_entry: u64,
 }
 
 impl KeylimeIntegrityQuotePostAttestation {
@@ -91,6 +96,7 @@ impl KeylimeIntegrityQuotePostAttestation {
         idquote: KeylimeIdQuote,
         ima: String,
         mb: Option<Vec<u8>>,
+        ima_measurement_list_entry: u64,
     ) -> Self {
         KeylimeIntegrityQuotePostAttestation {
             quote: idquote.quote,
@@ -99,6 +105,7 @@ impl KeylimeIntegrityQuotePostAttestation {
             sign_alg: idquote.sign_alg,
             ima_measurement_list: ima,
             mb_measurement_list: mb,
+            ima_measurement_list_entry,
         }
     }
 }
@@ -274,7 +281,9 @@ pub async fn integrity(
         }
 
         let ima_ml_path = &data.ima_ml_path;
-        let ima_ml = read_to_string(&ima_ml_path)?;
+        let (ima_ml, nth_entry, num_entries) =
+            read_measurement_list(&mut data.ima_ml.lock().unwrap(), &ima_ml_path, nth_entry)?;
+
         if partial == 0 {
             let quote = KeylimeIntegrityQuotePreAttestation::from_id_quote(
                 quote,
@@ -286,6 +295,7 @@ pub async fn integrity(
                 )
                 .map_err(KeylimeError::from)?,
                 mb_measurement_list,
+                nth_entry,
             );
             let response = JsonIntegWrapperPreAttestation::new(quote);
             info!("GET integrity quote returning 200 response");
@@ -295,6 +305,7 @@ pub async fn integrity(
                 quote,
                 ima_ml,
                 mb_measurement_list,
+                nth_entry,
             );
 
             let response = JsonIntegWrapperPostAttestation::new(quote);

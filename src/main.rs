@@ -37,6 +37,7 @@ mod algorithms;
 mod common;
 mod crypto;
 mod error;
+mod ima;
 mod keys_handler;
 mod notifications_handler;
 mod quotes_handler;
@@ -69,6 +70,7 @@ use tss_esapi::{
     handles::KeyHandle, interface_types::algorithm::AsymmetricAlgorithm,
     Context,
 };
+use ima::ImaMeasurementList;
 use uuid::Uuid;
 
 #[macro_use]
@@ -102,6 +104,7 @@ pub struct QuoteData {
     work_dir: PathBuf,
     ima_ml_path: PathBuf,
     measuredboot_ml_path: PathBuf,
+    ima_ml: Mutex<ImaMeasurementList>,
 }
 
 // Parameters are based on Python codebase:
@@ -507,6 +510,7 @@ async fn main() -> Result<()> {
         work_dir,
         ima_ml_path,
         measuredboot_ml_path,
+        ima_ml: Mutex::new(ImaMeasurementList::new()),
     });
 
     let actix_server = HttpServer::new(move || {
@@ -655,6 +659,7 @@ mod testing {
                 work_dir,
                 ima_ml_path,
                 measuredboot_ml_path: measuredboot_ml_path.to_path_buf(),
+                ima_ml: Mutex::new(ImaMeasurementList::new()),
             })
         }
     }
