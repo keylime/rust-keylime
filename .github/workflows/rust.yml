@@ -5,6 +5,7 @@ on:
     branches: [ master ]
   pull_request:
     branches: [ master ]
+  workflow_dispatch:
 
 env:
   CARGO_TERM_COLOR: always
@@ -25,10 +26,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v2
-    - name: Build the container
-      run: docker build -t testimage tests/
-    - name: Run the container
-      run: docker run --security-opt seccomp=tests/seccomp-profile.json -v $(pwd):/tmp/code_under_test -w /tmp/code_under_test testimage dbus-run-session -- /tmp/code_under_test/tests/run.sh
+    - name: Run tests
+      run: docker run --security-opt seccomp=tests/seccomp-profile.json -v $(pwd):/tmp/code_under_test -w /tmp/code_under_test quay.io/keylime/keylime-ci:latest dbus-run-session -- /tmp/code_under_test/tests/run.sh
     - uses: actions/upload-artifact@v2
       with:
         name: tarpaulin-report
