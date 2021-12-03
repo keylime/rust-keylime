@@ -25,7 +25,13 @@ use openssl::{
 use flate2::{write::ZlibEncoder, Compression};
 
 use tss_esapi::{
-    abstraction::{ak, cipher::Cipher, ek, DefaultKey},
+    abstraction::{
+        ak,
+        cipher::Cipher,
+        ek,
+        pcr::{read_all, PcrData},
+        DefaultKey,
+    },
     attributes::session::SessionAttributesBuilder,
     constants::{
         session_type::SessionType,
@@ -33,21 +39,24 @@ use tss_esapi::{
     },
     handles::{AuthHandle, KeyHandle, PcrHandle, SessionHandle},
     interface_types::{
-        algorithm::{AsymmetricAlgorithm, HashingAlgorithm, SignatureScheme},
+        algorithm::{
+            AsymmetricAlgorithm, HashingAlgorithm, SignatureSchemeAlgorithm,
+        },
         session_handles::AuthSession,
     },
     structures::{
-        Digest, DigestValues, EncryptedSecret, IDObject, Name,
-        PcrSelectionList, PcrSelectionListBuilder, PcrSlot,
+        Attest, AttestInfo, Digest, DigestValues, EncryptedSecret, IDObject,
+        Name, PcrSelectionList, PcrSelectionListBuilder, PcrSlot, Signature,
+        SignatureScheme,
     },
     tcti_ldr::TctiNameConf,
     tss2_esys::{
-        Tss2_MU_TPM2B_PUBLIC_Marshal, Tss2_MU_TPMS_ATTEST_Unmarshal,
-        Tss2_MU_TPMT_SIGNATURE_Marshal, TPM2B_ATTEST, TPM2B_PUBLIC,
-        TPML_DIGEST, TPML_PCR_SELECTION, TPMS_ATTEST, TPMS_SCHEME_HASH,
-        TPMT_SIGNATURE, TPMT_SIG_SCHEME, TPMU_SIG_SCHEME,
+        Tss2_MU_TPM2B_PUBLIC_Marshal, Tss2_MU_TPMS_ATTEST_Marshal,
+        Tss2_MU_TPMS_ATTEST_Unmarshal, Tss2_MU_TPMT_SIGNATURE_Marshal,
+        TPM2B_ATTEST, TPM2B_PUBLIC, TPML_DIGEST, TPML_PCR_SELECTION,
+        TPMS_ATTEST, TPMS_SCHEME_HASH, TPMT_SIGNATURE, TPMT_SIG_SCHEME,
+        TPMU_SIG_SCHEME,
     },
-    utils::{PcrData, Signature},
     Context,
 };
 
@@ -110,28 +119,9 @@ pub(crate) fn create_ek(
         }
     };
     let (tpm_pub, _, _) = context.read_public(handle)?;
-    let tpm_pub_vec = pub_to_vec(tpm_pub);
+    let tpm_pub_vec = pub_to_vec(tpm_pub.into());
 
     Ok((handle, cert, tpm_pub_vec))
-}
-
-fn unmarshal_tpms_attest(val: &[u8]) -> Result<TPMS_ATTEST> {
-    let mut resp = TPMS_ATTEST::default();
-    let mut offset = 0u64;
-
-    unsafe {
-        let res = Tss2_MU_TPMS_ATTEST_Unmarshal(
-            val[..].as_ptr(),
-            val.len() as u64,
-            &mut offset,
-            &mut resp,
-        );
-        if res != 0 {
-            panic!("Error converting"); //#[allow_ci]
-        }
-    }
-
-    Ok(resp)
 }
 
 // Multiple TPM objects need to be marshaled for Quoting. This macro will
@@ -180,6 +170,7 @@ create_marshal_fn!(
     TPMT_SIGNATURE,
     Tss2_MU_TPMT_SIGNATURE_Marshal
 );
+create_marshal_fn!(tpms_att_to_vec, TPMS_ATTEST, Tss2_MU_TPMS_ATTEST_Marshal);
 
 // Recreate how tpm2-tools creates the PCR out file. Roughly, this is a
 // TPML_PCR_SELECTION + number of TPML_DIGESTS + TPML_DIGESTs.
@@ -197,14 +188,21 @@ pub(crate) fn pcrdata_to_vec(
     let pcrsel: TPML_PCR_SELECTION = selection_list.into();
     let pcrsel_vec: [u8; 132] = unsafe { std::mem::transmute(pcrsel) };
 
-    let digest: TPML_DIGEST = pcrdata.into();
-    let digest_vec: [u8; 532] = unsafe { std::mem::transmute(digest) };
+    let digest: Vec<TPML_DIGEST> = pcrdata.into();
+    let num_tpml_digests = digest.len() as u32;
+
+    let mut digest_vec = Vec::with_capacity(digest.len() * 532);
+
+    for d in digest {
+        let vec: [u8; 532] = unsafe { std::mem::transmute(d) };
+        digest_vec.extend(vec);
+    }
 
     let mut data_vec =
         Vec::with_capacity(pcrsel_vec.len() + 4 + digest_vec.len());
 
     data_vec.extend(&pcrsel_vec);
-    data_vec.extend(&1u32.to_le_bytes());
+    data_vec.extend(&num_tpml_digests.to_le_bytes());
     data_vec.extend(&digest_vec);
 
     data_vec
@@ -239,12 +237,12 @@ pub(crate) fn create_ak(
         ctx,
         handle,
         HashingAlgorithm::Sha256,
-        SignatureScheme::RsaSsa,
+        SignatureSchemeAlgorithm::RsaSsa,
         None,
         DefaultKey,
     )?;
-    let ak_tpm2b_pub = ak.out_public;
-    let tpm2_pub_vec = pub_to_vec(ak_tpm2b_pub);
+    let ak_tpm2b_pub = ak.out_public.clone();
+    let tpm2_pub_vec = pub_to_vec(ak_tpm2b_pub.into());
     let ak_handle =
         ak::load_ak(ctx, handle, None, ak.out_private, ak.out_public)?;
     let (_, name, _) = ctx.read_public(ak_handle)?;
@@ -481,20 +479,20 @@ pub(crate) fn read_mask(mask: &str) -> Result<Vec<PcrSlot>> {
 // https://github.com/keylime/keylime/blob/2dd9e5c968f33bf77110092af9268d13db1806c6 \
 // /keylime/tpm/tpm_main.py#L964-L975
 pub(crate) fn encode_quote_string(
-    att: TPM2B_ATTEST,
+    att: Attest,
     sig: Signature,
     pcrs_read: PcrSelectionList,
     pcr_data: PcrData,
 ) -> Result<String> {
     // marshal structs to vec in expected formats. these formats are
     // dictated by tpm2_tools.
-    let att_vec = &att.attestationData[0..att.size as usize];
+    let att_vec = tpms_att_to_vec(att.into());
     let sig_vec = sig_to_vec(sig.try_into()?);
     let pcr_vec = pcrdata_to_vec(pcrs_read, pcr_data);
 
     // zlib compression
     let mut att_comp = ZlibEncoder::new(Vec::new(), Compression::default());
-    att_comp.write_all(att_vec);
+    att_comp.write_all(&att_vec);
     let att_comp_finished = att_comp.finish()?;
 
     let mut sig_comp = ZlibEncoder::new(Vec::new(), Compression::default());
@@ -583,16 +581,9 @@ pub(crate) fn make_pcr_blob(
     context: &mut Context,
     pcrlist: PcrSelectionList,
 ) -> Result<(PcrSelectionList, PcrData)> {
-    let (_, pcrs_read, pcr_data) =
-        context.execute_without_session(|ctx| ctx.pcr_read(&pcrlist))?;
-    if pcrs_read != pcrlist {
-        return Err(KeylimeError::Other(format!(
-            "could not read all pcrs; requested: {:?}, read: {:?}",
-            pcrlist, pcrs_read
-        )));
-    }
-
-    Ok((pcrs_read, pcr_data))
+    let pcr_data = context
+        .execute_without_session(|ctx| read_all(ctx, pcrlist.clone()))?;
+    Ok((pcrlist, pcr_data))
 }
 
 // Takes a TSS ESAPI HashingAlgorithm and returns the corresponding OpenSSL
@@ -613,26 +604,27 @@ fn hash_alg_to_message_digest(
 fn check_if_pcr_data_and_attestation_match(
     hash_algo: HashingAlgorithm,
     pcr_data: &PcrData,
-    attestation: &TPM2B_ATTEST,
+    attestation: Attest,
 ) -> Result<bool> {
-    let pcr_data = TPML_DIGEST::try_from(pcr_data.clone())?;
-    let attestation = unmarshal_tpms_attest(&attestation.attestationData)?;
+    let pcr_data = Vec::<TPML_DIGEST>::try_from(pcr_data.clone())?;
+    let quote_info = match attestation.attested() {
+        AttestInfo::Quote { info } => info,
+        _ => {
+            return Err(KeylimeError::Other(format!(
+                "Expected attestation type TPM2_ST_ATTEST_QUOTE, got {:?}",
+                attestation.attestation_type()
+            )));
+        }
+    };
 
-    if attestation.type_ != TPM2_ST_ATTEST_QUOTE {
-        return Err(KeylimeError::Other(format!(
-            "Expected attestation type TPM2_ST_ATTEST_QUOTE, got {:?}",
-            attestation.type_
-        )));
-    }
-
-    let quote = unsafe { attestation.attested.quote };
-    let attested_pcr = quote.pcrDigest;
-    let attested_pcr = &attested_pcr.buffer[..attested_pcr.size as usize];
+    let attested_pcr = quote_info.pcr_digest().value();
 
     let mut hasher = Hasher::new(hash_alg_to_message_digest(hash_algo)?)?;
-    for i in 0..pcr_data.count {
-        let pcr = pcr_data.digests[i as usize];
-        hasher.update(&pcr.buffer[..pcr.size as usize])?;
+    for tpml_digest in pcr_data {
+        for i in 0..tpml_digest.count {
+            let pcr = tpml_digest.digests[i as usize];
+            hasher.update(&pcr.buffer[..pcr.size as usize])?;
+        }
     }
     let pcr_digest = hasher.finish()?;
 
@@ -652,20 +644,18 @@ fn perform_quote_and_pcr_read(
     ak_handle: KeyHandle,
     nonce: &[u8],
     pcrlist: PcrSelectionList,
-) -> Result<(TPM2B_ATTEST, Signature, PcrSelectionList, PcrData)> {
-    let sig_scheme = get_sig_scheme(TpmSigScheme::default())?;
+) -> Result<(Attest, Signature, PcrSelectionList, PcrData)> {
     let nonce = nonce.try_into()?;
 
     for attempt in 0..NUM_ATTESTATION_ATTEMPTS {
         // TSS ESAPI quote does not create pcr blob, so create it separately
-        let (pcrs_read, pcr_data) =
-            make_pcr_blob(&mut context, pcrlist.clone())?;
+        let (pcrs_read, pcr_data) = make_pcr_blob(context, pcrlist.clone())?;
 
         // create quote
         let (attestation, sig) = context.quote(
             ak_handle,
             &nonce,
-            sig_scheme,
+            SignatureScheme::Null,
             pcrs_read.clone(),
         )?;
 
@@ -673,7 +663,7 @@ fn perform_quote_and_pcr_read(
         if (check_if_pcr_data_and_attestation_match(
             HashingAlgorithm::Sha256,
             &pcr_data,
-            &attestation,
+            attestation.clone(),
         )?) {
             return Ok((attestation, sig, pcrs_read, pcr_data));
         }
@@ -709,13 +699,8 @@ pub(crate) fn quote(
     let pcrlist = build_pcr_list(&mut context, nk_digest, mask)?;
 
     let (attestation, sig, pcrs_read, pcr_data) = context
-        .execute_with_nullauth_session(|mut ctx| {
-            perform_quote_and_pcr_read(
-                &mut ctx,
-                data.ak_handle,
-                nonce,
-                pcrlist,
-            )
+        .execute_with_nullauth_session(|ctx| {
+            perform_quote_and_pcr_read(ctx, data.ak_handle, nonce, pcrlist)
         })?;
 
     let quote = encode_quote_string(attestation, sig, pcrs_read, pcr_data)?;
