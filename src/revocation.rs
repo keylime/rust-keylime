@@ -209,14 +209,13 @@ pub(crate) async fn run_revocation_service() -> Result<()> {
         match verified {
             Ok(true) => {
                 let msg = body["msg"].as_str();
-                let msg_payload: Value =
-                    serde_json::from_str(match msg.as_deref() {
-                        Some(v) => v,
-                        _ => {
-                            warn!("Unable to decode json in msg");
-                            continue;
-                        }
-                    })?;
+                let msg_payload: Value = serde_json::from_str(match msg {
+                    Some(v) => v,
+                    _ => {
+                        warn!("Unable to decode json in msg");
+                        continue;
+                    }
+                })?;
                 debug!(
                     "Revocation signature validated for revocation: {}",
                     msg_payload

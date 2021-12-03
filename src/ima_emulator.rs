@@ -11,6 +11,7 @@ use std::io::BufReader;
 use thiserror::Error;
 
 use tss_esapi::{
+    abstraction::pcr,
     handles::PcrHandle,
     interface_types::algorithm::HashingAlgorithm,
     structures::{Digest, DigestValues, PcrSelectionListBuilder, PcrSlot},
@@ -126,15 +127,8 @@ fn main() -> std::result::Result<(), ImaEmulatorError> {
     let pcr_list = PcrSelectionListBuilder::new()
         .with_selection(HashingAlgorithm::Sha1, &[PcrSlot::Slot10])
         .build();
-    let (_, pcrs_read, pcr_data) =
-        context.execute_without_session(|ctx| ctx.pcr_read(&pcr_list))?;
-    if pcrs_read != pcr_list {
-        return Err(ImaEmulatorError::Other(format!(
-            "could not read all pcrs; requested: {:?}, read: {:?}",
-            pcr_list, pcrs_read
-        )));
-    }
-
+    let pcr_data = context
+        .execute_without_session(|ctx| pcr::read_all(ctx, pcr_list))?;
     let digest = pcr_data
         .pcr_bank(HashingAlgorithm::Sha1)
         .ok_or_else(|| {
@@ -142,7 +136,7 @@ fn main() -> std::result::Result<(), ImaEmulatorError> {
                 "IMA slot does not have SHA-1 bank".to_string(),
             )
         })?
-        .pcr_value(PcrSlot::Slot10)
+        .get_digest(PcrSlot::Slot10)
         .ok_or_else(|| {
             ImaEmulatorError::Other(
                 "could not read value from IMA PCR".to_string(),
