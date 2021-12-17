@@ -40,7 +40,7 @@ fn check_mount(secure_dir: &str) -> Result<bool> {
                 return Err(Error::SecureMount(msg));
             } else {
                 info!(
-                    "Using existing secure storage tmpsfs mount {}",
+                    "Using existing secure storage tmpfs mount {}",
                     secure_dir
                 );
             }

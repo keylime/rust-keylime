@@ -27,7 +27,7 @@ pub static WORK_DIR: &str = "/tmp";
 // information, check the README: https://github.com/keylime/keylime/#using-keylime-ca
 pub static REV_CERT: &str = "RevocationNotifier-cert.crt";
 
-// Secure mount of tpmfs (False is generally used for development environments)
+// Secure mount of tmpfs (False is generally used for development environments)
 #[cfg(not(feature = "testing"))]
 pub static MOUNT_SECURE: bool = true;
 
