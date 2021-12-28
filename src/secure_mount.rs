@@ -3,7 +3,6 @@
 
 use super::*;
 
-use crate::cmd_exec;
 use crate::error::{Error, Result};
 use common::config_get;
 use std::fs;
@@ -126,19 +125,32 @@ pub(crate) fn mount() -> Result<String> {
                     }
 
                     // mount tmpfs with secure directory
-                    if let Err(e) = cmd_exec::run(
-                        format!(
-                            "mount -t tmpfs -o size={},mode=0700 tmpfs {}",
-                            secure_size, s,
-                        ),
-                        None,
-                    ) {
-                        return Err(Error::SecureMount(
-                            format!(
-                                "unable to mount tmpfs with secure dir: received exit code {}",
-                                e.exe_code()?.unwrap() //#[allow_ci] : because this is an Option
-                            ),
-                        ));
+                    match Command::new("mount")
+                        .args([
+                            "-t",
+                            "tmpfs",
+                            "-o",
+                            format!("size={},mode=0700", secure_size)
+                                .as_str(),
+                            "tmpfs",
+                            s,
+                        ])
+                        .output()
+                    {
+                        Ok(output) => {
+                            if !output.status.success() {
+                                return Err(Error::SecureMount(format!(
+                                    "unable to mount tmpfs with secure dir: exit status code {}",
+                                    output.status
+                                )));
+                            }
+                        }
+                        Err(e) => {
+                            return Err(Error::SecureMount(format!(
+                                "unable to mount tmpfs with secure dir: {}",
+                                e
+                            )));
+                        }
                     }
 
                     Ok(s.to_string())
