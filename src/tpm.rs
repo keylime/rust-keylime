@@ -546,18 +546,7 @@ pub(crate) fn build_pcr_list(
         pcrs.append(&mut slot16);
     }
 
-    let ima_pcr_index = pcrs.iter().position(|&pcr| pcr == PcrSlot::Slot10);
-
     let mut pcrlist = PcrSelectionListBuilder::new();
-
-    // remove IMA pcr before selecting for sha256 bank
-    if let Some(ima_pcr_index) = ima_pcr_index {
-        let _ = pcrs.remove(ima_pcr_index);
-
-        // add only IMA pcr for sha1 bank
-        let mut sha1_pcrs = vec![PcrSlot::Slot10];
-        pcrlist = pcrlist.with_selection(HashingAlgorithm::Sha1, &sha1_pcrs);
-    }
     pcrlist = pcrlist.with_selection(HashingAlgorithm::Sha256, &pcrs);
     let pcrlist = pcrlist.build();
 
