@@ -33,7 +33,6 @@
 //  missing_docs: there is many functions missing documentations for now
 #![allow(unused, missing_docs)]
 
-mod cmd_exec;
 mod common;
 mod crypto;
 mod error;
