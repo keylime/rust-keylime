@@ -10,7 +10,7 @@ use std::convert::TryFrom;
 use std::env;
 use std::fs::File;
 use std::path::{Path, PathBuf};
-use tss_esapi::utils::TpmsContext;
+use tss_esapi::{structures::PcrSlot, utils::TpmsContext};
 
 /*
  * Constants and static variables
@@ -25,6 +25,8 @@ pub static RSA_PUBLICKEY_EXPORTABLE: &str = "rsa placeholder";
 pub static TPM_TOOLS_PATH: &str = "/usr/local/bin/";
 pub static IMA_ML: &str =
     "/sys/kernel/security/ima/ascii_runtime_measurements";
+pub static MEASUREDBOOT_ML: &str =
+    "/sys/kernel/security/tpm0/binary_bios_measurements";
 pub static KEY: &str = "secret";
 pub static WORK_DIR: &str = "/var/lib/keylime";
 pub static TPM_DATA: &str = "tpmdata.json";
@@ -315,6 +317,10 @@ cfg_if::cfg_if! {
 
 pub(crate) fn tpm_data_path_get() -> PathBuf {
     Path::new(WORK_DIR).join(TPM_DATA)
+}
+
+pub(crate) fn measuredboot_ml_path_get() -> PathBuf {
+    Path::new(MEASUREDBOOT_ML).to_path_buf()
 }
 
 // Unit Testing

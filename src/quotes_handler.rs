@@ -3,12 +3,14 @@
 
 use crate::{tpm, Error as KeylimeError, QuoteData};
 
-use crate::common::{ima_ml_path_get, KEY_LEN};
+use crate::common::{ima_ml_path_get, measuredboot_ml_path_get, KEY_LEN};
+use crate::serialization::serialize_maybe_base64;
 use actix_web::{web, HttpRequest, HttpResponse, Responder};
 use log::*;
 use serde::{Deserialize, Serialize};
-use std::fs::read_to_string;
+use std::fs::{read, read_to_string};
 use std::path::Path;
+use tss_esapi::structures::PcrSlot;
 
 #[derive(Deserialize)]
 pub struct Ident {
@@ -46,6 +48,11 @@ pub(crate) struct KeylimeIntegrityQuotePreAttestation {
     pub sign_alg: String,
     pub pubkey: String,
     pub ima_measurement_list: String,
+    #[serde(
+        serialize_with = "serialize_maybe_base64",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub mb_measurement_list: Option<Vec<u8>>,
 }
 
 impl KeylimeIntegrityQuotePreAttestation {
@@ -53,6 +60,7 @@ impl KeylimeIntegrityQuotePreAttestation {
         idquote: KeylimeIdQuote,
         ima: String,
         pubkey: String,
+        mb: Option<Vec<u8>>,
     ) -> Self {
         KeylimeIntegrityQuotePreAttestation {
             quote: idquote.quote,
@@ -61,6 +69,7 @@ impl KeylimeIntegrityQuotePreAttestation {
             sign_alg: idquote.sign_alg,
             pubkey,
             ima_measurement_list: ima,
+            mb_measurement_list: mb,
         }
     }
 }
@@ -72,16 +81,26 @@ pub(crate) struct KeylimeIntegrityQuotePostAttestation {
     pub enc_alg: String,
     pub sign_alg: String,
     pub ima_measurement_list: String,
+    #[serde(
+        serialize_with = "serialize_maybe_base64",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub mb_measurement_list: Option<Vec<u8>>,
 }
 
 impl KeylimeIntegrityQuotePostAttestation {
-    fn from_id_quote(idquote: KeylimeIdQuote, ima: String) -> Self {
+    fn from_id_quote(
+        idquote: KeylimeIdQuote,
+        ima: String,
+        mb: Option<Vec<u8>>,
+    ) -> Self {
         KeylimeIntegrityQuotePostAttestation {
             quote: idquote.quote,
             hash_alg: idquote.hash_alg,
             enc_alg: idquote.enc_alg,
             sign_alg: idquote.sign_alg,
             ima_measurement_list: ima,
+            mb_measurement_list: mb,
         }
     }
 }
@@ -232,6 +251,18 @@ pub async fn integrity(
         )?;
 
         let ima_ml_path = ima_ml_path_get();
+        let mut mb_measurement_list = None;
+        let measuredboot_ml = read(measuredboot_ml_path_get());
+        // Only add log if a measured boot PCR 0 is actually in the mask
+        if tpm::check_mask(&param.mask, &PcrSlot::Slot0)? {
+            mb_measurement_list = match measuredboot_ml {
+                Ok(ml) => Some(ml),
+                Err(e) => {
+                    warn!("TPM2 event log not available");
+                    None
+                }
+            };
+        }
 
         if partial == 0 {
             let quote = KeylimeIntegrityQuotePreAttestation::from_id_quote(
@@ -243,6 +274,7 @@ pub async fn integrity(
                         .map_err(KeylimeError::from)?,
                 )
                 .map_err(KeylimeError::from)?,
+                mb_measurement_list,
             );
             let response = JsonIntegWrapperPreAttestation::new(quote);
             info!("GET integrity quote returning 200 response");
@@ -251,6 +283,7 @@ pub async fn integrity(
             let quote = KeylimeIntegrityQuotePostAttestation::from_id_quote(
                 quote,
                 read_to_string(&ima_ml_path)?,
+                mb_measurement_list,
             );
 
             let response = JsonIntegWrapperPostAttestation::new(quote);
