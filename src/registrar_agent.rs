@@ -1,52 +1,11 @@
 use crate::error::Error;
 
 use crate::common::API_VERSION;
+use crate::serialization::*;
 use log::*;
 use reqwest::header::*;
 use serde::{Deserialize, Serialize};
 use serde_json::Number;
-
-fn serialize_as_base64<S>(
-    bytes: &[u8],
-    serializer: S,
-) -> Result<S::Ok, S::Error>
-where
-    S: serde::Serializer,
-{
-    serializer.serialize_str(&base64::encode(bytes))
-}
-
-fn deserialize_as_base64<'de, D>(deserializer: D) -> Result<Vec<u8>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    String::deserialize(deserializer).and_then(|string| {
-        base64::decode(&string).map_err(serde::de::Error::custom)
-    })
-}
-
-fn serialize_maybe_base64<S>(
-    value: &Option<Vec<u8>>,
-    serializer: S,
-) -> Result<S::Ok, S::Error>
-where
-    S: serde::Serializer,
-{
-    match *value {
-        Some(ref value) => serializer.serialize_str(&base64::encode(value)),
-        None => serializer.serialize_none(),
-    }
-}
-
-fn deserialize_maybe_base64<'de, D>(
-    deserializer: D,
-) -> Result<Option<Vec<u8>>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    Option::<WrappedBase64Encoded>::deserialize(deserializer)
-        .map(|wrapped| wrapped.map(|wrapped| wrapped.0))
-}
 
 fn is_empty(buf: &[u8]) -> bool {
     buf.is_empty()
@@ -87,11 +46,6 @@ pub struct Response<T> {
     status: String,
     results: T,
 }
-
-#[derive(Debug, Deserialize)]
-struct WrappedBase64Encoded(
-    #[serde(deserialize_with = "deserialize_as_base64")] Vec<u8>,
-);
 
 pub(crate) async fn do_activate_agent(
     registrar_ip: &str,

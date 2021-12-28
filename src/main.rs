@@ -42,6 +42,7 @@ mod quotes_handler;
 mod registrar_agent;
 mod revocation;
 mod secure_mount;
+mod serialization;
 mod tpm;
 
 use actix_web::{web, App, HttpServer};
