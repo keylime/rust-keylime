@@ -423,6 +423,12 @@ pub(crate) fn read_mask(mask: &str) -> Result<Vec<PcrSlot>> {
     Ok(pcrs)
 }
 
+//This checks if a PCR is contained in a mask
+pub(crate) fn check_mask(mask: &str, pcr: &PcrSlot) -> Result<bool> {
+    let selected_pcrs = read_mask(mask)?;
+    Ok(selected_pcrs.contains(pcr))
+}
+
 // This encodes a quote string as input to Python Keylime's quote checking functionality.
 // The quote, signature, and pcr blob are concatenated with ':' separators. To match the
 // expected format, the quote, signature, and pcr blob must be individually compressed
