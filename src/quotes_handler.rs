@@ -33,18 +33,6 @@ pub(crate) struct KeylimeIdQuote {
     pub pubkey: String,
 }
 
-impl Default for KeylimeIdQuote {
-    fn default() -> Self {
-        KeylimeIdQuote {
-            quote: String::from("r"),
-            hash_alg: String::from("sha256"),
-            enc_alg: String::from("rsa"),
-            sign_alg: String::from("rsassa"),
-            pubkey: String::from(""),
-        }
-    }
-}
-
 // The fields of this struct and their default values must
 // match what is expected by Python Keylime. Because the Python
 // verifier resends the vkey based on whether there is a pubkey

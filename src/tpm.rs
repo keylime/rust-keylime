@@ -9,8 +9,7 @@ use std::io::prelude::*;
 use std::str::FromStr;
 
 use crate::{
-    common::config_get, quotes_handler::KeylimeIdQuote,
-    Error as KeylimeError, QuoteData, Result,
+    quotes_handler::KeylimeIdQuote, Error as KeylimeError, QuoteData, Result,
 };
 
 use actix_web::web::Data;
@@ -45,9 +44,9 @@ use tss_esapi::{
         session_handles::AuthSession,
     },
     structures::{
-        Attest, AttestInfo, Digest, DigestValues, EncryptedSecret, IDObject,
-        Name, PcrSelectionList, PcrSelectionListBuilder, PcrSlot, Signature,
-        SignatureScheme,
+        Attest, AttestInfo, Digest, DigestValues, EncryptedSecret,
+        HashScheme, IDObject, Name, PcrSelectionList,
+        PcrSelectionListBuilder, PcrSlot, Signature, SignatureScheme,
     },
     tcti_ldr::TctiNameConf,
     tss2_esys::{
@@ -90,25 +89,8 @@ pub(crate) fn get_tpm2_ctx() -> Result<Context> {
  */
 pub(crate) fn create_ek(
     context: &mut Context,
-    alg: Option<AsymmetricAlgorithm>,
+    alg: AsymmetricAlgorithm,
 ) -> Result<(KeyHandle, Option<Vec<u8>>, Vec<u8>)> {
-    // Set encryption algorithm
-    let alg = match alg {
-        Some(a) => a,
-        None => {
-            match config_get(
-                "cloud_agent",
-                "tpm_encryption_alg",
-            )?
-            .as_str()
-            {
-                "rsa" => AsymmetricAlgorithm::Rsa,
-                "ecc" => AsymmetricAlgorithm::Ecc,
-                _ => return Err(KeylimeError::Configuration(String::from("Encryption algorithm provided in keylime.conf is not supported")))
-            }
-        }
-    };
-
     // Retrieve EK handle, EK pub cert, and TPM pub object
     let handle = ek::create_ek_object(context, alg, DefaultKey)?;
     let cert = match ek::retrieve_ek_pubcert(context, alg) {
@@ -232,15 +214,11 @@ pub(crate) fn ek_from_hex_str(val: &str) -> Result<KeyHandle> {
 pub(crate) fn create_ak(
     ctx: &mut Context,
     handle: KeyHandle,
+    hash_alg: HashingAlgorithm,
+    sign_alg: SignatureSchemeAlgorithm,
 ) -> Result<(KeyHandle, Name, Vec<u8>)> {
-    let ak = ak::create_ak(
-        ctx,
-        handle,
-        HashingAlgorithm::Sha256,
-        SignatureSchemeAlgorithm::RsaSsa,
-        None,
-        DefaultKey,
-    )?;
+    let ak =
+        ak::create_ak(ctx, handle, hash_alg, sign_alg, None, DefaultKey)?;
     let ak_tpm2b_pub = ak.out_public.clone();
     let tpm2_pub_vec = pub_to_vec(ak_tpm2b_pub.into());
     let ak_handle =
@@ -465,6 +443,7 @@ pub(crate) fn encode_quote_string(
 
     // create concatenated string
     let mut quote = String::new();
+    quote.push('r');
     quote.push_str(&att_str);
     quote.push(':');
     quote.push_str(&sig_str);
@@ -482,6 +461,7 @@ pub(crate) fn build_pcr_list(
     context: &mut Context,
     digest: DigestValues,
     mask: Option<&str>,
+    hash_alg: HashingAlgorithm,
 ) -> Result<PcrSelectionList> {
     // extend digest into pcr16
     context.execute_with_nullauth_session(|ctx| {
@@ -502,7 +482,7 @@ pub(crate) fn build_pcr_list(
     }
 
     let mut pcrlist = PcrSelectionListBuilder::new();
-    pcrlist = pcrlist.with_selection(HashingAlgorithm::Sha256, &pcrs);
+    pcrlist = pcrlist.with_selection(hash_alg, &pcrs);
     let pcrlist = pcrlist.build();
 
     Ok(pcrlist)
@@ -588,6 +568,8 @@ fn perform_quote_and_pcr_read(
     ak_handle: KeyHandle,
     nonce: &[u8],
     pcrlist: PcrSelectionList,
+    sign_scheme: SignatureScheme,
+    hash_alg: HashingAlgorithm,
 ) -> Result<(Attest, Signature, PcrSelectionList, PcrData)> {
     let nonce = nonce.try_into()?;
 
@@ -599,13 +581,13 @@ fn perform_quote_and_pcr_read(
         let (attestation, sig) = context.quote(
             ak_handle,
             &nonce,
-            SignatureScheme::Null,
+            sign_scheme,
             pcrs_read.clone(),
         )?;
 
         // Check whether the attestation and pcr_data match
         if (check_if_pcr_data_and_attestation_match(
-            HashingAlgorithm::Sha256,
+            hash_alg,
             &pcr_data,
             attestation.clone(),
         )?) {
@@ -633,26 +615,36 @@ pub(crate) fn quote(
     mask: Option<&str>,
     data: Data<QuoteData>,
 ) -> Result<KeylimeIdQuote> {
-    let hash_alg = get_hash_alg(config_get("cloud_agent", "tpm_hash_alg")?)?;
     let nk_digest = pubkey_to_tpm_digest(&data.pub_key)?;
 
     // must unwrap here due to lock mechanism
     // https://github.com/rust-lang-nursery/failure/issues/192
     let mut context = data.tpmcontext.lock().unwrap(); //#[allow_ci]
 
-    let pcrlist = build_pcr_list(&mut context, nk_digest, mask)?;
+    let pcrlist =
+        build_pcr_list(&mut context, nk_digest, mask, data.hash_alg.into())?;
 
     let (attestation, sig, pcrs_read, pcr_data) = context
         .execute_with_nullauth_session(|ctx| {
-            perform_quote_and_pcr_read(ctx, data.ak_handle, nonce, pcrlist)
+            perform_quote_and_pcr_read(
+                ctx,
+                data.ak_handle,
+                nonce,
+                pcrlist,
+                data.sign_alg.to_signature_scheme(data.hash_alg),
+                data.hash_alg.into(),
+            )
         })?;
 
     let quote = encode_quote_string(attestation, sig, pcrs_read, pcr_data)?;
 
-    let mut keylimequote = KeylimeIdQuote::default();
-    keylimequote.quote.push_str(&quote);
-
-    Ok(keylimequote)
+    Ok(KeylimeIdQuote {
+        quote,
+        hash_alg: data.hash_alg.to_string(),
+        enc_alg: data.enc_alg.to_string(),
+        sign_alg: data.sign_alg.to_string(),
+        pubkey: "".to_string(),
+    })
 }
 
 #[ignore] // This will only work as an integration test because it needs keylime.conf
