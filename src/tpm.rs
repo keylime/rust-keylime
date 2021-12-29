@@ -337,51 +337,6 @@ pub(crate) fn activate_credential(
     resp
 }
 
-// Returns TSS struct corresponding to an algorithm specified as a string, ex.
-// the string from the keylime.conf file.
-pub(crate) fn get_hash_alg(alg: String) -> Result<HashingAlgorithm> {
-    match alg.as_str() {
-        "sha256" => Ok(HashingAlgorithm::Sha256),
-        "sha1" => Ok(HashingAlgorithm::Sha1),
-        other => {
-            Err(KeylimeError::Other(format!("{:?} not implemented", alg)))
-        }
-    }
-}
-
-#[derive(Debug)]
-pub(crate) enum TpmSigScheme {
-    AlgNull,
-}
-
-impl Default for TpmSigScheme {
-    fn default() -> Self {
-        TpmSigScheme::AlgNull
-    }
-}
-
-// Returns TSS struct corresponding to a signature scheme.
-pub(crate) fn get_sig_scheme(
-    scheme: TpmSigScheme,
-) -> Result<TPMT_SIG_SCHEME> {
-    match scheme {
-        // The TPM2_ALG_NULL sig scheme can be filled out with placeholder data
-        // in the details field.
-        TpmSigScheme::AlgNull => Ok(TPMT_SIG_SCHEME {
-            scheme: TPM2_ALG_NULL,
-            details: TPMU_SIG_SCHEME {
-                any: TPMS_SCHEME_HASH {
-                    hashAlg: TPM2_ALG_NULL,
-                },
-            },
-        }),
-        _ => Err(KeylimeError::Other(format!(
-            "The signature scheme {:?} is not implemented",
-            scheme
-        ))),
-    }
-}
-
 // Takes a public PKey and returns a DigestValue of it.
 // Note: Currently, this creates a DigestValue including both SHA256 and
 // SHA1 because these banks are checked by Keylime on the Python side.
