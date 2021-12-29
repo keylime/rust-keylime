@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2021 Keylime Authors
 
+use crate::algorithms;
 use thiserror::Error;
 use tss_esapi::{
     constants::response_code::Tss2ResponseCodeKind,
@@ -65,6 +66,8 @@ pub(crate) enum Error {
     ParseBool(#[from] std::str::ParseBoolError),
     #[error("from hex error: {0}")]
     FromHex(#[from] hex::FromHexError),
+    #[error("Keylime algorithm error: {0}")]
+    Algorithm(#[from] algorithms::AlgorithmError),
     #[error("{0}")]
     Other(String),
 }
