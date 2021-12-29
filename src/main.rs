@@ -33,10 +33,10 @@
 //  missing_docs: there is many functions missing documentations for now
 #![allow(unused, missing_docs)]
 
+mod algorithms;
 mod common;
 mod crypto;
 mod error;
-mod hash;
 mod keys_handler;
 mod quotes_handler;
 mod registrar_agent;
