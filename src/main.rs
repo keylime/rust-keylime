@@ -74,7 +74,8 @@ use std::{
 use tss_esapi::{
     handles::KeyHandle,
     interface_types::{
-        algorithm::AsymmetricAlgorithm, resource_handles::Hierarchy,
+        algorithm::{AsymmetricAlgorithm, HashingAlgorithm},
+        resource_handles::Hierarchy,
     },
     utils, Context,
 };
@@ -95,6 +96,9 @@ pub struct QuoteData {
     payload_symm_key: Arc<Mutex<SymmKey>>,
     encr_payload: Arc<Mutex<Vec<u8>>>,
     auth_tag: Mutex<[u8; AUTH_TAG_LEN]>,
+    hash_alg: algorithms::HashAlgorithm,
+    enc_alg: algorithms::EncryptionAlgorithm,
+    sign_alg: algorithms::SignAlgorithm,
 }
 
 fn get_uuid(agent_uuid_config: &str) -> String {
@@ -326,13 +330,6 @@ async fn main() -> Result<()> {
 
     info!("Starting server with API version {}...", API_VERSION);
 
-    // Gather EK and AK key values and certs
-    let (ek_handle, ek_cert, ek_tpm2b_pub) =
-        tpm::create_ek(&mut ctx, Some(AsymmetricAlgorithm::Rsa))?;
-
-    let (ak_handle, ak_name, ak_tpm2b_pub) =
-        tpm::create_ak(&mut ctx, ek_handle)?;
-
     // Gather configs
     let cloudagent_ip = cloudagent_ip_get()?;
     let cloudagent_port = cloudagent_port_get()?;
@@ -342,6 +339,27 @@ async fn main() -> Result<()> {
     let agent_uuid = get_uuid(&agent_uuid_config);
     let cloudagent_contact_ip = cloudagent_contact_ip_get();
     let cloudagent_contact_port = cloudagent_contact_port_get()?;
+    let hash_alg = algorithms::HashAlgorithm::try_from(
+        config_get("cloud_agent", "tpm_hash_alg")?.as_str(),
+    )?;
+    let enc_alg = algorithms::EncryptionAlgorithm::try_from(
+        config_get("cloud_agent", "tpm_encryption_alg")?.as_str(),
+    )?;
+    let sign_alg = algorithms::SignAlgorithm::try_from(
+        config_get("cloud_agent", "tpm_signing_alg")?.as_str(),
+    )?;
+
+    // Gather EK and AK key values and certs
+    let (ek_handle, ek_cert, ek_tpm2b_pub) =
+        tpm::create_ek(&mut ctx, enc_alg.into())?;
+
+    let (ak_handle, ak_name, ak_tpm2b_pub) = tpm::create_ak(
+        &mut ctx,
+        ek_handle,
+        hash_alg.into(),
+        sign_alg.into(),
+    )?;
+
     info!("Agent UUID: {}", agent_uuid);
 
     {
@@ -408,6 +426,9 @@ async fn main() -> Result<()> {
         payload_symm_key: symm_key_arc,
         encr_payload: encr_payload_arc,
         auth_tag: Mutex::new([0u8; AUTH_TAG_LEN]),
+        hash_alg,
+        enc_alg,
+        sign_alg,
     });
 
     let actix_server = HttpServer::new(move || {
@@ -471,10 +492,14 @@ mod testing {
 
             // Gather EK and AK key values and certs
             let (ek_handle, ek_cert, ek_tpm2b_pub) =
-                tpm::create_ek(&mut ctx, Some(AsymmetricAlgorithm::Rsa))?;
+                tpm::create_ek(&mut ctx, AsymmetricAlgorithm::Rsa)?;
 
-            let (ak_handle, ak_name, ak_tpm2b_pub) =
-                tpm::create_ak(&mut ctx, ek_handle)?;
+            let (ak_handle, ak_name, ak_tpm2b_pub) = tpm::create_ak(
+                &mut ctx,
+                ek_handle,
+                algorithms::HashAlgorithm::Sha256.into(),
+                algorithms::SignAlgorithm::RsaSsa.into(),
+            )?;
 
             let rsa_key_path = Path::new(env!("CARGO_MANIFEST_DIR"))
                 .join("test-data")
@@ -503,6 +528,9 @@ mod testing {
                 payload_symm_key: symm_key_arc,
                 encr_payload: encr_payload_arc,
                 auth_tag: Mutex::new([0u8; AUTH_TAG_LEN]),
+                hash_alg: algorithms::HashAlgorithm::Sha256,
+                enc_alg: algorithms::EncryptionAlgorithm::Rsa,
+                sign_alg: algorithms::SignAlgorithm::RsaSsa,
             })
         }
     }
