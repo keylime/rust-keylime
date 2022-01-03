@@ -57,6 +57,8 @@ use openssl::{
     sign::Signer,
     symm::{decrypt_aead, Cipher},
 };
+use serde::{Deserialize, Serialize};
+use std::fs::File;
 use std::{
     convert::TryFrom,
     fs,
@@ -349,16 +351,65 @@ async fn main() -> Result<()> {
         config_get("cloud_agent", "tpm_signing_alg")?.as_str(),
     )?;
 
-    // Gather EK and AK key values and certs
+    // Gather EK values and certs
     let (ek_handle, ek_cert, ek_tpm2b_pub) =
         tpm::create_ek(&mut ctx, enc_alg.into())?;
 
-    let (ak_handle, ak_name, ak_tpm2b_pub) = tpm::create_ak(
-        &mut ctx,
-        ek_handle,
-        hash_alg.into(),
-        sign_alg.into(),
-    )?;
+    // Try to load persistent TPM data
+    let tpm_data_path = tpm_data_path_get();
+    let mut tpm_data = None;
+    if tpm_data_path.exists() {
+        match TpmData::load(&tpm_data_path) {
+            Ok(data) => match data.valid(hash_alg, sign_alg) {
+                true => tpm_data = Some(data),
+                false => warn!(
+                    "Not using old {} because algorithms changed",
+                    TPM_DATA
+                ),
+            },
+            Err(e) => warn!("Failed to load {}: {}", TPM_DATA, e),
+        }
+    }
+
+    // Try to reuse old AK from TpmData
+    let old_ak = tpm_data.and_then(|data| {
+        match tpm::load_ak(&mut ctx, data.ak_context) {
+            Ok(ak_data) => {
+                info!("Loaded old AK context from {}", TPM_DATA);
+                Some(ak_data)
+            }
+            Err(e) => {
+                warn!(
+                    "Loading old AK context from {} failed: {}",
+                    TPM_DATA, e
+                );
+                None
+            }
+        }
+    });
+
+    // Use old AK or generate a new one and update the TpmData
+    let (ak_handle, ak_name, ak_tpm2b_pub) = match old_ak {
+        Some(data) => data,
+        None => {
+            info!("Generating new AK");
+            let new_ak = tpm::create_ak(
+                &mut ctx,
+                ek_handle,
+                hash_alg.into(),
+                sign_alg.into(),
+            )?;
+            // Only updating tpmdata.json if a new AK was used
+            info!("Storing updated TPM data in {}", TPM_DATA);
+            TpmData {
+                ak_hash_alg: hash_alg,
+                ak_sign_alg: sign_alg,
+                ak_context: tpm::store_ak(&mut ctx, new_ak.0)?,
+            }
+            .store(&tpm_data_path)?;
+            new_ak
+        }
+    };
 
     info!("Agent UUID: {}", agent_uuid);
 
