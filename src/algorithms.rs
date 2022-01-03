@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2021 Keylime Authors
+use serde::{Deserialize, Serialize};
 use std::convert::TryFrom;
 use std::fmt;
 use thiserror::Error;
@@ -22,7 +23,7 @@ pub enum AlgorithmError {
     Sign(String),
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum HashAlgorithm {
     Sha1,
     Sha256,
@@ -73,7 +74,7 @@ impl From<HashAlgorithm> for HashingAlgorithm {
     }
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum EncryptionAlgorithm {
     Rsa,
     Ecc,
@@ -113,7 +114,7 @@ impl fmt::Display for EncryptionAlgorithm {
     }
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum SignAlgorithm {
     RsaSsa,
     RsaPss,

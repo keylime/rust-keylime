@@ -56,6 +56,7 @@ use tss_esapi::{
         TPMS_ATTEST, TPMS_SCHEME_HASH, TPMT_SIGNATURE, TPMT_SIG_SCHEME,
         TPMU_SIG_SCHEME,
     },
+    utils::TpmsContext,
     Context,
 };
 
@@ -225,6 +226,25 @@ pub(crate) fn create_ak(
         ak::load_ak(ctx, handle, None, ak.out_private, ak.out_public)?;
     let (_, name, _) = ctx.read_public(ak_handle)?;
     Ok((ak_handle, name, tpm2_pub_vec))
+}
+
+pub(crate) fn store_ak(
+    ctx: &mut Context,
+    ak_handle: KeyHandle,
+) -> Result<TpmsContext> {
+    let ak_context = ctx.context_save(ak_handle.into())?;
+    Ok(ak_context)
+}
+
+pub(crate) fn load_ak(
+    ctx: &mut Context,
+    ak: TpmsContext,
+) -> Result<(KeyHandle, Name, Vec<u8>)> {
+    let ak_handle: KeyHandle = ctx.context_load(ak)?.into();
+
+    let (ak_public, ak_name, _) = ctx.read_public(ak_handle)?;
+    let ak_pub_vec = pub_to_vec(ak_public.into());
+    Ok((ak_handle, ak_name, ak_pub_vec))
 }
 
 const TSS_MAGIC: u32 = 3135029470;
