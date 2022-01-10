@@ -47,6 +47,7 @@ fn ml_extend(
 ) -> Result<usize> {
     let f = File::open(ml)?;
     let mut reader = BufReader::new(f);
+    let mut running_hash: Vec<u8> = Vec::from(&START_HASH[..]);
     for line in reader.by_ref().lines().skip(position) {
         let line = line?;
         if line.is_empty() {
@@ -82,14 +83,14 @@ fn ml_extend(
             }
             Some(search_hash) => {
                 let mut hasher = openssl::sha::Sha1::new();
-                hasher.update(START_HASH);
+                hasher.update(&running_hash);
                 hasher.update(&template_hash);
-                let running_hash: Vec<u8> = hasher.finish().into();
-                let running_hash = Digest::try_from(running_hash)?;
+                running_hash = hasher.finish().into();
+                let digest = Digest::try_from(running_hash.as_slice())?;
                 let mut vals = DigestValues::new();
-                vals.set(HashingAlgorithm::Sha1, running_hash.clone());
+                vals.set(HashingAlgorithm::Sha1, digest.clone());
 
-                if running_hash == *search_hash {
+                if digest == *search_hash {
                     println!("Located last IMA file updated: {}", path);
                     return Ok(position);
                 }
