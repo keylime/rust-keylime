@@ -115,8 +115,12 @@ pub(crate) fn asym_verify(
     signature: &str,
 ) -> Result<bool> {
     let mut verifier = Verifier::new(MessageDigest::sha256(), keypair)?;
+    verifier.set_rsa_padding(Padding::PKCS1_PSS)?;
+    verifier.set_rsa_mgf1_md(MessageDigest::sha256())?;
+    verifier
+        .set_rsa_pss_saltlen(openssl::sign::RsaPssSaltlen::MAXIMUM_LENGTH)?;
     verifier.update(message.as_bytes())?;
-    Ok(verifier.verify(signature.as_bytes())?)
+    Ok(verifier.verify(&base64::decode(signature.as_bytes())?)?)
 }
 
 /*
@@ -451,5 +455,30 @@ mod tests {
         let ciphertext = hex::decode("41424344").unwrap(); //#[allow_ci]
         let result = decrypt_aead(&key[..], &ciphertext[..]);
         assert!(matches!(result, Err(Error::InvalidRequest)));
+    }
+
+    #[test]
+    fn test_asym_verify() {
+        // Import test keypair
+        let rsa_key_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("test-data")
+            .join("test-rsa.pem");
+
+        // Get RSA keys
+        let contents = fs::read_to_string(rsa_key_path);
+        let private =
+            PKey::private_key_from_pem(contents.unwrap().as_bytes()).unwrap(); //#[allow_ci]
+        let public = pkey_pub_from_priv(private).unwrap(); //#[allow_ci]
+
+        let message = String::from("Hello World!");
+
+        // Get known valid signature
+        let signature_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("test-data")
+            .join("test-rsa.sig");
+
+        let signature = fs::read_to_string(signature_path).unwrap(); //#[allow_ci]
+
+        assert!(asym_verify(&public, &message, &signature).unwrap()) //#[allow_ci]
     }
 }
