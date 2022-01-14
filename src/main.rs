@@ -102,32 +102,7 @@ pub struct QuoteData {
     hash_alg: algorithms::HashAlgorithm,
     enc_alg: algorithms::EncryptionAlgorithm,
     sign_alg: algorithms::SignAlgorithm,
-}
-
-fn get_uuid(agent_uuid_config: &str) -> String {
-    match agent_uuid_config {
-        "openstack" => {
-            info!("Openstack placeholder...");
-            "openstack".into()
-        }
-        "hash_ek" => {
-            info!("hash_ek placeholder...");
-            "hash_ek".into()
-        }
-        "generate" => {
-            let agent_uuid = Uuid::new_v4();
-            info!("Generated a new UUID: {}", &agent_uuid);
-            agent_uuid.to_string()
-        }
-        uuid_config => match Uuid::parse_str(uuid_config) {
-            Ok(uuid_config) => uuid_config.to_string(),
-            Err(_) => {
-                info!("Misformatted UUID: {}", &uuid_config);
-                let agent_uuid = Uuid::new_v4();
-                agent_uuid.to_string()
-            }
-        },
-    }
+    agent_uuid: String,
 }
 
 // Parameters are based on Python codebase:
@@ -164,8 +139,10 @@ pub(crate) fn decrypt_payload(
 // sets up unzipped directory in secure mount location in preparation for
 // writing out symmetric key and encrypted payload. returns file paths for
 // both.
-pub(crate) fn setup_unzipped() -> Result<(String, String, String)> {
-    let mount = secure_mount::mount()?;
+pub(crate) fn setup_unzipped(
+    config: &KeylimeConfig,
+) -> Result<(String, String, String)> {
+    let mount = secure_mount::mount(&config.secure_size)?;
     let unzipped = format!("{}/unzipped", mount);
 
     // clear any old data
@@ -173,11 +150,9 @@ pub(crate) fn setup_unzipped() -> Result<(String, String, String)> {
         fs::remove_dir_all(&unzipped)?;
     }
 
-    let dec_payload_filename = config_get("cloud_agent", "dec_payload_file")?;
-    let dec_payload_path = format!("{}/{}", unzipped, dec_payload_filename);
-
-    let key_filename = config_get("cloud_agent", "enc_keyname")?;
-    let key_path = format!("{}/{}", unzipped, key_filename);
+    let dec_payload_path =
+        format!("{}/{}", unzipped, &config.dec_payload_filename);
+    let key_path = format!("{}/{}", unzipped, &config.key_filename);
 
     fs::create_dir(&unzipped)?;
 
@@ -251,10 +226,12 @@ pub(crate) fn run(dir: &str, script: &str, agent_uuid: &str) -> Result<()> {
 
 // checks if keylime.conf indicates the payload should be unzipped, and does so if needed.
 // the input string is the directory where the unzipped file(s) should be stored.
-pub(crate) fn optional_unzip_payload(unzipped: &str) -> Result<()> {
-    let is_zip = config_get("cloud_agent", "extract_payload_zip")?;
-    if bool::from_str(&is_zip.to_lowercase())? {
-        let zipped_payload = config_get("cloud_agent", "dec_payload_file")?;
+pub(crate) fn optional_unzip_payload(
+    unzipped: &str,
+    config: &KeylimeConfig,
+) -> Result<()> {
+    if config.extract_payload_zip {
+        let zipped_payload = &config.dec_payload_filename;
         let zipped_payload_path = format!("{}/{}", unzipped, zipped_payload);
 
         info!("Unzipping payload {} to {}", &zipped_payload, &unzipped);
@@ -270,7 +247,7 @@ pub(crate) fn optional_unzip_payload(unzipped: &str) -> Result<()> {
 async fn run_encrypted_payload(
     symm_key: Arc<Mutex<SymmKey>>,
     payload: Arc<Mutex<Vec<u8>>>,
-    agent_uuid: &str,
+    config: &KeylimeConfig,
 ) -> Result<()> {
     // do nothing until actix server's handlers have updated the symmetric key
     loop {
@@ -288,7 +265,7 @@ async fn run_encrypted_payload(
 
     let dec_payload = decrypt_payload(payload, symm_key.clone())?;
 
-    let (unzipped, dec_payload_path, key_path) = setup_unzipped()?;
+    let (unzipped, dec_payload_path, key_path) = setup_unzipped(config)?;
 
     write_out_key_and_payload(
         &dec_payload,
@@ -297,23 +274,21 @@ async fn run_encrypted_payload(
         &key_path,
     )?;
 
-    optional_unzip_payload(&unzipped)?;
+    optional_unzip_payload(&unzipped, config)?;
 
     // there may also be also a separate init script
-    match config_get("cloud_agent", "payload_script")?.as_str() {
+    match config.payload_script.as_str() {
         "" => {
             info!("No payload script specified, skipping");
         }
         script => {
             info!("Payload init script indicated: {}", script);
-            run(&unzipped, script, agent_uuid)?;
+            run(&unzipped, script, config.agent_uuid.as_str())?;
         }
     }
 
-    // run revocation script, if configured
-    let run_revocation = config_get("cloud_agent", "listen_notfications")?;
-    if bool::from_str(&run_revocation.to_lowercase())? {
-        return revocation::run_revocation_service().await;
+    if config.run_revocation {
+        return revocation::run_revocation_service(config).await;
     }
 
     Ok(())
@@ -333,44 +308,26 @@ async fn main() -> Result<()> {
 
     info!("Starting server with API version {}...", API_VERSION);
 
-    // Gather configs
-    let cloudagent_ip = cloudagent_ip_get()?;
-    let cloudagent_port = cloudagent_port_get()?;
-    let registrar_ip = registrar_ip_get()?;
-    let registrar_port = registrar_port_get()?;
-    let agent_uuid_config = config_get("cloud_agent", "agent_uuid")?;
-    let agent_uuid = get_uuid(&agent_uuid_config);
-    let cloudagent_contact_ip = cloudagent_contact_ip_get();
-    let cloudagent_contact_port = cloudagent_contact_port_get()?;
-    let hash_alg = algorithms::HashAlgorithm::try_from(
-        config_get("cloud_agent", "tpm_hash_alg")?.as_str(),
-    )?;
-    let enc_alg = algorithms::EncryptionAlgorithm::try_from(
-        config_get("cloud_agent", "tpm_encryption_alg")?.as_str(),
-    )?;
-    let sign_alg = algorithms::SignAlgorithm::try_from(
-        config_get("cloud_agent", "tpm_signing_alg")?.as_str(),
-    )?;
+    // Load config
+    let config = KeylimeConfig::build()?;
 
     // Gather EK values and certs
     let (ek_handle, ek_cert, ek_tpm2b_pub) =
-        tpm::create_ek(&mut ctx, enc_alg.into())?;
+        tpm::create_ek(&mut ctx, config.enc_alg.into())?;
 
     // Try to load persistent TPM data
-    let tpm_data_path = tpm_data_path_get();
-    let mut tpm_data = None;
-    if tpm_data_path.exists() {
-        match TpmData::load(&tpm_data_path) {
-            Ok(data) => match data.valid(hash_alg, sign_alg) {
-                true => tpm_data = Some(data),
-                false => warn!(
-                    "Not using old {} because algorithms changed",
+    let tpm_data = config.tpm_data.clone().and_then(|data|
+        match data.valid(config.hash_alg, config.sign_alg) {
+            true => Some(data),
+            false => {
+                warn!(
+                    "Not using old {} because it is not valid with current configuration",
                     TPM_DATA
-                ),
+                );
+                None
             },
-            Err(e) => warn!("Failed to load {}: {}", TPM_DATA, e),
         }
-    }
+    );
 
     // Try to reuse old AK from TpmData
     let old_ak = tpm_data.and_then(|data| {
@@ -397,37 +354,37 @@ async fn main() -> Result<()> {
             let new_ak = tpm::create_ak(
                 &mut ctx,
                 ek_handle,
-                hash_alg.into(),
-                sign_alg.into(),
+                config.hash_alg.into(),
+                config.sign_alg.into(),
             )?;
             // Only updating tpmdata.json if a new AK was used
             info!("Storing updated TPM data in {}", TPM_DATA);
             TpmData {
-                ak_hash_alg: hash_alg,
-                ak_sign_alg: sign_alg,
+                ak_hash_alg: config.hash_alg,
+                ak_sign_alg: config.sign_alg,
                 ak_context: tpm::store_ak(&mut ctx, new_ak.0)?,
             }
-            .store(&tpm_data_path)?;
+            .store(&tpm_data_path_get())?;
             new_ak
         }
     };
 
-    info!("Agent UUID: {}", agent_uuid);
+    info!("Agent UUID: {}", config.agent_uuid);
 
     {
         // Request keyblob material
         let keyblob = registrar_agent::do_register_agent(
-            &registrar_ip,
-            &registrar_port,
-            &agent_uuid,
+            &config.registrar_ip,
+            &config.registrar_port,
+            &config.agent_uuid,
             &ek_tpm2b_pub,
             ek_cert,
             &ak_tpm2b_pub,
-            cloudagent_contact_ip,
-            cloudagent_contact_port,
+            config.agent_contact_ip.clone(),
+            config.agent_contact_port,
         )
         .await?;
-        info!("SUCCESS: Agent {} registered", agent_uuid);
+        info!("SUCCESS: Agent {} registered", config.agent_uuid);
 
         let key = tpm::activate_credential(
             &mut ctx, keyblob, ak_handle, ek_handle,
@@ -435,18 +392,18 @@ async fn main() -> Result<()> {
         let mackey = base64::encode(key.value());
         let mackey = PKey::hmac(mackey.as_bytes())?;
         let mut signer = Signer::new(MessageDigest::sha384(), &mackey)?;
-        signer.update(agent_uuid.as_bytes());
+        signer.update(config.agent_uuid.as_bytes());
         let auth_tag = signer.sign_to_vec()?;
         let auth_tag = hex::encode(&auth_tag);
 
         registrar_agent::do_activate_agent(
-            &registrar_ip,
-            &registrar_port,
-            &agent_uuid,
+            &config.registrar_ip,
+            &config.registrar_port,
+            &config.agent_uuid,
             &auth_tag,
         )
         .await?;
-        info!("SUCCESS: Agent {} activated", agent_uuid);
+        info!("SUCCESS: Agent {} activated", config.agent_uuid);
     }
 
     // Generate key pair for secure transmission of u, v keys. The u, v
@@ -478,9 +435,10 @@ async fn main() -> Result<()> {
         payload_symm_key: symm_key_arc,
         encr_payload: encr_payload_arc,
         auth_tag: Mutex::new([0u8; AUTH_TAG_LEN]),
-        hash_alg,
-        enc_alg,
-        sign_alg,
+        hash_alg: config.hash_alg,
+        enc_alg: config.enc_alg,
+        sign_alg: config.sign_alg,
+        agent_uuid: config.agent_uuid.clone(),
     });
 
     let actix_server = HttpServer::new(move || {
@@ -504,13 +462,16 @@ async fn main() -> Result<()> {
                     .route(web::get().to(quotes_handler::integrity)),
             )
     })
-    .bind(format!("{}:{}", cloudagent_ip, cloudagent_port))?
+    .bind(format!("{}:{}", config.agent_ip, config.agent_port))?
     .run()
     .map_err(Error::from);
-    info!("Listening on http://{}:{}", cloudagent_ip, cloudagent_port);
+    info!(
+        "Listening on http://{}:{}",
+        config.agent_ip, config.agent_port
+    );
 
     try_join!(
-        run_encrypted_payload(symm_key, payload, &agent_uuid),
+        run_encrypted_payload(symm_key, payload, &config),
         actix_server
     )?;
 
@@ -540,17 +501,18 @@ mod testing {
 
     impl QuoteData {
         pub(crate) fn fixture() -> Result<Self> {
+            let test_config = KeylimeConfig::default();
             let mut ctx = tpm::get_tpm2_ctx()?;
 
             // Gather EK and AK key values and certs
             let (ek_handle, ek_cert, ek_tpm2b_pub) =
-                tpm::create_ek(&mut ctx, AsymmetricAlgorithm::Rsa)?;
+                tpm::create_ek(&mut ctx, test_config.enc_alg.into())?;
 
             let (ak_handle, ak_name, ak_tpm2b_pub) = tpm::create_ak(
                 &mut ctx,
                 ek_handle,
-                algorithms::HashAlgorithm::Sha256.into(),
-                algorithms::SignAlgorithm::RsaSsa.into(),
+                test_config.hash_alg.into(),
+                test_config.sign_alg.into(),
             )?;
 
             let rsa_key_path = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -583,6 +545,7 @@ mod testing {
                 hash_alg: algorithms::HashAlgorithm::Sha256,
                 enc_alg: algorithms::EncryptionAlgorithm::Rsa,
                 sign_alg: algorithms::SignAlgorithm::RsaSsa,
+                agent_uuid: test_config.agent_uuid,
             })
         }
     }
@@ -605,25 +568,6 @@ mod tests {
                 .expect("File doesn't exist"),
             String::from("Hello World!\n")
         );
-    }
-
-    #[test]
-    fn test_get_uuid() {
-        assert_eq!(get_uuid("openstack"), "openstack");
-        assert_eq!(get_uuid("hash_ek"), "hash_ek");
-        let _ = Uuid::parse_str(&get_uuid("generate")).unwrap(); //#[allow_ci]
-        assert_eq!(
-            get_uuid("D432FBB3-D2F1-4A97-9EF7-75BD81C00000"),
-            "d432fbb3-d2f1-4a97-9ef7-75bd81c00000"
-        );
-        assert_ne!(
-            get_uuid("D432FBB3-D2F1-4A97-9EF7-75BD81C0000X"),
-            "d432fbb3-d2f1-4a97-9ef7-75bd81c0000X"
-        );
-        let _ = Uuid::parse_str(&get_uuid(
-            "D432FBB3-D2F1-4A97-9EF7-75BD81C0000X",
-        ))
-        .unwrap(); //#[allow_ci]
     }
 
     #[test]

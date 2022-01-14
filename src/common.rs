@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2021 Keylime Authors
 
-use crate::algorithms::{HashAlgorithm, SignAlgorithm};
+use crate::algorithms::{EncryptionAlgorithm, HashAlgorithm, SignAlgorithm};
 use crate::error::{Error, Result};
 use ini::Ini;
 use log::*;
@@ -10,7 +10,9 @@ use std::convert::TryFrom;
 use std::env;
 use std::fs::File;
 use std::path::{Path, PathBuf};
+use std::str::FromStr;
 use tss_esapi::{structures::PcrSlot, utils::TpmsContext};
+use uuid::Uuid;
 
 /*
  * Constants and static variables
@@ -129,6 +131,159 @@ impl TpmData {
     }
 }
 
+#[derive(Debug)]
+pub(crate) struct KeylimeConfig {
+    pub agent_ip: String,
+    pub agent_port: String,
+    pub registrar_ip: String,
+    pub registrar_port: String,
+    pub agent_uuid: String,
+    pub agent_contact_ip: Option<String>,
+    pub agent_contact_port: Option<u32>,
+    pub hash_alg: HashAlgorithm,
+    pub enc_alg: EncryptionAlgorithm,
+    pub sign_alg: SignAlgorithm,
+    pub tpm_data: Option<TpmData>,
+    pub run_revocation: bool,
+    pub revocation_ip: String,
+    pub revocation_port: String,
+    pub secure_size: String,
+    pub payload_script: String,
+    pub dec_payload_filename: String,
+    pub key_filename: String,
+    pub extract_payload_zip: bool,
+}
+
+impl KeylimeConfig {
+    pub fn build() -> Result<Self> {
+        let agent_ip =
+            config_get_env("cloud_agent", "cloudagent_ip", "CLOUDAGENT_IP")?;
+        let agent_port = config_get_env(
+            "cloud_agent",
+            "cloudagent_port",
+            "CLOUDAGENT_PORT",
+        )?;
+        let registrar_ip =
+            config_get_env("cloud_agent", "registrar_ip", "REGISTRAR_IP")?;
+        let registrar_port = config_get_env(
+            "cloud_agent",
+            "registrar_port",
+            "REGISTRAR_PORT",
+        )?;
+        let agent_uuid_config = config_get("cloud_agent", "agent_uuid")?;
+        let agent_uuid = get_uuid(&agent_uuid_config);
+        let agent_contact_ip = cloudagent_contact_ip_get();
+        let agent_contact_port = cloudagent_contact_port_get()?;
+        let hash_alg = HashAlgorithm::try_from(
+            config_get("cloud_agent", "tpm_hash_alg")?.as_str(),
+        )?;
+        let enc_alg = EncryptionAlgorithm::try_from(
+            config_get("cloud_agent", "tpm_encryption_alg")?.as_str(),
+        )?;
+        let sign_alg = SignAlgorithm::try_from(
+            config_get("cloud_agent", "tpm_signing_alg")?.as_str(),
+        )?;
+        let tpm_data_path = tpm_data_path_get();
+        let mut tpm_data = None;
+        if tpm_data_path.exists() {
+            match TpmData::load(&tpm_data_path) {
+                Ok(data) => tpm_data = Some(data),
+                Err(e) => warn!("Could not load TPM data"),
+            }
+        }
+        let run_revocation = bool::from_str(
+            &config_get("cloud_agent", "listen_notfications")?.to_lowercase(),
+        )?;
+        let revocation_ip = config_get("general", "receive_revocation_ip")?;
+        let revocation_port =
+            config_get("general", "receive_revocation_port")?;
+
+        let secure_size = config_get("cloud_agent", "secure_size")?;
+        let payload_script = config_get("cloud_agent", "payload_script")?;
+        let dec_payload_filename =
+            config_get("cloud_agent", "dec_payload_file")?;
+        let key_filename = config_get("cloud_agent", "enc_keyname")?;
+        let extract_payload_zip = bool::from_str(
+            &config_get("cloud_agent", "extract_payload_zip")?.to_lowercase(),
+        )?;
+        Ok(KeylimeConfig {
+            agent_ip,
+            agent_port,
+            registrar_ip,
+            registrar_port,
+            agent_uuid,
+            agent_contact_ip,
+            agent_contact_port,
+            hash_alg,
+            enc_alg,
+            sign_alg,
+            tpm_data,
+            run_revocation,
+            revocation_ip,
+            revocation_port,
+            secure_size,
+            payload_script,
+            dec_payload_filename,
+            key_filename,
+            extract_payload_zip,
+        })
+    }
+}
+
+// Default test configuration. This should match the defaults in keylime.conf
+#[cfg(any(test, feature = "testing"))]
+impl Default for KeylimeConfig {
+    fn default() -> Self {
+        KeylimeConfig {
+            agent_ip: "127.0.0.1".to_string(),
+            agent_port: "9002".to_string(),
+            registrar_ip: "127.0.0.1".to_string(),
+            registrar_port: "8890".to_string(),
+            agent_uuid: "d432fbb3-d2f1-4a97-9ef7-75bd81c00000".to_string(),
+            agent_contact_ip: Some("127.0.0.1".to_string()),
+            agent_contact_port: Some(9002),
+            hash_alg: HashAlgorithm::Sha256,
+            enc_alg: EncryptionAlgorithm::Rsa,
+            sign_alg: SignAlgorithm::RsaSsa,
+            tpm_data: None,
+            run_revocation: true,
+            revocation_ip: "127.0.0.1".to_string(),
+            revocation_port: "8992".to_string(),
+            secure_size: "1m".to_string(),
+            payload_script: "autorun.sh".to_string(),
+            dec_payload_filename: "decrypted_payload".to_string(),
+            key_filename: "derived_tci_key".to_string(),
+            extract_payload_zip: true,
+        }
+    }
+}
+
+fn get_uuid(agent_uuid_config: &str) -> String {
+    match agent_uuid_config {
+        "openstack" => {
+            info!("Openstack placeholder...");
+            "openstack".into()
+        }
+        "hash_ek" => {
+            info!("hash_ek placeholder...");
+            "hash_ek".into()
+        }
+        "generate" => {
+            let agent_uuid = Uuid::new_v4();
+            info!("Generated a new UUID: {}", &agent_uuid);
+            agent_uuid.to_string()
+        }
+        uuid_config => match Uuid::parse_str(uuid_config) {
+            Ok(uuid_config) => uuid_config.to_string(),
+            Err(_) => {
+                info!("Misformatted UUID: {}", &uuid_config);
+                let agent_uuid = Uuid::new_v4();
+                agent_uuid.to_string()
+            }
+        },
+    }
+}
+
 /*
  * Return: Returns the configuration file provided in the environment variable
  * KEYLIME_CONFIG or defaults to /etc/keylime.conf
@@ -136,7 +291,7 @@ impl TpmData {
  * Example call:
  * let config = config_file_get();
  */
-pub(crate) fn config_file_get() -> String {
+fn config_file_get() -> String {
     match env::var("KEYLIME_CONFIG") {
         Ok(cfg) => {
             // The variable length must be larger than 0 to accept
@@ -151,37 +306,17 @@ pub(crate) fn config_file_get() -> String {
 }
 
 /// Returns revocation ip from keylime.conf if env var not present
-pub(crate) fn revocation_ip_get() -> Result<String> {
+fn revocation_ip_get() -> Result<String> {
     config_get_env("general", "receive_revocation_ip", "REVOCATION_IP")
 }
 
 /// Returns revocation port from keylime.conf if env var not present
-pub(crate) fn revocation_port_get() -> Result<String> {
+fn revocation_port_get() -> Result<String> {
     config_get_env("general", "receive_revocation_port", "REVOCATION_PORT")
 }
 
-/// Returns cloud agent IP from keylime.conf if env var not present
-pub(crate) fn cloudagent_ip_get() -> Result<String> {
-    config_get_env("cloud_agent", "cloudagent_ip", "CLOUDAGENT_IP")
-}
-
-/// Returns cloud agent port from keylime.conf if env var not present
-pub(crate) fn cloudagent_port_get() -> Result<String> {
-    config_get_env("cloud_agent", "cloudagent_port", "CLOUDAGENT_PORT")
-}
-
-/// Returns registrar IP from keylime.conf if env var not present
-pub(crate) fn registrar_ip_get() -> Result<String> {
-    config_get_env("cloud_agent", "registrar_ip", "REGISTRAR_IP")
-}
-
-/// Returns registrar port from keylime.conf if env var not present
-pub(crate) fn registrar_port_get() -> Result<String> {
-    config_get_env("cloud_agent", "registrar_port", "REGISTRAR_PORT")
-}
-
 /// Returns the contact ip for the agent if set
-pub(crate) fn cloudagent_contact_ip_get() -> Option<String> {
+fn cloudagent_contact_ip_get() -> Option<String> {
     match config_get_env(
         "cloud_agent",
         "agent_contact_ip",
@@ -193,7 +328,7 @@ pub(crate) fn cloudagent_contact_ip_get() -> Option<String> {
 }
 
 /// Returns the contact ip for the agent if set
-pub(crate) fn cloudagent_contact_port_get() -> Result<Option<u32>> {
+fn cloudagent_contact_port_get() -> Result<Option<u32>> {
     match config_get_env(
         "cloud_agent",
         "agent_contact_port",
@@ -217,7 +352,7 @@ pub(crate) fn cloudagent_contact_port_get() -> Result<Option<u32>> {
  * Example call:
  * let port = common::config_get("general","cloudagent_port");
  */
-pub(crate) fn config_get(section: &str, key: &str) -> Result<String> {
+fn config_get(section: &str, key: &str) -> Result<String> {
     let conf_name = config_file_get();
     let conf = Ini::load_from_file(&conf_name)?;
     let section = match conf.section(Some(section.to_owned())) {
@@ -253,11 +388,7 @@ pub(crate) fn config_get(section: &str, key: &str) -> Result<String> {
  * Example call:
  * let port = common::config_get_env("general","cloudagent_port", "CLOUDAGENT_PORT");
  */
-pub(crate) fn config_get_env(
-    section: &str,
-    key: &str,
-    env: &str,
-) -> Result<String> {
+fn config_get_env(section: &str, key: &str, env: &str) -> Result<String> {
     match env::var(env) {
         Ok(ip) => {
             // The variable length must be larger than 0 to accept
@@ -347,5 +478,24 @@ mod tests {
         assert_eq!(config_file_get(), String::from("/tmp/testing.conf"));
         // Reset environment
         env::set_var("KEYLIME_CONFIG", conf_orig);
+    }
+
+    #[test]
+    fn test_get_uuid() {
+        assert_eq!(get_uuid("openstack"), "openstack");
+        assert_eq!(get_uuid("hash_ek"), "hash_ek");
+        let _ = Uuid::parse_str(&get_uuid("generate")).unwrap(); //#[allow_ci]
+        assert_eq!(
+            get_uuid("D432FBB3-D2F1-4A97-9EF7-75BD81C00000"),
+            "d432fbb3-d2f1-4a97-9ef7-75bd81c00000"
+        );
+        assert_ne!(
+            get_uuid("D432FBB3-D2F1-4A97-9EF7-75BD81C0000X"),
+            "d432fbb3-d2f1-4a97-9ef7-75bd81c0000X"
+        );
+        let _ = Uuid::parse_str(&get_uuid(
+            "D432FBB3-D2F1-4A97-9EF7-75BD81C0000X",
+        ))
+        .unwrap(); //#[allow_ci]
     }
 }
