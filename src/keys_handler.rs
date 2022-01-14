@@ -3,10 +3,10 @@
 
 use crate::{
     common::{
-        config_get, KeySet, SymmKey, AES_BLOCK_SIZE, AGENT_UUID_LEN,
-        AUTH_TAG_LEN, KEY_LEN,
+        KeySet, SymmKey, AES_BLOCK_SIZE, AGENT_UUID_LEN, AUTH_TAG_LEN,
+        KEY_LEN,
     },
-    get_uuid, Error, QuoteData, Result,
+    Error, QuoteData, Result,
 };
 use actix_web::{web, HttpRequest, HttpResponse, Responder};
 use json::parse;
@@ -221,13 +221,11 @@ pub async fn u_or_v_key(
         global_encr_payload.extend(encr_payload.iter());
     }
 
-    let agent_uuid = get_uuid(&config_get("cloud_agent", "agent_uuid")?);
-
     let _ = try_combine_keys(
         &mut global_current_keyset,
         &mut global_other_keyset,
         &mut global_symm_key,
-        &agent_uuid.into_bytes(),
+        quote_data.agent_uuid.as_bytes(),
         &global_auth_tag,
     )?;
 
@@ -237,7 +235,7 @@ pub async fn u_or_v_key(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::common::{API_VERSION, KEY_LEN};
+    use crate::common::{KeylimeConfig, API_VERSION, KEY_LEN};
     use actix_web::{http::StatusCode, test, web, App};
     use openssl::{
         encrypt::Encrypter,
@@ -264,6 +262,7 @@ mod tests {
     #[cfg(feature = "testing")]
     #[actix_rt::test]
     async fn test_u_or_v_key() {
+        let test_config = KeylimeConfig::default();
         let quotedata = web::Data::new(QuoteData::fixture().unwrap()); //#[allow_ci]
         let mut app = test::init_service(
             App::new()
@@ -295,11 +294,9 @@ mod tests {
         let encrypted_len = encrypter.encrypt(u, &mut encrypted_key).unwrap(); //#[allow_ci]
         encrypted_key.truncate(encrypted_len);
 
-        let agent_uuid =
-            get_uuid(&config_get("cloud_agent", "agent_uuid").unwrap()); //#[allow_ci]
         let pkey = PKey::hmac(&k).unwrap(); //#[allow_ci]
         let mut signer = Signer::new(MessageDigest::sha384(), &pkey).unwrap(); //#[allow_ci]
-        signer.update(agent_uuid.as_bytes()).unwrap(); //#[allow_ci]
+        signer.update(test_config.agent_uuid.as_bytes()).unwrap(); //#[allow_ci]
         let auth_tag = signer.sign_to_vec().unwrap(); //#[allow_ci]
 
         let ukey = KeylimeUKey {

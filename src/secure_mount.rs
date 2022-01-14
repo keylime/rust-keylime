@@ -4,7 +4,6 @@
 use super::*;
 
 use crate::error::{Error, Result};
-use common::config_get;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::process::Command;
@@ -58,7 +57,7 @@ fn check_mount(secure_dir: &str) -> Result<bool> {
  * implementation as the original python version, but the chown/geteuid
  * functions are unsafe function in Rust to use.
  */
-pub(crate) fn mount() -> Result<String> {
+pub(crate) fn mount(secure_size: &str) -> Result<String> {
     // Use /tmpfs-dev directory if MOUNT_SECURE flag is not set. This
     // is for development environment and does not mount to the system.
     if !MOUNT_SECURE {
@@ -80,7 +79,6 @@ pub(crate) fn mount() -> Result<String> {
 
     // Mount the directory to file system
     let secure_dir = format!("{}/secure", WORK_DIR);
-    let secure_size = config_get("cloud_agent", "secure_size")?;
 
     match check_mount(&secure_dir)? {
         false => {
