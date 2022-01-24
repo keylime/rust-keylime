@@ -178,6 +178,49 @@ pub async fn v_key(
     HttpResponse::Ok().await
 }
 
+#[derive(Serialize, Deserialize)]
+struct KeylimePubkey {
+    pubkey: String,
+}
+
+#[derive(Serialize, Deserialize)]
+struct JsonPubkeyWrapper {
+    code: u32,
+    status: String,
+    results: KeylimePubkey,
+}
+
+impl JsonPubkeyWrapper {
+    fn new(pubkey: String) -> Self {
+        JsonPubkeyWrapper {
+            code: 200,
+            status: String::from("Success"),
+            results: KeylimePubkey { pubkey },
+        }
+    }
+}
+
+pub async fn pubkey(
+    req: HttpRequest,
+    data: web::Data<QuoteData>,
+) -> impl Responder {
+    info!(
+        "GET invoked from {:?} with uri {}",
+        req.connection_info().remote_addr().unwrap(), //#[allow_ci]
+        req.uri()
+    );
+
+    let pubkey = String::from_utf8(
+        data.pub_key.public_key_to_pem().map_err(Error::from)?,
+    )
+    .map_err(Error::from)?;
+
+    let response = JsonPubkeyWrapper::new(pubkey);
+    info!("GET pubkey returning 200 response.");
+
+    HttpResponse::Ok().json(response).await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -186,7 +229,9 @@ mod tests {
     };
     use crate::crypto::compute_hmac;
     #[cfg(feature = "testing")]
-    use crate::crypto::testing::{encrypt_aead, rsa_oaep_encrypt};
+    use crate::crypto::testing::{
+        encrypt_aead, pkey_pub_from_pem, rsa_oaep_encrypt,
+    };
     use actix_rt::Arbiter;
     use actix_web::{test, web, App};
     use openssl::{
@@ -324,5 +369,29 @@ mod tests {
         test_u_or_v_key(AES_128_KEY_LEN, Some(payload.as_slice())).await;
         let timestamp_path = dir.path().join("timestamp");
         assert!(timestamp_path.exists());
+    }
+
+    #[cfg(feature = "testing")]
+    #[actix_rt::test]
+    async fn test_pubkey() {
+        let quotedata = web::Data::new(QuoteData::fixture().unwrap()); //#[allow_ci]
+        let mut app =
+            test::init_service(App::new().app_data(quotedata.clone()).route(
+                &format!("/{}/keys/pubkey", API_VERSION),
+                web::get().to(pubkey),
+            ))
+            .await;
+
+        let req = test::TestRequest::get()
+            .uri(&format!("/{}/keys/pubkey", API_VERSION,))
+            .to_request();
+
+        let resp = test::call_service(&mut app, req).await;
+        assert!(resp.status().is_success());
+
+        let result: JsonPubkeyWrapper = test::read_body_json(resp).await;
+        assert!(pkey_pub_from_pem(result.results.pubkey.as_bytes())
+            .unwrap() //#[allow_ci]
+            .public_eq(&quotedata.pub_key));
     }
 }
