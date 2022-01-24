@@ -4,7 +4,7 @@
 #[macro_use]
 use log::*;
 
-use crate::common::{config_get, REV_CERT};
+use crate::common::{KeylimeConfig, REV_CERT};
 use crate::crypto;
 use crate::error::*;
 use crate::secure_mount;
@@ -61,7 +61,10 @@ pub(crate) fn run_action(
 /// An OK result indicates all actions were run successfully.
 /// Otherwise, an Error will be returned from the first action that
 /// did not run successfully.
-pub(crate) fn run_revocation_actions(json: Value) -> Result<Vec<Output>> {
+pub(crate) fn run_revocation_actions(
+    json: Value,
+    secure_size: &str,
+) -> Result<Vec<Output>> {
     #[cfg(not(test))]
     pretty_env_logger::init();
 
@@ -69,7 +72,7 @@ pub(crate) fn run_revocation_actions(json: Value) -> Result<Vec<Output>> {
     let mount = concat!(env!("CARGO_MANIFEST_DIR"), "/tests");
 
     #[cfg(not(test))]
-    let mount = secure_mount::mount()?;
+    let mount = secure_mount::mount(secure_size)?;
     let unzipped = format!("{}/unzipped", mount);
     let action_file = format!("{}/unzipped/action_list", mount);
 
@@ -119,8 +122,10 @@ pub(crate) fn run_revocation_actions(json: Value) -> Result<Vec<Output>> {
 /// See:
 /// - URL: https://github.com/keylime/keylime/blob/master/keylime/revocation_notifier.py
 ///   Function: await_notifications
-pub(crate) async fn run_revocation_service() -> Result<()> {
-    let mount = secure_mount::mount()?;
+pub(crate) async fn run_revocation_service(
+    config: &KeylimeConfig,
+) -> Result<()> {
+    let mount = secure_mount::mount(&config.secure_size)?;
     let revocation_cert_path = format!("{}/unzipped/{}", mount, REV_CERT);
 
     // Connect to the service via 0mq
@@ -129,9 +134,8 @@ pub(crate) async fn run_revocation_service() -> Result<()> {
 
     mysock.set_subscribe(b"")?;
 
-    let revocation_ip = config_get("general", "receive_revocation_ip")?;
-    let revocation_port = config_get("general", "receive_revocation_port")?;
-    let endpoint = format!("tcp://{}:{}", revocation_ip, revocation_port);
+    let endpoint =
+        format!("tcp://{}:{}", config.revocation_ip, config.revocation_port);
 
     info!("Connecting to revocation endpoint at {}...", endpoint);
 
@@ -220,7 +224,8 @@ pub(crate) async fn run_revocation_service() -> Result<()> {
                     "Revocation signature validated for revocation: {}",
                     msg_payload
                 );
-                let _ = run_revocation_actions(msg_payload)?;
+                let _ =
+                    run_revocation_actions(msg_payload, &config.secure_size)?;
             }
             _ => {
                 error!("Invalid revocation message signature {}", body);
@@ -236,14 +241,14 @@ mod tests {
 
     #[test]
     fn revocation_scripts_ok() {
+        let test_config = KeylimeConfig::default();
         let json_file = concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/tests/unzipped/test_ok.json"
         );
         let json_str = std::fs::read_to_string(json_file).unwrap(); //#[allow_ci]
         let json = serde_json::from_str(&json_str).unwrap(); //#[allow_ci]
-
-        let outputs = run_revocation_actions(json);
+        let outputs = run_revocation_actions(json, &test_config.secure_size);
         assert!(outputs.is_ok());
         let outputs = outputs.unwrap(); //#[allow_ci]
         assert!(outputs.len() == 2);
@@ -258,6 +263,7 @@ mod tests {
 
     #[test]
     fn revocation_scripts_err() {
+        let test_config = KeylimeConfig::default();
         let json_file = concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/tests/unzipped/test_err.json"
@@ -265,7 +271,7 @@ mod tests {
         let json_str = std::fs::read_to_string(json_file).unwrap(); //#[allow_ci]
         let json = serde_json::from_str(&json_str).unwrap(); //#[allow_ci]
 
-        let outputs = run_revocation_actions(json);
+        let outputs = run_revocation_actions(json, &test_config.secure_size);
         assert!(outputs.is_err());
     }
 }
