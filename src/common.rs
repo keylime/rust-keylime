@@ -8,6 +8,7 @@ use log::*;
 use serde::{Deserialize, Serialize};
 use std::convert::TryFrom;
 use std::env;
+use std::ffi::CString;
 use std::fs::File;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
@@ -421,7 +422,8 @@ pub(crate) fn chownroot(path: String) -> Result<String> {
         }
 
         // change directory owner to root
-        if libc::chown(path.as_bytes().as_ptr() as *const i8, 0, 0) != 0 {
+        let c_path = CString::new(path.as_bytes()).unwrap(); //#[allow_ci]
+        if libc::chown(c_path.as_ptr(), 0, 0) != 0 {
             error!("Failed to change file {} owner.", path);
             return Err(Error::Permission);
         }
