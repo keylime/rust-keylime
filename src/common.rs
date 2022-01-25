@@ -142,6 +142,7 @@ pub(crate) struct KeylimeConfig {
     pub sign_alg: SignAlgorithm,
     pub tpm_data: Option<TpmData>,
     pub run_revocation: bool,
+    pub revocation_cert: String,
     pub revocation_ip: String,
     pub revocation_port: String,
     pub secure_size: String,
@@ -191,6 +192,7 @@ impl KeylimeConfig {
         let run_revocation = bool::from_str(
             &config_get("cloud_agent", "listen_notfications")?.to_lowercase(),
         )?;
+        let revocation_cert = config_get("cloud_agent", "revocation_cert")?;
         let revocation_ip = config_get("general", "receive_revocation_ip")?;
         let revocation_port =
             config_get("general", "receive_revocation_port")?;
@@ -216,6 +218,7 @@ impl KeylimeConfig {
             sign_alg,
             tpm_data,
             run_revocation,
+            revocation_cert,
             revocation_ip,
             revocation_port,
             secure_size,
@@ -244,6 +247,7 @@ impl Default for KeylimeConfig {
             sign_alg: SignAlgorithm::RsaSsa,
             tpm_data: None,
             run_revocation: true,
+            revocation_cert: "default".to_string(),
             revocation_ip: "127.0.0.1".to_string(),
             revocation_port: "8992".to_string(),
             secure_size: "1m".to_string(),
