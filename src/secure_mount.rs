@@ -6,6 +6,7 @@ use super::*;
 use crate::error::{Error, Result};
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
+use std::path::PathBuf;
 use std::process::Command;
 /*
  * Input: secure mount directory
@@ -16,7 +17,7 @@ use std::process::Command;
  * Check the mount status of the secure mount directory. Same
  * implementation as the original python version.
  */
-fn check_mount(secure_dir: &str) -> Result<bool> {
+fn check_mount(secure_dir: &Path) -> Result<bool> {
     let output = Command::new("mount").output()?;
 
     let mount_result = String::from_utf8(output.stdout)?;
@@ -31,22 +32,22 @@ fn check_mount(secure_dir: &str) -> Result<bool> {
             continue;
         }
 
-        if tokens[2] == secure_dir {
+        if Path::new(tokens[2]) == secure_dir {
             if tokens[0] != "tmpfs" {
-                let msg = format!("secure storage location {} already mounted as wrong file system type: {}. Unmount to continue", secure_dir, tokens[0]);
+                let msg = format!("secure storage location {:?} already mounted as wrong file system type: {}. Unmount to continue", &secure_dir, tokens[0]);
                 error!("{}", msg);
                 return Err(Error::SecureMount(msg));
             } else {
                 info!(
-                    "Using existing secure storage tmpsfs mount {}",
-                    secure_dir
+                    "Using existing secure storage tmpsfs mount {:?}",
+                    &secure_dir
                 );
             }
             return Ok(true);
         }
     }
 
-    info!("secure storage location {} not mounted.", secure_dir);
+    info!("secure storage location {:?} not mounted.", &secure_dir);
     Ok(false)
 }
 
@@ -57,109 +58,99 @@ fn check_mount(secure_dir: &str) -> Result<bool> {
  * implementation as the original python version, but the chown/geteuid
  * functions are unsafe function in Rust to use.
  */
-pub(crate) fn mount(secure_size: &str) -> Result<String> {
+pub(crate) fn mount(secure_size: &str) -> Result<PathBuf> {
     // Use /tmpfs-dev directory if MOUNT_SECURE flag is not set. This
     // is for development environment and does not mount to the system.
     if !MOUNT_SECURE {
         warn!("Using /tmpfs-dev (dev environment)");
-        let secure_dir = format!("{}{}", WORK_DIR, "/tmpfs-dev");
-        let secure_dir_path = Path::new(secure_dir.as_str());
+        let secure_dir_path = Path::new(WORK_DIR).join("tmpfs-dev");
         if !secure_dir_path.exists() {
-            fs::create_dir(secure_dir_path).map_err(|e| {
+            fs::create_dir(&secure_dir_path).map_err(|e| {
                 Error::SecureMount(format!(
                     "unable to create secure dir path: {:?}",
                     e
                 ))
             })?;
-            info!("Directory {:?} created.", secure_dir_path);
+            info!("Directory {:?} created.", &secure_dir_path);
         }
 
-        return Ok(secure_dir_path.to_str().unwrap().to_string()); //#[allow_ci] : because this is an Option
+        return Ok(secure_dir_path);
     }
 
     // Mount the directory to file system
-    let secure_dir = format!("{}/secure", WORK_DIR);
+    let secure_dir_path = Path::new(WORK_DIR).join("secure");
 
-    match check_mount(&secure_dir)? {
-        false => {
-            // If the directory is not mount to file system, mount the directory to
-            // file system.
-            let secure_dir_clone = secure_dir.clone();
-            let secure_dir_path = Path::new(secure_dir_clone.as_str());
+    // If the directory is not mount to file system, mount the directory to
+    // file system.
+    if !check_mount(&secure_dir_path)? {
+        // Create directory if the directory is not exist. The
+        // directory permission is set to 448.
+        if !secure_dir_path.exists() {
+            fs::create_dir(&secure_dir_path).map_err(|e| {
+                Error::SecureMount(format!(
+                    "unable to create secure dir path: {:?}",
+                    e
+                ))
+            })?;
 
-            // Create directory if the directory is not exist. The
-            // directory permission is set to 448.
+            info!("Directory {:?} created.", secure_dir_path);
+            let metadata = fs::metadata(&secure_dir_path).map_err(|e| {
+                Error::SecureMount(format!(
+                    "unable to get metadata for secure dir path: {:?}",
+                    e
+                ))
+            })?;
+            metadata.permissions().set_mode(0o750); // decimal 488
+        }
 
-            if !secure_dir_path.exists() {
-                fs::create_dir(secure_dir_path).map_err(|e| {
-                    Error::SecureMount(format!(
-                        "unable to create secure dir path: {:?}",
-                        e
-                    ))
-                })?;
+        info!(
+            "Mounting secure storage location {:?} on tmpfs.",
+            &secure_dir_path
+        );
 
-                info!("Directory {:?} created.", secure_dir_path);
-                let metadata =
-                    fs::metadata(secure_dir_path).map_err(|e| {
-                        Error::SecureMount(format!("unable to get metadata for secure dir path: {:?}", e))
-                    })?;
-                metadata.permissions().set_mode(0o750); // decimal 488
+        // change the secure path directory owner to root
+        match chownroot(&secure_dir_path) {
+            Ok(_) => {
+                info!("Changed path {:?} owner to root.", &secure_dir_path);
             }
-
-            match secure_dir_path.to_str() {
-                Some(s) => {
-                    info!("Mounting secure storage location {} on tmpfs.", s);
-
-                    // change the secure path directory owner to root
-                    if let Err(e) = chownroot(s.to_string()).map(|path| {
-                        info!("Changed path {} owner to root.", path);
-                    }) {
-                        return Err(Error::SecureMount(
-                                format!(
-                                    "unable to change secure path dir owner to root: received exit code {}",
-                                    e.exe_code()?.unwrap() //#[allow_ci] : because this is an Option
-                                ),
-                            ));
-                    }
-
-                    // mount tmpfs with secure directory
-                    match Command::new("mount")
-                        .args([
-                            "-t",
-                            "tmpfs",
-                            "-o",
-                            format!("size={},mode=0700", secure_size)
-                                .as_str(),
-                            "tmpfs",
-                            s,
-                        ])
-                        .output()
-                    {
-                        Ok(output) => {
-                            if !output.status.success() {
-                                return Err(Error::SecureMount(format!(
-                                    "unable to mount tmpfs with secure dir: exit status code {}",
-                                    output.status
-                                )));
-                            }
-                        }
-                        Err(e) => {
-                            return Err(Error::SecureMount(format!(
-                                "unable to mount tmpfs with secure dir: {}",
-                                e
-                            )));
-                        }
-                    }
-
-                    Ok(s.to_string())
-                }
-                None => Err(Error::SecureMount(
-                    "Error mounting secure storage location on tmpfs"
-                        .to_string(),
-                )),
+            Err(e) => {
+                return Err(Error::SecureMount(
+                    format!(
+                        "unable to change secure path dir owner to root: received exit code {}",
+                        e.exe_code()?.unwrap() //#[allow_ci] : because this is an Option
+                    ),
+                ));
             }
         }
 
-        true => Ok(secure_dir),
+        // mount tmpfs with secure directory
+        match Command::new("mount")
+            .args([
+                "-t",
+                "tmpfs",
+                "-o",
+                format!("size={},mode=0700", secure_size).as_str(),
+                "tmpfs",
+                secure_dir_path.to_str().unwrap(), //#[allow_ci]
+            ])
+            .output()
+        {
+            Ok(output) => {
+                if !output.status.success() {
+                    return Err(Error::SecureMount(format!(
+                        "unable to mount tmpfs with secure dir: exit status code {}",
+                        output.status
+                    )));
+                }
+            }
+            Err(e) => {
+                return Err(Error::SecureMount(format!(
+                    "unable to mount tmpfs with secure dir: {}",
+                    e
+                )));
+            }
+        }
     }
+
+    Ok(secure_dir_path)
 }

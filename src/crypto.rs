@@ -12,6 +12,7 @@ use openssl::{
     x509::X509,
 };
 use std::fs;
+use std::path::Path;
 use std::string::String;
 
 use crate::{
@@ -20,8 +21,8 @@ use crate::{
 
 // Reads an X509 cert chain (provided by the tenant with the --cert command) and outputs
 // its public key.
-pub(crate) fn import_x509(input_key_path: String) -> Result<PKey<Public>> {
-    let contents = fs::read_to_string(&input_key_path[..])?;
+pub(crate) fn import_x509(input_key_path: &Path) -> Result<PKey<Public>> {
+    let contents = fs::read_to_string(input_key_path)?;
     let mut cert_chain = X509::stack_from_pem(contents.as_bytes())?;
 
     if cert_chain.len() != 1 {
