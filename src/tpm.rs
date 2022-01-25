@@ -18,7 +18,6 @@ use openssl::{
     hash::{Hasher, MessageDigest},
     memcmp,
     pkey::{Id, PKeyRef, Public},
-    rsa::Rsa,
 };
 
 use flate2::{write::ZlibEncoder, Compression};
@@ -36,7 +35,7 @@ use tss_esapi::{
         session_type::SessionType,
         tss::{TPM2_ALG_NULL, TPM2_ST_ATTEST_QUOTE},
     },
-    handles::{AuthHandle, KeyHandle, PcrHandle, SessionHandle},
+    handles::{AuthHandle, KeyHandle, PcrHandle},
     interface_types::{
         algorithm::{
             AsymmetricAlgorithm, HashingAlgorithm, SignatureSchemeAlgorithm,

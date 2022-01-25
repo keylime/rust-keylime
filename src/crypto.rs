@@ -1,38 +1,22 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2021 Keylime Authors
 
-// use super::*;
-use openssl::hash::MessageDigest;
-use openssl::pkcs5;
-use openssl::pkey::{Id, PKey, PKeyRef, Private, Public};
-use openssl::rsa::{Padding, Rsa};
-use openssl::sign::{Signer, Verifier};
-use openssl::x509::X509;
+use openssl::{
+    encrypt::Decrypter,
+    hash::MessageDigest,
+    memcmp, pkcs5,
+    pkey::{Id, PKey, PKeyRef, Private, Public},
+    rsa::{Padding, Rsa},
+    sign::{Signer, Verifier},
+    symm::Cipher,
+    x509::X509,
+};
 use std::fs;
-use std::io::Read;
-use std::path::Path;
 use std::string::String;
 
-use crate::{Error, Result};
-
-/*
- * Inputs: secret key
- *        message to sign
- * Output: signed HMAC result
- *
- * Sign message and return HMAC result string
- */
-pub(crate) fn do_hmac(
-    input_key: String,
-    input_message: String,
-) -> Result<String> {
-    let key = PKey::hmac(input_key.as_bytes())?;
-    let message = input_message.as_bytes();
-    let mut signer = Signer::new(MessageDigest::sha384(), &key)?;
-    signer.update(message)?;
-    let hmac = signer.sign_to_vec()?;
-    Ok(to_hex_string(hmac))
-}
+use crate::{
+    Error, Result, AES_128_KEY_LEN, AES_256_KEY_LEN, AES_BLOCK_SIZE,
+};
 
 // Reads an X509 cert chain (provided by the tenant with the --cert command) and outputs
 // its public key.
@@ -85,27 +69,6 @@ pub(crate) fn pkey_pub_from_priv(
 }
 
 /*
- * Inputs: OpenSSL RSA key
- *         ciphertext to be decrypted
- * Output: decrypted plaintext
- *
- * Take in an RSA-encrypted ciphertext and an RSA private key and decrypt the
- * ciphertext based on PKCS1 OAEP. Parameters match that of Python-Keylime.
- */
-pub(crate) fn rsa_decrypt(
-    private_key: Rsa<Private>,
-    ciphertext: String,
-) -> Result<String> {
-    let mut dec_result = vec![0; private_key.size() as usize];
-    let dec_len = private_key.private_decrypt(
-        ciphertext.as_bytes(),
-        &mut dec_result,
-        Padding::PKCS1,
-    )?;
-    Ok(to_hex_string(dec_result[..dec_len].to_vec()))
-}
-
-/*
  * Inputs: password to derive key
  *         shared salt
  * Output: derived key
@@ -137,19 +100,7 @@ pub(crate) fn kdf(
         MessageDigest::sha1(),
         &mut key,
     )?;
-    Ok(to_hex_string(key.to_vec()))
-}
-
-/*
- * Input: bytes data
- * Output: hex string representation of bytes
- *
- * Convert a byte data to a hex representation
- */
-fn to_hex_string(bytes: Vec<u8>) -> String {
-    let strs: Vec<String> =
-        bytes.iter().map(|b| format!("{:02x}", b)).collect();
-    strs.join("")
+    Ok(hex::encode(&key[..]))
 }
 
 /*
@@ -168,9 +119,107 @@ pub(crate) fn asym_verify(
     Ok(verifier.verify(signature.as_bytes())?)
 }
 
-#[cfg(feature = "testing")]
+/*
+ * Inputs: OpenSSL RSA key
+ *         ciphertext to be decrypted
+ * Output: decrypted plaintext
+ *
+ * Take in an RSA-encrypted ciphertext and an RSA private key and decrypt the
+ * ciphertext based on PKCS1 OAEP.
+ */
+pub(crate) fn rsa_oaep_decrypt(
+    priv_key: &PKey<Private>,
+    data: &[u8],
+) -> Result<Vec<u8>> {
+    let mut decrypter = Decrypter::new(priv_key)?;
+
+    decrypter.set_rsa_padding(Padding::PKCS1_OAEP)?;
+    decrypter.set_rsa_mgf1_md(MessageDigest::sha1())?;
+    decrypter.set_rsa_oaep_md(MessageDigest::sha1())?;
+
+    // Create an output buffer
+    let buffer_len = decrypter.decrypt_len(data)?;
+    let mut decrypted = vec![0; buffer_len];
+
+    // Decrypt and truncate the buffer
+    let decrypted_len = decrypter.decrypt(data, &mut decrypted)?;
+    decrypted.truncate(decrypted_len);
+
+    Ok(decrypted)
+}
+
+/*
+ * Inputs: secret key
+ *        message to sign
+ * Output: signed HMAC result
+ *
+ * Sign message and return HMAC result string
+ */
+pub(crate) fn compute_hmac(key: &[u8], data: &[u8]) -> Result<Vec<u8>> {
+    let pkey = PKey::hmac(key)?;
+    // SHA-384 is used as the underlying hash algorithm.
+    //
+    // Reference:
+    // https://keylime-docs.readthedocs.io/en/latest/rest_apis.html#post--v1.0-keys-ukey
+    // https://github.com/keylime/keylime/blob/910b38b296038b187a020c095dc747e9c46cbef3/keylime/crypto.py#L151
+    let mut signer = Signer::new(MessageDigest::sha384(), &pkey)?;
+    signer.update(data)?;
+    signer.sign_to_vec().map_err(Error::Crypto)
+}
+
+pub(crate) fn verify_hmac(
+    key: &[u8],
+    data: &[u8],
+    hmac: &[u8],
+) -> Result<()> {
+    let pkey = PKey::hmac(key)?;
+    // SHA-384 is used as the underlying hash algorithm.
+    //
+    // Reference:
+    // https://keylime-docs.readthedocs.io/en/latest/rest_apis.html#post--v1.0-keys-ukey
+    // https://github.com/keylime/keylime/blob/910b38b296038b187a020c095dc747e9c46cbef3/keylime/crypto.py#L151
+    let mut signer = Signer::new(MessageDigest::sha384(), &pkey)?;
+    signer.update(data)?;
+
+    if !memcmp::eq(&signer.sign_to_vec()?, hmac) {
+        return Err(Error::Other("hmac check failed".to_string()));
+    }
+
+    Ok(())
+}
+
+pub(crate) fn decrypt_aead(key: &[u8], data: &[u8]) -> Result<Vec<u8>> {
+    let cipher = match key.len() {
+        AES_128_KEY_LEN => Cipher::aes_128_gcm(),
+        AES_256_KEY_LEN => Cipher::aes_256_gcm(),
+        other => {
+            return Err(Error::Other(format!(
+                "key length {} does not correspond to valid GCM cipher",
+                other
+            )))
+        }
+    };
+
+    // Parse out payload IV, tag, ciphertext.  Note that Keylime
+    // currently uses 16-byte IV, while the recommendation in SP
+    // 800-38D is 12-byte.
+    //
+    // Reference:
+    // https://github.com/keylime/keylime/blob/1663a7702b3286152b38dbcb715a9eb6705e05e9/keylime/crypto.py#L191
+    if data.len() < AES_BLOCK_SIZE * 2 {
+        return Err(Error::InvalidRequest);
+    }
+    let (iv, rest) = data.split_at(AES_BLOCK_SIZE);
+    let (ciphertext, tag) = rest.split_at(rest.len() - AES_BLOCK_SIZE);
+
+    openssl::symm::decrypt_aead(cipher, key, Some(iv), &[], ciphertext, tag)
+        .map_err(Error::Crypto)
+}
+
 pub mod testing {
     use super::*;
+    use openssl::encrypt::Encrypter;
+    use std::path::Path;
 
     pub(crate) fn rsa_import_pair(
         path: impl AsRef<Path>,
@@ -184,6 +233,67 @@ pub mod testing {
     pub(crate) fn pkey_pub_from_pem(pem: &[u8]) -> Result<PKey<Public>> {
         PKey::<Public>::public_key_from_pem(pem).map_err(Error::Crypto)
     }
+
+    pub(crate) fn rsa_oaep_encrypt(
+        pub_key: &PKey<Public>,
+        data: &[u8],
+    ) -> Result<Vec<u8>> {
+        let mut encrypter = Encrypter::new(pub_key)?;
+
+        encrypter.set_rsa_padding(Padding::PKCS1_OAEP)?;
+        encrypter.set_rsa_mgf1_md(MessageDigest::sha1())?;
+        encrypter.set_rsa_oaep_md(MessageDigest::sha1())?;
+
+        // Create an output buffer
+        let buffer_len = encrypter.encrypt_len(data)?;
+        let mut encrypted = vec![0; buffer_len];
+
+        // Encrypt and truncate the buffer
+        let encrypted_len = encrypter.encrypt(data, &mut encrypted)?;
+        encrypted.truncate(encrypted_len);
+
+        Ok(encrypted)
+    }
+
+    pub(crate) fn encrypt_aead(
+        key: &[u8],
+        iv: &[u8],
+        data: &[u8],
+    ) -> Result<Vec<u8>> {
+        let cipher = match key.len() {
+            AES_128_KEY_LEN => Cipher::aes_128_gcm(),
+            AES_256_KEY_LEN => Cipher::aes_256_gcm(),
+            other => {
+                return Err(Error::Other(format!(
+                    "key length {} does not correspond to valid GCM cipher",
+                    other
+                )))
+            }
+        };
+        if iv.len() != AES_BLOCK_SIZE {
+            return Err(Error::Other(format!(
+                "IV length {} does not correspond to valid GCM cipher {}",
+                iv.len(),
+                AES_BLOCK_SIZE
+            )));
+        }
+        let mut tag = vec![0u8; AES_BLOCK_SIZE];
+        let ciphertext = openssl::symm::encrypt_aead(
+            cipher,
+            key,
+            Some(iv),
+            &[],
+            data,
+            &mut tag,
+        )
+        .map_err(Error::Crypto)?;
+        let mut result =
+            Vec::with_capacity(iv.len() + ciphertext.len() + tag.len());
+        result.extend(iv);
+        result.extend(ciphertext);
+        result.extend(tag);
+        Ok(result)
+    }
 }
 
 // Unit Testing
@@ -191,13 +301,16 @@ pub mod testing {
 mod tests {
     use super::*;
     use openssl::rsa::Rsa;
+    use std::path::Path;
+    use testing::{encrypt_aead, rsa_import_pair, rsa_oaep_encrypt};
 
     // compare with the result from python output
     #[test]
-    fn test_do_hmac() {
+    fn test_compute_hmac() {
         let key = String::from("mysecret");
         let message = String::from("hellothere");
-        let mac = do_hmac(key, message);
+        let mac =
+            compute_hmac(key.as_bytes(), message.as_bytes()).map(hex::encode);
         assert_eq!(
             format!(
                 "{}{}",
@@ -225,23 +338,118 @@ mod tests {
     #[test]
     fn test_hmac_verification() {
         // Generate a keypair
-        let keypair = Rsa::generate(2048).unwrap(); //#[allow_ci]
-        let keypair = PKey::from_rsa(keypair).unwrap(); //#[allow_ci]
+        let (pub_key, priv_key) = rsa_generate_pair(2048).unwrap(); //#[allow_ci]
         let data = b"hello, world!";
         let data2 = b"hola, mundo!";
 
         // Sign the data
         let mut signer =
-            Signer::new(MessageDigest::sha256(), &keypair).unwrap(); //#[allow_ci]
+            Signer::new(MessageDigest::sha256(), &priv_key).unwrap(); //#[allow_ci]
         signer.update(data).unwrap(); //#[allow_ci]
         signer.update(data2).unwrap(); //#[allow_ci]
         let signature = signer.sign_to_vec().unwrap(); //#[allow_ci]
 
         // Verify the data
         let mut verifier =
-            Verifier::new(MessageDigest::sha256(), &keypair).unwrap(); //#[allow_ci]
+            Verifier::new(MessageDigest::sha256(), &pub_key).unwrap(); //#[allow_ci]
         verifier.update(data).unwrap(); //#[allow_ci]
         verifier.update(data2).unwrap(); //#[allow_ci]
         assert!(verifier.verify(&signature).unwrap()); //#[allow_ci]
+    }
+
+    #[test]
+    fn test_rsa_oaep() {
+        // Import a keypair
+        let rsa_key_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("test-data")
+            .join("test-rsa.pem");
+
+        let (pub_key, priv_key) = rsa_import_pair(&rsa_key_path)
+            .expect("unable to import RSA key pair");
+        let plaintext = b"0123456789012345";
+        let ciphertext = rsa_oaep_encrypt(&pub_key, &plaintext[..])
+            .expect("unable to encrypt");
+
+        // We can't check against the fixed ciphertext, as OAEP
+        // involves randomness. Check with a round-trip instead.
+        let decrypted = rsa_oaep_decrypt(&priv_key, &ciphertext[..])
+            .expect("unable to decrypt");
+        assert_eq!(decrypted, plaintext);
+    }
+
+    #[test]
+    fn test_encrypt_aead_short() {
+        let key = b"0123456789012345";
+        let iv = b"ABCDEFGHIJKLMNOP";
+        let plaintext = b"test string, longer than the block size";
+        let ciphertext = encrypt_aead(&key[..], &iv[..], &plaintext[..])
+            .expect("unable to encrypt");
+        let expected = hex::decode("4142434445464748494A4B4C4D4E4F50B2198661586C9839CCDD0B1D5B4FF92FA9C0E6477C4E8E42C19ACD9E8061DD1E759401337DA285A70580E6A2E10B5D3A09994F46D90AB6").unwrap(); //#[allow_ci]
+        assert_eq!(ciphertext, expected);
+    }
+
+    #[test]
+    fn test_decrypt_aead_short() {
+        let key = b"0123456789012345";
+        let ciphertext = hex::decode("4142434445464748494A4B4C4D4E4F50B2198661586C9839CCDD0B1D5B4FF92FA9C0E6477C4E8E42C19ACD9E8061DD1E759401337DA285A70580E6A2E10B5D3A09994F46D90AB6").unwrap(); //#[allow_ci]
+        let plaintext = decrypt_aead(&key[..], &ciphertext[..])
+            .expect("unable to decrypt");
+        let expected = b"test string, longer than the block size";
+        assert_eq!(plaintext, expected);
+    }
+
+    #[test]
+    fn test_encrypt_aead_long() {
+        let key = b"01234567890123450123456789012345";
+        let iv = b"ABCDEFGHIJKLMNOP";
+        let plaintext = b"test string, longer than the block size";
+        let ciphertext = encrypt_aead(&key[..], &iv[..], &plaintext[..])
+            .expect("unable to encrypt");
+        let expected = hex::decode("4142434445464748494A4B4C4D4E4F50FCE7CA78C08FB1D5E04DB3C4AA6B6ED2F09C4AD7985BD1DB9FF15F9FDA869D0C01B27FF4618737BB53C84D256455AAB53B9AC7EAF88C4B").unwrap(); //#[allow_ci]
+        assert_eq!(ciphertext, expected);
+    }
+
+    #[test]
+    fn test_decrypt_aead_long() {
+        let key = b"01234567890123450123456789012345";
+        let ciphertext = hex::decode("4142434445464748494A4B4C4D4E4F50FCE7CA78C08FB1D5E04DB3C4AA6B6ED2F09C4AD7985BD1DB9FF15F9FDA869D0C01B27FF4618737BB53C84D256455AAB53B9AC7EAF88C4B").unwrap(); //#[allow_ci]
+        let plaintext = decrypt_aead(&key[..], &ciphertext[..])
+            .expect("unable to decrypt");
+        let expected = b"test string, longer than the block size";
+        assert_eq!(plaintext, expected);
+    }
+
+    #[test]
+    fn test_encrypt_aead_invalid_key_length() {
+        let key = b"0123456789012345012345678901234";
+        let iv = b"ABCDEFGHIJKLMNOP";
+        let plaintext = b"test string, longer than the block size";
+        let result = encrypt_aead(&key[..], &iv[..], &plaintext[..]);
+        assert!(matches!(result, Err(_)));
+    }
+
+    #[test]
+    fn test_encrypt_aead_invalid_iv_length() {
+        let key = b"01234567890123450123456789012345";
+        let iv = b"ABCDEFGHIJKLMN";
+        let plaintext = b"test string, longer than the block size";
+        let result = encrypt_aead(&key[..], &iv[..], &plaintext[..]);
+        assert!(matches!(result, Err(_)));
+    }
+
+    #[test]
+    fn test_decrypt_aead_invalid_key_length() {
+        let key = b"0123456789012345012345678901234";
+        let ciphertext = hex::decode("4142434445464748494A4B4C4D4E4F50FCE7CA78C08FB1D5E04DB3C4AA6B6ED2F09C4AD7985BD1DB9FF15F9FDA869D0C01B27FF4618737BB53C84D256455AAB53B9AC7EAF88C4B").unwrap(); //#[allow_ci]
+        let result = decrypt_aead(&key[..], &ciphertext[..]);
+        assert!(matches!(result, Err(_)));
+    }
+
+    #[test]
+    fn test_decrypt_aead_invalid_ciphertext_length() {
+        let key = b"0123456789012345";
+        let ciphertext = hex::decode("41424344").unwrap(); //#[allow_ci]
+        let result = decrypt_aead(&key[..], &ciphertext[..]);
+        assert!(matches!(result, Err(Error::InvalidRequest)));
     }
 }

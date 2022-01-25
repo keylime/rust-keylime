@@ -12,9 +12,8 @@ use crate::secure_mount;
 use std::convert::TryInto;
 use std::io::Write;
 use std::path::Path;
-use std::process::{Child, Command, Output, Stdio};
+use std::process::{Command, Output, Stdio};
 
-use openssl::pkey::PKey;
 use serde_json::Value;
 
 /// Runs a script with a json value as argument (used for revocation actions)
@@ -32,17 +31,17 @@ pub(crate) fn run_action(
         .stderr(Stdio::piped())
         .spawn()?;
 
-    child
-        .stdin
-        .as_mut()
-        .unwrap_or_else(|| {
-            panic!( //#[allow_ci]
-            "unable to get mut ref to child stdin in {}",
-            script
-        )
-        })
-        .write_all(raw_json.get().as_bytes());
+    let child_ref_mut = match child.stdin.as_mut() {
+        Some(c) => c,
+        None => {
+            return Err(Error::Other(format!(
+                "unable to get mut ref to child stdin in {}",
+                script
+            )));
+        }
+    };
 
+    child_ref_mut.write_all(raw_json.get().as_bytes());
     let output = child.wait_with_output()?;
 
     if !output.status.success() {

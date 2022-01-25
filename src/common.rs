@@ -47,58 +47,54 @@ pub static MOUNT_SECURE: bool = false;
 
 pub const AGENT_UUID_LEN: usize = 36;
 pub const AUTH_TAG_LEN: usize = 96;
-pub const KEY_LEN: usize = 32;
+pub const AES_128_KEY_LEN: usize = 16;
+pub const AES_256_KEY_LEN: usize = 32;
 pub const AES_BLOCK_SIZE: usize = 16;
 
-// symmetric keys as bytes
-pub type KeyBytes = [u8; KEY_LEN];
-
 // a vector holding keys
+pub type KeySet = Vec<SymmKey>;
+
+// a key of len AES_128_KEY_LEN or AES_256_KEY_LEN
 #[derive(Debug, Clone)]
-pub struct KeySet {
-    pub set: Vec<SymmKey>,
-}
-
-impl Default for KeySet {
-    fn default() -> Self {
-        let set = Vec::new();
-        KeySet { set }
-    }
-}
-
-impl KeySet {
-    pub fn all_empty(&self) -> bool {
-        self.set.iter().all(|&key| key.is_empty())
-    }
-
-    pub fn clear(&mut self) {
-        self.set.clear();
-    }
-}
-
-// a key of len KEY_LEN
-#[derive(Debug, Clone, Copy)]
 pub struct SymmKey {
-    pub bytes: KeyBytes,
-}
-
-impl Default for SymmKey {
-    fn default() -> Self {
-        SymmKey {
-            bytes: [0u8; KEY_LEN],
-        }
-    }
+    bytes: Vec<u8>,
 }
 
 impl SymmKey {
-    pub fn is_empty(&self) -> bool {
-        self.bytes == [0u8; KEY_LEN]
+    pub(crate) fn bytes(&self) -> &[u8] {
+        self.bytes.as_slice()
     }
 
-    pub fn from_vec(v: Vec<u8>) -> Self {
-        let mut b = [0u8; KEY_LEN];
-        b.copy_from_slice(&v[..]);
-        SymmKey { bytes: b }
+    pub(crate) fn xor(&self, other: &Self) -> Result<Self> {
+        if self.bytes().len() != other.bytes().len() {
+            return Err(Error::Other(
+                "cannot xor differing length slices".to_string(),
+            ));
+        }
+        let mut outbuf = vec![0u8; self.bytes().len()];
+        for (out, (x, y)) in outbuf
+            .iter_mut()
+            .zip(self.bytes().iter().zip(other.bytes()))
+        {
+            *out = x ^ y;
+        }
+        Ok(Self { bytes: outbuf })
+    }
+}
+
+impl TryFrom<&[u8]> for SymmKey {
+    type Error = String;
+
+    fn try_from(v: &[u8]) -> std::result::Result<Self, Self::Error> {
+        match v.len() {
+            AES_128_KEY_LEN | AES_256_KEY_LEN => {
+                Ok(SymmKey { bytes: v.to_vec() })
+            }
+            other => Err(format!(
+                "key length {} does not correspond to valid GCM cipher",
+                other
+            )),
+        }
     }
 }
 
@@ -132,7 +128,7 @@ impl TpmData {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(crate) struct KeylimeConfig {
     pub agent_ip: String,
     pub agent_port: String,
