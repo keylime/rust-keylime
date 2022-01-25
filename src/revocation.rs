@@ -68,17 +68,18 @@ pub(crate) fn run_revocation_actions(
     pretty_env_logger::init();
 
     #[cfg(test)]
-    let mount = concat!(env!("CARGO_MANIFEST_DIR"), "/tests");
+    let mount = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests");
 
     #[cfg(not(test))]
     let mount = secure_mount::mount(secure_size)?;
-    let unzipped = format!("{}/unzipped", mount);
-    let action_file = format!("{}/unzipped/action_list", mount);
+
+    let unzipped = mount.join("unzipped");
+    let action_file = unzipped.join("action_list");
 
     let mut outputs = Vec::new();
 
-    if Path::new(&action_file).exists() {
-        let action_data = std::fs::read_to_string(action_file)
+    if action_file.exists() {
+        let action_data = std::fs::read_to_string(&action_file)
             .expect("unable to read action_list");
 
         let action_list = action_data
@@ -89,7 +90,7 @@ pub(crate) fn run_revocation_actions(
 
         if !action_list.is_empty() {
             for action in action_list {
-                match run_action(Path::new(&unzipped), action, json.clone()) {
+                match run_action(&unzipped, action, json.clone()) {
                     Ok(output) => {
                         outputs.push(output);
                     }
@@ -182,8 +183,7 @@ pub(crate) async fn run_revocation_service(
             "Loading the revocation certificate from {}",
             revocation_cert_path.display()
         );
-        match crypto::import_x509(revocation_cert_path.display().to_string())
-        {
+        match crypto::import_x509(&revocation_cert_path) {
             Ok(v) => v,
             Err(e) => {
                 return Err(Error::Configuration(String::from(

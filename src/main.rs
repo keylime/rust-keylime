@@ -57,7 +57,7 @@ use std::{
     fs,
     io::{BufReader, Read, Write},
     os::unix::fs::PermissionsExt,
-    path::Path,
+    path::{Path, PathBuf},
     process::{Command, Stdio},
     str::FromStr,
     sync::{Arc, Condvar, Mutex},
@@ -114,18 +114,17 @@ pub(crate) fn decrypt_payload(
 // both.
 pub(crate) fn setup_unzipped(
     config: &KeylimeConfig,
-) -> Result<(String, String, String)> {
+) -> Result<(PathBuf, PathBuf, PathBuf)> {
     let mount = secure_mount::mount(&config.secure_size)?;
-    let unzipped = format!("{}/unzipped", mount);
+    let unzipped = mount.join("unzipped");
 
     // clear any old data
     if Path::new(&unzipped).exists() {
         fs::remove_dir_all(&unzipped)?;
     }
 
-    let dec_payload_path =
-        format!("{}/{}", unzipped, &config.dec_payload_filename);
-    let key_path = format!("{}/{}", unzipped, &config.key_filename);
+    let dec_payload_path = unzipped.join(&config.dec_payload_filename);
+    let key_path = unzipped.join(&config.key_filename);
 
     fs::create_dir(&unzipped)?;
 
@@ -135,9 +134,9 @@ pub(crate) fn setup_unzipped(
 // write symm key data and decrypted payload data out to specified files
 pub(crate) fn write_out_key_and_payload(
     dec_payload: &[u8],
-    dec_payload_path: &str,
+    dec_payload_path: &Path,
     key: &SymmKey,
-    key_path: &str,
+    key_path: &Path,
 ) -> Result<()> {
     let mut key_file = fs::File::create(key_path)?;
     let bytes = key_file.write(key.bytes())?;
@@ -157,27 +156,26 @@ pub(crate) fn write_out_key_and_payload(
 }
 
 // run a script (such as the init script, if any) and check the status
-pub(crate) fn run(dir: &str, script: &str, agent_uuid: &str) -> Result<()> {
-    let script_location = format!("{}/{}", dir, script);
-    info!("Running script: {:?}", script_location);
+pub(crate) fn run(dir: &Path, script: &str, agent_uuid: &str) -> Result<()> {
+    let script_path = dir.join(script);
+    info!("Running script: {:?}", script_path);
 
-    let script_path = Path::new(&script_location);
     if !script_path.exists() {
-        return Err(Error::Other(format!("{} not found", script_location)));
+        return Err(Error::Other(format!("{:?} not found", &script_path)));
     }
 
     if fs::set_permissions(&script_path, fs::Permissions::from_mode(0o700))
         .is_err()
     {
         return Err(Error::Other(format!(
-            "unable to set {} as executable",
-            script_location
+            "unable to set {:?} as executable",
+            &script_path
         )));
     }
 
     match Command::new("sh")
         .arg("-c")
-        .arg(&script_location)
+        .arg(script_path.to_str().unwrap()) //#[allow_ci]
         .current_dir(dir)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -185,12 +183,12 @@ pub(crate) fn run(dir: &str, script: &str, agent_uuid: &str) -> Result<()> {
         .status()
     {
         Ok(_) => {
-            info!("{:?} ran successfully", script_location);
+            info!("{:?} ran successfully", &script_path);
             Ok(())
         }
         Err(e) => Err(Error::Other(format!(
             "{:?} failed during run: {}",
-            script_location, e
+            &script_path, e
         ))),
     }
 }
@@ -198,18 +196,17 @@ pub(crate) fn run(dir: &str, script: &str, agent_uuid: &str) -> Result<()> {
 // checks if keylime.conf indicates the payload should be unzipped, and does so if needed.
 // the input string is the directory where the unzipped file(s) should be stored.
 pub(crate) fn optional_unzip_payload(
-    unzipped: &str,
+    unzipped: &Path,
     config: &KeylimeConfig,
 ) -> Result<()> {
     if config.extract_payload_zip {
         let zipped_payload = &config.dec_payload_filename;
-        let zipped_payload_path = format!("{}/{}", unzipped, zipped_payload);
+        let zipped_payload_path = unzipped.join(zipped_payload);
 
-        info!("Unzipping payload {} to {}", &zipped_payload, &unzipped);
+        info!("Unzipping payload {} to {:?}", &zipped_payload, unzipped);
 
         let mut source = fs::File::open(&zipped_payload_path)?;
-        let dest = Path::new(&unzipped);
-        uncompress_archive(&mut source, dest, Ownership::Preserve)?;
+        uncompress_archive(&mut source, unzipped, Ownership::Preserve)?;
     }
 
     Ok(())
@@ -568,7 +565,7 @@ echo hello > test-output
             let _ = script_file.write(script.as_bytes()).unwrap(); //#[allow_ci]
         }
         run(
-            dir.path().to_str().unwrap(), //#[allow_ci]
+            dir.path(),
             script_path.file_name().unwrap().to_str().unwrap(), //#[allow_ci]
             "D432FBB3-D2F1-4A97-9EF7-75BD81C0000X",
         )

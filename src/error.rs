@@ -67,6 +67,8 @@ pub(crate) enum Error {
     Algorithm(#[from] algorithms::AlgorithmError),
     #[error("Error converting number: {0}")]
     TryFromInt(#[from] std::num::TryFromIntError),
+    #[error("C string is not NUL-terminated: {0}")]
+    Nul(#[from] std::ffi::NulError),
     #[error("{0}")]
     Other(String),
 }

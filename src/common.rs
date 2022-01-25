@@ -10,6 +10,7 @@ use std::convert::TryFrom;
 use std::env;
 use std::ffi::CString;
 use std::fs::File;
+use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use tss_esapi::{structures::PcrSlot, utils::TpmsContext};
@@ -405,31 +406,28 @@ fn config_get_env(section: &str, key: &str, env: &str) -> Result<String> {
 
 /*
  * Input: path directory to be changed owner to root
- * Return: Result contains execution result
- *         - directory name for successful execution
- *         - -1 code for failure execution.
  *
  * If privilege requirement is met, change the owner of the path to root
  * This function is unsafely using libc. Result is returned indicating
  * execution result.
  */
-pub(crate) fn chownroot(path: String) -> Result<String> {
+pub(crate) fn chownroot(path: &Path) -> Result<()> {
     unsafe {
         // check privilege
         if libc::geteuid() != 0 {
-            error!("Privilege level unable to change ownership to root for file: {}", path);
+            error!("Privilege level unable to change ownership to root for file: {:?}", &path);
             return Err(Error::Permission);
         }
 
         // change directory owner to root
-        let c_path = CString::new(path.as_bytes()).unwrap(); //#[allow_ci]
+        let c_path = CString::new(path.as_os_str().as_bytes())?;
         if libc::chown(c_path.as_ptr(), 0, 0) != 0 {
-            error!("Failed to change file {} owner.", path);
+            error!("Failed to change file {:?} owner.", &path);
             return Err(Error::Permission);
         }
 
-        info!("Changed file {} owner to root.", path);
-        Ok(path)
+        info!("Changed file {:?} owner to root.", &path);
+        Ok(())
     }
 }
 
