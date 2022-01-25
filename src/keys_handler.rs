@@ -1,64 +1,26 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2021 Keylime Authors
 
+use crate::crypto;
 use crate::{
-    common::{
-        KeySet, SymmKey, AES_BLOCK_SIZE, AGENT_UUID_LEN, AUTH_TAG_LEN,
-        KEY_LEN,
-    },
+    common::{KeySet, SymmKey, AES_BLOCK_SIZE, AGENT_UUID_LEN, AUTH_TAG_LEN},
     Error, QuoteData, Result,
 };
 use actix_web::{web, HttpRequest, HttpResponse, Responder};
-use json::parse;
 use log::*;
-use openssl::{
-    encrypt::Decrypter,
-    hash::MessageDigest,
-    memcmp,
-    pkey::{PKey, Private},
-    rsa::Padding,
-    sign::Signer,
-};
-use serde::Deserialize;
-use std::sync::Mutex;
+use serde::{Deserialize, Serialize};
+use std::convert::TryInto;
 
-// Helper function for combining U and V keys and storing output to a buffer.
-pub(crate) fn xor_to_outbuf(
-    outbuf: &mut [u8],
-    a: &[u8],
-    b: &[u8],
-) -> Result<()> {
-    if a.len() != b.len() {
-        return Err(Error::Other(
-            "cannot xor differing length slices".to_string(),
-        ));
-    }
-    for (out, (x, y)) in outbuf.iter_mut().zip(a.iter().zip(b)) {
-        *out = *x ^ *y;
-    }
-
-    Ok(())
+#[derive(Serialize, Deserialize, Debug)]
+pub struct KeylimeUKey {
+    auth_tag: String,
+    encrypted_key: String,
+    payload: Option<String>,
 }
 
-// Computes HMAC over agent UUID with provided key (payload decryption key) and
-// checks that this matches the provided auth_tag.
-pub(crate) fn check_hmac(
-    key: &SymmKey,
-    uuid: &[u8],
-    auth_tag: &[u8; AUTH_TAG_LEN],
-) -> Result<()> {
-    let pkey = PKey::hmac(&key.bytes)?;
-    let mut signer = Signer::new(MessageDigest::sha384(), &pkey)?;
-    signer.update(uuid)?;
-    let hmac = signer.sign_to_vec()?;
-
-    let auth_tag = hex::decode(auth_tag)?;
-    if !memcmp::eq(&hmac, &auth_tag) {
-        return Err(Error::Other("hmac check failed".to_string()));
-    }
-
-    info!("HMAC check passed");
-    Ok(())
+#[derive(Serialize, Deserialize, Debug)]
+pub struct KeylimeVKey {
+    encrypted_key: String,
 }
 
 // Attempt to combine U and V keys into the payload decryption key. An HMAC over
@@ -68,35 +30,35 @@ pub(crate) fn check_hmac(
 pub(crate) fn try_combine_keys(
     keyset1: &mut KeySet,
     keyset2: &mut KeySet,
-    symm_key_out: &mut SymmKey,
     uuid: &[u8],
     auth_tag: &[u8; AUTH_TAG_LEN],
-) -> Result<Option<()>> {
+) -> Result<Option<SymmKey>> {
     // U, V keys and auth_tag must be present for this to succeed
-    if keyset1.all_empty()
-        || keyset2.all_empty()
+    if keyset1.is_empty()
+        || keyset2.is_empty()
         || auth_tag == &[0u8; AUTH_TAG_LEN]
     {
         debug!("Still waiting on u or v key or auth_tag");
         return Ok(None);
     }
 
-    for key1 in &keyset1.set {
-        for key2 in &keyset2.set {
-            xor_to_outbuf(
-                &mut symm_key_out.bytes[..],
-                &key1.bytes[..],
-                &key2.bytes[..],
-            );
+    for key1 in keyset1.iter() {
+        for key2 in keyset2.iter() {
+            let symm_key_out = key1.xor(key2)?;
 
-            if let Ok(()) = check_hmac(symm_key_out, uuid, auth_tag) {
+            // Computes HMAC over agent UUID with provided key (payload decryption key) and
+            // checks that this matches the provided auth_tag.
+            let auth_tag = hex::decode(auth_tag)?;
+            if crypto::verify_hmac(symm_key_out.bytes(), uuid, &auth_tag)
+                .is_ok()
+            {
                 info!(
                     "Successfully derived symmetric payload decryption key"
                 );
 
                 keyset1.clear();
                 keyset2.clear();
-                return Ok(Some(()));
+                return Ok(Some(symm_key_out));
             }
         }
     }
@@ -106,128 +68,112 @@ pub(crate) fn try_combine_keys(
     ))
 }
 
-// Uses NK (key for encrypting data from verifier or tenant to agent in transit) to
-// decrypt U and V keys, which will be combined into one key that can decrypt the
-// payload.
-//
-// Reference:
-// https://github.com/keylime/keylime/blob/f3c31b411dd3dd971fd9d614a39a150655c6797c/ \
-// keylime/crypto.py#L118
-pub(crate) fn decrypt_u_or_v_key(
-    nk_priv: &PKey<Private>,
-    encrypted_key: Vec<u8>,
-) -> Result<Vec<u8>> {
-    let mut decrypter = Decrypter::new(nk_priv)?;
-
-    decrypter.set_rsa_padding(Padding::PKCS1_OAEP)?;
-    decrypter.set_rsa_mgf1_md(MessageDigest::sha1())?;
-    decrypter.set_rsa_oaep_md(MessageDigest::sha1())?;
-
-    // Create an output buffer
-    let buffer_len = decrypter.decrypt_len(&encrypted_key)?;
-    let mut decrypted = vec![0; buffer_len];
-
-    // Decrypt and truncate the buffer
-    let decrypted_len = decrypter.decrypt(&encrypted_key, &mut decrypted)?;
-    decrypted.truncate(decrypted_len);
-
-    Ok(decrypted)
-}
-
-// struct to hold data and keep track of whether we are processing a u
-// or v key
-pub(crate) struct CurrentKeyInfo<'a> {
-    current_keyset: &'a Mutex<KeySet>,
-    other_keyset: &'a Mutex<KeySet>,
-    keyname: String,
-}
-
-impl<'a> CurrentKeyInfo<'a> {
-    fn new(
-        current_keyset: &'a Mutex<KeySet>,
-        other_keyset: &'a Mutex<KeySet>,
-        keyname: String,
-    ) -> Self {
-        CurrentKeyInfo {
-            current_keyset,
-            other_keyset,
-            keyname,
-        }
-    }
-}
-
-// Returns a reference to the U key or the V key in the app data.
-pub(crate) fn find_keytype<'a>(
-    req: &HttpRequest,
-    u: &'a Mutex<KeySet>,
-    v: &'a Mutex<KeySet>,
-) -> Result<CurrentKeyInfo<'a>> {
-    if req.path().contains("ukey") {
-        info!("Received ukey");
-        Ok(CurrentKeyInfo::new(u, v, "ukey".into()))
-    } else if req.path().contains("vkey") {
-        info!("Received vkey");
-        Ok(CurrentKeyInfo::new(v, u, "vkey".into()))
-    } else {
-        Err(Error::Other("request to keys handler contained neither ukey nor vkey key word".to_string()))
-    }
-}
-
-// b64 decode and remove quotation marks
-pub(crate) fn decode_data(data: &mut String) -> Result<Vec<u8>> {
-    let data = data.replace("\"", "");
-    base64::decode(&data).map_err(Error::from)
-}
-
-pub async fn u_or_v_key(
+// We can't simply accept payload as web::Json<KeylimeUKey>, as the
+// Content-Type header is currently missing, which is required by
+// actix-web 3:
+// https://github.com/actix/actix-web/blob/web-v3.3.3/src/types/json.rs#L339
+pub async fn u_key(
     body: web::Bytes,
     req: HttpRequest,
     quote_data: web::Data<QuoteData>,
 ) -> impl Responder {
-    // determine if the key is the u or the v key
-    let curr_key_info =
-        find_keytype(&req, &quote_data.ukeys, &quote_data.vkeys)?;
+    info!("Received ukey");
+
+    let key: KeylimeUKey = serde_json::from_slice(&body.to_vec())?;
 
     // must unwrap when using lock
     // https://github.com/rust-lang-nursery/failure/issues/192
-    let mut global_current_keyset =
-        curr_key_info.current_keyset.lock().unwrap(); //#[allow_ci]
-    let mut global_other_keyset = curr_key_info.other_keyset.lock().unwrap(); //#[allow_ci]
+    let mut global_current_keyset = quote_data.ukeys.lock().unwrap(); //#[allow_ci]
+    let mut global_other_keyset = quote_data.vkeys.lock().unwrap(); //#[allow_ci]
     let mut global_symm_key = quote_data.payload_symm_key.lock().unwrap(); //#[allow_ci]
     let mut global_encr_payload = quote_data.encr_payload.lock().unwrap(); //#[allow_ci]
     let mut global_auth_tag = quote_data.auth_tag.lock().unwrap(); //#[allow_ci]
 
-    let json_body =
-        parse(&String::from_utf8(body.to_vec()).map_err(Error::from)?)
-            .map_err(Error::from)?;
-
     // get key and decode it from web data
-    let encrypted_key = decode_data(&mut json_body["encrypted_key"].dump())?;
+    let encrypted_key =
+        base64::decode(&key.encrypted_key).map_err(Error::from)?;
+    // Uses NK (key for encrypting data from verifier or tenant to agent in transit) to
+    // decrypt U and V keys, which will be combined into one key that can decrypt the
+    // payload.
+    //
+    // Reference:
+    // https://github.com/keylime/keylime/blob/f3c31b411dd3dd971fd9d614a39a150655c6797c/ \
+    // keylime/crypto.py#L118
     let decrypted_key =
-        decrypt_u_or_v_key(&quote_data.priv_key, encrypted_key)?;
+        crypto::rsa_oaep_decrypt(&quote_data.priv_key, &encrypted_key)?;
 
-    global_current_keyset
-        .set
-        .push(SymmKey::from_vec(decrypted_key));
+    let decrypted_key: SymmKey = decrypted_key.as_slice().try_into().unwrap(); //#[allow_ci]
 
-    // only ukey POSTs from tenant have payload and auth_tag data
-    if curr_key_info.keyname == "ukey" {
-        // note: the auth_tag shouldn't be base64 decoded here
-        let mut auth_tag = json_body["auth_tag"].dump();
-        let auth_tag = auth_tag.replace("\"", "");
-        global_auth_tag.copy_from_slice(&auth_tag.into_bytes()[..]);
+    global_current_keyset.push(decrypted_key);
 
-        let encr_payload = decode_data(&mut json_body["payload"].dump())?;
+    // note: the auth_tag shouldn't be base64 decoded here
+    global_auth_tag.copy_from_slice(key.auth_tag.as_bytes());
+
+    if let Some(payload) = &key.payload {
+        let encr_payload = base64::decode(&payload).map_err(Error::from)?;
         global_encr_payload.extend(encr_payload.iter());
     }
 
-    let _ = try_combine_keys(
+    if let Some(symm_key) = try_combine_keys(
         &mut global_current_keyset,
         &mut global_other_keyset,
-        &mut global_symm_key,
         quote_data.agent_uuid.as_bytes(),
         &global_auth_tag,
-    )?;
+    )? {
+        let _ = global_symm_key.replace(symm_key);
+        quote_data.payload_symm_key_cvar.notify_one();
+    }
+
+    HttpResponse::Ok().await
+}
+
+// We can't simply accept payload as web::Json<KeylimeVKey>, as the
+// Content-Type header is currently missing, which is required by
+// actix-web 3:
+// https://github.com/actix/actix-web/blob/web-v3.3.3/src/types/json.rs#L339
+pub async fn v_key(
+    body: web::Bytes,
+    req: HttpRequest,
+    quote_data: web::Data<QuoteData>,
+) -> impl Responder {
+    info!("Received vkey");
+
+    let key: KeylimeVKey = serde_json::from_slice(&body.to_vec())?;
+
+    // must unwrap when using lock
+    // https://github.com/rust-lang-nursery/failure/issues/192
+    let mut global_current_keyset = quote_data.vkeys.lock().unwrap(); //#[allow_ci]
+    let mut global_other_keyset = quote_data.ukeys.lock().unwrap(); //#[allow_ci]
+    let mut global_symm_key = quote_data.payload_symm_key.lock().unwrap(); //#[allow_ci]
+    let mut global_encr_payload = quote_data.encr_payload.lock().unwrap(); //#[allow_ci]
+    let mut global_auth_tag = quote_data.auth_tag.lock().unwrap(); //#[allow_ci]
+
+    // get key and decode it from web data
+    let encrypted_key =
+        base64::decode(&key.encrypted_key).map_err(Error::from)?;
+    // Uses NK (key for encrypting data from verifier or tenant to agent in transit) to
+    // decrypt U and V keys, which will be combined into one key that can decrypt the
+    // payload.
+    //
+    // Reference:
+    // https://github.com/keylime/keylime/blob/f3c31b411dd3dd971fd9d614a39a150655c6797c/ \
+    // keylime/crypto.py#L118
+    let decrypted_key =
+        crypto::rsa_oaep_decrypt(&quote_data.priv_key, &encrypted_key)?;
+
+    let decrypted_key: SymmKey = decrypted_key.as_slice().try_into().unwrap(); //#[allow_ci]
+
+    global_current_keyset.push(decrypted_key);
+
+    if let Some(symm_key) = try_combine_keys(
+        &mut global_current_keyset,
+        &mut global_other_keyset,
+        quote_data.agent_uuid.as_bytes(),
+        &global_auth_tag,
+    )? {
+        let _ = global_symm_key.replace(symm_key);
+        quote_data.payload_symm_key_cvar.notify_one();
+    }
 
     HttpResponse::Ok().await
 }
@@ -235,33 +181,25 @@ pub async fn u_or_v_key(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::common::{KeylimeConfig, API_VERSION, KEY_LEN};
-    use actix_web::{http::StatusCode, test, web, App};
+    use crate::common::{
+        KeylimeConfig, AES_128_KEY_LEN, AES_256_KEY_LEN, API_VERSION,
+    };
+    use crate::crypto::compute_hmac;
+    #[cfg(feature = "testing")]
+    use crate::crypto::testing::{encrypt_aead, rsa_oaep_encrypt};
+    use actix_rt::Arbiter;
+    use actix_web::{test, web, App};
     use openssl::{
-        encrypt::Encrypter,
-        hash::MessageDigest,
-        memcmp,
-        pkey::{PKey, Private},
-        rsa::Padding,
+        encrypt::Encrypter, hash::MessageDigest, pkey::PKey, rsa::Padding,
         sign::Signer,
     };
-    use serde::{Deserialize, Serialize};
-
-    #[derive(Serialize, Deserialize, Debug)]
-    struct KeylimeUKey {
-        auth_tag: String,
-        encrypted_key: String,
-        payload: Option<String>,
-    }
-
-    #[derive(Serialize, Deserialize, Debug)]
-    struct KeylimeVKey {
-        encrypted_key: String,
-    }
+    use std::env;
+    use std::fs;
+    use std::path::Path;
+    use std::sync::Arc;
 
     #[cfg(feature = "testing")]
-    #[actix_rt::test]
-    async fn test_u_or_v_key() {
+    async fn test_u_or_v_key(key_len: usize, payload: Option<&[u8]>) {
         let test_config = KeylimeConfig::default();
         let quotedata = web::Data::new(QuoteData::fixture().unwrap()); //#[allow_ci]
         let mut app = test::init_service(
@@ -269,40 +207,64 @@ mod tests {
                 .app_data(quotedata.clone())
                 .route(
                     &format!("/{}/keys/ukey", API_VERSION),
-                    web::post().to(u_or_v_key),
+                    web::post().to(u_key),
                 )
                 .route(
                     &format!("/{}/keys/vkey", API_VERSION),
-                    web::post().to(u_or_v_key),
+                    web::post().to(v_key),
                 ),
         )
         .await;
 
-        let mut encrypter = Encrypter::new(&quotedata.pub_key).unwrap(); //#[allow_ci]
+        let arbiter = Arbiter::new();
 
-        encrypter.set_rsa_padding(Padding::PKCS1_OAEP).unwrap(); //#[allow_ci]
-        encrypter.set_rsa_mgf1_md(MessageDigest::sha1()).unwrap(); //#[allow_ci]
-        encrypter.set_rsa_oaep_md(MessageDigest::sha1()).unwrap(); //#[allow_ci]
+        let payload_symm_key_clone = Arc::clone(&quotedata.payload_symm_key);
+        let payload_symm_key_cvar_clone =
+            Arc::clone(&quotedata.payload_symm_key_cvar);
+        let encr_payload_clone = Arc::clone(&quotedata.encr_payload);
+        let test_config_clone = test_config.clone();
 
-        let u: &[u8; KEY_LEN] = b"01234567890123456789012345678901";
-        let v: &[u8; KEY_LEN] = b"ABCDEFGHIJABCDEFGHIJABCDEFGHIJAB";
-        let mut k = vec![0u8; KEY_LEN];
-        xor_to_outbuf(&mut k, u, v).unwrap(); //#[allow_ci]
+        assert!(arbiter.spawn(Box::pin(async move {
+            if crate::run_encrypted_payload(
+                payload_symm_key_clone,
+                payload_symm_key_cvar_clone,
+                encr_payload_clone,
+                &test_config_clone,
+            )
+            .await
+            .is_err()
+            {
+                debug!("payload run failed");
+            }
+            if !Arbiter::current().stop() {
+                debug!("couldn't stop current arbiter");
+            }
+        })));
 
-        let buffer_len = encrypter.encrypt_len(u).unwrap(); //#[allow_ci]
-        let mut encrypted_key = vec![0; buffer_len];
-        let encrypted_len = encrypter.encrypt(u, &mut encrypted_key).unwrap(); //#[allow_ci]
-        encrypted_key.truncate(encrypted_len);
+        // Enough length for testing both AES-128 and AES-256
+        const U: &[u8; AES_256_KEY_LEN] = b"01234567890123456789012345678901";
+        const V: &[u8; AES_256_KEY_LEN] = b"ABCDEFGHIJABCDEFGHIJABCDEFGHIJAB";
 
-        let pkey = PKey::hmac(&k).unwrap(); //#[allow_ci]
-        let mut signer = Signer::new(MessageDigest::sha384(), &pkey).unwrap(); //#[allow_ci]
-        signer.update(test_config.agent_uuid.as_bytes()).unwrap(); //#[allow_ci]
-        let auth_tag = signer.sign_to_vec().unwrap(); //#[allow_ci]
+        let u: SymmKey = U[..key_len][..].try_into().unwrap(); //#[allow_ci]
+        let v: SymmKey = V[..key_len][..].try_into().unwrap(); //#[allow_ci]
+        let k = u.xor(&v).unwrap(); //#[allow_ci]
+
+        let payload = payload.map(|payload| {
+            let iv = b"ABCDEFGHIJKLMNOP";
+            encrypt_aead(k.bytes(), &iv[..], payload).unwrap() //#[allow_ci]
+        });
+
+        let encrypted_key =
+            rsa_oaep_encrypt(&quotedata.pub_key, u.bytes()).unwrap(); //#[allow_ci]
+
+        let auth_tag =
+            compute_hmac(k.bytes(), test_config.agent_uuid.as_bytes())
+                .unwrap(); //#[allow_ci]
 
         let ukey = KeylimeUKey {
             encrypted_key: base64::encode(&encrypted_key),
             auth_tag: hex::encode(auth_tag),
-            payload: None,
+            payload: payload.map(base64::encode),
         };
 
         let req = test::TestRequest::post()
@@ -313,10 +275,8 @@ mod tests {
         let resp = test::call_service(&mut app, req).await;
         assert!(resp.status().is_success());
 
-        let buffer_len = encrypter.encrypt_len(v).unwrap(); //#[allow_ci]
-        let mut encrypted_key = vec![0; buffer_len];
-        let encrypted_len = encrypter.encrypt(v, &mut encrypted_key).unwrap(); //#[allow_ci]
-        encrypted_key.truncate(encrypted_len);
+        let encrypted_key =
+            rsa_oaep_encrypt(&quotedata.pub_key, v.bytes()).unwrap(); //#[allow_ci]
 
         let vkey = KeylimeVKey {
             encrypted_key: base64::encode(&encrypted_key),
@@ -330,8 +290,39 @@ mod tests {
         let resp = test::call_service(&mut app, req).await;
         assert!(resp.status().is_success());
 
-        let key = quotedata.payload_symm_key.lock().unwrap(); //#[allow_ci]
-        assert!(!key.is_empty());
-        assert_eq!(key.bytes, k.as_slice());
+        {
+            let key = quotedata.payload_symm_key.lock().unwrap(); //#[allow_ci]
+            assert!(key.is_some());
+            assert_eq!(key.as_ref().unwrap().bytes(), k.bytes()); //#[allow_ci]
+        }
+
+        arbiter.join();
+    }
+
+    #[cfg(feature = "testing")]
+    #[actix_rt::test]
+    async fn test_u_or_v_key_short() {
+        test_u_or_v_key(AES_128_KEY_LEN, None).await;
+    }
+
+    #[cfg(feature = "testing")]
+    #[actix_rt::test]
+    async fn test_u_or_v_key_long() {
+        test_u_or_v_key(AES_128_KEY_LEN, None).await;
+    }
+
+    #[cfg(feature = "testing")]
+    #[actix_rt::test]
+    async fn test_u_or_v_key_with_payload() {
+        let payload_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("test-data")
+            .join("payload.zip");
+        let payload =
+            fs::read(&payload_path).expect("unable to read payload");
+        let dir = tempfile::tempdir().unwrap(); //#[allow_ci]
+        env::set_var("KEYLIME_TEST_DIR", dir.path());
+        test_u_or_v_key(AES_128_KEY_LEN, Some(payload.as_slice())).await;
+        let timestamp_path = dir.path().join("timestamp");
+        assert!(timestamp_path.exists());
     }
 }

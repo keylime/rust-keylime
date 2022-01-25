@@ -32,6 +32,7 @@ echo "-------- Building"
 RUST_BACKTRACE=1 cargo build
 
 echo "-------- Testing"
+mkdir -p /var/lib/keylime
 TCTI=tabrmd:bus_type=session RUST_BACKTRACE=1 RUST_LOG=info \
 KEYLIME_CONFIG=$PWD/keylime.conf \
 cargo test --features testing -- --nocapture

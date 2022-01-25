@@ -4,8 +4,7 @@
 use crate::algorithms;
 use thiserror::Error;
 use tss_esapi::{
-    constants::response_code::Tss2ResponseCodeKind,
-    Error::{Tss2Error, WrapperError},
+    constants::response_code::Tss2ResponseCodeKind, Error::Tss2Error,
 };
 
 #[derive(Error, Debug)]
@@ -58,8 +57,6 @@ pub(crate) enum Error {
     Crypto(#[from] openssl::error::ErrorStack),
     #[error("ZMQ error: {0}")]
     Zmq(#[from] zmq::Error),
-    #[error("Json error: {0}")]
-    Json(#[from] json::Error),
     #[error("base64 decode error: {0}")]
     Base64(#[from] base64::DecodeError),
     #[error("parse bool error: {0}")]
