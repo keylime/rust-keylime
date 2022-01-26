@@ -112,7 +112,7 @@ pub(crate) fn create_ek(
 macro_rules! create_marshal_fn {
     ($func:ident, $tpmobj:ty, $marshal:ident) => {
         fn $func(t: $tpmobj) -> Vec<u8> {
-            let mut offset = 0u64;
+            let mut offset = 0;
             let size = std::mem::size_of::<$tpmobj>();
 
             let mut tpm_vec = Vec::with_capacity(size);
@@ -120,7 +120,7 @@ macro_rules! create_marshal_fn {
                 let res = $marshal(
                     &t,
                     tpm_vec.as_mut_ptr(),
-                    tpm_vec.capacity() as u64,
+                    tpm_vec.capacity().try_into().unwrap(), //#[allow_ci]
                     &mut offset,
                 );
                 if res != 0 {

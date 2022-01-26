@@ -432,6 +432,10 @@ async fn main() -> Result<()> {
                     .route(web::post().to(keys_handler::v_key)),
             )
             .service(
+                web::resource(format!("/{}/keys/pubkey", API_VERSION))
+                    .route(web::get().to(keys_handler::pubkey)),
+            )
+            .service(
                 web::resource(format!("/{}/quotes/identity", API_VERSION))
                     .route(web::get().to(quotes_handler::identity)),
             )

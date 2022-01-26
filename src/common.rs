@@ -8,6 +8,7 @@ use log::*;
 use serde::{Deserialize, Serialize};
 use std::convert::TryFrom;
 use std::env;
+use std::ffi::CString;
 use std::fs::File;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
@@ -141,6 +142,7 @@ pub(crate) struct KeylimeConfig {
     pub sign_alg: SignAlgorithm,
     pub tpm_data: Option<TpmData>,
     pub run_revocation: bool,
+    pub revocation_cert: String,
     pub revocation_ip: String,
     pub revocation_port: String,
     pub secure_size: String,
@@ -190,6 +192,7 @@ impl KeylimeConfig {
         let run_revocation = bool::from_str(
             &config_get("cloud_agent", "listen_notfications")?.to_lowercase(),
         )?;
+        let revocation_cert = config_get("cloud_agent", "revocation_cert")?;
         let revocation_ip = config_get("general", "receive_revocation_ip")?;
         let revocation_port =
             config_get("general", "receive_revocation_port")?;
@@ -215,6 +218,7 @@ impl KeylimeConfig {
             sign_alg,
             tpm_data,
             run_revocation,
+            revocation_cert,
             revocation_ip,
             revocation_port,
             secure_size,
@@ -243,6 +247,7 @@ impl Default for KeylimeConfig {
             sign_alg: SignAlgorithm::RsaSsa,
             tpm_data: None,
             run_revocation: true,
+            revocation_cert: "default".to_string(),
             revocation_ip: "127.0.0.1".to_string(),
             revocation_port: "8992".to_string(),
             secure_size: "1m".to_string(),
@@ -417,7 +422,8 @@ pub(crate) fn chownroot(path: String) -> Result<String> {
         }
 
         // change directory owner to root
-        if libc::chown(path.as_bytes().as_ptr() as *const i8, 0, 0) != 0 {
+        let c_path = CString::new(path.as_bytes()).unwrap(); //#[allow_ci]
+        if libc::chown(c_path.as_ptr(), 0, 0) != 0 {
             error!("Failed to change file {} owner.", path);
             return Err(Error::Permission);
         }
