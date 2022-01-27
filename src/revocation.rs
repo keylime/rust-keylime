@@ -289,6 +289,96 @@ pub(crate) fn get_revocation_cert_path(
     Ok(cert_path_buf)
 }
 
+/// Process revocation message received from REST API or 0mq
+pub(crate) fn process_revocation(
+    body: Value,
+    cert_path: &Path,
+    secure_size: &str,
+    config_actions: &str,
+    actions_dir: &Path,
+    allow_payload_revocation_actions: bool,
+) -> Result<()> {
+    // Ensure we have a signature, otherwise continue the loop
+    let signature = match body["signature"].as_str() {
+        Some(v) => v,
+        _ => {
+            warn!("No signature on revocation message from server");
+            return Err(Error::InvalidRequest);
+        }
+    };
+
+    // Ensure we have a msg, otherwise continue the loop
+    let message = match body["msg"].as_str() {
+        Some(v) => v,
+        _ => {
+            warn!("No msg on revocation message from server");
+            return Err(Error::InvalidRequest);
+        }
+    };
+
+    // Canonicalize will fail it the file is not found
+    let cert_absolute_path = cert_path.canonicalize()?;
+    info!(
+        "Loading the revocation certificate from {}",
+        cert_absolute_path.display()
+    );
+
+    let cert_key = match crypto::load_x509(&cert_absolute_path) {
+        Ok(v) => v.public_key().map_err(Error::Crypto)?,
+        Err(e) => {
+            return Err(Error::Configuration(String::from(
+                "Cannot load pubkey from revocation certificate",
+            )))
+        }
+    };
+    // Verify the message and signature with our key
+    let mut verified = crypto::asym_verify(&cert_key, message, signature);
+
+    match verified {
+        Ok(true) => {
+            let msg = body["msg"].as_str();
+            let msg_payload: Value = serde_json::from_str(match msg {
+                Some(v) => v,
+                _ => {
+                    warn!("Unable to decode json in msg");
+                    return Err(Error::InvalidRequest);
+                }
+            })?;
+            debug!(
+                "Revocation signature validated for revocation: {}",
+                msg_payload
+            );
+            let outputs = run_revocation_actions(
+                msg_payload,
+                secure_size,
+                config_actions,
+                actions_dir,
+                allow_payload_revocation_actions,
+            )?;
+
+            for output in outputs {
+                if !output.stdout.is_empty() {
+                    info!(
+                        "Action stdout: {}",
+                        String::from_utf8(output.stdout).unwrap() //#[allow_ci]
+                    );
+                }
+                if !output.stderr.is_empty() {
+                    warn!(
+                        "Action stderr: {}",
+                        String::from_utf8(output.stderr).unwrap() //#[allow_ci])
+                    );
+                }
+            }
+            Ok(())
+        }
+        _ => {
+            error!("Invalid revocation message signature {}", body);
+            Err(Error::InvalidRequest)
+        }
+    }
+}
+
 /// Handles revocation messages via 0mq
 /// See:
 /// - URL: https://github.com/keylime/keylime/blob/master/keylime/revocation_notifier.py
@@ -311,37 +401,8 @@ pub(crate) async fn run_revocation_service(
 
     mysock.connect(endpoint.as_str())?;
 
-    // Get the path to the certificate and canonicalize to obtain an absolute path
-    let revocation_cert_path =
-        get_revocation_cert_path(config)?.canonicalize()?;
-
-    let cert_key = if revocation_cert_path.exists() {
-        info!(
-            "Loading the revocation certificate from {}",
-            revocation_cert_path.display()
-        );
-        match crypto::load_x509(&revocation_cert_path) {
-            Ok(v) => v.public_key().map_err(Error::Crypto)?,
-            Err(e) => {
-                return Err(Error::Configuration(String::from(
-                    "Cannot load pubkey",
-                )))
-            }
-        }
-    } else {
-        error!(
-            "Path {} for the 0mq socket doesn't exist",
-            revocation_cert_path.display()
-        );
-        return Err(Error::Configuration(format!(
-            "Path {} for the 0mq socket socket doesn't exist",
-            revocation_cert_path.display(),
-        )));
-    };
-
-    let config_actions = config.revocation_actions.trim();
+    let revocation_cert = get_revocation_cert_path(config)?;
     let actions_dir = PathBuf::from(&config.revocation_actions_dir.trim());
-    let allow_payload_actions = config.allow_payload_revocation_actions;
 
     info!("Waiting for revocation messages on 0mq {}", endpoint);
 
@@ -363,69 +424,14 @@ pub(crate) async fn run_revocation_service(
         };
 
         let body: Value = serde_json::from_str(rawbody.as_str())?;
-
-        // Ensure we have a signature, otherwise continue the loop
-        let signature = match body["signature"].as_str() {
-            Some(v) => v,
-            _ => {
-                warn!("No signature on revocation message from server");
-                continue;
-            }
-        };
-
-        // Ensure we have a msg, otherwise continue the loop
-        let message = match body["msg"].as_str() {
-            Some(v) => v,
-            _ => {
-                warn!("No msg on revocation message from server");
-                continue;
-            }
-        };
-
-        // Verify the message and signature with our key
-        let mut verified = crypto::asym_verify(&cert_key, message, signature);
-
-        match verified {
-            Ok(true) => {
-                let msg = body["msg"].as_str();
-                let msg_payload: Value = serde_json::from_str(match msg {
-                    Some(v) => v,
-                    _ => {
-                        warn!("Unable to decode json in msg");
-                        continue;
-                    }
-                })?;
-                debug!(
-                    "Revocation signature validated for revocation: {}",
-                    msg_payload
-                );
-                let outputs = run_revocation_actions(
-                    msg_payload,
-                    &config.secure_size,
-                    config_actions,
-                    &actions_dir,
-                    allow_payload_actions,
-                )?;
-
-                for output in outputs {
-                    if !output.stdout.is_empty() {
-                        info!(
-                            "Action stdout: {}",
-                            String::from_utf8(output.stdout)?
-                        );
-                    }
-                    if !output.stderr.is_empty() {
-                        warn!(
-                            "Action stderr: {}",
-                            String::from_utf8(output.stderr)?
-                        );
-                    }
-                }
-            }
-            _ => {
-                error!("Invalid revocation message signature {}", body);
-            }
-        }
+        let _ = process_revocation(
+            body,
+            &revocation_cert,
+            &config.secure_size,
+            &config.revocation_actions,
+            &actions_dir,
+            config.allow_payload_revocation_actions,
+        );
     }
     Ok(())
 }
@@ -433,6 +439,7 @@ pub(crate) async fn run_revocation_service(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     #[test]
     fn revocation_scripts_ok() {
@@ -670,5 +677,40 @@ mod tests {
             ),
             expected,
         ));
+    }
+
+    #[test]
+    fn test_process_revocation() {
+        let test_config = KeylimeConfig::default();
+
+        let sig_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("test-data/revocation.sig");
+        let signature = fs::read_to_string(sig_path).unwrap(); //#[allow_ci]
+
+        let message_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("test-data/test_ok.json");
+        let message = fs::read_to_string(message_path).unwrap(); //#[allow_ci]
+
+        let body = json!({
+            "msg": message,
+            "signature": signature,
+        });
+
+        let cert_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("test-data/test-cert.pem");
+
+        let actions_dir =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/actions");
+
+        let result = process_revocation(
+            body,
+            &cert_path,
+            &test_config.secure_size,
+            &test_config.revocation_actions,
+            &actions_dir,
+            test_config.allow_payload_revocation_actions,
+        );
+
+        assert!(result.is_ok());
     }
 }
