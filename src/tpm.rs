@@ -155,8 +155,8 @@ create_marshal_fn!(
 create_marshal_fn!(tpms_att_to_vec, TPMS_ATTEST, Tss2_MU_TPMS_ATTEST_Marshal);
 
 // Ensure that TPML_PCR_SELECTION and TPML_DIGEST have known sizes
-assert_eq_size!(TPML_PCR_SELECTION; TPML_PCR_SELECTION, [u8; 132]);
-assert_eq_size!(TPML_DIGEST; TPML_DIGEST, [u8; 532]);
+assert_eq_size!(TPML_PCR_SELECTION, [u8; 132]);
+assert_eq_size!(TPML_DIGEST, [u8; 532]);
 
 // Recreate how tpm2-tools creates the PCR out file. Roughly, this is a
 // TPML_PCR_SELECTION + number of TPML_DIGESTS + TPML_DIGESTs.
