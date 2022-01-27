@@ -1,0 +1,15 @@
+[Unit]
+Description=The Keylime compute agent
+
+[Service]
+# To run the agent as a non-root user, setup the environment following
+# the procedure at:
+# https://github.com/keylime/keylime/blob/master/agent_non_root_condition.sh
+# and uncomment the following lines:
+# User=keylime
+# Group=tss
+ExecStart=/usr/bin/keylime_agent
+KillSignal=SIGINT
+
+[Install]
+WantedBy=default.target

@@ -57,3 +57,21 @@ Unit tests are gating in CI for new code submission.  To run them:
 ```
 $ cargo test
 ```
+
+## Running agent as a systemd-managed service
+
+To make deployment and management of the service easier, this crate
+comes with a Makefile and systemd unit file.
+
+To install the executables and the unit file, do:
+
+```console
+$ make
+$ sudo make install
+```
+
+Then you should be able to start the service with:
+
+```console
+$ sudo systemctl start keylime_agent
+```
