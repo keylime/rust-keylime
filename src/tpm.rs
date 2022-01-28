@@ -438,8 +438,7 @@ pub(crate) fn check_mask(mask: &str, pcr: &PcrSlot) -> Result<bool> {
 
 // This encodes a quote string as input to Python Keylime's quote checking functionality.
 // The quote, signature, and pcr blob are concatenated with ':' separators. To match the
-// expected format, the quote, signature, and pcr blob must be individually compressed
-// with zlib at the default compression level and then base64 encoded before concatenation.
+// expected format, the quote, signature, and pcr blob must be base64 encoded before concatenation.
 //
 // Reference:
 // https://github.com/keylime/keylime/blob/2dd9e5c968f33bf77110092af9268d13db1806c6 \
@@ -456,23 +455,10 @@ pub(crate) fn encode_quote_string(
     let sig_vec = sig_to_vec(sig.try_into()?);
     let pcr_vec = pcrdata_to_vec(pcrs_read, pcr_data);
 
-    // zlib compression
-    let mut att_comp = ZlibEncoder::new(Vec::new(), Compression::default());
-    att_comp.write_all(&att_vec);
-    let att_comp_finished = att_comp.finish()?;
-
-    let mut sig_comp = ZlibEncoder::new(Vec::new(), Compression::default());
-    sig_comp.write_all(&sig_vec);
-    let sig_comp_finished = sig_comp.finish()?;
-
-    let mut pcr_comp = ZlibEncoder::new(Vec::new(), Compression::default());
-    pcr_comp.write_all(&pcr_vec);
-    let pcr_comp_finished = pcr_comp.finish()?;
-
     // base64 encoding
-    let att_str = base64::encode(att_comp_finished);
-    let sig_str = base64::encode(sig_comp_finished);
-    let pcr_str = base64::encode(pcr_comp_finished);
+    let att_str = base64::encode(att_vec);
+    let sig_str = base64::encode(sig_vec);
+    let pcr_str = base64::encode(pcr_vec);
 
     // create concatenated string
     let mut quote = String::new();
@@ -780,30 +766,18 @@ pub mod testing {
         let sig_comp_finished = base64::decode(sig_str)?;
         let pcr_comp_finished = base64::decode(pcr_str)?;
 
-        // zlib uncompression
-        let mut att_comp = ZlibDecoder::new(att_comp_finished.as_slice());
-        let mut att_vec = Vec::new();
-        let _ = att_comp.read_to_end(&mut att_vec)?;
-
-        let mut sig_comp = ZlibDecoder::new(sig_comp_finished.as_slice());
-        let mut sig_vec = Vec::new();
-        let _ = sig_comp.read_to_end(&mut sig_vec)?;
-
-        let mut pcr_comp = ZlibDecoder::new(pcr_comp_finished.as_slice());
-        let mut pcr_vec = Vec::new();
-        let _ = pcr_comp.read_to_end(&mut pcr_vec)?;
-
-        let sig: Signature = vec_to_sig(&sig_vec)?.try_into()?;
-        let (pcrsel, pcrdata) = vec_to_pcrdata(&pcr_vec)?;
+        let sig: Signature = vec_to_sig(&sig_comp_finished)?.try_into()?;
+        let (pcrsel, pcrdata) = vec_to_pcrdata(&pcr_comp_finished)?;
 
         let mut att = TPM2B_ATTEST {
-            size: att_vec
+            size: att_comp_finished
                 .len()
                 .try_into()
                 .or(Err(KeylimeError::InvalidRequest))?,
             ..Default::default()
         };
-        att.attestationData[0..att_vec.len()].copy_from_slice(&att_vec);
+        att.attestationData[0..att_comp_finished.len()]
+            .copy_from_slice(&att_comp_finished);
         Ok((att.try_into()?, sig, pcrsel, pcrdata))
     }
 
