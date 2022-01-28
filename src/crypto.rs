@@ -2,14 +2,19 @@
 // Copyright 2021 Keylime Authors
 
 use openssl::{
+    asn1::Asn1Time,
     encrypt::Decrypter,
     hash::MessageDigest,
-    memcmp, pkcs5,
+    memcmp,
+    nid::Nid,
+    pkcs5,
     pkey::{Id, PKey, PKeyRef, Private, Public},
     rsa::{Padding, Rsa},
     sign::{Signer, Verifier},
+    ssl::{SslAcceptor, SslAcceptorBuilder, SslMethod, SslVerifyMode},
     symm::Cipher,
-    x509::X509,
+    x509::store::X509StoreBuilder,
+    x509::{X509Name, X509},
 };
 use std::fs;
 use std::path::Path;
@@ -34,6 +39,12 @@ pub(crate) fn import_x509(input_key_path: &Path) -> Result<PKey<Public>> {
 
     let cert = cert_chain.pop().unwrap(); //#[allow_ci]
     cert.public_key().map_err(Error::Crypto)
+}
+
+pub(crate) fn load_x509(input_cert_path: &str) -> Result<X509> {
+    let contents = fs::read_to_string(&input_cert_path)?;
+    let mut cert = X509::from_pem(contents.as_bytes())?;
+    Ok(cert)
 }
 
 pub(crate) fn rsa_generate(key_size: u32) -> Result<PKey<Private>> {
@@ -67,6 +78,51 @@ pub(crate) fn pkey_pub_from_priv(
             )));
         }
     }
+}
+
+pub(crate) fn generate_x509(key: &PKey<Private>, uuid: &str) -> Result<X509> {
+    let mut name = X509Name::builder()?;
+    name.append_entry_by_nid(Nid::COMMONNAME, uuid)?;
+    let name = name.build();
+
+    let valid_from = Asn1Time::days_from_now(0)?;
+    let valid_to = Asn1Time::days_from_now(356)?;
+
+    let mut builder = X509::builder()?;
+    builder.set_version(2)?;
+    builder.set_subject_name(&name)?;
+    builder.set_issuer_name(&name)?;
+    builder.set_not_before(&valid_from)?;
+    builder.set_not_after(&valid_to)?;
+    builder.set_pubkey(key)?;
+    builder.sign(key, MessageDigest::sha256())?;
+
+    Ok(builder.build())
+}
+
+pub(crate) fn generate_mtls_context(
+    mtls_cert: &X509,
+    key: &PKey<Private>,
+    keylime_ca_cert: X509,
+) -> Result<SslAcceptorBuilder> {
+    let mut ssl_context_builder =
+        SslAcceptor::mozilla_intermediate(SslMethod::tls())?;
+    ssl_context_builder.set_certificate(mtls_cert);
+    ssl_context_builder.set_private_key(key);
+
+    // Build verification cert store.
+    let mut mtls_store_builder = X509StoreBuilder::new()?;
+    mtls_store_builder.add_cert(keylime_ca_cert)?;
+    let mtls_store = mtls_store_builder.build();
+    ssl_context_builder.set_verify_cert_store(mtls_store);
+
+    // Enable mTLS verification
+    let mut verify_mode = SslVerifyMode::empty();
+    verify_mode.set(SslVerifyMode::PEER, true);
+    verify_mode.set(SslVerifyMode::FAIL_IF_NO_PEER_CERT, true);
+    ssl_context_builder.set_verify(verify_mode);
+
+    Ok(ssl_context_builder)
 }
 
 /*
