@@ -19,7 +19,7 @@ use uuid::Uuid;
 /*
  * Constants and static variables
  */
-pub const API_VERSION: &str = "v2.0";
+pub const API_VERSION: &str = "v2.1";
 pub const STUB_VTPM: bool = false;
 pub const STUB_IMA: bool = true;
 pub const TPM_DATA_PCR: usize = 16;

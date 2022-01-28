@@ -331,6 +331,7 @@ pub(crate) fn process_revocation(
             )))
         }
     };
+
     // Verify the message and signature with our key
     let mut verified = crypto::asym_verify(&cert_key, message, signature);
 
