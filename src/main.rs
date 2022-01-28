@@ -344,6 +344,17 @@ async fn main() -> Result<()> {
 
     info!("Agent UUID: {}", config.agent_uuid);
 
+    // Generate key pair for secure transmission of u, v keys. The u, v
+    // keys are two halves of the key used to decrypt the workload after
+    // the Identity and Integrity Quotes sent by the agent are validated
+    // by the Tenant and Cloud Verifier, respectively.
+    //
+    // Since we store the u key in memory, discarding this key, which
+    // safeguards u and v keys in transit, is not part of the threat model.
+    let (nk_pub, nk_priv) = crypto::rsa_generate_pair(2048)?;
+
+    let mtls_cert = crypto::generate_x509(&nk_priv, &config.agent_uuid)?;
+
     {
         // Request keyblob material
         let keyblob = registrar_agent::do_register_agent(
@@ -353,6 +364,7 @@ async fn main() -> Result<()> {
             &ek_tpm2b_pub,
             ek_cert,
             &ak_tpm2b_pub,
+            &mtls_cert,
             config.agent_contact_ip.clone(),
             config.agent_contact_port,
         )
@@ -379,14 +391,9 @@ async fn main() -> Result<()> {
         info!("SUCCESS: Agent {} activated", config.agent_uuid);
     }
 
-    // Generate key pair for secure transmission of u, v keys. The u, v
-    // keys are two halves of the key used to decrypt the workload after
-    // the Identity and Integrity Quotes sent by the agent are validated
-    // by the Tenant and Cloud Verifier, respectively.
-    //
-    // Since we store the u key in memory, discarding this key, which
-    // safeguards u and v keys in transit, is not part of the threat model.
-    let (nk_pub, nk_priv) = crypto::rsa_generate_pair(2048)?;
+    let keylime_ca_cert = crypto::load_x509(&config.keylime_ca_path)?;
+    let ssl_context =
+        crypto::generate_mtls_context(&mtls_cert, &nk_priv, keylime_ca_cert)?;
 
     let mut encr_payload = Vec::new();
 
@@ -441,11 +448,14 @@ async fn main() -> Result<()> {
                     .route(web::get().to(quotes_handler::integrity)),
             )
     })
-    .bind(format!("{}:{}", config.agent_ip, config.agent_port))?
+    .bind_openssl(
+        format!("{}:{}", config.agent_ip, config.agent_port),
+        ssl_context,
+    )?
     .run()
     .map_err(Error::from);
     info!(
-        "Listening on http://{}:{}",
+        "Listening on https://{}:{}",
         config.agent_ip, config.agent_port
     );
 

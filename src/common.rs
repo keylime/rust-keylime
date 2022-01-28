@@ -31,6 +31,7 @@ pub static IMA_ML: &str =
     "/sys/kernel/security/ima/ascii_runtime_measurements";
 pub static MEASUREDBOOT_ML: &str =
     "/sys/kernel/security/tpm0/binary_bios_measurements";
+pub static DEFAULT_CA_PATH: &str = "/var/lib/keylime/cv_ca/cacert.crt";
 pub static KEY: &str = "secret";
 pub static WORK_DIR: &str = "/var/lib/keylime";
 pub static TPM_DATA: &str = "tpmdata.json";
@@ -151,6 +152,7 @@ pub(crate) struct KeylimeConfig {
     pub dec_payload_filename: String,
     pub key_filename: String,
     pub extract_payload_zip: bool,
+    pub keylime_ca_path: String,
 }
 
 impl KeylimeConfig {
@@ -212,6 +214,12 @@ impl KeylimeConfig {
         let extract_payload_zip = bool::from_str(
             &config_get("cloud_agent", "extract_payload_zip")?.to_lowercase(),
         )?;
+
+        let mut keylime_ca_path = config_get("cloud_agent", "keylime_ca")?;
+        if keylime_ca_path == "default" {
+            keylime_ca_path = DEFAULT_CA_PATH.to_string()
+        }
+
         Ok(KeylimeConfig {
             agent_ip,
             agent_port,
@@ -233,6 +241,7 @@ impl KeylimeConfig {
             dec_payload_filename,
             key_filename,
             extract_payload_zip,
+            keylime_ca_path,
         })
     }
 }
@@ -262,6 +271,7 @@ impl Default for KeylimeConfig {
             dec_payload_filename: "decrypted_payload".to_string(),
             key_filename: "derived_tci_key".to_string(),
             extract_payload_zip: true,
+            keylime_ca_path: DEFAULT_CA_PATH.to_string(),
         }
     }
 }
