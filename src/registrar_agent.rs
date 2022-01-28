@@ -3,6 +3,7 @@ use crate::error::Error;
 use crate::common::API_VERSION;
 use crate::serialization::*;
 use log::*;
+use openssl::x509::X509;
 use serde::{Deserialize, Serialize};
 use serde_json::Number;
 
@@ -21,6 +22,7 @@ struct Register<'a> {
     ek_tpm: &'a [u8],
     #[serde(serialize_with = "serialize_as_base64")]
     aik_tpm: &'a [u8],
+    mtls_cert: String,
     ip: Option<String>,
     port: Option<u32>,
 }
@@ -90,13 +92,17 @@ pub(crate) async fn do_register_agent(
     ek_tpm: &[u8],
     ekcert: Option<Vec<u8>>,
     aik_tpm: &[u8],
+    mtls_cert_x509: &X509,
     ip: Option<String>,
     port: Option<u32>,
 ) -> crate::error::Result<Vec<u8>> {
+    let mtls_cert = String::from_utf8(mtls_cert_x509.to_pem()?)?;
+
     let data = Register {
         ekcert,
         ek_tpm,
         aik_tpm,
+        mtls_cert,
         ip,
         port,
     };
@@ -140,6 +146,7 @@ pub(crate) async fn do_register_agent(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::crypto;
     use wiremock::matchers::{any, method};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -165,6 +172,8 @@ mod tests {
         let addr = format!("http://{}:{}", uri[0], uri[1]);
 
         let mock_data = [0u8; 1];
+        let priv_key = crypto::rsa_generate(2048).unwrap(); //#[allow_ci]
+        let cert = crypto::generate_x509(&priv_key, "uuid").unwrap(); //#[allow_ci]
         let response = do_register_agent(
             uri[0],
             uri[1],
@@ -172,6 +181,7 @@ mod tests {
             &mock_data,
             Some((&mock_data).to_vec()),
             &mock_data,
+            &cert,
             None,
             None,
         )
@@ -201,8 +211,11 @@ mod tests {
         let addr = format!("http://{}:{}", uri[0], uri[1]);
 
         let mock_data = [0u8; 1];
+        let priv_key = crypto::rsa_generate(2048).unwrap(); //#[allow_ci]
+        let cert = crypto::generate_x509(&priv_key, "uuid").unwrap(); //#[allow_ci]
         let response = do_register_agent(
-            uri[0], uri[1], "uuid", &mock_data, None, &mock_data, None, None,
+            uri[0], uri[1], "uuid", &mock_data, None, &mock_data, &cert,
+            None, None,
         )
         .await;
         assert!(response.is_ok());
@@ -226,6 +239,8 @@ mod tests {
         let addr = format!("http://{}:{}", uri[0], uri[1]);
 
         let mock_data = [0u8; 1];
+        let priv_key = crypto::rsa_generate(2048).unwrap(); //#[allow_ci]
+        let cert = crypto::generate_x509(&priv_key, "uuid").unwrap(); //#[allow_ci]
         let response = do_register_agent(
             uri[0],
             uri[1],
@@ -233,6 +248,7 @@ mod tests {
             &mock_data,
             Some((&mock_data).to_vec()),
             &mock_data,
+            &cert,
             None,
             None,
         )

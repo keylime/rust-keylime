@@ -18,7 +18,7 @@ path = "src/ima_emulator.rs"
 doc = false
 
 [dependencies]
-actix-web = "3"
+actix-web =  { version = "3", features = ["openssl"] }
 base64 = "0.13"
 cfg-if = "1"
 compress-tools = "0.12"
