@@ -38,6 +38,7 @@ mod common;
 mod crypto;
 mod error;
 mod keys_handler;
+mod notifications_handler;
 mod quotes_handler;
 mod registrar_agent;
 mod revocation;
@@ -93,6 +94,11 @@ pub struct QuoteData {
     enc_alg: algorithms::EncryptionAlgorithm,
     sign_alg: algorithms::SignAlgorithm,
     agent_uuid: String,
+    revocation_cert: PathBuf,
+    revocation_actions: String,
+    revocation_actions_dir: PathBuf,
+    allow_payload_revocation_actions: bool,
+    secure_size: String,
 }
 
 // Parameters are based on Python codebase:
@@ -461,6 +467,10 @@ async fn main() -> Result<()> {
     let symm_key_cvar = Arc::clone(&symm_key_cvar_arc);
     let payload = Arc::clone(&encr_payload_arc);
 
+    let revocation_cert = revocation::get_revocation_cert_path(&config)?;
+    let actions_dir =
+        PathBuf::from(&config.revocation_actions_dir).canonicalize()?;
+
     let quotedata = web::Data::new(QuoteData {
         tpmcontext: Mutex::new(ctx),
         priv_key: nk_priv,
@@ -476,6 +486,12 @@ async fn main() -> Result<()> {
         enc_alg: config.enc_alg,
         sign_alg: config.sign_alg,
         agent_uuid: config.agent_uuid.clone(),
+        revocation_cert,
+        revocation_actions: config.revocation_actions.clone(),
+        revocation_actions_dir: actions_dir,
+        allow_payload_revocation_actions: config
+            .allow_payload_revocation_actions,
+        secure_size: config.secure_size.clone(),
     });
 
     let actix_server = HttpServer::new(move || {
@@ -501,6 +517,13 @@ async fn main() -> Result<()> {
             .service(
                 web::resource(format!("/{}/quotes/integrity", API_VERSION))
                     .route(web::get().to(quotes_handler::integrity)),
+            )
+            .service(
+                web::resource(format!(
+                    "/{}/notifications/revocation",
+                    API_VERSION
+                ))
+                .route(web::post().to(notifications_handler::revocation)),
             )
     })
     .bind_openssl(
@@ -577,6 +600,12 @@ mod testing {
             let symm_key_cvar = Arc::clone(&symm_key_cvar_arc);
             let payload = Arc::clone(&encr_payload_arc);
 
+            let revocation_cert =
+                revocation::get_revocation_cert_path(&test_config)?;
+
+            let actions_dir =
+                Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/actions/");
+
             Ok(QuoteData {
                 tpmcontext: Mutex::new(ctx),
                 priv_key: nk_priv,
@@ -592,6 +621,12 @@ mod testing {
                 enc_alg: algorithms::EncryptionAlgorithm::Rsa,
                 sign_alg: algorithms::SignAlgorithm::RsaSsa,
                 agent_uuid: test_config.agent_uuid,
+                revocation_cert,
+                revocation_actions: String::from(""),
+                revocation_actions_dir: actions_dir,
+                allow_payload_revocation_actions: test_config
+                    .allow_payload_revocation_actions,
+                secure_size: test_config.secure_size,
             })
         }
     }
