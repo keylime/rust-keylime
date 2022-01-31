@@ -64,9 +64,6 @@ pub(crate) fn run_revocation_actions(
     json: Value,
     secure_size: &str,
 ) -> Result<Vec<Output>> {
-    #[cfg(not(test))]
-    pretty_env_logger::init();
-
     #[cfg(test)]
     let mount = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests");
 
