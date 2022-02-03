@@ -83,6 +83,13 @@ pub(crate) fn run_revocation_actions(
             .split('\n')
             .filter(|&script| !script.is_empty())
             .map(|script| script.trim())
+            .inspect(|&script| {
+                // Enforce the name restriction
+                if !script.starts_with("local_action_") {
+                    warn!("Invalid local action will not be executed: {}. Must start with local_action_", script)
+                }
+            })
+            .filter(|&script| script.starts_with("local_action_"))
             .collect::<Vec<&str>>();
 
         if !action_list.is_empty() {
