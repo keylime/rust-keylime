@@ -190,8 +190,14 @@ impl KeylimeConfig {
                 Err(e) => warn!("Could not load TPM data"),
             }
         }
+        // There was a typo in Python Keylime and this accounts for having a version
+        // of Keylime installed that still has this typo. TODO: Remove later
         let run_revocation = bool::from_str(
-            &config_get("cloud_agent", "listen_notfications")?.to_lowercase(),
+            &config_get("cloud_agent", "listen_notifications")
+                .or_else(|_| {
+                    config_get("cloud_agent", "listen_notfications")
+                })?
+                .to_lowercase(),
         )?;
         let revocation_cert = config_get("cloud_agent", "revocation_cert")?;
         let revocation_ip = config_get("general", "receive_revocation_ip")?;
