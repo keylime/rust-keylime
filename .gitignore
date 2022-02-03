@@ -2,3 +2,6 @@
 **/*.rs.bk
 .auditing-0
 tpmdata.json
+tests/.tmp*
+tests/actions/__pycache__
+tests/unzipped/__pycache__
