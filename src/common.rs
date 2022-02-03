@@ -153,6 +153,9 @@ pub(crate) struct KeylimeConfig {
     pub key_filename: String,
     pub extract_payload_zip: bool,
     pub keylime_ca_path: String,
+    pub revocation_actions: String,
+    pub revocation_actions_dir: String,
+    pub allow_payload_revocation_actions: bool,
 }
 
 impl KeylimeConfig {
@@ -219,6 +222,14 @@ impl KeylimeConfig {
         if keylime_ca_path == "default" {
             keylime_ca_path = DEFAULT_CA_PATH.to_string()
         }
+        let revocation_actions =
+            config_get("cloud_agent", "revocation_actions")?;
+        let revocation_actions_dir =
+            config_get("cloud_agent", "revocation_actions_dir")?;
+        let allow_payload_revocation_actions = bool::from_str(
+            &config_get("cloud_agent", "allow_payload_revocation_actions")?
+                .to_lowercase(),
+        )?;
 
         Ok(KeylimeConfig {
             agent_ip,
@@ -242,6 +253,9 @@ impl KeylimeConfig {
             key_filename,
             extract_payload_zip,
             keylime_ca_path,
+            revocation_actions,
+            revocation_actions_dir,
+            allow_payload_revocation_actions,
         })
     }
 }
@@ -272,6 +286,9 @@ impl Default for KeylimeConfig {
             key_filename: "derived_tci_key".to_string(),
             extract_payload_zip: true,
             keylime_ca_path: DEFAULT_CA_PATH.to_string(),
+            revocation_actions: "".to_string(),
+            revocation_actions_dir: "/usr/libexec/keylime".to_string(),
+            allow_payload_revocation_actions: true,
         }
     }
 }
