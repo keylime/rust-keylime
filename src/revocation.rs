@@ -10,9 +10,10 @@ use crate::error::*;
 use crate::secure_mount;
 
 use std::convert::TryInto;
+use std::fs;
 use std::io::{ErrorKind, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output, Stdio};
+use std::process::{Child, Command, Output, Stdio};
 
 use serde_json::Value;
 
@@ -78,40 +79,76 @@ fn lookup_action(
 
 /// Runs a script with a json value as argument (used for revocation actions)
 pub(crate) fn run_action(
-    dir: &Path,
-    script: &str,
+    payload_dir: &Path,
+    actions_dir: &Path,
+    action: &str,
     json: Value,
+    allow_payload_actions: bool,
 ) -> Result<Output> {
+    #[cfg(not(test))]
+    let work_dir = PathBuf::from(WORK_DIR);
+
+    #[cfg(test)]
+    let work_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests");
+
+    // Lookup for command and get command line
+    let (command, is_python, is_payload) = lookup_action(
+        payload_dir,
+        actions_dir,
+        action,
+        allow_payload_actions,
+    )?;
+
+    info!("Executing revocation action {}", action);
+
+    // Write JSON argument to a temporary file
     let raw_json = serde_json::value::to_raw_value(&json)?;
+    let mut json_dump = tempfile::NamedTempFile::new_in(&work_dir)?;
+    json_dump.write_all(raw_json.get().as_bytes());
 
-    let mut child = Command::new(format!("{}{}", "./", script))
-        .current_dir(dir)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()?;
+    //TODO check if it is possible to not keep the file when passing to another process
+    let (json_dump, json_path) = json_dump.keep()?;
 
-    let child_ref_mut = match child.stdin.as_mut() {
-        Some(c) => c,
-        None => {
-            return Err(Error::Other(format!(
-                "unable to get mut ref to child stdin in {}",
-                script
-            )));
-        }
+    let child;
+    if is_python {
+        let python_path = if is_payload { payload_dir } else { actions_dir };
+
+        child = Command::new(command)
+            .arg(action)
+            .arg(&json_path)
+            .current_dir(work_dir)
+            .env("PYTHONPATH", python_path)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()?;
+    } else {
+        child = Command::new(command)
+            .arg(&json_path)
+            .current_dir(work_dir)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()?;
     };
 
-    child_ref_mut.write_all(raw_json.get().as_bytes());
-    let output = child.wait_with_output()?;
+    let output = match child.wait_with_output() {
+        Ok(output) => {
+            fs::remove_file(json_path)?;
+            output
+        }
+        Err(err) => {
+            fs::remove_file(json_path)?;
+            return Err(err.try_into()?);
+        }
+    };
 
     if !output.status.success() {
         return Err(output.try_into()?);
     }
 
-    info!(
-        "{}",
-        format!("INFO: revocation action {:?} successful", script)
-    );
+    info!("INFO: revocation action {} successful", action);
+
     Ok(output)
 }
 
@@ -123,6 +160,8 @@ pub(crate) fn run_action(
 pub(crate) fn run_revocation_actions(
     json: Value,
     secure_size: &str,
+    actions_dir: &Path,
+    allow_payload_actions: bool,
 ) -> Result<Vec<Output>> {
     #[cfg(test)]
     let mount = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests");
@@ -154,7 +193,13 @@ pub(crate) fn run_revocation_actions(
 
         if !action_list.is_empty() {
             for action in action_list {
-                match run_action(&unzipped, action, json.clone()) {
+                match run_action(
+                    &unzipped,
+                    actions_dir,
+                    action,
+                    json.clone(),
+                    allow_payload_actions,
+                ) {
                     Ok(output) => {
                         outputs.push(output);
                     }
@@ -266,6 +311,9 @@ pub(crate) async fn run_revocation_service(
         )));
     };
 
+    let actions_dir = PathBuf::from(&config.revocation_actions_dir.trim());
+    let allow_payload_actions = config.allow_payload_revocation_actions;
+
     info!("Waiting for revocation messages on 0mq {}", endpoint);
 
     // Main revocation service loop. If a message is malformed or
@@ -322,8 +370,12 @@ pub(crate) async fn run_revocation_service(
                     "Revocation signature validated for revocation: {}",
                     msg_payload
                 );
-                let _ =
-                    run_revocation_actions(msg_payload, &config.secure_size)?;
+                let _ = run_revocation_actions(
+                    msg_payload,
+                    &config.secure_size,
+                    &actions_dir,
+                    allow_payload_actions,
+                )?;
             }
             _ => {
                 error!("Invalid revocation message signature {}", body);
@@ -346,10 +398,19 @@ mod tests {
         );
         let json_str = std::fs::read_to_string(json_file).unwrap(); //#[allow_ci]
         let json = serde_json::from_str(&json_str).unwrap(); //#[allow_ci]
-        let outputs = run_revocation_actions(json, &test_config.secure_size);
+        let actions_dir =
+            &PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/actions/");
+        let outputs = run_revocation_actions(
+            json,
+            &test_config.secure_size,
+            actions_dir,
+            true,
+        );
+
         assert!(outputs.is_ok());
         let outputs = outputs.unwrap(); //#[allow_ci]
-        assert!(outputs.len() == 2);
+
+        assert!(outputs.len() == 4);
 
         for output in outputs {
             assert_eq!(
@@ -368,8 +429,14 @@ mod tests {
         );
         let json_str = std::fs::read_to_string(json_file).unwrap(); //#[allow_ci]
         let json = serde_json::from_str(&json_str).unwrap(); //#[allow_ci]
-
-        let outputs = run_revocation_actions(json, &test_config.secure_size);
+        let actions_dir =
+            &PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/actions/");
+        let outputs = run_revocation_actions(
+            json,
+            &test_config.secure_size,
+            actions_dir,
+            true,
+        );
         assert!(outputs.is_err());
     }
 
