@@ -69,6 +69,10 @@ pub(crate) enum Error {
     TryFromInt(#[from] std::num::TryFromIntError),
     #[error("C string is not NUL-terminated: {0}")]
     Nul(#[from] std::ffi::NulError),
+    #[error("Error persisting file path: {0}")]
+    PathPersist(#[from] tempfile::PathPersistError),
+    #[error("Error persisting file: {0}")]
+    Persist(#[from] tempfile::PersistError),
     #[error("{0}")]
     Other(String),
 }
