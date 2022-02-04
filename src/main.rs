@@ -391,7 +391,8 @@ async fn main() -> Result<()> {
         info!("SUCCESS: Agent {} activated", config.agent_uuid);
     }
 
-    let keylime_ca_cert = crypto::load_x509(&config.keylime_ca_path)?;
+    let keylime_ca_cert =
+        crypto::load_x509(Path::new(&config.keylime_ca_path))?;
     let ssl_context =
         crypto::generate_mtls_context(&mtls_cert, &nk_priv, keylime_ca_cert)?;
 
