@@ -183,8 +183,8 @@ pub(crate) async fn run_revocation_service(
             "Loading the revocation certificate from {}",
             revocation_cert_path.display()
         );
-        match crypto::import_x509(&revocation_cert_path) {
-            Ok(v) => v,
+        match crypto::load_x509(&revocation_cert_path) {
+            Ok(v) => v.public_key().map_err(Error::Crypto)?,
             Err(e) => {
                 return Err(Error::Configuration(String::from(
                     "Cannot load pubkey",
