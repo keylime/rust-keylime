@@ -261,7 +261,7 @@ pub(crate) fn run_revocation_actions(
 /// If the revocation_cert entry is "default", then use the default path;
 /// If the revocation_cert entry is an absolute path, then use the specified path;
 /// If the revocation_cert entry is a relative path, then expand from the WORK_DIR;
-/// If the revocation_cert is empty, fallback to the default path.
+/// If the revocation_cert is empty, return error.
 fn get_revocation_cert_path(config: &KeylimeConfig) -> Result<PathBuf> {
     let default_path = &format!("{}/secure/unzipped/{}", WORK_DIR, REV_CERT);
 
