@@ -127,7 +127,7 @@ fn main() -> std::result::Result<(), ImaEmulatorError> {
     // check if pcr is clean
     let pcr_list = PcrSelectionListBuilder::new()
         .with_selection(HashingAlgorithm::Sha1, &[PcrSlot::Slot10])
-        .build();
+        .build()?;
     let pcr_data = context
         .execute_without_session(|ctx| pcr::read_all(ctx, pcr_list))?;
     let digest = pcr_data
