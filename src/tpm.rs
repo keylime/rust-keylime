@@ -44,7 +44,7 @@ use tss_esapi::{
     },
     structures::{
         Attest, AttestInfo, Digest, DigestValues, EncryptedSecret,
-        HashScheme, IDObject, Name, PcrSelectionList,
+        HashScheme, IdObject, Name, PcrSelectionList,
         PcrSelectionListBuilder, PcrSlot, Signature, SignatureScheme,
     },
     tcti_ldr::TctiNameConf,
@@ -101,7 +101,7 @@ pub(crate) fn create_ek(
         }
     };
     let (tpm_pub, _, _) = context.read_public(handle)?;
-    let tpm_pub_vec = pub_to_vec(tpm_pub.into());
+    let tpm_pub_vec = pub_to_vec(tpm_pub.try_into()?);
 
     Ok((handle, cert, tpm_pub_vec))
 }
@@ -228,7 +228,7 @@ pub(crate) fn create_ak(
     let ak =
         ak::create_ak(ctx, handle, hash_alg, sign_alg, None, DefaultKey)?;
     let ak_tpm2b_pub = ak.out_public.clone();
-    let tpm2_pub_vec = pub_to_vec(ak_tpm2b_pub.into());
+    let tpm2_pub_vec = pub_to_vec(ak_tpm2b_pub.try_into()?);
     let ak_handle =
         ak::load_ak(ctx, handle, None, ak.out_private, ak.out_public)?;
     let (_, name, _) = ctx.read_public(ak_handle)?;
@@ -250,7 +250,7 @@ pub(crate) fn load_ak(
     let ak_handle: KeyHandle = ctx.context_load(ak)?.into();
 
     let (ak_public, ak_name, _) = ctx.read_public(ak_handle)?;
-    let ak_pub_vec = pub_to_vec(ak_public.into());
+    let ak_pub_vec = pub_to_vec(ak_public.try_into()?);
     Ok((ak_handle, ak_name, ak_pub_vec))
 }
 
@@ -258,7 +258,7 @@ const TSS_MAGIC: u32 = 3135029470;
 
 fn parse_cred_and_secret(
     keyblob: Vec<u8>,
-) -> Result<(IDObject, EncryptedSecret)> {
+) -> Result<(IdObject, EncryptedSecret)> {
     let magic = u32::from_be_bytes(keyblob[0..4].try_into().unwrap()); //#[allow_ci]
     let version = u32::from_be_bytes(keyblob[4..8].try_into().unwrap()); //#[allow_ci]
 
@@ -282,7 +282,7 @@ fn parse_cred_and_secret(
     let credential = &keyblob[10..(10 + credsize as usize)];
     let secret = &keyblob[(12 + credsize as usize)..];
 
-    let credential = IDObject::try_from(credential)?;
+    let credential = IdObject::try_from(credential)?;
     let secret = EncryptedSecret::try_from(secret)?;
 
     Ok((credential, secret))
@@ -502,7 +502,7 @@ pub(crate) fn build_pcr_list(
 
     let mut pcrlist = PcrSelectionListBuilder::new();
     pcrlist = pcrlist.with_selection(hash_alg, &pcrs);
-    let pcrlist = pcrlist.build();
+    let pcrlist = pcrlist.build()?;
 
     Ok(pcrlist)
 }
@@ -590,7 +590,7 @@ fn perform_quote_and_pcr_read(
     sign_scheme: SignatureScheme,
     hash_alg: HashingAlgorithm,
 ) -> Result<(Attest, Signature, PcrSelectionList, PcrData)> {
-    let nonce = nonce.try_into()?;
+    let nonce: tss_esapi::structures::Data = nonce.try_into()?;
 
     for attempt in 0..NUM_ATTESTATION_ATTEMPTS {
         // TSS ESAPI quote does not create pcr blob, so create it separately
@@ -599,7 +599,7 @@ fn perform_quote_and_pcr_read(
         // create quote
         let (attestation, sig) = context.quote(
             ak_handle,
-            &nonce,
+            nonce.clone(),
             sign_scheme,
             pcrs_read.clone(),
         )?;
@@ -801,7 +801,7 @@ pub mod testing {
         hasher.update(att.value())?;
         let digest = hasher.finish()?;
         let digest: Digest = digest.as_ref().try_into().unwrap(); //#[allow_ci]
-        match context.verify_signature(ak_handle, &digest, sig) {
+        match context.verify_signature(ak_handle, digest, sig) {
             Ok(ticket) if ticket.tag() == StructureTag::Verified => {}
             _ => {
                 return Err(KeylimeError::Other(
