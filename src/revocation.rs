@@ -399,13 +399,28 @@ pub(crate) async fn run_revocation_service(
                     "Revocation signature validated for revocation: {}",
                     msg_payload
                 );
-                let _ = run_revocation_actions(
+                let outputs = run_revocation_actions(
                     msg_payload,
                     &config.secure_size,
                     config_actions,
                     &actions_dir,
                     allow_payload_actions,
                 )?;
+
+                for output in outputs {
+                    if !output.stdout.is_empty() {
+                        info!(
+                            "Action stdout: {}",
+                            String::from_utf8(output.stdout)?
+                        );
+                    }
+                    if !output.stderr.is_empty() {
+                        warn!(
+                            "Action stderr: {}",
+                            String::from_utf8(output.stderr)?
+                        );
+                    }
+                }
             }
             _ => {
                 error!("Invalid revocation message signature {}", body);
