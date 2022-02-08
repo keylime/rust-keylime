@@ -249,6 +249,39 @@ pub(crate) async fn run_encrypted_payload(
         }
     }
 
+    // Set execution permission for listed revocation actions
+    let action_file = unzipped.join("action_list");
+
+    if action_file.exists() {
+        let action_data = std::fs::read_to_string(&action_file)
+            .expect("unable to read action_list");
+
+        action_data
+            .split('\n')
+            .filter(|&script| !script.is_empty())
+            .map(|script| script.trim())
+            .inspect(|&script| {
+                // Enforce the name restriction
+                if !script.starts_with("local_action_") {
+                    warn!("Invalid local action: {}. Must start with local_action_", script)
+                }
+            })
+            .filter(|&script| script.starts_with("local_action_"))
+            .map(|script| unzipped.join(script))
+            .filter(|script| script.exists())
+            .try_for_each(|script| {
+                if fs::set_permissions(&script, fs::Permissions::from_mode(0o700))
+                    .is_err()
+                {
+                    error!("Could not set permission for action {}", script.display());
+                    Err(Error::Permission)
+                } else {
+                    info!("Permission set for action: {}", script.display());
+                    Ok(())
+                }
+            })?
+    }
+
     Ok(())
 }
 
