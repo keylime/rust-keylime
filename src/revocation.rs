@@ -157,9 +157,17 @@ pub(crate) fn run_action(
 /// An OK result indicates all actions were run successfully.
 /// Otherwise, an Error will be returned from the first action that
 /// did not run successfully.
+///
+/// # Arguments
+///
+/// * `json` - The revocation message content
+/// * `secure_size` - The size of the secure mount
+/// * `config_actions` - Actions from the configuration file
+/// * `actions_dir` - Location of the pre-installed actions
 pub(crate) fn run_revocation_actions(
     json: Value,
     secure_size: &str,
+    config_actions: &str,
     actions_dir: &Path,
     allow_payload_actions: bool,
 ) -> Result<Vec<Output>> {
@@ -169,59 +177,79 @@ pub(crate) fn run_revocation_actions(
     #[cfg(not(test))]
     let mount = secure_mount::mount(secure_size)?;
 
+    // The actions from the configuration file takes precedence over the actions from the
+    // actions_list file
+    let mut action_list = config_actions
+        .split(',')
+        .map(|script| script.trim())
+        .filter(|script| !script.is_empty())
+        .inspect(|script| {
+            // Enforce the name restriction
+            if !script.starts_with("local_action_") {
+                warn!(
+                    "Invalid local action: {}. Must start with local_action_",
+                    script
+                )
+            }
+        })
+        .filter(|script| script.starts_with("local_action_"))
+        .collect::<Vec<&str>>();
+
+    let action_data;
     let unzipped = mount.join("unzipped");
     let action_file = unzipped.join("action_list");
 
-    let mut outputs = Vec::new();
-
     if action_file.exists() {
-        let action_data = std::fs::read_to_string(&action_file)
+        action_data = std::fs::read_to_string(&action_file)
             .expect("unable to read action_list");
 
-        let action_list = action_data
+        let file_actions = action_data
             .split('\n')
-            .filter(|&script| !script.is_empty())
             .map(|script| script.trim())
-            .inspect(|&script| {
+            .filter(|script| !script.is_empty())
+            .inspect(|script| {
                 // Enforce the name restriction
                 if !script.starts_with("local_action_") {
                     warn!("Invalid local action will not be executed: {}. Must start with local_action_", script)
                 }
             })
-            .filter(|&script| script.starts_with("local_action_"))
-            .collect::<Vec<&str>>();
+            .filter(|script| script.starts_with("local_action_"));
 
-        if !action_list.is_empty() {
-            for action in action_list {
-                match run_action(
-                    &unzipped,
-                    actions_dir,
-                    action,
-                    json.clone(),
-                    allow_payload_actions,
-                ) {
-                    Ok(output) => {
-                        outputs.push(output);
-                    }
-                    Err(e) => {
-                        let msg = format!(
-                            "error executing revocation script {}: {:?}",
-                            action, e
-                        );
-                        error!("{}", msg);
-                        return Err(Error::Script(
-                            String::from(action),
-                            e.exe_code()?,
-                            e.stderr()?,
-                        ));
-                    }
-                }
-            }
-        } else {
-            warn!("WARNING: no actions found in revocation action list");
-        }
+        action_list.extend(file_actions);
     } else {
         warn!("WARNING: no action_list found in secure directory");
+    }
+
+    let mut outputs = Vec::new();
+
+    if !action_list.is_empty() {
+        for action in action_list {
+            match run_action(
+                &unzipped,
+                actions_dir,
+                action,
+                json.clone(),
+                allow_payload_actions,
+            ) {
+                Ok(output) => {
+                    outputs.push(output);
+                }
+                Err(e) => {
+                    let msg = format!(
+                        "error executing revocation script {}: {:?}",
+                        action, e
+                    );
+                    error!("{}", msg);
+                    return Err(Error::Script(
+                        String::from(action),
+                        e.exe_code()?,
+                        e.stderr()?,
+                    ));
+                }
+            }
+        }
+    } else {
+        warn!("WARNING: no actions found in revocation action list");
     }
 
     Ok(outputs)
@@ -311,6 +339,7 @@ pub(crate) async fn run_revocation_service(
         )));
     };
 
+    let config_actions = config.revocation_actions.trim();
     let actions_dir = PathBuf::from(&config.revocation_actions_dir.trim());
     let allow_payload_actions = config.allow_payload_revocation_actions;
 
@@ -373,6 +402,7 @@ pub(crate) async fn run_revocation_service(
                 let _ = run_revocation_actions(
                     msg_payload,
                     &config.secure_size,
+                    config_actions,
                     &actions_dir,
                     allow_payload_actions,
                 )?;
@@ -403,6 +433,7 @@ mod tests {
         let outputs = run_revocation_actions(
             json,
             &test_config.secure_size,
+            &test_config.revocation_actions,
             actions_dir,
             true,
         );
@@ -434,10 +465,45 @@ mod tests {
         let outputs = run_revocation_actions(
             json,
             &test_config.secure_size,
+            &test_config.revocation_actions,
             actions_dir,
             true,
         );
         assert!(outputs.is_err());
+    }
+
+    #[test]
+    fn revocation_scripts_from_config() {
+        let mut test_config = KeylimeConfig::default();
+        let json_file = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/unzipped/test_ok.json"
+        );
+        test_config.revocation_actions =
+            String::from("local_action_hello, local_action_payload");
+        let json_str = std::fs::read_to_string(json_file).unwrap(); //#[allow_ci]
+        let json = serde_json::from_str(&json_str).unwrap(); //#[allow_ci]
+        let actions_dir =
+            &PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/actions/");
+        let outputs = run_revocation_actions(
+            json,
+            &test_config.secure_size,
+            &test_config.revocation_actions,
+            actions_dir,
+            true,
+        );
+
+        assert!(outputs.is_ok());
+        let outputs = outputs.unwrap(); //#[allow_ci]
+
+        assert!(outputs.len() == 6);
+
+        for output in outputs {
+            assert_eq!(
+                String::from_utf8(output.stdout).unwrap(), //#[allow_ci]
+                "there\n"
+            );
+        }
     }
 
     #[test]
