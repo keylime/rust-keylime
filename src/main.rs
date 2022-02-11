@@ -46,6 +46,7 @@ mod serialization;
 mod tpm;
 
 use actix_web::{web, App, HttpServer};
+use clap::{App as ClapApp, Arg};
 use common::*;
 use compress_tools::*;
 use error::{Error, Result};
@@ -302,8 +303,17 @@ async fn worker(
 
 #[actix_web::main]
 async fn main() -> Result<()> {
+    // Print --help information
+    let matches = ClapApp::new("keylime_agent")
+        .about("A Rust implementation of the Keylime agent")
+        .override_usage(
+            "sudo RUST_LOG=keylime_agent=trace ./target/debug/keylime_agent",
+        )
+        .get_matches();
+
     pretty_env_logger::init();
     let mut ctx = tpm::get_tpm2_ctx()?;
+
     //  Retrieve the TPM Vendor, this allows us to warn if someone is using a
     // Software TPM ("SW")
     if tss_esapi::utils::get_tpm_vendor(&mut ctx)?.contains("SW") {
