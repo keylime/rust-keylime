@@ -384,6 +384,7 @@ pub(crate) fn process_revocation(
 /// See:
 /// - URL: https://github.com/keylime/keylime/blob/master/keylime/revocation_notifier.py
 ///   Function: await_notifications
+#[cfg(feature = "with-zmq")]
 pub(crate) async fn run_revocation_service(
     config: &KeylimeConfig,
 ) -> Result<()> {

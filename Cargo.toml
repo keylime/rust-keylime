@@ -42,13 +42,18 @@ tokio = {version = "0.2", features = ["full"]}
 tokio-io = "0.1"
 tss-esapi = "7.0.0"
 thiserror = "1.0"
-zmq = "0.9.2"
 uuid = {version = "0.8", features = ["v4"]}
+zmq = {version = "0.9.2", optional = true}
 
 [dev-dependencies]
 actix-rt = "2"
 wiremock = "0.5"
 
 [features]
+# The features enabled by default
+default = ["with-zmq"]
 # this should change to dev-dependencies when we have integration testing
 testing = []
+# Whether the agent should be compiled with support to listen for notification
+# messages on ZeroMQ
+with-zmq = ["zmq"]

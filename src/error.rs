@@ -55,6 +55,7 @@ pub(crate) enum Error {
     NumParse(#[from] std::num::ParseIntError),
     #[error("Crypto error: {0}")]
     Crypto(#[from] openssl::error::ErrorStack),
+    #[cfg(feature = "with-zmq")]
     #[error("ZMQ error: {0}")]
     Zmq(#[from] zmq::Error),
     #[error("base64 decode error: {0}")]

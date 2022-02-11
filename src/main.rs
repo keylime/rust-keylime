@@ -300,6 +300,8 @@ async fn worker(
 ) -> Result<()> {
     run_encrypted_payload(symm_key, symm_key_cvar, payload, config).await?;
 
+    // If with-zmq feature is enabled, run the service listening for ZeroMQ messages
+    #[cfg(feature = "with-zmq")]
     if config.run_revocation {
         return revocation::run_revocation_service(config).await;
     }
