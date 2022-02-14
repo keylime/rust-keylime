@@ -317,6 +317,17 @@ async fn main() -> Result<()> {
     // Load config
     let config = KeylimeConfig::build()?;
 
+    // Verify if the python shim is installed in the expected location
+    let python_shim =
+        PathBuf::from(&config.revocation_actions_dir).join("shim.py");
+    if !python_shim.exists() {
+        error!("Could not find python shim at {}", python_shim.display());
+        return Err(Error::Configuration(format!(
+            "Could not find python shim at {}",
+            python_shim.display()
+        )));
+    }
+
     // Gather EK values and certs
     let (ek_handle, ek_cert, ek_tpm2b_pub) =
         tpm::create_ek(&mut ctx, config.enc_alg.into())?;
