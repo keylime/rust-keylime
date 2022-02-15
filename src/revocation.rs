@@ -65,13 +65,12 @@ fn lookup_action(
         Some((script, is_python, is_payload)) => {
             // If the script is python, add the shim to the command.  It is expected to be
             // installed on pre-installed actions directory.
-            let command;
-            if *is_python {
+            let command = if *is_python {
                 let shim = actions_dir.join("shim.py");
-                command = format!("{}", shim.as_path().display());
+                format!("{}", shim.as_path().display())
             } else {
-                command = format!("{}", script.as_path().display());
-            }
+                format!("{}", script.as_path().display())
+            };
             Ok((command, *is_python, *is_payload))
         }
     }
@@ -109,11 +108,10 @@ pub(crate) fn run_action(
     //TODO check if it is possible to not keep the file when passing to another process
     let (json_dump, json_path) = json_dump.keep()?;
 
-    let child;
-    if is_python {
+    let child = if is_python {
         let python_path = if is_payload { payload_dir } else { actions_dir };
 
-        child = Command::new(command)
+        Command::new(command)
             .arg(action)
             .arg(&json_path)
             .current_dir(work_dir)
@@ -121,15 +119,15 @@ pub(crate) fn run_action(
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
-            .spawn()?;
+            .spawn()?
     } else {
-        child = Command::new(command)
+        Command::new(command)
             .arg(&json_path)
             .current_dir(work_dir)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
-            .spawn()?;
+            .spawn()?
     };
 
     let output = match child.wait_with_output() {
