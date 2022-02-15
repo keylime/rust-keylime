@@ -2700,9 +2700,9 @@ checksum = "59547bce71d9c38b83d9c0e92b6066c4253371f15005def0c30d9657f50c7642"
 
 [[package]]
 name = "tss-esapi"
-version = "7.0.0-beta.1"
+version = "7.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "14c207ea1313496a86048b20cf145b2da8f5b833fd6f6a30bd6db55a46665bac"
+checksum = "d038d648f74f57bc15d5c385e5fd8281b1228f268fc09ce1ca80d0772e6f9a55"
 dependencies = [
  "bitfield",
  "enumflags2",
