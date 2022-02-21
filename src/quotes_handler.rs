@@ -3,8 +3,8 @@
 
 use crate::{tpm, Error as KeylimeError, QuoteData};
 
-use crate::serialization::serialize_maybe_base64;
 use crate::ima::read_measurement_list;
+use crate::serialization::serialize_maybe_base64;
 use actix_web::{web, HttpRequest, HttpResponse, Responder};
 use log::*;
 use serde::{Deserialize, Serialize};
@@ -249,7 +249,7 @@ pub async fn integrity(
                 .await;
         };
 
-        let ima_ml_entry = req.uri().query().unwrap();
+        let ima_ml_entry = req.uri().query().unwrap(); //#[allow_ci]
         let nth_entry = match ima_ml_entry.find("ima_ml_entry=") {
             None => 0,
             Some(idx) => {
@@ -281,8 +281,11 @@ pub async fn integrity(
         }
 
         let ima_ml_path = &data.ima_ml_path;
-        let (ima_ml, nth_entry, num_entries) =
-            read_measurement_list(&mut data.ima_ml.lock().unwrap(), &ima_ml_path, nth_entry)?;
+        let (ima_ml, nth_entry, num_entries) = read_measurement_list(
+            &mut data.ima_ml.lock().unwrap(), //#[allow_ci]
+            ima_ml_path,
+            nth_entry,
+        )?;
 
         if partial == 0 {
             let quote = KeylimeIntegrityQuotePreAttestation::from_id_quote(
