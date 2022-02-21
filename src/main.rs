@@ -53,6 +53,7 @@ use common::*;
 use compress_tools::*;
 use error::{Error, Result};
 use futures::{future::TryFutureExt, try_join};
+use ima::ImaMeasurementList;
 use log::*;
 use openssl::pkey::{PKey, Private, Public};
 use std::{
@@ -70,7 +71,6 @@ use tss_esapi::{
     handles::KeyHandle, interface_types::algorithm::AsymmetricAlgorithm,
     Context,
 };
-use ima::ImaMeasurementList;
 use uuid::Uuid;
 
 #[macro_use]

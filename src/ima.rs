@@ -51,7 +51,7 @@ impl ImaMeasurementList {
                 best = *entry
             }
         }
-        return best;
+        best
     }
 }
 
@@ -107,7 +107,7 @@ pub(crate) fn read_measurement_list(
             Some(_) => (),
         }
     }
-    return Ok((String::from(ml.unwrap()), nth_entry, num_entries));
+    Ok((String::from(ml.unwrap()), nth_entry, num_entries))
 }
 
 #[test]
