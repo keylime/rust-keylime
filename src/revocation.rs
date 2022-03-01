@@ -181,16 +181,6 @@ pub(crate) fn run_revocation_actions(
         .split(',')
         .map(|script| script.trim())
         .filter(|script| !script.is_empty())
-        .inspect(|script| {
-            // Enforce the name restriction
-            if !script.starts_with("local_action_") {
-                warn!(
-                    "Invalid local action: {}. Must start with local_action_",
-                    script
-                )
-            }
-        })
-        .filter(|script| script.starts_with("local_action_"))
         .collect::<Vec<&str>>();
 
     let action_data;
@@ -204,14 +194,7 @@ pub(crate) fn run_revocation_actions(
         let file_actions = action_data
             .split('\n')
             .map(|script| script.trim())
-            .filter(|script| !script.is_empty())
-            .inspect(|script| {
-                // Enforce the name restriction
-                if !script.starts_with("local_action_") {
-                    warn!("Invalid local action will not be executed: {}. Must start with local_action_", script)
-                }
-            })
-            .filter(|script| script.starts_with("local_action_"));
+            .filter(|script| !script.is_empty());
 
         action_list.extend(file_actions);
     } else {
