@@ -172,7 +172,8 @@ pub(crate) fn run(dir: &Path, script: &str, agent_uuid: &str) -> Result<()> {
     info!("Running script: {:?}", script_path);
 
     if !script_path.exists() {
-        return Err(Error::Other(format!("{:?} not found", &script_path)));
+        info!("No payload script {} found in {}", script, dir.display());
+        return Ok(());
     }
 
     if fs::set_permissions(&script_path, fs::Permissions::from_mode(0o700))
@@ -183,6 +184,8 @@ pub(crate) fn run(dir: &Path, script: &str, agent_uuid: &str) -> Result<()> {
             &script_path
         )));
     }
+
+    info!("Executing payload script: {}", script_path.display());
 
     match Command::new("sh")
         .arg("-c")
