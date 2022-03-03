@@ -225,7 +225,7 @@ pub async fn pubkey(
 mod tests {
     use super::*;
     use crate::common::{
-        KeylimeConfig, AES_128_KEY_LEN, AES_256_KEY_LEN, API_VERSION,
+        KeylimeConfig, AES_128_KEY_LEN, AES_256_KEY_LEN, PYTHON_API_VERSION,
     };
     use crate::crypto::compute_hmac;
     #[cfg(feature = "testing")]
@@ -251,11 +251,11 @@ mod tests {
             App::new()
                 .app_data(quotedata.clone())
                 .route(
-                    &format!("/{}/keys/ukey", API_VERSION),
+                    &format!("/{}/keys/ukey", PYTHON_API_VERSION),
                     web::post().to(u_key),
                 )
                 .route(
-                    &format!("/{}/keys/vkey", API_VERSION),
+                    &format!("/{}/keys/vkey", PYTHON_API_VERSION),
                     web::post().to(v_key),
                 ),
         )
@@ -313,7 +313,7 @@ mod tests {
         };
 
         let req = test::TestRequest::post()
-            .uri(&format!("/{}/keys/ukey", API_VERSION,))
+            .uri(&format!("/{}/keys/ukey", PYTHON_API_VERSION,))
             .set_json(&ukey)
             .to_request();
 
@@ -328,7 +328,7 @@ mod tests {
         };
 
         let req = test::TestRequest::post()
-            .uri(&format!("/{}/keys/vkey", API_VERSION,))
+            .uri(&format!("/{}/keys/vkey", PYTHON_API_VERSION,))
             .set_json(&vkey)
             .to_request();
 
@@ -377,13 +377,13 @@ mod tests {
         let quotedata = web::Data::new(QuoteData::fixture().unwrap()); //#[allow_ci]
         let mut app =
             test::init_service(App::new().app_data(quotedata.clone()).route(
-                &format!("/{}/keys/pubkey", API_VERSION),
+                &format!("/{}/keys/pubkey", PYTHON_API_VERSION),
                 web::get().to(pubkey),
             ))
             .await;
 
         let req = test::TestRequest::get()
-            .uri(&format!("/{}/keys/pubkey", API_VERSION,))
+            .uri(&format!("/{}/keys/pubkey", PYTHON_API_VERSION,))
             .to_request();
 
         let resp = test::call_service(&mut app, req).await;

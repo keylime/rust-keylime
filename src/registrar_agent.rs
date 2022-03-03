@@ -1,6 +1,6 @@
 use crate::error::Error;
 
-use crate::common::API_VERSION;
+use crate::common::PYTHON_API_VERSION;
 use crate::serialization::*;
 use log::*;
 use openssl::x509::X509;
@@ -62,7 +62,7 @@ pub(crate) async fn do_activate_agent(
     #[cfg(not(test))]
     let addr = format!(
         "http://{}:{}/{}/agents/{}",
-        registrar_ip, registrar_port, API_VERSION, agent_uuid
+        registrar_ip, registrar_port, PYTHON_API_VERSION, agent_uuid
     );
 
     info!(
@@ -113,7 +113,7 @@ pub(crate) async fn do_register_agent(
     #[cfg(not(test))]
     let addr = format!(
         "http://{}:{}/{}/agents/{}",
-        registrar_ip, registrar_port, API_VERSION, agent_uuid
+        registrar_ip, registrar_port, PYTHON_API_VERSION, agent_uuid
     );
 
     info!(

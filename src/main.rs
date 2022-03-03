@@ -330,7 +330,11 @@ async fn main() -> Result<()> {
         warn!("INSECURE: Only use Keylime in this mode for testing or debugging purposes.");
     }
 
-    info!("Starting server with API version {}...", API_VERSION);
+    info!("Starting server with API version {}...", AGENT_API_VERSION);
+    info!(
+        "Supporting verifier, registrar, tenant API version {}...",
+        PYTHON_API_VERSION
+    );
 
     // Load config
     let config = KeylimeConfig::build()?;
@@ -500,30 +504,36 @@ async fn main() -> Result<()> {
         App::new()
             .app_data(quotedata.clone())
             .service(
-                web::resource(format!("/{}/keys/ukey", API_VERSION))
+                web::resource(format!("/{}/keys/ukey", PYTHON_API_VERSION))
                     .route(web::post().to(keys_handler::u_key)),
             )
             .service(
                 // the double slash may be a typo on the python side
-                web::resource(format!("/{}/keys/vkey", API_VERSION))
+                web::resource(format!("/{}/keys/vkey", PYTHON_API_VERSION))
                     .route(web::post().to(keys_handler::v_key)),
             )
             .service(
-                web::resource(format!("/{}/keys/pubkey", API_VERSION))
+                web::resource(format!("/{}/keys/pubkey", PYTHON_API_VERSION))
                     .route(web::get().to(keys_handler::pubkey)),
             )
             .service(
-                web::resource(format!("/{}/quotes/identity", API_VERSION))
-                    .route(web::get().to(quotes_handler::identity)),
+                web::resource(format!(
+                    "/{}/quotes/identity",
+                    PYTHON_API_VERSION
+                ))
+                .route(web::get().to(quotes_handler::identity)),
             )
             .service(
-                web::resource(format!("/{}/quotes/integrity", API_VERSION))
-                    .route(web::get().to(quotes_handler::integrity)),
+                web::resource(format!(
+                    "/{}/quotes/integrity",
+                    PYTHON_API_VERSION
+                ))
+                .route(web::get().to(quotes_handler::integrity)),
             )
             .service(
                 web::resource(format!(
                     "/{}/notifications/revocation",
-                    API_VERSION
+                    PYTHON_API_VERSION
                 ))
                 .route(web::post().to(notifications_handler::revocation)),
             )

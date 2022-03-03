@@ -304,7 +304,7 @@ mod tests {
         let quotedata = web::Data::new(QuoteData::fixture().unwrap()); //#[allow_ci]
         let mut app =
             test::init_service(App::new().app_data(quotedata.clone()).route(
-                &format!("/{}/quotes/identity", API_VERSION),
+                &format!("/{}/quotes/identity", PYTHON_API_VERSION),
                 web::get().to(identity),
             ))
             .await;
@@ -312,7 +312,7 @@ mod tests {
         let req = test::TestRequest::get()
             .uri(&format!(
                 "/{}/quotes/identity?nonce=1234567890ABCDEFHIJ",
-                API_VERSION,
+                PYTHON_API_VERSION,
             ))
             .to_request();
 
@@ -343,7 +343,7 @@ mod tests {
         let quotedata = web::Data::new(QuoteData::fixture().unwrap()); //#[allow_ci]
         let mut app =
             test::init_service(App::new().app_data(quotedata.clone()).route(
-                &format!("/{}/quotes/integrity", API_VERSION),
+                &format!("/{}/quotes/integrity", PYTHON_API_VERSION),
                 web::get().to(integrity),
             ))
             .await;
@@ -351,7 +351,7 @@ mod tests {
         let req = test::TestRequest::get()
             .uri(&format!(
                 "/{}/quotes/integrity?nonce=1234567890ABCDEFHIJ&mask=0x408000&vmask=0x808000&partial=0",
-                API_VERSION,
+                PYTHON_API_VERSION,
             ))
             .to_request();
 
@@ -387,7 +387,7 @@ mod tests {
         let quotedata = web::Data::new(QuoteData::fixture().unwrap()); //#[allow_ci]
         let mut app =
             test::init_service(App::new().app_data(quotedata.clone()).route(
-                &format!("/{}/quotes/integrity", API_VERSION),
+                &format!("/{}/quotes/integrity", PYTHON_API_VERSION),
                 web::get().to(integrity),
             ))
             .await;
@@ -395,7 +395,7 @@ mod tests {
         let req = test::TestRequest::get()
             .uri(&format!(
                 "/{}/quotes/integrity?nonce=1234567890ABCDEFHIJ&mask=0x408000&vmask=0x808000&partial=1",
-                API_VERSION,
+                PYTHON_API_VERSION,
             ))
             .to_request();
 

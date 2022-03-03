@@ -19,7 +19,10 @@ use uuid::Uuid;
 /*
  * Constants and static variables
  */
-pub const API_VERSION: &str = "v2.1";
+// expected API version of verifier, registrar, tenant
+pub const PYTHON_API_VERSION: &str = "v2.0";
+// API version of agent
+pub const AGENT_API_VERSION: &str = "v2.1";
 pub const STUB_VTPM: bool = false;
 pub const STUB_IMA: bool = true;
 pub const TPM_DATA_PCR: usize = 16;

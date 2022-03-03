@@ -50,7 +50,7 @@ pub async fn revocation(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::common::{KeylimeConfig, API_VERSION};
+    use crate::common::{KeylimeConfig, PYTHON_API_VERSION};
     use actix_web::{test, web, App};
     use serde_json::json;
     use std::{fs, path::Path};
@@ -72,7 +72,7 @@ mod tests {
 
         let mut app =
             test::init_service(App::new().app_data(quotedata.clone()).route(
-                &format!("/{}/notifications/revocation", API_VERSION),
+                &format!("/{}/notifications/revocation", PYTHON_API_VERSION),
                 web::post().to(revocation),
             ))
             .await;
@@ -92,7 +92,9 @@ mod tests {
         };
 
         let req = test::TestRequest::post()
-            .uri(&format!("/{}/notifications/revocation", API_VERSION,))
+            .uri(
+                &format!("/{}/notifications/revocation", PYTHON_API_VERSION,),
+            )
             .set_json(&revocation)
             .to_request();
 
