@@ -58,12 +58,12 @@ fn check_mount(secure_dir: &Path) -> Result<bool> {
  * implementation as the original python version, but the chown/geteuid
  * functions are unsafe function in Rust to use.
  */
-pub(crate) fn mount(secure_size: &str) -> Result<PathBuf> {
+pub(crate) fn mount(work_dir: &Path, secure_size: &str) -> Result<PathBuf> {
     // Use /tmpfs-dev directory if MOUNT_SECURE flag is not set. This
     // is for development environment and does not mount to the system.
     if !MOUNT_SECURE {
         warn!("Using /tmpfs-dev (dev environment)");
-        let secure_dir_path = Path::new(WORK_DIR).join("tmpfs-dev");
+        let secure_dir_path = Path::new(work_dir).join("tmpfs-dev");
         if !secure_dir_path.exists() {
             fs::create_dir(&secure_dir_path).map_err(|e| {
                 Error::SecureMount(format!(
@@ -78,7 +78,7 @@ pub(crate) fn mount(secure_size: &str) -> Result<PathBuf> {
     }
 
     // Mount the directory to file system
-    let secure_dir_path = Path::new(WORK_DIR).join("secure");
+    let secure_dir_path = Path::new(work_dir).join("secure");
 
     // If the directory is not mount to file system, mount the directory to
     // file system.

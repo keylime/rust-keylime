@@ -3,7 +3,6 @@
 
 use crate::{tpm, Error as KeylimeError, QuoteData};
 
-use crate::common::{ima_ml_path_get, measuredboot_ml_path_get};
 use crate::serialization::serialize_maybe_base64;
 use actix_web::{web, HttpRequest, HttpResponse, Responder};
 use log::*;
@@ -249,9 +248,9 @@ pub async fn integrity(
             data.clone(),
         )?;
 
-        let ima_ml_path = ima_ml_path_get();
+        let ima_ml_path = &data.ima_ml_path;
         let mut mb_measurement_list = None;
-        let measuredboot_ml = read(measuredboot_ml_path_get());
+        let measuredboot_ml = read(&data.measuredboot_ml_path);
         // Only add log if a measured boot PCR 0 is actually in the mask
         if tpm::check_mask(&param.mask, &PcrSlot::Slot0)? {
             mb_measurement_list = match measuredboot_ml {
@@ -367,8 +366,8 @@ mod tests {
             .unwrap() //#[allow_ci]
             .public_eq(&quotedata.pub_key));
 
-        let ima_ml_path = ima_ml_path_get();
-        let ima_ml = read_to_string(&ima_ml_path).unwrap(); //#[allow_ci]
+        let ima_ml_path = &quotedata.ima_ml_path;
+        let ima_ml = read_to_string(ima_ml_path).unwrap(); //#[allow_ci]
         assert_eq!(result.results.ima_measurement_list.as_str(), ima_ml);
         assert!(result.results.quote.starts_with('r'));
 
@@ -408,7 +407,7 @@ mod tests {
         assert_eq!(result.results.enc_alg.as_str(), "rsa");
         assert_eq!(result.results.sign_alg.as_str(), "rsassa");
 
-        let ima_ml_path = ima_ml_path_get();
+        let ima_ml_path = &quotedata.ima_ml_path;
         let ima_ml = read_to_string(&ima_ml_path).unwrap(); //#[allow_ci]
         assert_eq!(result.results.ima_measurement_list.as_str(), ima_ml);
         assert!(result.results.quote.starts_with('r'));

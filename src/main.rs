@@ -99,6 +99,9 @@ pub struct QuoteData {
     revocation_actions_dir: PathBuf,
     allow_payload_revocation_actions: bool,
     secure_size: String,
+    work_dir: PathBuf,
+    ima_ml_path: PathBuf,
+    measuredboot_ml_path: PathBuf,
 }
 
 // Parameters are based on Python codebase:
@@ -122,7 +125,8 @@ pub(crate) fn decrypt_payload(
 pub(crate) fn setup_unzipped(
     config: &KeylimeConfig,
 ) -> Result<(PathBuf, PathBuf, PathBuf)> {
-    let mount = secure_mount::mount(&config.secure_size)?;
+    let work_dir = Path::new(&config.work_dir);
+    let mount = secure_mount::mount(work_dir, &config.secure_size)?;
     let unzipped = mount.join("unzipped");
 
     // clear any old data
@@ -270,20 +274,19 @@ pub(crate) async fn run_encrypted_payload(
             .split('\n')
             .filter(|&script| !script.is_empty())
             .map(|script| script.trim())
-            .inspect(|&script| {
-                // Enforce the name restriction
-                if !script.starts_with("local_action_") {
-                    warn!("Invalid local action: {}. Must start with local_action_", script)
-                }
-            })
-            .filter(|&script| script.starts_with("local_action_"))
             .map(|script| unzipped.join(script))
             .filter(|script| script.exists())
             .try_for_each(|script| {
-                if fs::set_permissions(&script, fs::Permissions::from_mode(0o700))
-                    .is_err()
+                if fs::set_permissions(
+                    &script,
+                    fs::Permissions::from_mode(0o700),
+                )
+                .is_err()
                 {
-                    error!("Could not set permission for action {}", script.display());
+                    error!(
+                        "Could not set permission for action {}",
+                        script.display()
+                    );
                     Err(Error::Permission)
                 } else {
                     info!("Permission set for action: {}", script.display());
@@ -402,7 +405,7 @@ async fn main() -> Result<()> {
                 ak_sign_alg: config.sign_alg,
                 ak_context: tpm::store_ak(&mut ctx, new_ak.0)?,
             }
-            .store(&tpm_data_path_get())?;
+            .store(Path::new(&config.tpm_data_path))?;
             new_ak
         }
     };
@@ -474,7 +477,11 @@ async fn main() -> Result<()> {
 
     let revocation_cert = revocation::get_revocation_cert_path(&config)?;
     let actions_dir =
-        PathBuf::from(&config.revocation_actions_dir).canonicalize()?;
+        Path::new(&config.revocation_actions_dir).canonicalize()?;
+    let work_dir = Path::new(&config.work_dir).canonicalize()?;
+    let ima_ml_path = Path::new(&config.ima_ml_path).to_path_buf();
+    let measuredboot_ml_path =
+        Path::new(&config.measuredboot_ml_path).to_path_buf();
 
     let quotedata = web::Data::new(QuoteData {
         tpmcontext: Mutex::new(ctx),
@@ -497,6 +504,9 @@ async fn main() -> Result<()> {
         allow_payload_revocation_actions: config
             .allow_payload_revocation_actions,
         secure_size: config.secure_size.clone(),
+        work_dir,
+        ima_ml_path,
+        measuredboot_ml_path,
     });
 
     let actix_server = HttpServer::new(move || {
@@ -611,6 +621,16 @@ mod testing {
             let actions_dir =
                 Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/actions/");
 
+            let work_dir =
+                Path::new(env!("CARGO_MANIFEST_DIR")).join("tests");
+
+            let ima_ml_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("test-data/ima/ascii_runtime_measurements");
+
+            let measuredboot_ml_path = Path::new(
+                "/sys/kernel/security/tpm0/binary_bios_measurements",
+            );
+
             Ok(QuoteData {
                 tpmcontext: Mutex::new(ctx),
                 priv_key: nk_priv,
@@ -632,6 +652,9 @@ mod testing {
                 allow_payload_revocation_actions: test_config
                     .allow_payload_revocation_actions,
                 secure_size: test_config.secure_size,
+                work_dir,
+                ima_ml_path,
+                measuredboot_ml_path: measuredboot_ml_path.to_path_buf(),
             })
         }
     }
