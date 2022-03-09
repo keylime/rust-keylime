@@ -4,7 +4,7 @@
 #[macro_use]
 use log::*;
 
-use crate::common::{KeylimeConfig, REV_CERT, WORK_DIR};
+use crate::common::{KeylimeConfig, REV_CERT};
 use crate::crypto;
 use crate::error::*;
 use crate::secure_mount;
@@ -83,13 +83,8 @@ pub(crate) fn run_action(
     action: &str,
     json: Value,
     allow_payload_actions: bool,
+    work_dir: &Path,
 ) -> Result<Output> {
-    #[cfg(not(test))]
-    let work_dir = PathBuf::from(WORK_DIR);
-
-    #[cfg(test)]
-    let work_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests");
-
     // Lookup for command and get command line
     let (command, is_python, is_payload) = lookup_action(
         payload_dir,
@@ -102,7 +97,7 @@ pub(crate) fn run_action(
 
     // Write JSON argument to a temporary file
     let raw_json = serde_json::value::to_raw_value(&json)?;
-    let mut json_dump = tempfile::NamedTempFile::new_in(&work_dir)?;
+    let mut json_dump = tempfile::NamedTempFile::new_in(work_dir)?;
     json_dump.write_all(raw_json.get().as_bytes());
 
     //TODO check if it is possible to not keep the file when passing to another process
@@ -168,12 +163,9 @@ pub(crate) fn run_revocation_actions(
     config_actions: &str,
     actions_dir: &Path,
     allow_payload_actions: bool,
+    work_dir: &Path,
 ) -> Result<Vec<Output>> {
-    #[cfg(test)]
-    let mount = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests");
-
-    #[cfg(not(test))]
-    let mount = secure_mount::mount(secure_size)?;
+    let mount = secure_mount::mount(work_dir, secure_size)?;
 
     // The actions from the configuration file takes precedence over the actions from the
     // actions_list file
@@ -211,6 +203,7 @@ pub(crate) fn run_revocation_actions(
                 action,
                 json.clone(),
                 allow_payload_actions,
+                work_dir,
             ) {
                 Ok(output) => {
                     outputs.push(output);
@@ -246,7 +239,8 @@ pub(crate) fn run_revocation_actions(
 pub(crate) fn get_revocation_cert_path(
     config: &KeylimeConfig,
 ) -> Result<PathBuf> {
-    let default_path = &format!("{}/secure/unzipped/{}", WORK_DIR, REV_CERT);
+    let default_path =
+        &format!("{}/secure/unzipped/{}", &config.work_dir, REV_CERT);
 
     // Unlike the python agent we do not attempt lazy loading. We either
     // have the certificate, or we don't. If we don't have a key or can't load
@@ -265,7 +259,7 @@ pub(crate) fn get_revocation_cert_path(
     // If the path is not absolute, expand from the WORK_DIR
     if cert_path_buf.as_path().is_relative() {
         let rel_path = cert_path_buf;
-        cert_path_buf = PathBuf::from(WORK_DIR);
+        cert_path_buf = PathBuf::from(&config.work_dir);
         cert_path_buf.push(rel_path);
     }
 
@@ -280,6 +274,7 @@ pub(crate) fn process_revocation(
     config_actions: &str,
     actions_dir: &Path,
     allow_payload_revocation_actions: bool,
+    work_dir: &Path,
 ) -> Result<()> {
     // Ensure we have a signature, otherwise continue the loop
     let signature = match body["signature"].as_str() {
@@ -338,6 +333,7 @@ pub(crate) fn process_revocation(
                 config_actions,
                 actions_dir,
                 allow_payload_revocation_actions,
+                work_dir,
             )?;
 
             for output in outputs {
@@ -371,7 +367,8 @@ pub(crate) fn process_revocation(
 pub(crate) async fn run_revocation_service(
     config: &KeylimeConfig,
 ) -> Result<()> {
-    let mount = secure_mount::mount(&config.secure_size)?;
+    let work_dir = Path::new(&config.work_dir);
+    let mount = secure_mount::mount(work_dir, &config.secure_size)?;
 
     // Connect to the service via 0mq
     let context = zmq::Context::new();
@@ -416,6 +413,7 @@ pub(crate) async fn run_revocation_service(
             &config.revocation_actions,
             &actions_dir,
             config.allow_payload_revocation_actions,
+            work_dir,
         );
     }
     Ok(())
@@ -425,6 +423,9 @@ pub(crate) async fn run_revocation_service(
 mod tests {
     use super::*;
     use serde_json::json;
+
+    // Used to create symbolic links
+    use std::os::unix::fs::symlink;
 
     #[test]
     fn revocation_scripts_ok() {
@@ -436,13 +437,20 @@ mod tests {
         let json_str = std::fs::read_to_string(json_file).unwrap(); //#[allow_ci]
         let json = serde_json::from_str(&json_str).unwrap(); //#[allow_ci]
         let actions_dir =
-            &PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/actions/");
+            &Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/actions/");
+        let work_dir = tempfile::tempdir().unwrap(); //#[allow_ci]
+        let tmpfs_dir = work_dir.path().join("tmpfs-dev"); //#[allow_ci]
+        fs::create_dir(&tmpfs_dir).unwrap(); //#[allow_ci]
+        let unzipped_dir =
+            &Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/unzipped");
+        symlink(unzipped_dir, tmpfs_dir.join("unzipped")).unwrap(); //#[allow_ci]
         let outputs = run_revocation_actions(
             json,
             &test_config.secure_size,
             &test_config.revocation_actions,
             actions_dir,
             true,
+            work_dir.path(),
         );
 
         assert!(outputs.is_ok());
@@ -468,13 +476,20 @@ mod tests {
         let json_str = std::fs::read_to_string(json_file).unwrap(); //#[allow_ci]
         let json = serde_json::from_str(&json_str).unwrap(); //#[allow_ci]
         let actions_dir =
-            &PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/actions/");
+            &Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/actions/");
+        let work_dir = tempfile::tempdir().unwrap(); //#[allow_ci]
+        let tmpfs_dir = work_dir.path().join("tmpfs-dev"); //#[allow_ci]
+        fs::create_dir(&tmpfs_dir).unwrap(); //#[allow_ci]
+        let unzipped_dir =
+            &Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/unzipped");
+        symlink(unzipped_dir, tmpfs_dir.join("unzipped")).unwrap(); //#[allow_ci]
         let outputs = run_revocation_actions(
             json,
             &test_config.secure_size,
             &test_config.revocation_actions,
             actions_dir,
             true,
+            work_dir.path(),
         );
         assert!(outputs.is_err());
     }
@@ -491,13 +506,20 @@ mod tests {
         let json_str = std::fs::read_to_string(json_file).unwrap(); //#[allow_ci]
         let json = serde_json::from_str(&json_str).unwrap(); //#[allow_ci]
         let actions_dir =
-            &PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/actions/");
+            &Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/actions/");
+        let work_dir = tempfile::tempdir().unwrap(); //#[allow_ci]
+        let tmpfs_dir = work_dir.path().join("tmpfs-dev"); //#[allow_ci]
+        fs::create_dir(&tmpfs_dir).unwrap(); //#[allow_ci]
+        let unzipped_dir =
+            &Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/unzipped");
+        symlink(unzipped_dir, tmpfs_dir.join("unzipped")).unwrap(); //#[allow_ci]
         let outputs = run_revocation_actions(
             json,
             &test_config.secure_size,
             &test_config.revocation_actions,
             actions_dir,
             true,
+            work_dir.path(),
         );
 
         assert!(outputs.is_ok());
@@ -518,7 +540,7 @@ mod tests {
         let test_config = KeylimeConfig::default();
         let revocation_cert_path =
             get_revocation_cert_path(&test_config).unwrap(); //#[allow_ci]
-        let mut expected = PathBuf::from(WORK_DIR);
+        let mut expected = PathBuf::from(&test_config.work_dir);
         expected.push("secure/unzipped/");
         expected.push(REV_CERT);
         assert_eq!(*revocation_cert_path, expected);
@@ -543,8 +565,7 @@ mod tests {
         };
         let revocation_cert_path =
             get_revocation_cert_path(&test_config).unwrap(); //#[allow_ci]
-        let mut expected = PathBuf::from(WORK_DIR);
-        expected.push("cert.crt");
+        let mut expected = Path::new(&test_config.work_dir).join("cert.crt");
         assert_eq!(revocation_cert_path, expected);
     }
 
@@ -563,8 +584,8 @@ mod tests {
     #[test]
     fn test_lookup_action() {
         let work_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests");
-        let payload_dir = PathBuf::from(&work_dir.join("unzipped/"));
-        let actions_dir = PathBuf::from(&work_dir.join("actions/"));
+        let payload_dir = Path::new(&work_dir).join("unzipped/");
+        let actions_dir = Path::new(&work_dir).join("actions/");
 
         // Test local python action
         let expected = format!("{}", &actions_dir.join("shim.py").display(),);
@@ -687,6 +708,8 @@ mod tests {
         let actions_dir =
             Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/actions");
 
+        let work_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests");
+
         let result = process_revocation(
             body,
             &cert_path,
@@ -694,6 +717,7 @@ mod tests {
             &test_config.revocation_actions,
             &actions_dir,
             test_config.allow_payload_revocation_actions,
+            &work_dir,
         );
 
         assert!(result.is_ok());

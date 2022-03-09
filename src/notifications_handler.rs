@@ -34,6 +34,7 @@ pub async fn revocation(
     let revocation_actions = &data.revocation_actions;
     let actions_dir = PathBuf::from(&data.revocation_actions_dir);
     let payload_actions_allowed = data.allow_payload_revocation_actions;
+    let work_dir = PathBuf::from(&data.work_dir);
 
     let result = revocation::process_revocation(
         json_body,
@@ -42,6 +43,7 @@ pub async fn revocation(
         revocation_actions,
         &actions_dir,
         payload_actions_allowed,
+        &work_dir,
     )?;
 
     HttpResponse::Ok().await

@@ -19,7 +19,7 @@ use uuid::Uuid;
 /*
  * Constants and static variables
  */
-pub const API_VERSION: &str = "v2.1";
+pub const API_VERSION: &str = "v2.0";
 pub const STUB_VTPM: bool = false;
 pub const STUB_IMA: bool = true;
 pub const TPM_DATA_PCR: usize = 16;
@@ -31,7 +31,8 @@ pub static IMA_ML: &str =
     "/sys/kernel/security/ima/ascii_runtime_measurements";
 pub static MEASUREDBOOT_ML: &str =
     "/sys/kernel/security/tpm0/binary_bios_measurements";
-pub static DEFAULT_CA_PATH: &str = "/var/lib/keylime/cv_ca/cacert.crt";
+// The DEFAULT_CA_PATH is relative from WORK_DIR
+pub static DEFAULT_CA_PATH: &str = "cv_ca/cacert.crt";
 pub static KEY: &str = "secret";
 pub static WORK_DIR: &str = "/var/lib/keylime";
 pub static TPM_DATA: &str = "tpmdata.json";
@@ -43,18 +44,31 @@ pub static REV_ACTIONS_DIR: &str = "/usr/libexec/keylime";
 pub static REV_ACTIONS: &str = "";
 pub static ALLOW_PAYLOAD_REV_ACTIONS: bool = true;
 
-// Secure mount of tpmfs (False is generally used for development environments)
-#[cfg(not(feature = "testing"))]
-pub static MOUNT_SECURE: bool = true;
-
-#[cfg(feature = "testing")]
-pub static MOUNT_SECURE: bool = false;
-
 pub const AGENT_UUID_LEN: usize = 36;
 pub const AUTH_TAG_LEN: usize = 96;
 pub const AES_128_KEY_LEN: usize = 16;
 pub const AES_256_KEY_LEN: usize = 32;
 pub const AES_BLOCK_SIZE: usize = 16;
+
+cfg_if::cfg_if! {
+    if #[cfg(any(test, feature = "testing"))] {
+        // Secure mount of tpmfs (False is generally used for development environments)
+        pub static MOUNT_SECURE: bool = false;
+
+        pub(crate) fn ima_ml_path_get() -> PathBuf {
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("test-data")
+                .join("ima")
+                .join("ascii_runtime_measurements")
+        }
+    } else {
+        pub static MOUNT_SECURE: bool = true;
+
+        pub(crate) fn ima_ml_path_get() -> PathBuf {
+            Path::new(IMA_ML).to_path_buf()
+        }
+    }
+}
 
 // a vector holding keys
 pub type KeySet = Vec<SymmKey>;
@@ -146,6 +160,7 @@ pub(crate) struct KeylimeConfig {
     pub enc_alg: EncryptionAlgorithm,
     pub sign_alg: SignAlgorithm,
     pub tpm_data: Option<TpmData>,
+    pub tpm_data_path: String,
     pub run_revocation: bool,
     pub revocation_cert: String,
     pub revocation_ip: String,
@@ -159,6 +174,9 @@ pub(crate) struct KeylimeConfig {
     pub revocation_actions: String,
     pub revocation_actions_dir: String,
     pub allow_payload_revocation_actions: bool,
+    pub work_dir: String,
+    pub ima_ml_path: String,
+    pub measuredboot_ml_path: String,
 }
 
 impl KeylimeConfig {
@@ -190,14 +208,6 @@ impl KeylimeConfig {
         let sign_alg = SignAlgorithm::try_from(
             config_get("cloud_agent", "tpm_signing_alg")?.as_str(),
         )?;
-        let tpm_data_path = tpm_data_path_get();
-        let mut tpm_data = None;
-        if tpm_data_path.exists() {
-            match TpmData::load(&tpm_data_path) {
-                Ok(data) => tpm_data = Some(data),
-                Err(e) => warn!("Could not load TPM data"),
-            }
-        }
         // There was a typo in Python Keylime and this accounts for having a version
         // of Keylime installed that still has this typo. TODO: Remove later
         let run_revocation = bool::from_str(
@@ -221,9 +231,33 @@ impl KeylimeConfig {
             &config_get("cloud_agent", "extract_payload_zip")?.to_lowercase(),
         )?;
 
+        let work_dir =
+            config_get_env("cloud_agent", "keylime_dir", "KEYLIME_DIR")
+                .or_else::<Error, _>(|_| Ok(String::from(WORK_DIR)))?;
+
+        let tpm_data_path = PathBuf::from(&work_dir).join(TPM_DATA);
+        let tpm_data = if tpm_data_path.exists() {
+            match TpmData::load(&tpm_data_path) {
+                Ok(data) => Some(data),
+                Err(e) => {
+                    warn!("Could not load TPM data");
+                    None
+                }
+            }
+        } else {
+            warn!(
+                "TPM2 event log not available: {}",
+                tpm_data_path.display()
+            );
+            None
+        };
+
         let mut keylime_ca_path = config_get("cloud_agent", "keylime_ca")?;
         if keylime_ca_path == "default" {
-            keylime_ca_path = DEFAULT_CA_PATH.to_string()
+            keylime_ca_path = Path::new(&work_dir)
+                .join(DEFAULT_CA_PATH)
+                .display()
+                .to_string();
         }
         let revocation_actions =
             config_get("cloud_agent", "revocation_actions")
@@ -238,6 +272,8 @@ impl KeylimeConfig {
             Ok(s) => bool::from_str(&s.to_lowercase())?,
             Err(_) => ALLOW_PAYLOAD_REV_ACTIONS,
         };
+        let ima_ml_path = ima_ml_path_get();
+        let measuredboot_ml_path = Path::new(MEASUREDBOOT_ML).to_path_buf();
 
         Ok(KeylimeConfig {
             agent_ip,
@@ -251,6 +287,7 @@ impl KeylimeConfig {
             enc_alg,
             sign_alg,
             tpm_data,
+            tpm_data_path: tpm_data_path.display().to_string(),
             run_revocation,
             revocation_cert,
             revocation_ip,
@@ -264,6 +301,9 @@ impl KeylimeConfig {
             revocation_actions,
             revocation_actions_dir,
             allow_payload_revocation_actions,
+            work_dir,
+            ima_ml_path: ima_ml_path.display().to_string(),
+            measuredboot_ml_path: measuredboot_ml_path.display().to_string(),
         })
     }
 }
@@ -284,6 +324,10 @@ impl Default for KeylimeConfig {
             enc_alg: EncryptionAlgorithm::Rsa,
             sign_alg: SignAlgorithm::RsaSsa,
             tpm_data: None,
+            tpm_data_path: Path::new(WORK_DIR)
+                .join(TPM_DATA)
+                .display()
+                .to_string(),
             run_revocation: true,
             revocation_cert: "default".to_string(),
             revocation_ip: "127.0.0.1".to_string(),
@@ -297,6 +341,9 @@ impl Default for KeylimeConfig {
             revocation_actions: "".to_string(),
             revocation_actions_dir: "/usr/libexec/keylime".to_string(),
             allow_payload_revocation_actions: true,
+            work_dir: WORK_DIR.to_string(),
+            ima_ml_path: IMA_ML.to_string(),
+            measuredboot_ml_path: MEASUREDBOOT_ML.to_string(),
         }
     }
 }
@@ -470,29 +517,6 @@ pub(crate) fn chownroot(path: &Path) -> Result<()> {
         info!("Changed file {:?} owner to root.", &path);
         Ok(())
     }
-}
-
-cfg_if::cfg_if! {
-    if #[cfg(feature = "testing")] {
-        pub(crate) fn ima_ml_path_get() -> PathBuf {
-            Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("test-data")
-                .join("ima")
-                .join("ascii_runtime_measurements")
-        }
-    } else {
-        pub(crate) fn ima_ml_path_get() -> PathBuf {
-            Path::new(IMA_ML).to_path_buf()
-        }
-    }
-}
-
-pub(crate) fn tpm_data_path_get() -> PathBuf {
-    Path::new(WORK_DIR).join(TPM_DATA)
-}
-
-pub(crate) fn measuredboot_ml_path_get() -> PathBuf {
-    Path::new(MEASUREDBOOT_ML).to_path_buf()
 }
 
 // Unit Testing
