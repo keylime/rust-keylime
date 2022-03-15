@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2022 Keylime Authors
 
-use crate::common::API_VERSION;
+use crate::common::{JsonWrapper, API_VERSION};
 use actix_web::{web, HttpRequest, HttpResponse, Responder};
 use log::*;
 use serde::{Deserialize, Serialize};
@@ -9,23 +9,6 @@ use serde::{Deserialize, Serialize};
 #[derive(Serialize, Deserialize, Debug)]
 struct KeylimeVersion {
     supported_version: String,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-struct JsonVersionWrapper {
-    code: u32,
-    status: String,
-    results: KeylimeVersion,
-}
-
-impl JsonVersionWrapper {
-    fn new(results: KeylimeVersion) -> Self {
-        JsonVersionWrapper {
-            code: 200,
-            status: String::from("Success"),
-            results,
-        }
-    }
 }
 
 // This is the handler for the GET request for the API version
@@ -36,7 +19,7 @@ pub async fn version(req: HttpRequest) -> impl Responder {
         req.uri()
     );
 
-    let response = JsonVersionWrapper::new(KeylimeVersion {
+    let response = JsonWrapper::new(KeylimeVersion {
         supported_version: API_VERSION[1..].to_string(),
     });
 
@@ -61,7 +44,8 @@ mod tests {
         let resp = test::call_service(&mut app, req).await;
         assert!(resp.status().is_success());
 
-        let body: JsonVersionWrapper = test::read_body_json(resp).await;
+        let body: JsonWrapper<KeylimeVersion> =
+            test::read_body_json(resp).await;
         assert_eq!(body.results.supported_version, API_VERSION[1..]);
     }
 }

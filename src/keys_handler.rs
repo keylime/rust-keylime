@@ -3,7 +3,10 @@
 
 use crate::crypto;
 use crate::{
-    common::{KeySet, SymmKey, AES_BLOCK_SIZE, AGENT_UUID_LEN, AUTH_TAG_LEN},
+    common::{
+        JsonWrapper, KeySet, SymmKey, AES_BLOCK_SIZE, AGENT_UUID_LEN,
+        AUTH_TAG_LEN,
+    },
     Error, QuoteData, Result,
 };
 use actix_web::{web, HttpRequest, HttpResponse, Responder};
@@ -21,6 +24,11 @@ pub struct KeylimeUKey {
 #[derive(Serialize, Deserialize, Debug)]
 pub struct KeylimeVKey {
     encrypted_key: String,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+struct KeylimePubkey {
+    pubkey: String,
 }
 
 // Attempt to combine U and V keys into the payload decryption key. An HMAC over
@@ -178,28 +186,6 @@ pub async fn v_key(
     HttpResponse::Ok().await
 }
 
-#[derive(Serialize, Deserialize)]
-struct KeylimePubkey {
-    pubkey: String,
-}
-
-#[derive(Serialize, Deserialize)]
-struct JsonPubkeyWrapper {
-    code: u32,
-    status: String,
-    results: KeylimePubkey,
-}
-
-impl JsonPubkeyWrapper {
-    fn new(pubkey: String) -> Self {
-        JsonPubkeyWrapper {
-            code: 200,
-            status: String::from("Success"),
-            results: KeylimePubkey { pubkey },
-        }
-    }
-}
-
 pub async fn pubkey(
     req: HttpRequest,
     data: web::Data<QuoteData>,
@@ -215,7 +201,7 @@ pub async fn pubkey(
     )
     .map_err(Error::from)?;
 
-    let response = JsonPubkeyWrapper::new(pubkey);
+    let response = JsonWrapper::new(KeylimePubkey { pubkey });
     info!("GET pubkey returning 200 response.");
 
     HttpResponse::Ok().json(response).await
@@ -389,7 +375,8 @@ mod tests {
         let resp = test::call_service(&mut app, req).await;
         assert!(resp.status().is_success());
 
-        let result: JsonPubkeyWrapper = test::read_body_json(resp).await;
+        let result: JsonWrapper<KeylimePubkey> =
+            test::read_body_json(resp).await;
         assert!(pkey_pub_from_pem(result.results.pubkey.as_bytes())
             .unwrap() //#[allow_ci]
             .public_eq(&quotedata.pub_key));

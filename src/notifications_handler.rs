@@ -13,13 +13,6 @@ struct KeylimeRevocation {
     signature: String,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
-struct JsonRevocationWrapper {
-    code: u32,
-    status: String,
-    results: KeylimeRevocation,
-}
-
 // This is Revocation request from the cloud verifier via REST API
 pub async fn revocation(
     body: web::Bytes,

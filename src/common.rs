@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use std::convert::TryFrom;
 use std::env;
 use std::ffi::CString;
+use std::fmt::Debug;
 use std::fs::File;
 use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
@@ -66,6 +67,26 @@ cfg_if::cfg_if! {
 
         pub(crate) fn ima_ml_path_get() -> PathBuf {
             Path::new(IMA_ML).to_path_buf()
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub(crate) struct JsonWrapper<A> {
+    pub code: u32,
+    pub status: String,
+    pub results: A,
+}
+
+impl<'de, A> JsonWrapper<A>
+where
+    A: Deserialize<'de> + Serialize + Debug,
+{
+    pub(crate) fn new(results: A) -> JsonWrapper<A> {
+        JsonWrapper {
+            code: 200,
+            status: String::from("Success"),
+            results,
         }
     }
 }
