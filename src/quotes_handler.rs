@@ -3,6 +3,7 @@
 
 use crate::{tpm, Error as KeylimeError, QuoteData};
 
+use crate::common::JsonWrapper;
 use crate::ima::read_measurement_list;
 use crate::serialization::serialize_maybe_base64;
 use actix_web::{web, HttpRequest, HttpResponse, Responder};
@@ -110,59 +111,6 @@ impl KeylimeIntegrityQuotePostAttestation {
     }
 }
 
-#[derive(Serialize, Deserialize)]
-struct JsonIdWrapper {
-    code: u32,
-    status: String,
-    results: KeylimeIdQuote,
-}
-
-// The fields of this struct and their default values must
-// match what is expected by Python Keylime.
-#[derive(Serialize, Deserialize)]
-struct JsonIntegWrapperPreAttestation {
-    code: u32,
-    status: String,
-    results: KeylimeIntegrityQuotePreAttestation,
-}
-
-#[derive(Serialize, Deserialize)]
-struct JsonIntegWrapperPostAttestation {
-    code: u32,
-    status: String,
-    results: KeylimeIntegrityQuotePostAttestation,
-}
-
-impl JsonIdWrapper {
-    fn new(results: KeylimeIdQuote) -> Self {
-        JsonIdWrapper {
-            code: 200,
-            status: String::from("Success"),
-            results,
-        }
-    }
-}
-
-impl JsonIntegWrapperPreAttestation {
-    fn new(results: KeylimeIntegrityQuotePreAttestation) -> Self {
-        JsonIntegWrapperPreAttestation {
-            code: 200,
-            status: String::from("Success"),
-            results,
-        }
-    }
-}
-
-impl JsonIntegWrapperPostAttestation {
-    fn new(results: KeylimeIntegrityQuotePostAttestation) -> Self {
-        JsonIntegWrapperPostAttestation {
-            code: 200,
-            status: String::from("Success"),
-            results,
-        }
-    }
-}
-
 // This is a Quote request from the tenant, which does not check
 // integrity measurement. It should return this data:
 // { QuoteAIK(nonce, 16:H(NK_pub)), NK_pub }
@@ -196,7 +144,7 @@ pub async fn identity(
         )
         .map_err(KeylimeError::from)?;
 
-        let response = JsonIdWrapper::new(quote);
+        let response = JsonWrapper::new(quote);
         info!("GET identity quote returning 200 response");
         HttpResponse::Ok().json(response).await
     }
@@ -300,7 +248,7 @@ pub async fn integrity(
                 mb_measurement_list,
                 nth_entry,
             );
-            let response = JsonIntegWrapperPreAttestation::new(quote);
+            let response = JsonWrapper::new(quote);
             info!("GET integrity quote returning 200 response");
             HttpResponse::Ok().json(response).await
         } else {
@@ -311,7 +259,7 @@ pub async fn integrity(
                 nth_entry,
             );
 
-            let response = JsonIntegWrapperPostAttestation::new(quote);
+            let response = JsonWrapper::new(quote);
             info!("GET integrity quote returning 200 response");
             HttpResponse::Ok().json(response).await
         }
@@ -345,7 +293,8 @@ mod tests {
         let resp = test::call_service(&mut app, req).await;
         assert!(resp.status().is_success());
 
-        let result: JsonIdWrapper = test::read_body_json(resp).await;
+        let result: JsonWrapper<KeylimeIdQuote> =
+            test::read_body_json(resp).await;
         assert_eq!(result.results.hash_alg.as_str(), "sha256");
         assert_eq!(result.results.enc_alg.as_str(), "rsa");
         assert_eq!(result.results.sign_alg.as_str(), "rsassa");
@@ -384,7 +333,7 @@ mod tests {
         let resp = test::call_service(&mut app, req).await;
         assert!(resp.status().is_success());
 
-        let result: JsonIntegWrapperPreAttestation =
+        let result: JsonWrapper<KeylimeIntegrityQuotePreAttestation> =
             test::read_body_json(resp).await;
         assert_eq!(result.results.hash_alg.as_str(), "sha256");
         assert_eq!(result.results.enc_alg.as_str(), "rsa");
@@ -428,7 +377,7 @@ mod tests {
         let resp = test::call_service(&mut app, req).await;
         assert!(resp.status().is_success());
 
-        let result: JsonIntegWrapperPostAttestation =
+        let result: JsonWrapper<KeylimeIntegrityQuotePostAttestation> =
             test::read_body_json(resp).await;
         assert_eq!(result.results.hash_alg.as_str(), "sha256");
         assert_eq!(result.results.enc_alg.as_str(), "rsa");
