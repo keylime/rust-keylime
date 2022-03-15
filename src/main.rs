@@ -549,6 +549,10 @@ async fn main() -> Result<()> {
                 web::resource("/version".to_string())
                     .route(web::get().to(version_handler::version)),
             )
+            .service(
+                web::resource(format!("/{}/keys/verify", API_VERSION))
+                    .route(web::get().to(keys_handler::verify)),
+            )
     })
     .bind_openssl(
         format!("{}:{}", config.agent_ip, config.agent_port),
