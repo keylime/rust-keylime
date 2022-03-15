@@ -12,7 +12,7 @@ use crate::{
 use actix_web::{web, HttpRequest, HttpResponse, Responder};
 use log::*;
 use serde::{Deserialize, Serialize};
-use std::convert::TryInto;
+use std::{convert::TryInto, sync::Arc};
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct KeylimeUKey {
@@ -29,6 +29,16 @@ pub struct KeylimeVKey {
 #[derive(Serialize, Deserialize, Debug)]
 struct KeylimePubkey {
     pubkey: String,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct KeylimeChallenge {
+    challenge: String,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct KeylimeHMAC {
+    hmac: String,
 }
 
 // Attempt to combine U and V keys into the payload decryption key. An HMAC over
@@ -207,6 +217,56 @@ pub async fn pubkey(
     HttpResponse::Ok().json(response).await
 }
 
+pub async fn verify(
+    param: web::Query<KeylimeChallenge>,
+    req: HttpRequest,
+    data: web::Data<QuoteData>,
+) -> impl Responder {
+    info!(
+        "GET invoked from {:?} with uri {}",
+        req.connection_info().remote_addr().unwrap(), //#[allow_ci]
+        req.uri()
+    );
+
+    if param.challenge.is_empty() {
+        info!(
+            "GET key challenge returning 400 response. No challenge provided"
+        );
+        return HttpResponse::BadRequest()
+            .body("No challenge provided.".to_string())
+            .await;
+    }
+
+    if !param.challenge.chars().all(char::is_alphanumeric) {
+        return HttpResponse::BadRequest()
+            .body(format!(
+                "Parameters should be strictly alphanumeric: {}",
+                param.challenge
+            ))
+            .await;
+    }
+
+    let key_arc = Arc::clone(&data.payload_symm_key);
+    let mut key = key_arc.lock().unwrap(); //#[allow_ci]
+
+    if key.is_none() {
+        info!("GET key challenge returning 400 response. bootstrap key not available");
+        return HttpResponse::BadRequest()
+            .body("Bootstrap key not yet available.".to_string())
+            .await;
+    }
+
+    let key = key.as_ref().unwrap(); //#[allow_ci]
+    let hmac = crypto::compute_hmac(key.bytes(), param.challenge.as_bytes())?;
+
+    let response = JsonWrapper::new(KeylimeHMAC {
+        hmac: hex::encode(hmac),
+    });
+
+    info!("GET key challenge returning 200 response.");
+    HttpResponse::Ok().json(response).await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -380,5 +440,49 @@ mod tests {
         assert!(pkey_pub_from_pem(result.results.pubkey.as_bytes())
             .unwrap() //#[allow_ci]
             .public_eq(&quotedata.pub_key));
+    }
+
+    #[cfg(feature = "testing")]
+    #[actix_rt::test]
+    async fn test_verify() {
+        let mut quotedata = web::Data::new(QuoteData::fixture().unwrap()); //#[allow_ci]
+
+        let test_key: Vec<u8> = (0..32).collect();
+
+        let mut symkey = quotedata.payload_symm_key.lock().unwrap(); //#[allow_ci]
+        *symkey = Some(test_key.as_slice().try_into().unwrap()); //#[allow_ci]
+
+        // Drop to unlock the mutex after setting the value
+        drop(symkey);
+
+        let mut app =
+            test::init_service(App::new().app_data(quotedata.clone()).route(
+                &format!("/{}/keys/verify", API_VERSION),
+                web::get().to(verify),
+            ))
+            .await;
+
+        let challenge = "1234567890ABCDEFGHIJ";
+
+        let req = test::TestRequest::get()
+            .uri(&format!(
+                "/{}/keys/verify?challenge={}",
+                API_VERSION, challenge
+            ))
+            .to_request();
+
+        let resp = test::call_service(&mut app, req).await;
+        assert!(resp.status().is_success());
+
+        let result: JsonWrapper<KeylimeHMAC> =
+            test::read_body_json(resp).await;
+        let response_hmac = hex::decode(&result.results.hmac).unwrap(); //#[allow_ci]
+
+        // The expected result is an HMAC-SHA384 using:
+        // key (hexadecimal): 000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f
+        // input: "1234567890ABCDEFGHIJ"
+        let expected = hex::decode("6d815226048e336305a3cf87dd5a205ae637ba1ece0716e29464ee887a04f0d784c8ace39c559dbfd65bccdd6fcb227a").unwrap(); //#[allow_ci]
+
+        assert_eq!(&response_hmac, &expected);
     }
 }
