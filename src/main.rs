@@ -46,6 +46,7 @@ mod revocation;
 mod secure_mount;
 mod serialization;
 mod tpm;
+mod version_handler;
 
 use actix_web::{web, App, HttpServer};
 use clap::{App as ClapApp, Arg};
@@ -543,6 +544,10 @@ async fn main() -> Result<()> {
                     API_VERSION
                 ))
                 .route(web::post().to(notifications_handler::revocation)),
+            )
+            .service(
+                web::resource("/version".to_string())
+                    .route(web::get().to(version_handler::version)),
             )
     })
     .bind_openssl(
