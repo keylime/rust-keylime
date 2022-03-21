@@ -119,35 +119,50 @@ pub async fn identity(
     param: web::Query<Ident>,
     data: web::Data<QuoteData>,
 ) -> impl Responder {
+    info!(
+        "GET invoked from {:?} with uri {}",
+        req.connection_info().remote_addr().unwrap(), //#[allow_ci]
+        req.uri()
+    );
+
     // nonce can only be in alphanumerical format
     if !param.nonce.chars().all(char::is_alphanumeric) {
-        HttpResponse::BadRequest()
+        warn!("Get quote returning 400 response. Parameters should be strictly alphanumeric");
+        return HttpResponse::BadRequest()
             .body(format!(
                 "Parameters should be strictly alphanumeric: {}",
                 param.nonce
             ))
-            .await
-    } else {
-        info!(
-            "GET invoked from {:?} with uri {}",
-            req.connection_info().remote_addr().unwrap(), //#[allow_ci]
-            req.uri()
-        );
-        info!("Calling Identity Quote with nonce: {}", param.nonce);
-
-        let mut quote =
-            tpm::quote(param.nonce.as_bytes(), None, data.clone())?;
-        quote.pubkey = String::from_utf8(
-            data.pub_key
-                .public_key_to_pem()
-                .map_err(KeylimeError::from)?,
-        )
-        .map_err(KeylimeError::from)?;
-
-        let response = JsonWrapper::new(quote);
-        info!("GET identity quote returning 200 response");
-        HttpResponse::Ok().json(response).await
+            .await;
     }
+
+    if param.nonce.len() > tpm::MAX_NONCE_SIZE {
+        warn!("Get quote returning 400 response. Nonce is too long (max size {}): {}",
+              tpm::MAX_NONCE_SIZE,
+              param.nonce.len()
+        );
+        return HttpResponse::BadRequest()
+            .body(format!(
+                "Nonce is too long (max size {}): {}",
+                tpm::MAX_NONCE_SIZE,
+                param.nonce
+            ))
+            .await;
+    }
+
+    info!("Calling Identity Quote with nonce: {}", param.nonce);
+
+    let mut quote = tpm::quote(param.nonce.as_bytes(), None, data.clone())?;
+    quote.pubkey = String::from_utf8(
+        data.pub_key
+            .public_key_to_pem()
+            .map_err(KeylimeError::from)?,
+    )
+    .map_err(KeylimeError::from)?;
+
+    let response = JsonWrapper::new(quote);
+    info!("GET identity quote returning 200 response");
+    HttpResponse::Ok().json(response).await
 }
 
 // This is a Quote request from the cloud verifier, which will check
@@ -160,109 +175,126 @@ pub async fn integrity(
     param: web::Query<Integ>,
     data: web::Data<QuoteData>,
 ) -> impl Responder {
+    info!(
+        "GET invoked from {:?} with uri {}",
+        req.connection_info().remote_addr().unwrap(), //#[allow_ci]
+        req.uri()
+    );
+
     // nonce, mask, vmask can only be in alphanumerical format
     if !param.nonce.chars().all(char::is_alphanumeric) {
-        HttpResponse::BadRequest()
+        warn!("Get quote returning 400 response. Parameters should be strictly alphanumeric");
+        return HttpResponse::BadRequest()
             .body(format!(
                 "nonce should be strictly alphanumeric: {}",
                 param.nonce
             ))
-            .await
-    } else if !param.mask.chars().all(char::is_alphanumeric) {
-        HttpResponse::BadRequest()
+            .await;
+    }
+
+    if !param.mask.chars().all(char::is_alphanumeric) {
+        warn!("Get quote returning 400 response. Parameters should be strictly alphanumeric");
+        return HttpResponse::BadRequest()
             .body(format!(
                 "mask should be strictly alphanumeric: {}",
                 param.mask
             ))
-            .await
+            .await;
+    }
+
+    if param.nonce.len() > tpm::MAX_NONCE_SIZE {
+        warn!("Get quote returning 400 response. Nonce is too long (max size {}): {}",
+              tpm::MAX_NONCE_SIZE,
+              param.nonce.len()
+        );
+        return HttpResponse::BadRequest()
+            .body(format!(
+                "Nonce is too long (max size: {}): {}",
+                tpm::MAX_NONCE_SIZE,
+                param.nonce.len()
+            ))
+            .await;
+    }
+
+    info!(
+        "Calling Integrity Quote with nonce: {}, mask: {}",
+        param.nonce, param.mask
+    );
+
+    let partial = req.uri().query().unwrap(); //#[allow_ci]
+    let partial = if partial.contains("partial=0") {
+        0
+    } else if partial.contains("partial=1") {
+        1
     } else {
-        info!(
-            "GET invoked from {:?} with uri {}",
-            req.connection_info().remote_addr().unwrap(), //#[allow_ci]
-            req.uri()
-        );
-        info!(
-            "Calling Integrity Quote with nonce: {}, mask: {}",
-            param.nonce, param.mask
-        );
+        warn!("Get quote returning 400 response. uri must contain key 'partial' and value '0' or '1'");
+        return HttpResponse::BadRequest()
+            .body("uri must contain key 'partial' and value '0' or '1'")
+            .await;
+    };
 
-        let partial = req.uri().query().unwrap(); //#[allow_ci]
-        let partial = if partial.contains("partial=0") {
-            0
-        } else if partial.contains("partial=1") {
-            1
-        } else {
-            return HttpResponse::BadRequest()
-                .body("uri must contain key 'partial' and value '0' or '1'")
-                .await;
-        };
+    let ima_ml_entry = req.uri().query().unwrap(); //#[allow_ci]
+    let nth_entry = match ima_ml_entry.find("ima_ml_entry=") {
+        None => 0,
+        Some(idx) => {
+            let number = &ima_ml_entry[idx + 13..];
+            let last: usize = number
+                .find(|c: char| !c.is_numeric())
+                .unwrap_or(number.len());
+            number[..last].parse().unwrap_or(0)
+        }
+    };
 
-        let ima_ml_entry = req.uri().query().unwrap(); //#[allow_ci]
-        let nth_entry = match ima_ml_entry.find("ima_ml_entry=") {
-            None => 0,
-            Some(idx) => {
-                let number = &ima_ml_entry[idx + 13..];
-                let last: usize = number
-                    .find(|c: char| !c.is_numeric())
-                    .unwrap_or(number.len());
-                number[..last].parse().unwrap_or(0)
+    let mut quote =
+        tpm::quote(param.nonce.as_bytes(), Some(&param.mask), data.clone())?;
+
+    let mut mb_measurement_list = None;
+    let measuredboot_ml = read(&data.measuredboot_ml_path);
+    // Only add log if a measured boot PCR 0 is actually in the mask
+    if tpm::check_mask(&param.mask, &PcrSlot::Slot0)? {
+        mb_measurement_list = match measuredboot_ml {
+            Ok(ml) => Some(ml),
+            Err(e) => {
+                warn!("TPM2 event log not available");
+                None
             }
         };
+    }
 
-        let mut quote = tpm::quote(
-            param.nonce.as_bytes(),
-            Some(&param.mask),
-            data.clone(),
-        )?;
+    let ima_ml_path = &data.ima_ml_path;
+    let (ima_ml, nth_entry, num_entries) = read_measurement_list(
+        &mut data.ima_ml.lock().unwrap(), //#[allow_ci]
+        ima_ml_path,
+        nth_entry,
+    )?;
 
-        let mut mb_measurement_list = None;
-        let measuredboot_ml = read(&data.measuredboot_ml_path);
-        // Only add log if a measured boot PCR 0 is actually in the mask
-        if tpm::check_mask(&param.mask, &PcrSlot::Slot0)? {
-            mb_measurement_list = match measuredboot_ml {
-                Ok(ml) => Some(ml),
-                Err(e) => {
-                    warn!("TPM2 event log not available");
-                    None
-                }
-            };
-        }
-
-        let ima_ml_path = &data.ima_ml_path;
-        let (ima_ml, nth_entry, num_entries) = read_measurement_list(
-            &mut data.ima_ml.lock().unwrap(), //#[allow_ci]
-            ima_ml_path,
+    if partial == 0 {
+        let quote = KeylimeIntegrityQuotePreAttestation::from_id_quote(
+            quote,
+            ima_ml,
+            String::from_utf8(
+                data.pub_key
+                    .public_key_to_pem()
+                    .map_err(KeylimeError::from)?,
+            )
+            .map_err(KeylimeError::from)?,
+            mb_measurement_list,
             nth_entry,
-        )?;
+        );
+        let response = JsonWrapper::new(quote);
+        info!("GET integrity quote returning 200 response");
+        HttpResponse::Ok().json(response).await
+    } else {
+        let quote = KeylimeIntegrityQuotePostAttestation::from_id_quote(
+            quote,
+            ima_ml,
+            mb_measurement_list,
+            nth_entry,
+        );
 
-        if partial == 0 {
-            let quote = KeylimeIntegrityQuotePreAttestation::from_id_quote(
-                quote,
-                ima_ml,
-                String::from_utf8(
-                    data.pub_key
-                        .public_key_to_pem()
-                        .map_err(KeylimeError::from)?,
-                )
-                .map_err(KeylimeError::from)?,
-                mb_measurement_list,
-                nth_entry,
-            );
-            let response = JsonWrapper::new(quote);
-            info!("GET integrity quote returning 200 response");
-            HttpResponse::Ok().json(response).await
-        } else {
-            let quote = KeylimeIntegrityQuotePostAttestation::from_id_quote(
-                quote,
-                ima_ml,
-                mb_measurement_list,
-                nth_entry,
-            );
-
-            let response = JsonWrapper::new(quote);
-            info!("GET integrity quote returning 200 response");
-            HttpResponse::Ok().json(response).await
-        }
+        let response = JsonWrapper::new(quote);
+        info!("GET integrity quote returning 200 response");
+        HttpResponse::Ok().json(response).await
     }
 }
 
