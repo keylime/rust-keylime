@@ -339,7 +339,7 @@ mod tests {
     #[cfg(feature = "testing")]
     #[actix_rt::test]
     async fn test_u_or_v_key_long() {
-        test_u_or_v_key(AES_128_KEY_LEN, None).await;
+        test_u_or_v_key(AES_256_KEY_LEN, None).await;
     }
 
     #[cfg(feature = "testing")]
