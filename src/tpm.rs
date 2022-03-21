@@ -59,6 +59,8 @@ use tss_esapi::{
     Context,
 };
 
+pub const MAX_NONCE_SIZE: usize = 64;
+
 /*
  * Input: None
  * Return: Connection context
