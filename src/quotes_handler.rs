@@ -22,6 +22,7 @@ pub struct Integ {
     nonce: String,
     mask: String,
     partial: String,
+    ima_ml_entry: Option<String>,
 }
 
 // The fields of this struct and their default values must
@@ -221,37 +222,18 @@ pub async fn integrity(
         param.nonce, param.mask
     );
 
-    let partial = req.uri().query().unwrap(); //#[allow_ci]
-    let partial = if partial.contains("partial=0") {
-        0
-    } else if partial.contains("partial=1") {
-        1
-    } else {
-        warn!("Get quote returning 400 response. uri must contain key 'partial' and value '0' or '1'");
-        return HttpResponse::BadRequest()
-            .body("uri must contain key 'partial' and value '0' or '1'")
-            .await;
-    };
-
-    let ima_ml_entry = req.uri().query().unwrap(); //#[allow_ci]
-    let nth_entry = match ima_ml_entry.find("ima_ml_entry=") {
+    let nth_entry = match &param.ima_ml_entry {
         None => 0,
-        Some(idx) => {
-            let number = &ima_ml_entry[idx + 13..];
-            let last: usize = number
-                .find(|c: char| !c.is_numeric())
-                .unwrap_or(number.len());
-            number[..last].parse().unwrap_or(0)
-        }
+        Some(idx) => idx.parse::<u64>().unwrap_or(0),
     };
 
     let mut quote =
         tpm::quote(param.nonce.as_bytes(), Some(&param.mask), data.clone())?;
 
     let mut mb_measurement_list = None;
-    let measuredboot_ml = read(&data.measuredboot_ml_path);
     // Only add log if a measured boot PCR 0 is actually in the mask
     if tpm::check_mask(&param.mask, &PcrSlot::Slot0)? {
+        let measuredboot_ml = read(&data.measuredboot_ml_path);
         mb_measurement_list = match measuredboot_ml {
             Ok(ml) => Some(ml),
             Err(e) => {
@@ -268,7 +250,7 @@ pub async fn integrity(
         nth_entry,
     )?;
 
-    if partial == 0 {
+    if param.partial == "0" {
         let quote = KeylimeIntegrityQuotePreAttestation::from_id_quote(
             quote,
             ima_ml,
