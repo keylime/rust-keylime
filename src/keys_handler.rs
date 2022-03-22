@@ -76,18 +76,12 @@ pub(crate) fn try_combine_keys(
     ))
 }
 
-// We can't simply accept payload as web::Json<KeylimeUKey>, as the
-// Content-Type header is currently missing, which is required by
-// actix-web 3:
-// https://github.com/actix/actix-web/blob/web-v3.3.3/src/types/json.rs#L339
 pub async fn u_key(
-    body: web::Bytes,
+    body: web::Json<KeylimeUKey>,
     req: HttpRequest,
     quote_data: web::Data<QuoteData>,
 ) -> impl Responder {
     info!("Received ukey");
-
-    let key: KeylimeUKey = serde_json::from_slice(&body.to_vec())?;
 
     // must unwrap when using lock
     // https://github.com/rust-lang-nursery/failure/issues/192
@@ -99,7 +93,7 @@ pub async fn u_key(
 
     // get key and decode it from web data
     let encrypted_key =
-        base64::decode(&key.encrypted_key).map_err(Error::from)?;
+        base64::decode(&body.encrypted_key).map_err(Error::from)?;
     // Uses NK (key for encrypting data from verifier or tenant to agent in transit) to
     // decrypt U and V keys, which will be combined into one key that can decrypt the
     // payload.
@@ -115,9 +109,9 @@ pub async fn u_key(
     global_current_keyset.push(decrypted_key);
 
     // note: the auth_tag shouldn't be base64 decoded here
-    global_auth_tag.copy_from_slice(key.auth_tag.as_bytes());
+    global_auth_tag.copy_from_slice(body.auth_tag.as_bytes());
 
-    if let Some(payload) = &key.payload {
+    if let Some(payload) = &body.payload {
         let encr_payload = base64::decode(&payload).map_err(Error::from)?;
         global_encr_payload.extend(encr_payload.iter());
     }
@@ -135,18 +129,12 @@ pub async fn u_key(
     HttpResponse::Ok().await
 }
 
-// We can't simply accept payload as web::Json<KeylimeVKey>, as the
-// Content-Type header is currently missing, which is required by
-// actix-web 3:
-// https://github.com/actix/actix-web/blob/web-v3.3.3/src/types/json.rs#L339
 pub async fn v_key(
-    body: web::Bytes,
+    body: web::Json<KeylimeVKey>,
     req: HttpRequest,
     quote_data: web::Data<QuoteData>,
 ) -> impl Responder {
     info!("Received vkey");
-
-    let key: KeylimeVKey = serde_json::from_slice(&body.to_vec())?;
 
     // must unwrap when using lock
     // https://github.com/rust-lang-nursery/failure/issues/192
@@ -158,7 +146,8 @@ pub async fn v_key(
 
     // get key and decode it from web data
     let encrypted_key =
-        base64::decode(&key.encrypted_key).map_err(Error::from)?;
+        base64::decode(&body.encrypted_key).map_err(Error::from)?;
+
     // Uses NK (key for encrypting data from verifier or tenant to agent in transit) to
     // decrypt U and V keys, which will be combined into one key that can decrypt the
     // payload.
