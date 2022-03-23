@@ -25,91 +25,16 @@ pub struct Integ {
     ima_ml_entry: Option<String>,
 }
 
-// The fields of this struct and their default values must
-// match what is expected by Python Keylime.
 #[derive(Serialize, Deserialize, Debug)]
-pub(crate) struct KeylimeIdQuote {
+pub(crate) struct KeylimeQuote {
     pub quote: String, // 'r' + quote + sig + pcrblob
     pub hash_alg: String,
     pub enc_alg: String,
     pub sign_alg: String,
-    pub pubkey: String,
-}
-
-// The fields of this struct and their default values must
-// match what is expected by Python Keylime. Because the Python
-// verifier resends the vkey based on whether there is a pubkey
-// field included in the returned data, we must use a struct
-// without this field after attestation is complete.
-#[derive(Serialize, Deserialize, Debug)]
-pub(crate) struct KeylimeIntegrityQuotePreAttestation {
-    pub quote: String, // 'r' + quote + sig + pcrblob
-    pub hash_alg: String,
-    pub enc_alg: String,
-    pub sign_alg: String,
-    pub pubkey: String,
-    pub ima_measurement_list: String,
-    #[serde(
-        serialize_with = "serialize_maybe_base64",
-        skip_serializing_if = "Option::is_none"
-    )]
+    pub pubkey: Option<String>,
+    pub ima_measurement_list: Option<String>,
     pub mb_measurement_list: Option<Vec<u8>>,
-    pub ima_measurement_list_entry: u64,
-}
-
-impl KeylimeIntegrityQuotePreAttestation {
-    fn from_id_quote(
-        idquote: KeylimeIdQuote,
-        ima: String,
-        pubkey: String,
-        mb: Option<Vec<u8>>,
-        ima_measurement_list_entry: u64,
-    ) -> Self {
-        KeylimeIntegrityQuotePreAttestation {
-            quote: idquote.quote,
-            hash_alg: idquote.hash_alg,
-            enc_alg: idquote.enc_alg,
-            sign_alg: idquote.sign_alg,
-            pubkey,
-            ima_measurement_list: ima,
-            mb_measurement_list: mb,
-            ima_measurement_list_entry,
-        }
-    }
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-pub(crate) struct KeylimeIntegrityQuotePostAttestation {
-    pub quote: String, // 'r' + quote + sig + pcrblob
-    pub hash_alg: String,
-    pub enc_alg: String,
-    pub sign_alg: String,
-    pub ima_measurement_list: String,
-    #[serde(
-        serialize_with = "serialize_maybe_base64",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub mb_measurement_list: Option<Vec<u8>>,
-    pub ima_measurement_list_entry: u64,
-}
-
-impl KeylimeIntegrityQuotePostAttestation {
-    fn from_id_quote(
-        idquote: KeylimeIdQuote,
-        ima: String,
-        mb: Option<Vec<u8>>,
-        ima_measurement_list_entry: u64,
-    ) -> Self {
-        KeylimeIntegrityQuotePostAttestation {
-            quote: idquote.quote,
-            hash_alg: idquote.hash_alg,
-            enc_alg: idquote.enc_alg,
-            sign_alg: idquote.sign_alg,
-            ima_measurement_list: ima,
-            mb_measurement_list: mb,
-            ima_measurement_list_entry,
-        }
-    }
+    pub ima_measurement_list_entry: Option<u64>,
 }
 
 // This is a Quote request from the tenant, which does not check
@@ -154,12 +79,14 @@ pub async fn identity(
     info!("Calling Identity Quote with nonce: {}", param.nonce);
 
     let mut quote = tpm::quote(param.nonce.as_bytes(), None, data.clone())?;
-    quote.pubkey = String::from_utf8(
-        data.pub_key
-            .public_key_to_pem()
-            .map_err(KeylimeError::from)?,
-    )
-    .map_err(KeylimeError::from)?;
+    quote.pubkey = Some(
+        String::from_utf8(
+            data.pub_key
+                .public_key_to_pem()
+                .map_err(KeylimeError::from)?,
+        )
+        .map_err(KeylimeError::from)?,
+    );
 
     let response = JsonWrapper::new(quote);
     info!("GET identity quote returning 200 response");
@@ -217,21 +144,43 @@ pub async fn integrity(
             .await;
     }
 
+    // If partial="0", include the public key in the quote
+    let pubkey = match &param.partial[..] {
+        "0" => Some(
+            String::from_utf8(
+                data.pub_key
+                    .public_key_to_pem()
+                    .map_err(KeylimeError::from)?,
+            )
+            .map_err(KeylimeError::from)?,
+        ),
+        "1" => None,
+        _ => {
+            warn!("Get quote returning 400 response. uri must contain key 'partial' and value '0' or '1'");
+            return HttpResponse::BadRequest()
+                .body("uri must contain key 'partial' and value '0' or '1'")
+                .await;
+        }
+    };
+
     info!(
         "Calling Integrity Quote with nonce: {}, mask: {}",
         param.nonce, param.mask
     );
 
+    // If an index was provided, the request is for the entries starting from the given index
+    // (iterative attestation). Otherwise the request is for the whole list.
     let nth_entry = match &param.ima_ml_entry {
         None => 0,
         Some(idx) => idx.parse::<u64>().unwrap_or(0),
     };
 
-    let mut quote =
+    // Generate the ID quote.
+    let id_quote =
         tpm::quote(param.nonce.as_bytes(), Some(&param.mask), data.clone())?;
 
+    // If PCR 0 is included in the mask, obtain the measured boot
     let mut mb_measurement_list = None;
-    // Only add log if a measured boot PCR 0 is actually in the mask
     if tpm::check_mask(&param.mask, &PcrSlot::Slot0)? {
         let measuredboot_ml = read(&data.measuredboot_ml_path);
         mb_measurement_list = match measuredboot_ml {
@@ -243,41 +192,27 @@ pub async fn integrity(
         };
     }
 
+    // Generate the measurement list
     let ima_ml_path = &data.ima_ml_path;
-    let (ima_ml, nth_entry, num_entries) = read_measurement_list(
-        &mut data.ima_ml.lock().unwrap(), //#[allow_ci]
-        ima_ml_path,
-        nth_entry,
-    )?;
-
-    if param.partial == "0" {
-        let quote = KeylimeIntegrityQuotePreAttestation::from_id_quote(
-            quote,
-            ima_ml,
-            String::from_utf8(
-                data.pub_key
-                    .public_key_to_pem()
-                    .map_err(KeylimeError::from)?,
-            )
-            .map_err(KeylimeError::from)?,
-            mb_measurement_list,
+    let (ima_measurement_list, ima_measurement_list_entry, num_entries) =
+        read_measurement_list(
+            &mut data.ima_ml.lock().unwrap(), //#[allow_ci]
+            ima_ml_path,
             nth_entry,
-        );
-        let response = JsonWrapper::new(quote);
-        info!("GET integrity quote returning 200 response");
-        HttpResponse::Ok().json(response).await
-    } else {
-        let quote = KeylimeIntegrityQuotePostAttestation::from_id_quote(
-            quote,
-            ima_ml,
-            mb_measurement_list,
-            nth_entry,
-        );
+        )?;
 
-        let response = JsonWrapper::new(quote);
-        info!("GET integrity quote returning 200 response");
-        HttpResponse::Ok().json(response).await
-    }
+    // Generate the final quote based on the ID quote
+    let quote = KeylimeQuote {
+        pubkey,
+        ima_measurement_list,
+        mb_measurement_list,
+        ima_measurement_list_entry,
+        ..id_quote
+    };
+
+    let response = JsonWrapper::new(quote);
+    info!("GET integrity quote returning 200 response");
+    HttpResponse::Ok().json(response).await
 }
 
 #[cfg(feature = "testing")]
@@ -307,14 +242,16 @@ mod tests {
         let resp = test::call_service(&mut app, req).await;
         assert!(resp.status().is_success());
 
-        let result: JsonWrapper<KeylimeIdQuote> =
+        let result: JsonWrapper<KeylimeQuote> =
             test::read_body_json(resp).await;
         assert_eq!(result.results.hash_alg.as_str(), "sha256");
         assert_eq!(result.results.enc_alg.as_str(), "rsa");
         assert_eq!(result.results.sign_alg.as_str(), "rsassa");
-        assert!(pkey_pub_from_pem(result.results.pubkey.as_bytes())
-            .unwrap() //#[allow_ci]
-            .public_eq(&quotedata.pub_key));
+        assert!(
+            pkey_pub_from_pem(result.results.pubkey.unwrap().as_bytes()) //#[allow_ci]
+                .unwrap() //#[allow_ci]
+                .public_eq(&quotedata.pub_key)
+        );
         assert!(result.results.quote.starts_with('r'));
 
         let mut context = quotedata.tpmcontext.lock().unwrap(); //#[allow_ci]
@@ -347,18 +284,23 @@ mod tests {
         let resp = test::call_service(&mut app, req).await;
         assert!(resp.status().is_success());
 
-        let result: JsonWrapper<KeylimeIntegrityQuotePreAttestation> =
+        let result: JsonWrapper<KeylimeQuote> =
             test::read_body_json(resp).await;
         assert_eq!(result.results.hash_alg.as_str(), "sha256");
         assert_eq!(result.results.enc_alg.as_str(), "rsa");
         assert_eq!(result.results.sign_alg.as_str(), "rsassa");
-        assert!(pkey_pub_from_pem(result.results.pubkey.as_bytes())
-            .unwrap() //#[allow_ci]
-            .public_eq(&quotedata.pub_key));
+        assert!(
+            pkey_pub_from_pem(result.results.pubkey.unwrap().as_bytes()) //#[allow_ci]
+                .unwrap() //#[allow_ci]
+                .public_eq(&quotedata.pub_key)
+        );
 
         let ima_ml_path = &quotedata.ima_ml_path;
         let ima_ml = read_to_string(ima_ml_path).unwrap(); //#[allow_ci]
-        assert_eq!(result.results.ima_measurement_list.as_str(), ima_ml);
+        assert_eq!(
+            result.results.ima_measurement_list.unwrap().as_str(), //#[allow_ci]
+            ima_ml
+        );
         assert!(result.results.quote.starts_with('r'));
 
         let mut context = quotedata.tpmcontext.lock().unwrap(); //#[allow_ci]
@@ -391,7 +333,7 @@ mod tests {
         let resp = test::call_service(&mut app, req).await;
         assert!(resp.status().is_success());
 
-        let result: JsonWrapper<KeylimeIntegrityQuotePostAttestation> =
+        let result: JsonWrapper<KeylimeQuote> =
             test::read_body_json(resp).await;
         assert_eq!(result.results.hash_alg.as_str(), "sha256");
         assert_eq!(result.results.enc_alg.as_str(), "rsa");
@@ -399,7 +341,10 @@ mod tests {
 
         let ima_ml_path = &quotedata.ima_ml_path;
         let ima_ml = read_to_string(&ima_ml_path).unwrap(); //#[allow_ci]
-        assert_eq!(result.results.ima_measurement_list.as_str(), ima_ml);
+        assert_eq!(
+            result.results.ima_measurement_list.unwrap().as_str(), //#[allow_ci]
+            ima_ml
+        );
         assert!(result.results.quote.starts_with('r'));
 
         let mut context = quotedata.tpmcontext.lock().unwrap(); //#[allow_ci]
