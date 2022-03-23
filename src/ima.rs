@@ -16,7 +16,7 @@ pub(crate) struct ImaMeasurementList {
     entries: HashSet<(u64, u64)>,
 }
 
-pub type IMAError = Result<(String, u64, u64), Error>;
+pub type IMAError = Result<(Option<String>, Option<u64>, Option<u64>), Error>;
 
 impl ImaMeasurementList {
     pub(crate) fn new() -> ImaMeasurementList {
@@ -63,7 +63,7 @@ pub(crate) fn read_measurement_list(
     if !Path::new(filename).exists() {
         let _ = ima_ml.reset();
         warn!("IMA measurement list not available: {}", filename.display());
-        return Ok(("".to_string(), 0, 0));
+        return Ok((None, None, None));
     }
 
     let mut nth_entry = nth_entry;
@@ -95,7 +95,11 @@ pub(crate) fn read_measurement_list(
 
     match ml {
         None => read_measurement_list(ima_ml, filename, 0),
-        Some(slice) => Ok((String::from(slice), nth_entry, num_entries)),
+        Some(slice) => Ok((
+            Some(String::from(slice)),
+            Some(nth_entry),
+            Some(num_entries),
+        )),
     }
 }
 
@@ -115,23 +119,23 @@ mod tests {
         // Request the 2nd entry, which is available
         let (ml, nth_entry, num_entries) =
             read_measurement_list(&mut ima_ml, tf.path(), 2).unwrap(); //#[allow_ci]
-        assert_eq!(num_entries, 3);
-        assert_eq!(nth_entry, 2);
-        assert_eq!(ml.find("2-entry").unwrap(), 0); //#[allow_ci]
+        assert_eq!(num_entries, Some(3));
+        assert_eq!(nth_entry, Some(2));
+        assert_eq!(ml.unwrap().find("2-entry").unwrap(), 0); //#[allow_ci]
 
         // Request the 3rd entry, which is not available yet, thus we get an empty list
         let (ml, nth_entry, num_entries) =
             read_measurement_list(&mut ima_ml, tf.path(), 3).unwrap(); //#[allow_ci]
-        assert_eq!(num_entries, 3);
-        assert_eq!(nth_entry, 3);
-        assert_eq!(ml.len(), 0);
+        assert_eq!(num_entries, Some(3));
+        assert_eq!(nth_entry, Some(3));
+        assert_eq!(ml.unwrap().len(), 0); //#[allow_ci]
 
         // Request the 4th entry, which is beyond the next entry; since this is wrong,
         // we expect the entire list now.
         let (ml, nth_entry, num_entries) =
             read_measurement_list(&mut ima_ml, tf.path(), 4).unwrap(); //#[allow_ci]
-        assert_eq!(num_entries, 3);
-        assert_eq!(nth_entry, 0);
-        assert_eq!(ml.find("0-entry").unwrap(), 0); //#[allow_ci]
+        assert_eq!(num_entries, Some(3));
+        assert_eq!(nth_entry, Some(0));
+        assert_eq!(ml.unwrap().find("0-entry").unwrap(), 0); //#[allow_ci]
     }
 }

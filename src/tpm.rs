@@ -9,7 +9,7 @@ use std::io::prelude::*;
 use std::str::FromStr;
 
 use crate::{
-    quotes_handler::KeylimeIdQuote, Error as KeylimeError, QuoteData, Result,
+    quotes_handler::KeylimeQuote, Error as KeylimeError, QuoteData, Result,
 };
 
 use actix_web::web::Data;
@@ -628,14 +628,11 @@ fn perform_quote_and_pcr_read(
     ))
 }
 
-// Despite the return type, this function is used for both Identity and
-// Integrity Quotes. The Quote handler will add additional information to
-// turn an Identity Quote into an Integrity Quote.
 pub(crate) fn quote(
     nonce: &[u8],
     mask: Option<&str>,
     data: Data<QuoteData>,
-) -> Result<KeylimeIdQuote> {
+) -> Result<KeylimeQuote> {
     let nk_digest = pubkey_to_tpm_digest(&data.pub_key)?;
 
     // must unwrap here due to lock mechanism
@@ -657,14 +654,18 @@ pub(crate) fn quote(
             )
         })?;
 
-    let quote = encode_quote_string(attestation, sig, pcrs_read, pcr_data)?;
+    let tpm_quote =
+        encode_quote_string(attestation, sig, pcrs_read, pcr_data)?;
 
-    Ok(KeylimeIdQuote {
-        quote,
+    Ok(KeylimeQuote {
+        quote: tpm_quote,
         hash_alg: data.hash_alg.to_string(),
         enc_alg: data.enc_alg.to_string(),
         sign_alg: data.sign_alg.to_string(),
-        pubkey: "".to_string(),
+        pubkey: None,
+        ima_measurement_list: None,
+        mb_measurement_list: None,
+        ima_measurement_list_entry: None,
     })
 }
 
