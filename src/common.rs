@@ -6,6 +6,7 @@ use crate::error::{Error, Result};
 use ini::Ini;
 use log::*;
 use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
 use std::convert::TryFrom;
 use std::env;
 use std::ffi::CString;
@@ -76,6 +77,16 @@ pub(crate) struct JsonWrapper<A> {
     pub code: u32,
     pub status: String,
     pub results: A,
+}
+
+impl JsonWrapper<Value> {
+    pub(crate) fn bad_request(status: String) -> JsonWrapper<Value> {
+        JsonWrapper {
+            code: 400,
+            status,
+            results: json!({}),
+        }
+    }
 }
 
 impl<'de, A> JsonWrapper<A>

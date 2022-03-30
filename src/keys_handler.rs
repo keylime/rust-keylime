@@ -222,16 +222,18 @@ pub async fn verify(
             "GET key challenge returning 400 response. No challenge provided"
         );
         return HttpResponse::BadRequest()
-            .body("No challenge provided.".to_string())
+            .json(JsonWrapper::bad_request(
+                "No challenge provided.".to_string(),
+            ))
             .await;
     }
 
     if !param.challenge.chars().all(char::is_alphanumeric) {
         return HttpResponse::BadRequest()
-            .body(format!(
+            .json(JsonWrapper::bad_request(format!(
                 "Parameters should be strictly alphanumeric: {}",
                 param.challenge
-            ))
+            )))
             .await;
     }
 
@@ -241,7 +243,9 @@ pub async fn verify(
     if key.is_none() {
         info!("GET key challenge returning 400 response. bootstrap key not available");
         return HttpResponse::BadRequest()
-            .body("Bootstrap key not yet available.".to_string())
+            .json(JsonWrapper::bad_request(
+                "Bootstrap key not yet available.".to_string(),
+            ))
             .await;
     }
 
