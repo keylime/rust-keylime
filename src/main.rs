@@ -514,52 +514,57 @@ async fn main() -> Result<()> {
         ima_ml: Mutex::new(ImaMeasurementList::new()),
     });
 
-    let actix_server = HttpServer::new(move || {
-        App::new()
-            .app_data(quotedata.clone())
-            .service(
-                web::resource(format!("/{}/keys/ukey", API_VERSION))
-                    .route(web::post().to(keys_handler::u_key)),
-            )
-            .service(
-                // the double slash may be a typo on the python side
-                web::resource(format!("/{}/keys/vkey", API_VERSION))
-                    .route(web::post().to(keys_handler::v_key)),
-            )
-            .service(
-                web::resource(format!("/{}/keys/pubkey", API_VERSION))
-                    .route(web::get().to(keys_handler::pubkey)),
-            )
-            .service(
-                web::resource(format!("/{}/quotes/identity", API_VERSION))
-                    .route(web::get().to(quotes_handler::identity)),
-            )
-            .service(
-                web::resource(format!("/{}/quotes/integrity", API_VERSION))
-                    .route(web::get().to(quotes_handler::integrity)),
-            )
-            .service(
-                web::resource(format!(
-                    "/{}/notifications/revocation",
-                    API_VERSION
-                ))
-                .route(web::post().to(notifications_handler::revocation)),
-            )
-            .service(
-                web::resource("/version".to_string())
-                    .route(web::get().to(version_handler::version)),
-            )
-            .service(
-                web::resource(format!("/{}/keys/verify", API_VERSION))
-                    .route(web::get().to(keys_handler::verify)),
-            )
-    })
-    .bind_openssl(
-        format!("{}:{}", config.agent_ip, config.agent_port),
-        ssl_context,
-    )?
-    .run()
-    .map_err(Error::from);
+    let actix_server =
+        HttpServer::new(move || {
+            App::new()
+                .app_data(quotedata.clone())
+                .service(
+                    web::scope(&format!("/{}", API_VERSION))
+                        .service(
+                            web::scope("/keys")
+                                .service(web::resource("/pubkey").route(
+                                    web::get().to(keys_handler::pubkey),
+                                ))
+                                .service(web::resource("/ukey").route(
+                                    web::post().to(keys_handler::u_key),
+                                ))
+                                .service(web::resource("/verify").route(
+                                    web::get().to(keys_handler::verify),
+                                ))
+                                .service(web::resource("/vkey").route(
+                                    web::post().to(keys_handler::v_key),
+                                )),
+                        )
+                        .service(
+                            web::scope("/notifications").service(
+                                web::resource("/revocation").route(
+                                    web::post().to(
+                                        notifications_handler::revocation,
+                                    ),
+                                ),
+                            ),
+                        )
+                        .service(
+                            web::scope("/quotes")
+                                .service(web::resource("/identity").route(
+                                    web::get().to(quotes_handler::identity),
+                                ))
+                                .service(web::resource("/integrity").route(
+                                    web::get().to(quotes_handler::integrity),
+                                )),
+                        ),
+                )
+                .service(
+                    web::resource("/version")
+                        .route(web::get().to(version_handler::version)),
+                )
+        })
+        .bind_openssl(
+            format!("{}:{}", config.agent_ip, config.agent_port),
+            ssl_context,
+        )?
+        .run()
+        .map_err(Error::from);
     info!(
         "Listening on https://{}:{}",
         config.agent_ip, config.agent_port
