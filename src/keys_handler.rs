@@ -91,7 +91,7 @@ pub async fn u_key(
     req: HttpRequest,
     quote_data: web::Data<QuoteData>,
 ) -> impl Responder {
-    info!("Received ukey");
+    debug!("Received ukey");
 
     // must unwrap when using lock
     // https://github.com/rust-lang-nursery/failure/issues/192
@@ -144,7 +144,7 @@ pub async fn v_key(
     req: HttpRequest,
     quote_data: web::Data<QuoteData>,
 ) -> impl Responder {
-    info!("Received vkey");
+    debug!("Received vkey");
 
     // must unwrap when using lock
     // https://github.com/rust-lang-nursery/failure/issues/192
@@ -189,12 +189,6 @@ pub async fn pubkey(
     req: HttpRequest,
     data: web::Data<QuoteData>,
 ) -> impl Responder {
-    info!(
-        "GET invoked from {:?} with uri {}",
-        req.connection_info().remote_addr().unwrap(), //#[allow_ci]
-        req.uri()
-    );
-
     let pubkey = String::from_utf8(
         data.pub_key.public_key_to_pem().map_err(Error::from)?,
     )
@@ -211,25 +205,17 @@ pub async fn verify(
     req: HttpRequest,
     data: web::Data<QuoteData>,
 ) -> impl Responder {
-    info!(
-        "GET invoked from {:?} with uri {}",
-        req.connection_info().remote_addr().unwrap(), //#[allow_ci]
-        req.uri()
-    );
-
     if param.challenge.is_empty() {
-        info!(
+        warn!(
             "GET key challenge returning 400 response. No challenge provided"
         );
         return HttpResponse::BadRequest()
-            .json(JsonWrapper::error(
-                400,
-                "No challenge provided.",
-            ))
+            .json(JsonWrapper::error(400, "No challenge provided."))
             .await;
     }
 
     if !param.challenge.chars().all(char::is_alphanumeric) {
+        warn!("GET key challenge returning 400 response. Parameters should be strictly alphanumeric: {}", param.challenge);
         return HttpResponse::BadRequest()
             .json(JsonWrapper::error(
                 400,
@@ -245,12 +231,9 @@ pub async fn verify(
     let mut key = key_arc.lock().unwrap(); //#[allow_ci]
 
     if key.is_none() {
-        info!("GET key challenge returning 400 response. bootstrap key not available");
+        warn!("GET key challenge returning 400 response. Bootstrap key not available");
         return HttpResponse::BadRequest()
-            .json(JsonWrapper::error(
-                400,
-                "Bootstrap key not yet available.",
-            ))
+            .json(JsonWrapper::error(400, "Bootstrap key not yet available."))
             .await;
     }
 

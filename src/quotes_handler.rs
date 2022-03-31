@@ -45,15 +45,9 @@ pub async fn identity(
     param: web::Query<Ident>,
     data: web::Data<QuoteData>,
 ) -> impl Responder {
-    info!(
-        "GET invoked from {:?} with uri {}",
-        req.connection_info().remote_addr().unwrap(), //#[allow_ci]
-        req.uri()
-    );
-
     // nonce can only be in alphanumerical format
     if !param.nonce.chars().all(char::is_alphanumeric) {
-        warn!("Get quote returning 400 response. Parameters should be strictly alphanumeric");
+        warn!("Get quote returning 400 response. Parameters should be strictly alphanumeric: {}", param.nonce);
         return HttpResponse::BadRequest()
             .json(JsonWrapper::error(
                 400,
@@ -82,7 +76,7 @@ pub async fn identity(
             .await;
     }
 
-    info!("Calling Identity Quote with nonce: {}", param.nonce);
+    debug!("Calling Identity Quote with nonce: {}", param.nonce);
 
     let mut quote = tpm::quote(param.nonce.as_bytes(), None, data.clone())?;
     quote.pubkey = Some(
@@ -109,15 +103,9 @@ pub async fn integrity(
     param: web::Query<Integ>,
     data: web::Data<QuoteData>,
 ) -> impl Responder {
-    info!(
-        "GET invoked from {:?} with uri {}",
-        req.connection_info().remote_addr().unwrap(), //#[allow_ci]
-        req.uri()
-    );
-
     // nonce, mask, vmask can only be in alphanumerical format
     if !param.nonce.chars().all(char::is_alphanumeric) {
-        warn!("Get quote returning 400 response. Parameters should be strictly alphanumeric");
+        warn!("Get quote returning 400 response. Parameters should be strictly alphanumeric: {}", param.nonce);
         return HttpResponse::BadRequest()
             .json(JsonWrapper::error(
                 400,
@@ -130,7 +118,7 @@ pub async fn integrity(
     }
 
     if !param.mask.chars().all(char::is_alphanumeric) {
-        warn!("Get quote returning 400 response. Parameters should be strictly alphanumeric");
+        warn!("Get quote returning 400 response. Parameters should be strictly alphanumeric: {}", param.mask);
         return HttpResponse::BadRequest()
             .json(JsonWrapper::error(
                 400,
@@ -182,7 +170,7 @@ pub async fn integrity(
         }
     };
 
-    info!(
+    debug!(
         "Calling Integrity Quote with nonce: {}, mask: {}",
         param.nonce, param.mask
     );

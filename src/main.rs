@@ -48,7 +48,7 @@ mod serialization;
 mod tpm;
 mod version_handler;
 
-use actix_web::{web, App, HttpServer};
+use actix_web::{dev::Service, middleware, web, App, HttpServer};
 use clap::{App as ClapApp, Arg};
 use common::*;
 use compress_tools::*;
@@ -517,6 +517,18 @@ async fn main() -> Result<()> {
     let actix_server =
         HttpServer::new(move || {
             App::new()
+                .wrap(middleware::Logger::new(
+                    "%r from %a result %s (took %D ms)",
+                ))
+                .wrap_fn(|req, srv| {
+                    info!(
+                        "{} invoked from {:?} with uri {}",
+                        req.head().method,
+                        req.connection_info().remote_addr().unwrap(), //#[allow_ci]
+                        req.uri()
+                    );
+                    srv.call(req)
+                })
                 .app_data(quotedata.clone())
                 .service(
                     web::scope(&format!("/{}", API_VERSION))
