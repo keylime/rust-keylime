@@ -93,7 +93,7 @@ impl<'de, A> JsonWrapper<A>
 where
     A: Deserialize<'de> + Serialize + Debug,
 {
-    pub(crate) fn new(results: A) -> JsonWrapper<A> {
+    pub(crate) fn success(results: A) -> JsonWrapper<A> {
         JsonWrapper {
             code: 200,
             status: String::from("Success"),
