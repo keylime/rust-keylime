@@ -80,9 +80,9 @@ pub(crate) struct JsonWrapper<A> {
 }
 
 impl JsonWrapper<Value> {
-    pub(crate) fn bad_request(status: String) -> JsonWrapper<Value> {
+    pub(crate) fn error(code: u32, status: String) -> JsonWrapper<Value> {
         JsonWrapper {
-            code: 400,
+            code,
             status,
             results: json!({}),
         }
