@@ -55,10 +55,13 @@ pub async fn identity(
     if !param.nonce.chars().all(char::is_alphanumeric) {
         warn!("Get quote returning 400 response. Parameters should be strictly alphanumeric");
         return HttpResponse::BadRequest()
-            .json(JsonWrapper::bad_request(format!(
-                "Parameters should be strictly alphanumeric: {}",
-                param.nonce
-            )))
+            .json(JsonWrapper::error(
+                400,
+                format!(
+                    "Parameters should be strictly alphanumeric: {}",
+                    param.nonce
+                ),
+            ))
             .await;
     }
 
@@ -68,11 +71,14 @@ pub async fn identity(
               param.nonce.len()
         );
         return HttpResponse::BadRequest()
-            .json(JsonWrapper::bad_request(format!(
-                "Nonce is too long (max size {}): {}",
-                tpm::MAX_NONCE_SIZE,
-                param.nonce
-            )))
+            .json(JsonWrapper::error(
+                400,
+                format!(
+                    "Nonce is too long (max size {}): {}",
+                    tpm::MAX_NONCE_SIZE,
+                    param.nonce
+                ),
+            ))
             .await;
     }
 
@@ -113,20 +119,26 @@ pub async fn integrity(
     if !param.nonce.chars().all(char::is_alphanumeric) {
         warn!("Get quote returning 400 response. Parameters should be strictly alphanumeric");
         return HttpResponse::BadRequest()
-            .json(JsonWrapper::bad_request(format!(
-                "nonce should be strictly alphanumeric: {}",
-                param.nonce
-            )))
+            .json(JsonWrapper::error(
+                400,
+                format!(
+                    "nonce should be strictly alphanumeric: {}",
+                    param.nonce
+                ),
+            ))
             .await;
     }
 
     if !param.mask.chars().all(char::is_alphanumeric) {
         warn!("Get quote returning 400 response. Parameters should be strictly alphanumeric");
         return HttpResponse::BadRequest()
-            .json(JsonWrapper::bad_request(format!(
-                "mask should be strictly alphanumeric: {}",
-                param.mask
-            )))
+            .json(JsonWrapper::error(
+                400,
+                format!(
+                    "mask should be strictly alphanumeric: {}",
+                    param.mask
+                ),
+            ))
             .await;
     }
 
@@ -136,11 +148,14 @@ pub async fn integrity(
               param.nonce.len()
         );
         return HttpResponse::BadRequest()
-            .json(JsonWrapper::bad_request(format!(
-                "Nonce is too long (max size: {}): {}",
-                tpm::MAX_NONCE_SIZE,
-                param.nonce.len()
-            )))
+            .json(JsonWrapper::error(
+                400,
+                format!(
+                    "Nonce is too long (max size: {}): {}",
+                    tpm::MAX_NONCE_SIZE,
+                    param.nonce.len()
+                ),
+            ))
             .await;
     }
 
@@ -158,7 +173,8 @@ pub async fn integrity(
         _ => {
             warn!("Get quote returning 400 response. uri must contain key 'partial' and value '0' or '1'");
             return HttpResponse::BadRequest()
-                .json(JsonWrapper::bad_request(
+                .json(JsonWrapper::error(
+                    400,
                     "uri must contain key 'partial' and value '0' or '1'"
                         .to_string(),
                 ))
