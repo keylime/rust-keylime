@@ -19,7 +19,7 @@ pub async fn version(req: HttpRequest) -> impl Responder {
         req.uri()
     );
 
-    let response = JsonWrapper::new(KeylimeVersion {
+    let response = JsonWrapper::success(KeylimeVersion {
         supported_version: API_VERSION[1..].to_string(),
     });
 

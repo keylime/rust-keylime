@@ -200,7 +200,7 @@ pub async fn pubkey(
     )
     .map_err(Error::from)?;
 
-    let response = JsonWrapper::new(KeylimePubkey { pubkey });
+    let response = JsonWrapper::success(KeylimePubkey { pubkey });
     info!("GET pubkey returning 200 response.");
 
     HttpResponse::Ok().json(response).await
@@ -257,7 +257,7 @@ pub async fn verify(
     let key = key.as_ref().unwrap(); //#[allow_ci]
     let hmac = crypto::compute_hmac(key.bytes(), param.challenge.as_bytes())?;
 
-    let response = JsonWrapper::new(KeylimeHMAC {
+    let response = JsonWrapper::success(KeylimeHMAC {
         hmac: hex::encode(hmac),
     });
 

@@ -94,7 +94,7 @@ pub async fn identity(
         .map_err(KeylimeError::from)?,
     );
 
-    let response = JsonWrapper::new(quote);
+    let response = JsonWrapper::success(quote);
     info!("GET identity quote returning 200 response");
     HttpResponse::Ok().json(response).await
 }
@@ -229,7 +229,7 @@ pub async fn integrity(
         ..id_quote
     };
 
-    let response = JsonWrapper::new(quote);
+    let response = JsonWrapper::success(quote);
     info!("GET integrity quote returning 200 response");
     HttpResponse::Ok().json(response).await
 }
