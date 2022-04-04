@@ -37,6 +37,7 @@ mod algorithms;
 mod common;
 mod crypto;
 mod error;
+mod errors_handler;
 mod ima;
 mod keys_handler;
 mod notifications_handler;
@@ -545,16 +546,21 @@ async fn main() -> Result<()> {
                                 ))
                                 .service(web::resource("/vkey").route(
                                     web::post().to(keys_handler::v_key),
+                                ))
+                                .default_service(web::to(
+                                    errors_handler::keys_default,
                                 )),
                         )
                         .service(
-                            web::scope("/notifications").service(
-                                web::resource("/revocation").route(
+                            web::scope("/notifications")
+                                .service(web::resource("/revocation").route(
                                     web::post().to(
                                         notifications_handler::revocation,
                                     ),
-                                ),
-                            ),
+                                ))
+                                .default_service(web::to(
+                                    errors_handler::notifications_default,
+                                )),
                         )
                         .service(
                             web::scope("/quotes")
@@ -563,13 +569,24 @@ async fn main() -> Result<()> {
                                 ))
                                 .service(web::resource("/integrity").route(
                                     web::get().to(quotes_handler::integrity),
+                                ))
+                                .default_service(web::to(
+                                    errors_handler::quotes_default,
                                 )),
-                        ),
+                        )
+                        .default_service(web::to(
+                            errors_handler::api_default,
+                        )),
                 )
                 .service(
                     web::resource("/version")
                         .route(web::get().to(version_handler::version)),
                 )
+                .service(
+                    web::resource(r"/v{major:\d+}.{minor:\d+}{tail}*")
+                        .to(errors_handler::version_not_supported),
+                )
+                .default_service(web::to(errors_handler::app_default))
         })
         .bind_openssl(
             format!("{}:{}", config.agent_ip, config.agent_port),
