@@ -205,7 +205,10 @@ pub async fn integrity(
         mb_measurement_list = match measuredboot_ml {
             Ok(ml) => Some(ml),
             Err(e) => {
-                warn!("TPM2 event log not available");
+                warn!(
+                    "TPM2 event log not available: {}",
+                    data.measuredboot_ml_path.display()
+                );
                 None
             }
         };
