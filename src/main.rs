@@ -531,6 +531,18 @@ async fn main() -> Result<()> {
                     srv.call(req)
                 })
                 .app_data(quotedata.clone())
+                .app_data(
+                    web::JsonConfig::default()
+                        .error_handler(errors_handler::json_parser_error),
+                )
+                .app_data(
+                    web::QueryConfig::default()
+                        .error_handler(errors_handler::query_parser_error),
+                )
+                .app_data(
+                    web::PathConfig::default()
+                        .error_handler(errors_handler::path_parser_error),
+                )
                 .service(
                     web::scope(&format!("/{}", API_VERSION))
                         .service(

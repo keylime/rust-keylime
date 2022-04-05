@@ -2,7 +2,10 @@
 // Copyright 2021 Keylime Authors
 
 use crate::common::{APIVersion, JsonWrapper, API_VERSION};
-use actix_web::{http, web, HttpRequest, HttpResponse, Responder};
+use actix_web::{
+    error::{JsonPayloadError, PathError, QueryPayloadError},
+    http, web, Error, HttpRequest, HttpResponse, Responder,
+};
 use log::*;
 
 pub(crate) async fn app_default(req: HttpRequest) -> impl Responder {
@@ -205,4 +208,34 @@ pub(crate) async fn version_not_supported(
     HttpResponse::BadRequest()
         .json(JsonWrapper::error(400, message))
         .await
+}
+
+pub(crate) fn json_parser_error(
+    err: JsonPayloadError,
+    req: &HttpRequest,
+) -> Error {
+    warn!("{} returning 400 response. {}", req.head().method, err);
+
+    HttpResponse::BadRequest()
+        .json(JsonWrapper::error(400, err))
+        .into()
+}
+
+pub(crate) fn query_parser_error(
+    err: QueryPayloadError,
+    req: &HttpRequest,
+) -> Error {
+    warn!("{} returning 400 response. {}", req.head().method, err);
+
+    HttpResponse::BadRequest()
+        .json(JsonWrapper::error(400, err))
+        .into()
+}
+
+pub(crate) fn path_parser_error(err: PathError, req: &HttpRequest) -> Error {
+    warn!("{} returning 400 response. {}", req.head().method, err);
+
+    HttpResponse::BadRequest()
+        .json(JsonWrapper::error(400, err))
+        .into()
 }
