@@ -80,10 +80,13 @@ pub(crate) struct JsonWrapper<A> {
 }
 
 impl JsonWrapper<Value> {
-    pub(crate) fn error(code: u32, status: String) -> JsonWrapper<Value> {
+    pub(crate) fn error(
+        code: u32,
+        status: impl ToString,
+    ) -> JsonWrapper<Value> {
         JsonWrapper {
             code,
-            status,
+            status: status.to_string(),
             results: json!({}),
         }
     }

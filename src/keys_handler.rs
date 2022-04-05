@@ -224,7 +224,7 @@ pub async fn verify(
         return HttpResponse::BadRequest()
             .json(JsonWrapper::error(
                 400,
-                "No challenge provided.".to_string(),
+                "No challenge provided.",
             ))
             .await;
     }
@@ -249,7 +249,7 @@ pub async fn verify(
         return HttpResponse::BadRequest()
             .json(JsonWrapper::error(
                 400,
-                "Bootstrap key not yet available.".to_string(),
+                "Bootstrap key not yet available.",
             ))
             .await;
     }
