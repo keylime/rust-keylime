@@ -74,14 +74,14 @@ cfg_if::cfg_if! {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub(crate) struct JsonWrapper<A> {
-    pub code: u32,
+    pub code: u16,
     pub status: String,
     pub results: A,
 }
 
 impl JsonWrapper<Value> {
     pub(crate) fn error(
-        code: u32,
+        code: u16,
         status: impl ToString,
     ) -> JsonWrapper<Value> {
         JsonWrapper {
