@@ -15,7 +15,7 @@ struct KeylimeVersion {
 pub async fn version(req: HttpRequest) -> impl Responder {
     info!(
         "GET invoked from {:?} with uri {}",
-        req.connection_info().remote_addr().unwrap(), //#[allow_ci]
+        req.connection_info().peer_addr().unwrap(), //#[allow_ci]
         req.uri()
     );
 
@@ -23,7 +23,7 @@ pub async fn version(req: HttpRequest) -> impl Responder {
         supported_version: API_VERSION[1..].to_string(),
     });
 
-    HttpResponse::Ok().json(response).await
+    HttpResponse::Ok().json(response)
 }
 
 #[cfg(feature = "testing")]
@@ -41,7 +41,7 @@ mod tests {
 
         let req = test::TestRequest::get().uri("/version").to_request();
 
-        let resp = test::call_service(&mut app, req).await;
+        let resp = test::call_service(&app, req).await;
         assert!(resp.status().is_success());
 
         let body: JsonWrapper<KeylimeVersion> =

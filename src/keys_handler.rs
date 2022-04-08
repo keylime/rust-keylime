@@ -189,12 +189,21 @@ pub async fn pubkey(
     req: HttpRequest,
     data: web::Data<QuoteData>,
 ) -> impl Responder {
-    let pubkey = crypto::pkey_pub_to_pem(&data.pub_key)?;
+    match crypto::pkey_pub_to_pem(&data.pub_key) {
+        Ok(pubkey) => {
+            let response = JsonWrapper::success(KeylimePubkey { pubkey });
+            info!("GET pubkey returning 200 response.");
 
-    let response = JsonWrapper::success(KeylimePubkey { pubkey });
-    info!("GET pubkey returning 200 response.");
-
-    HttpResponse::Ok().json(response).await
+            HttpResponse::Ok().json(response)
+        }
+        Err(e) => {
+            debug!("Unable to retrieve public key: {:?}", e);
+            HttpResponse::InternalServerError().json(JsonWrapper::error(
+                500,
+                "Unable to retrieve public key".to_string(),
+            ))
+        }
+    }
 }
 
 pub async fn verify(
@@ -207,21 +216,18 @@ pub async fn verify(
             "GET key challenge returning 400 response. No challenge provided"
         );
         return HttpResponse::BadRequest()
-            .json(JsonWrapper::error(400, "No challenge provided."))
-            .await;
+            .json(JsonWrapper::error(400, "No challenge provided."));
     }
 
     if !param.challenge.chars().all(char::is_alphanumeric) {
         warn!("GET key challenge returning 400 response. Parameters should be strictly alphanumeric: {}", param.challenge);
-        return HttpResponse::BadRequest()
-            .json(JsonWrapper::error(
-                400,
-                format!(
-                    "Parameters should be strictly alphanumeric: {}",
-                    param.challenge
-                ),
-            ))
-            .await;
+        return HttpResponse::BadRequest().json(JsonWrapper::error(
+            400,
+            format!(
+                "Parameters should be strictly alphanumeric: {}",
+                param.challenge
+            ),
+        ));
     }
 
     let key_arc = Arc::clone(&data.payload_symm_key);
@@ -229,20 +235,30 @@ pub async fn verify(
 
     if key.is_none() {
         warn!("GET key challenge returning 400 response. Bootstrap key not available");
-        return HttpResponse::BadRequest()
-            .json(JsonWrapper::error(400, "Bootstrap key not yet available."))
-            .await;
+        return HttpResponse::BadRequest().json(JsonWrapper::error(
+            400,
+            "Bootstrap key not yet available.",
+        ));
     }
 
     let key = key.as_ref().unwrap(); //#[allow_ci]
-    let hmac = crypto::compute_hmac(key.bytes(), param.challenge.as_bytes())?;
+    match crypto::compute_hmac(key.bytes(), param.challenge.as_bytes()) {
+        Ok(hmac) => {
+            let response = JsonWrapper::success(KeylimeHMAC {
+                hmac: hex::encode(hmac),
+            });
 
-    let response = JsonWrapper::success(KeylimeHMAC {
-        hmac: hex::encode(hmac),
-    });
-
-    info!("GET key challenge returning 200 response.");
-    HttpResponse::Ok().json(response).await
+            info!("GET key challenge returning 200 response.");
+            HttpResponse::Ok().json(response)
+        }
+        Err(e) => {
+            warn!("GET key challenge failed: {:?}", e);
+            HttpResponse::InternalServerError().json(JsonWrapper::error(
+                500,
+                "GET key challenge failed".to_string(),
+            ))
+        }
+    }
 }
 
 #[cfg(test)]
@@ -341,7 +357,7 @@ mod tests {
             .set_json(&ukey)
             .to_request();
 
-        let resp = test::call_service(&mut app, req).await;
+        let resp = test::call_service(&app, req).await;
         assert!(resp.status().is_success());
 
         let encrypted_key =
@@ -356,7 +372,7 @@ mod tests {
             .set_json(&vkey)
             .to_request();
 
-        let resp = test::call_service(&mut app, req).await;
+        let resp = test::call_service(&app, req).await;
         assert!(resp.status().is_success());
 
         {
@@ -410,7 +426,7 @@ mod tests {
             .uri(&format!("/{}/keys/pubkey", API_VERSION,))
             .to_request();
 
-        let resp = test::call_service(&mut app, req).await;
+        let resp = test::call_service(&app, req).await;
         assert!(resp.status().is_success());
 
         let result: JsonWrapper<KeylimePubkey> =
@@ -449,7 +465,7 @@ mod tests {
             ))
             .to_request();
 
-        let resp = test::call_service(&mut app, req).await;
+        let resp = test::call_service(&app, req).await;
         assert!(resp.status().is_success());
 
         let result: JsonWrapper<KeylimeHMAC> =

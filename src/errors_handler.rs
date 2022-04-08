@@ -3,11 +3,10 @@
 
 use crate::common::{APIVersion, JsonWrapper, API_VERSION};
 use actix_web::{
-    body::ResponseBody,
-    dev,
-    error::{JsonPayloadError, PathError, QueryPayloadError},
+    body, dev,
+    error::{InternalError, JsonPayloadError, PathError, QueryPayloadError},
     http,
-    middleware::errhandlers::{ErrorHandlerResponse, ErrorHandlers},
+    middleware::{ErrorHandlerResponse, ErrorHandlers},
     web, Error, HttpRequest, HttpResponse, Responder, Result,
 };
 use log::*;
@@ -38,7 +37,7 @@ pub(crate) async fn app_default(req: HttpRequest) -> impl Responder {
             error = 405;
             message = "Method is not supported".to_string();
             response = HttpResponse::MethodNotAllowed()
-                .set(http::header::Allow(vec![
+                .insert_header(http::header::Allow(vec![
                     http::Method::GET,
                     http::Method::POST,
                 ]))
@@ -53,7 +52,7 @@ pub(crate) async fn app_default(req: HttpRequest) -> impl Responder {
         message
     );
 
-    response.await
+    response
 }
 
 pub(crate) async fn api_default(req: HttpRequest) -> impl Responder {
@@ -79,7 +78,7 @@ pub(crate) async fn api_default(req: HttpRequest) -> impl Responder {
             error = 405;
             message = "Method is not supported";
             response = HttpResponse::MethodNotAllowed()
-                .set(http::header::Allow(vec![
+                .insert_header(http::header::Allow(vec![
                     http::Method::GET,
                     http::Method::POST,
                 ]))
@@ -94,7 +93,7 @@ pub(crate) async fn api_default(req: HttpRequest) -> impl Responder {
         message
     );
 
-    response.await
+    response
 }
 
 pub(crate) async fn keys_default(req: HttpRequest) -> impl Responder {
@@ -119,7 +118,7 @@ pub(crate) async fn keys_default(req: HttpRequest) -> impl Responder {
             error = 405;
             message = "Method is not supported in /keys/ interface";
             response = HttpResponse::MethodNotAllowed()
-                .set(http::header::Allow(vec![
+                .insert_header(http::header::Allow(vec![
                     http::Method::GET,
                     http::Method::POST,
                 ]))
@@ -134,7 +133,7 @@ pub(crate) async fn keys_default(req: HttpRequest) -> impl Responder {
         message
     );
 
-    response.await
+    response
 }
 
 pub(crate) async fn quotes_default(req: HttpRequest) -> impl Responder {
@@ -153,7 +152,7 @@ pub(crate) async fn quotes_default(req: HttpRequest) -> impl Responder {
             error = 405;
             message = "Method is not supported in /quotes/ interface";
             response = HttpResponse::MethodNotAllowed()
-                .set(http::header::Allow(vec![http::Method::GET]))
+                .insert_header(http::header::Allow(vec![http::Method::GET]))
                 .json(JsonWrapper::error(error, message));
         }
     };
@@ -165,7 +164,7 @@ pub(crate) async fn quotes_default(req: HttpRequest) -> impl Responder {
         message
     );
 
-    response.await
+    response
 }
 
 pub(crate) async fn notifications_default(
@@ -186,7 +185,7 @@ pub(crate) async fn notifications_default(
             error = 405;
             message = "Method is not supported in /notifications/ interface";
             response = HttpResponse::MethodNotAllowed()
-                .set(http::header::Allow(vec![http::Method::POST]))
+                .insert_header(http::header::Allow(vec![http::Method::POST]))
                 .json(JsonWrapper::error(error, message));
         }
     };
@@ -198,7 +197,7 @@ pub(crate) async fn notifications_default(
         message
     );
 
-    response.await
+    response
 }
 
 pub(crate) async fn version_not_supported(
@@ -209,9 +208,7 @@ pub(crate) async fn version_not_supported(
 
     warn!("{} returning 400 response. {}", req.head().method, message);
 
-    HttpResponse::BadRequest()
-        .json(JsonWrapper::error(400, message))
-        .await
+    HttpResponse::BadRequest().json(JsonWrapper::error(400, message))
 }
 
 pub(crate) fn json_parser_error(
@@ -220,9 +217,8 @@ pub(crate) fn json_parser_error(
 ) -> Error {
     warn!("{} returning 400 response. {}", req.head().method, err);
 
-    HttpResponse::BadRequest()
-        .json(JsonWrapper::error(400, err))
-        .into()
+    let resp = HttpResponse::BadRequest().json(JsonWrapper::error(400, &err));
+    InternalError::from_response(err, resp).into()
 }
 
 pub(crate) fn query_parser_error(
@@ -231,25 +227,23 @@ pub(crate) fn query_parser_error(
 ) -> Error {
     warn!("{} returning 400 response. {}", req.head().method, err);
 
-    HttpResponse::BadRequest()
-        .json(JsonWrapper::error(400, err))
-        .into()
+    let resp = HttpResponse::BadRequest().json(JsonWrapper::error(400, &err));
+    InternalError::from_response(err, resp).into()
 }
 
 pub(crate) fn path_parser_error(err: PathError, req: &HttpRequest) -> Error {
     warn!("{} returning 400 response. {}", req.head().method, err);
 
-    HttpResponse::BadRequest()
-        .json(JsonWrapper::error(400, err))
-        .into()
+    let resp = HttpResponse::BadRequest().json(JsonWrapper::error(400, &err));
+    InternalError::from_response(err, resp).into()
 }
 
 // This handler is ugly as there is no easy way to capture default errors emitted by the server and
 // wrap using the JSON structure.
 // see: https://github.com/actix/actix-web/issues/1604
 pub(crate) fn wrap_404<B>(
-    mut res: dev::ServiceResponse<B>,
-) -> Result<ErrorHandlerResponse<B>> {
+    res: dev::ServiceResponse<B>,
+) -> Result<ErrorHandlerResponse<body::BoxBody>> {
     let status = res.status();
 
     warn!(
@@ -258,22 +252,16 @@ pub(crate) fn wrap_404<B>(
         status.canonical_reason().unwrap_or("Not Found")
     );
 
-    res.headers_mut().insert(
-        http::header::CONTENT_TYPE,
-        http::header::HeaderValue::from_static("application/json"),
-    );
+    let response =
+        HttpResponse::build(res.status()).json(JsonWrapper::error(
+            status.as_u16(),
+            status.canonical_reason().unwrap_or("Not Found"),
+        ));
 
-    let new_res: dev::ServiceResponse<B> = res.map_body(|_head, _body| {
-        ResponseBody::Other(dev::Body::Message(Box::new(
-            serde_json::to_string(&JsonWrapper::error(
-                status.as_u16(),
-                status.canonical_reason().unwrap_or("Not Found"),
-            ))
-            .unwrap(), //#[allow_ci]
-        )))
-    });
-
-    Ok(ErrorHandlerResponse::Response(new_res))
+    Ok(ErrorHandlerResponse::Response(dev::ServiceResponse::new(
+        res.into_parts().0,
+        response.map_into_left_body(),
+    )))
 }
 
 #[cfg(test)]
@@ -290,7 +278,7 @@ mod tests {
         if allow.contains("GET") {
             let req = test::TestRequest::get().uri("/").to_request();
 
-            let resp = test::call_service(&mut app, req).await;
+            let resp = test::call_service(&app, req).await;
             assert!(resp.status().is_client_error());
 
             let result: JsonWrapper<Value> = test::read_body_json(resp).await;
@@ -305,7 +293,7 @@ mod tests {
                 .data("some data")
                 .to_request();
 
-            let resp = test::call_service(&mut app, req).await;
+            let resp = test::call_service(&app, req).await;
             assert!(resp.status().is_client_error());
 
             let result: JsonWrapper<Value> = test::read_body_json(resp).await;
@@ -316,7 +304,7 @@ mod tests {
 
         let req = test::TestRequest::delete().uri("/").to_request();
 
-        let resp = test::call_service(&mut app, req).await;
+        let resp = test::call_service(&app, req).await;
         assert!(resp.status().is_client_error());
 
         let headers = resp.headers();
@@ -392,7 +380,7 @@ mod tests {
         let mut app = test::init_service(
             App::new()
                 .wrap(
-                    middleware::errhandlers::ErrorHandlers::new()
+                    middleware::ErrorHandlers::new()
                         .handler(http::StatusCode::NOT_FOUND, wrap_404),
                 )
                 .app_data(
@@ -427,7 +415,7 @@ mod tests {
             .set_json(&DummyPayload { field: 42 })
             .to_request();
 
-        let resp = test::call_service(&mut app, req).await;
+        let resp = test::call_service(&app, req).await;
 
         assert!(resp.status().is_success());
 
@@ -436,7 +424,7 @@ mod tests {
             .uri("/v500.440/some/tail")
             .set_json(&DummyPayload { field: 42 })
             .to_request();
-        let resp = test::call_service(&mut app, req).await;
+        let resp = test::call_service(&app, req).await;
         assert!(resp.status().is_client_error());
         let result: JsonWrapper<Value> = test::read_body_json(resp).await;
         assert_eq!(result.results, json!({}));
@@ -446,10 +434,10 @@ mod tests {
         // Test JSON parsing error
         let req = test::TestRequest::get()
             .uri("/v2.0/ok?param=Test")
-            .header(http::header::CONTENT_TYPE, "application/json")
+            .insert_header(http::header::ContentType::json())
             .set_payload("Not JSON")
             .to_request();
-        let resp = test::call_service(&mut app, req).await;
+        let resp = test::call_service(&app, req).await;
         assert!(resp.status().is_client_error());
         let result: JsonWrapper<Value> = test::read_body_json(resp).await;
         assert_eq!(result.results, json!({}));
@@ -461,7 +449,7 @@ mod tests {
             .uri("/v2.0/ok?test=query")
             .set_json(&DummyPayload { field: 42 })
             .to_request();
-        let resp = test::call_service(&mut app, req).await;
+        let resp = test::call_service(&app, req).await;
         assert!(resp.status().is_client_error());
         let result: JsonWrapper<Value> = test::read_body_json(resp).await;
         assert_eq!(result.results, json!({}));
@@ -473,7 +461,7 @@ mod tests {
             .uri("/v2.0/ok/something/42?test=query")
             .set_json(&DummyPayload { field: 42 })
             .to_request();
-        let resp = test::call_service(&mut app, req).await;
+        let resp = test::call_service(&app, req).await;
         assert!(resp.status().is_client_error());
         let result: JsonWrapper<Value> = test::read_body_json(resp).await;
         assert_eq!(result.results, json!({}));
@@ -482,7 +470,7 @@ mod tests {
 
         // Test not found
         let req = test::TestRequest::get().uri("/notfound").to_request();
-        let resp = test::call_service(&mut app, req).await;
+        let resp = test::call_service(&app, req).await;
         assert!(resp.status().is_client_error());
         let result: JsonWrapper<Value> = test::read_body_json(resp).await;
         assert_eq!(result.results, json!({}));

@@ -49,7 +49,7 @@ mod serialization;
 mod tpm;
 mod version_handler;
 
-use actix_web::{dev::Service, http, middleware, web, App, HttpServer};
+use actix_web::{dev::Service, http, middleware, rt, web, App, HttpServer};
 use clap::{App as ClapApp, Arg};
 use common::*;
 use compress_tools::*;
@@ -307,14 +307,14 @@ async fn worker(
     symm_key: Arc<Mutex<Option<SymmKey>>>,
     symm_key_cvar: Arc<Condvar>,
     payload: Arc<Mutex<Vec<u8>>>,
-    config: &KeylimeConfig,
+    config: KeylimeConfig,
 ) -> Result<()> {
-    run_encrypted_payload(symm_key, symm_key_cvar, payload, config).await?;
+    run_encrypted_payload(symm_key, symm_key_cvar, payload, &config).await?;
 
     // If with-zmq feature is enabled, run the service listening for ZeroMQ messages
     #[cfg(feature = "with-zmq")]
     if config.run_revocation {
-        return revocation::run_revocation_service(config).await;
+        return revocation::run_revocation_service(&config).await;
     }
 
     Ok(())
@@ -518,6 +518,10 @@ async fn main() -> Result<()> {
     let actix_server =
         HttpServer::new(move || {
             App::new()
+                .wrap(middleware::ErrorHandlers::new().handler(
+                    http::StatusCode::NOT_FOUND,
+                    errors_handler::wrap_404,
+                ))
                 .wrap(middleware::Logger::new(
                     "%r from %a result %s (took %D ms)",
                 ))
@@ -525,15 +529,11 @@ async fn main() -> Result<()> {
                     info!(
                         "{} invoked from {:?} with uri {}",
                         req.head().method,
-                        req.connection_info().remote_addr().unwrap(), //#[allow_ci]
+                        req.connection_info().peer_addr().unwrap(), //#[allow_ci]
                         req.uri()
                     );
                     srv.call(req)
                 })
-                .wrap(middleware::errhandlers::ErrorHandlers::new().handler(
-                    http::StatusCode::NOT_FOUND,
-                    errors_handler::wrap_404,
-                ))
                 .app_data(quotedata.clone())
                 .app_data(
                     web::JsonConfig::default()
@@ -608,19 +608,25 @@ async fn main() -> Result<()> {
             format!("{}:{}", config.agent_ip, config.agent_port),
             ssl_context,
         )?
-        .run()
-        .map_err(Error::from);
+        // Disable default signal handlers.  See:
+        // https://github.com/actix/actix-web/issues/2739
+        // for details.
+        .disable_signals()
+        .run();
     info!(
         "Listening on https://{}:{}",
         config.agent_ip, config.agent_port
     );
 
-    try_join!(
-        worker(symm_key, symm_key_cvar, payload, &config),
-        actix_server
-    )?;
+    let server_handle = actix_server.handle();
+    let server_task = rt::spawn(actix_server).map_err(Error::from);
+    let worker_task =
+        rt::spawn(worker(symm_key, symm_key_cvar, payload, config.clone()))
+            .map_err(Error::from);
 
-    Ok(())
+    let result = try_join!(server_task, worker_task);
+    server_handle.stop(true).await;
+    result.map(|_| ())
 }
 
 /*

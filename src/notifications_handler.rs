@@ -91,7 +91,7 @@ mod tests {
             .set_json(&revocation)
             .to_request();
 
-        let resp = test::call_service(&mut app, req).await;
+        let resp = test::call_service(&app, req).await;
         assert!(resp.status().is_success());
     }
 }
