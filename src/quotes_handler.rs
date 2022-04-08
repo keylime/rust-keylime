@@ -49,15 +49,13 @@ pub async fn identity(
     // nonce can only be in alphanumerical format
     if !param.nonce.chars().all(char::is_alphanumeric) {
         warn!("Get quote returning 400 response. Parameters should be strictly alphanumeric: {}", param.nonce);
-        return HttpResponse::BadRequest()
-            .json(JsonWrapper::error(
-                400,
-                format!(
-                    "Parameters should be strictly alphanumeric: {}",
-                    param.nonce
-                ),
-            ))
-            .await;
+        return HttpResponse::BadRequest().json(JsonWrapper::error(
+            400,
+            format!(
+                "Parameters should be strictly alphanumeric: {}",
+                param.nonce
+            ),
+        ));
     }
 
     if param.nonce.len() > tpm::MAX_NONCE_SIZE {
@@ -65,28 +63,48 @@ pub async fn identity(
               tpm::MAX_NONCE_SIZE,
               param.nonce.len()
         );
-        return HttpResponse::BadRequest()
-            .json(JsonWrapper::error(
-                400,
-                format!(
-                    "Nonce is too long (max size {}): {}",
-                    tpm::MAX_NONCE_SIZE,
-                    param.nonce
-                ),
-            ))
-            .await;
+        return HttpResponse::BadRequest().json(JsonWrapper::error(
+            400,
+            format!(
+                "Nonce is too long (max size {}): {}",
+                tpm::MAX_NONCE_SIZE,
+                param.nonce
+            ),
+        ));
     }
 
     debug!("Calling Identity Quote with nonce: {}", param.nonce);
 
-    let mut quote = tpm::quote(param.nonce.as_bytes(), None, data.clone())?;
-    let _ = quote
-        .pubkey
-        .replace(crypto::pkey_pub_to_pem(&data.pub_key)?);
+    let mut quote =
+        match tpm::quote(param.nonce.as_bytes(), None, data.clone()) {
+            Ok(quote) => quote,
+            Err(e) => {
+                debug!("Unable to retrieve quote: {:?}", e);
+                return HttpResponse::InternalServerError().json(
+                    JsonWrapper::error(
+                        500,
+                        "Unable to retrieve quote".to_string(),
+                    ),
+                );
+            }
+        };
+
+    match crypto::pkey_pub_to_pem(&data.pub_key) {
+        Ok(pubkey) => quote.pubkey = Some(pubkey),
+        Err(e) => {
+            debug!("Unable to retrieve public key for quote: {:?}", e);
+            return HttpResponse::InternalServerError().json(
+                JsonWrapper::error(
+                    500,
+                    "Unable to retrieve quote".to_string(),
+                ),
+            );
+        }
+    }
 
     let response = JsonWrapper::success(quote);
     info!("GET identity quote returning 200 response");
-    HttpResponse::Ok().json(response).await
+    HttpResponse::Ok().json(response)
 }
 
 // This is a Quote request from the cloud verifier, which will check
@@ -102,28 +120,18 @@ pub async fn integrity(
     // nonce, mask, vmask can only be in alphanumerical format
     if !param.nonce.chars().all(char::is_alphanumeric) {
         warn!("Get quote returning 400 response. Parameters should be strictly alphanumeric: {}", param.nonce);
-        return HttpResponse::BadRequest()
-            .json(JsonWrapper::error(
-                400,
-                format!(
-                    "nonce should be strictly alphanumeric: {}",
-                    param.nonce
-                ),
-            ))
-            .await;
+        return HttpResponse::BadRequest().json(JsonWrapper::error(
+            400,
+            format!("nonce should be strictly alphanumeric: {}", param.nonce),
+        ));
     }
 
     if !param.mask.chars().all(char::is_alphanumeric) {
         warn!("Get quote returning 400 response. Parameters should be strictly alphanumeric: {}", param.mask);
-        return HttpResponse::BadRequest()
-            .json(JsonWrapper::error(
-                400,
-                format!(
-                    "mask should be strictly alphanumeric: {}",
-                    param.mask
-                ),
-            ))
-            .await;
+        return HttpResponse::BadRequest().json(JsonWrapper::error(
+            400,
+            format!("mask should be strictly alphanumeric: {}", param.mask),
+        ));
     }
 
     if param.nonce.len() > tpm::MAX_NONCE_SIZE {
@@ -131,31 +139,41 @@ pub async fn integrity(
               tpm::MAX_NONCE_SIZE,
               param.nonce.len()
         );
-        return HttpResponse::BadRequest()
-            .json(JsonWrapper::error(
-                400,
-                format!(
-                    "Nonce is too long (max size: {}): {}",
-                    tpm::MAX_NONCE_SIZE,
-                    param.nonce.len()
-                ),
-            ))
-            .await;
+        return HttpResponse::BadRequest().json(JsonWrapper::error(
+            400,
+            format!(
+                "Nonce is too long (max size: {}): {}",
+                tpm::MAX_NONCE_SIZE,
+                param.nonce.len()
+            ),
+        ));
     }
 
     // If partial="0", include the public key in the quote
     let pubkey = match &param.partial[..] {
-        "0" => Some(crypto::pkey_pub_to_pem(&data.pub_key)?),
+        "0" => {
+            let pubkey = match crypto::pkey_pub_to_pem(&data.pub_key) {
+                Ok(pubkey) => pubkey,
+                Err(e) => {
+                    debug!("Unable to retrieve public key: {:?}", e);
+                    return HttpResponse::InternalServerError().json(
+                        JsonWrapper::error(
+                            500,
+                            "Unable to retrieve public key".to_string(),
+                        ),
+                    );
+                }
+            };
+            Some(pubkey)
+        }
         "1" => None,
         _ => {
             warn!("Get quote returning 400 response. uri must contain key 'partial' and value '0' or '1'");
-            return HttpResponse::BadRequest()
-                .json(JsonWrapper::error(
-                    400,
-                    "uri must contain key 'partial' and value '0' or '1'"
-                        .to_string(),
-                ))
-                .await;
+            return HttpResponse::BadRequest().json(JsonWrapper::error(
+                400,
+                "uri must contain key 'partial' and value '0' or '1'"
+                    .to_string(),
+            ));
         }
     };
 
@@ -172,33 +190,70 @@ pub async fn integrity(
     };
 
     // Generate the ID quote.
-    let id_quote =
-        tpm::quote(param.nonce.as_bytes(), Some(&param.mask), data.clone())?;
+    let id_quote = match tpm::quote(
+        param.nonce.as_bytes(),
+        Some(&param.mask),
+        data.clone(),
+    ) {
+        Ok(id_quote) => id_quote,
+        Err(e) => {
+            debug!("Unable to retrieve quote: {:?}", e);
+            return HttpResponse::InternalServerError().json(
+                JsonWrapper::error(
+                    500,
+                    "Unable to retrieve quote".to_string(),
+                ),
+            );
+        }
+    };
 
     // If PCR 0 is included in the mask, obtain the measured boot
     let mut mb_measurement_list = None;
-    if tpm::check_mask(&param.mask, &PcrSlot::Slot0)? {
-        let measuredboot_ml = read(&data.measuredboot_ml_path);
-        mb_measurement_list = match measuredboot_ml {
-            Ok(ml) => Some(ml),
-            Err(e) => {
-                warn!(
-                    "TPM2 event log not available: {}",
-                    data.measuredboot_ml_path.display()
-                );
-                None
+    match tpm::check_mask(&param.mask, &PcrSlot::Slot0) {
+        Ok(true) => {
+            let measuredboot_ml = read(&data.measuredboot_ml_path);
+            mb_measurement_list = match measuredboot_ml {
+                Ok(ml) => Some(ml),
+                Err(e) => {
+                    warn!(
+                        "TPM2 event log not available: {}",
+                        data.measuredboot_ml_path.display()
+                    );
+                    None
+                }
             }
-        };
+        }
+        Err(e) => {
+            debug!("Unable to check PCR mask: {:?}", e);
+            return HttpResponse::InternalServerError().json(
+                JsonWrapper::error(
+                    500,
+                    "Unable to retrieve quote".to_string(),
+                ),
+            );
+        }
+        _ => (),
     }
 
     // Generate the measurement list
     let ima_ml_path = &data.ima_ml_path;
     let (ima_measurement_list, ima_measurement_list_entry, num_entries) =
-        read_measurement_list(
+        match read_measurement_list(
             &mut data.ima_ml.lock().unwrap(), //#[allow_ci]
             ima_ml_path,
             nth_entry,
-        )?;
+        ) {
+            Ok(result) => result,
+            Err(e) => {
+                debug!("Unable to read measurement list: {:?}", e);
+                return HttpResponse::InternalServerError().json(
+                    JsonWrapper::error(
+                        500,
+                        "Unable to retrieve quote".to_string(),
+                    ),
+                );
+            }
+        };
 
     // Generate the final quote based on the ID quote
     let quote = KeylimeQuote {
@@ -211,7 +266,7 @@ pub async fn integrity(
 
     let response = JsonWrapper::success(quote);
     info!("GET integrity quote returning 200 response");
-    HttpResponse::Ok().json(response).await
+    HttpResponse::Ok().json(response)
 }
 
 #[cfg(feature = "testing")]
@@ -238,7 +293,7 @@ mod tests {
             ))
             .to_request();
 
-        let resp = test::call_service(&mut app, req).await;
+        let resp = test::call_service(&app, req).await;
         assert!(resp.status().is_success());
 
         let result: JsonWrapper<KeylimeQuote> =
@@ -280,7 +335,7 @@ mod tests {
             ))
             .to_request();
 
-        let resp = test::call_service(&mut app, req).await;
+        let resp = test::call_service(&app, req).await;
         assert!(resp.status().is_success());
 
         let result: JsonWrapper<KeylimeQuote> =
@@ -329,7 +384,7 @@ mod tests {
             ))
             .to_request();
 
-        let resp = test::call_service(&mut app, req).await;
+        let resp = test::call_service(&app, req).await;
         assert!(resp.status().is_success());
 
         let result: JsonWrapper<KeylimeQuote> =

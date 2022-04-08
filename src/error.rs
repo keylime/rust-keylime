@@ -10,7 +10,7 @@ use tss_esapi::{
 #[derive(Error, Debug)]
 pub(crate) enum Error {
     #[error("HttpServer error: {0}")]
-    ActixWeb(actix_web::Error),
+    ActixWeb(#[from] actix_web::Error),
     #[error("TPM Error: {err:?}, kind: {kind:?}, {message}")]
     Tpm {
         err: tss_esapi::Error,
@@ -74,6 +74,8 @@ pub(crate) enum Error {
     PathPersist(#[from] tempfile::PathPersistError),
     #[error("Error persisting file: {0}")]
     Persist(#[from] tempfile::PersistError),
+    #[error("Error joining threads: {0}")]
+    Join(#[from] tokio::task::JoinError),
     #[error("{0}")]
     Other(String),
 }
