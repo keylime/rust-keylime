@@ -4,6 +4,7 @@
 use crate::{tpm, Error as KeylimeError, QuoteData};
 
 use crate::common::JsonWrapper;
+use crate::crypto;
 use crate::ima::read_measurement_list;
 use crate::serialization::serialize_maybe_base64;
 use actix_web::{web, HttpRequest, HttpResponse, Responder};
@@ -79,14 +80,9 @@ pub async fn identity(
     debug!("Calling Identity Quote with nonce: {}", param.nonce);
 
     let mut quote = tpm::quote(param.nonce.as_bytes(), None, data.clone())?;
-    quote.pubkey = Some(
-        String::from_utf8(
-            data.pub_key
-                .public_key_to_pem()
-                .map_err(KeylimeError::from)?,
-        )
-        .map_err(KeylimeError::from)?,
-    );
+    let _ = quote
+        .pubkey
+        .replace(crypto::pkey_pub_to_pem(&data.pub_key)?);
 
     let response = JsonWrapper::success(quote);
     info!("GET identity quote returning 200 response");
@@ -149,14 +145,7 @@ pub async fn integrity(
 
     // If partial="0", include the public key in the quote
     let pubkey = match &param.partial[..] {
-        "0" => Some(
-            String::from_utf8(
-                data.pub_key
-                    .public_key_to_pem()
-                    .map_err(KeylimeError::from)?,
-            )
-            .map_err(KeylimeError::from)?,
-        ),
+        "0" => Some(crypto::pkey_pub_to_pem(&data.pub_key)?),
         "1" => None,
         _ => {
             warn!("Get quote returning 400 response. uri must contain key 'partial' and value '0' or '1'");
@@ -258,7 +247,7 @@ mod tests {
         assert_eq!(result.results.enc_alg.as_str(), "rsa");
         assert_eq!(result.results.sign_alg.as_str(), "rsassa");
         assert!(
-            pkey_pub_from_pem(result.results.pubkey.unwrap().as_bytes()) //#[allow_ci]
+            pkey_pub_from_pem(&result.results.pubkey.unwrap()) //#[allow_ci]
                 .unwrap() //#[allow_ci]
                 .public_eq(&quotedata.pub_key)
         );
@@ -300,7 +289,7 @@ mod tests {
         assert_eq!(result.results.enc_alg.as_str(), "rsa");
         assert_eq!(result.results.sign_alg.as_str(), "rsassa");
         assert!(
-            pkey_pub_from_pem(result.results.pubkey.unwrap().as_bytes()) //#[allow_ci]
+            pkey_pub_from_pem(&result.results.pubkey.unwrap()) //#[allow_ci]
                 .unwrap() //#[allow_ci]
                 .public_eq(&quotedata.pub_key)
         );

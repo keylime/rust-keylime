@@ -73,6 +73,13 @@ pub(crate) fn pkey_pub_from_priv(
     }
 }
 
+pub(crate) fn pkey_pub_to_pem(pubkey: &PKey<Public>) -> Result<String> {
+    pubkey
+        .public_key_to_pem()
+        .map_err(Error::from)
+        .and_then(|s| String::from_utf8(s).map_err(Error::from))
+}
+
 pub(crate) fn generate_x509(key: &PKey<Private>, uuid: &str) -> Result<X509> {
     let mut name = X509Name::builder()?;
     name.append_entry_by_nid(Nid::COMMONNAME, uuid)?;
@@ -284,8 +291,9 @@ pub mod testing {
         Ok((public, private))
     }
 
-    pub(crate) fn pkey_pub_from_pem(pem: &[u8]) -> Result<PKey<Public>> {
-        PKey::<Public>::public_key_from_pem(pem).map_err(Error::Crypto)
+    pub(crate) fn pkey_pub_from_pem(pem: &str) -> Result<PKey<Public>> {
+        PKey::<Public>::public_key_from_pem(pem.as_bytes())
+            .map_err(Error::Crypto)
     }
 
     pub(crate) fn rsa_oaep_encrypt(
