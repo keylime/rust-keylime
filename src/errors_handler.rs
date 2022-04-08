@@ -3,8 +3,12 @@
 
 use crate::common::{APIVersion, JsonWrapper, API_VERSION};
 use actix_web::{
+    body::ResponseBody,
+    dev,
     error::{JsonPayloadError, PathError, QueryPayloadError},
-    http, web, Error, HttpRequest, HttpResponse, Responder,
+    http,
+    middleware::errhandlers::{ErrorHandlerResponse, ErrorHandlers},
+    web, Error, HttpRequest, HttpResponse, Responder, Result,
 };
 use log::*;
 
@@ -240,10 +244,42 @@ pub(crate) fn path_parser_error(err: PathError, req: &HttpRequest) -> Error {
         .into()
 }
 
+// This handler is ugly as there is no easy way to capture default errors emitted by the server and
+// wrap using the JSON structure.
+// see: https://github.com/actix/actix-web/issues/1604
+pub(crate) fn wrap_404<B>(
+    mut res: dev::ServiceResponse<B>,
+) -> Result<ErrorHandlerResponse<B>> {
+    let status = res.status();
+
+    warn!(
+        "{} returning 404 response. {}",
+        res.request().head().method,
+        status.canonical_reason().unwrap_or("Not Found")
+    );
+
+    res.headers_mut().insert(
+        http::header::CONTENT_TYPE,
+        http::header::HeaderValue::from_static("application/json"),
+    );
+
+    let new_res: dev::ServiceResponse<B> = res.map_body(|_head, _body| {
+        ResponseBody::Other(dev::Body::Message(Box::new(
+            serde_json::to_string(&JsonWrapper::error(
+                status.as_u16(),
+                status.canonical_reason().unwrap_or("Not Found"),
+            ))
+            .unwrap(), //#[allow_ci]
+        )))
+    });
+
+    Ok(ErrorHandlerResponse::Response(new_res))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use actix_web::{test, App, Resource};
+    use actix_web::{middleware, test, App, Resource};
     use core::future::Future;
     use serde::{Deserialize, Serialize};
     use serde_json::{json, Value};
@@ -355,6 +391,10 @@ mod tests {
     async fn test_parsing_error() {
         let mut app = test::init_service(
             App::new()
+                .wrap(
+                    middleware::errhandlers::ErrorHandlers::new()
+                        .handler(http::StatusCode::NOT_FOUND, wrap_404),
+                )
                 .app_data(
                     web::JsonConfig::default()
                         .error_handler(json_parser_error),
@@ -439,5 +479,14 @@ mod tests {
         assert_eq!(result.results, json!({}));
         assert_eq!(result.code, 400);
         assert!(result.status.contains("Path deserialize error"));
+
+        // Test not found
+        let req = test::TestRequest::get().uri("/notfound").to_request();
+        let resp = test::call_service(&mut app, req).await;
+        assert!(resp.status().is_client_error());
+        let result: JsonWrapper<Value> = test::read_body_json(resp).await;
+        assert_eq!(result.results, json!({}));
+        assert_eq!(result.code, 404);
+        assert!(result.status.contains("Not Found"));
     }
 }

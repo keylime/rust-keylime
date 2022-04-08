@@ -49,7 +49,7 @@ mod serialization;
 mod tpm;
 mod version_handler;
 
-use actix_web::{dev::Service, middleware, web, App, HttpServer};
+use actix_web::{dev::Service, http, middleware, web, App, HttpServer};
 use clap::{App as ClapApp, Arg};
 use common::*;
 use compress_tools::*;
@@ -530,6 +530,10 @@ async fn main() -> Result<()> {
                     );
                     srv.call(req)
                 })
+                .wrap(middleware::errhandlers::ErrorHandlers::new().handler(
+                    http::StatusCode::NOT_FOUND,
+                    errors_handler::wrap_404,
+                ))
                 .app_data(quotedata.clone())
                 .app_data(
                     web::JsonConfig::default()
