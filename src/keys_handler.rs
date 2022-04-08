@@ -189,10 +189,7 @@ pub async fn pubkey(
     req: HttpRequest,
     data: web::Data<QuoteData>,
 ) -> impl Responder {
-    let pubkey = String::from_utf8(
-        data.pub_key.public_key_to_pem().map_err(Error::from)?,
-    )
-    .map_err(Error::from)?;
+    let pubkey = crypto::pkey_pub_to_pem(&data.pub_key)?;
 
     let response = JsonWrapper::success(KeylimePubkey { pubkey });
     info!("GET pubkey returning 200 response.");
@@ -418,7 +415,7 @@ mod tests {
 
         let result: JsonWrapper<KeylimePubkey> =
             test::read_body_json(resp).await;
-        assert!(pkey_pub_from_pem(result.results.pubkey.as_bytes())
+        assert!(pkey_pub_from_pem(&result.results.pubkey)
             .unwrap() //#[allow_ci]
             .public_eq(&quotedata.pub_key));
     }
