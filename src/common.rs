@@ -224,8 +224,6 @@ pub(crate) struct KeylimeConfig {
     pub revocation_actions_dir: String,
     pub allow_payload_revocation_actions: bool,
     pub work_dir: String,
-    pub ima_ml_path: String,
-    pub measuredboot_ml_path: String,
     pub mtls_enabled: bool,
     pub enable_insecure_payload: bool,
 }
@@ -323,8 +321,6 @@ impl KeylimeConfig {
             Ok(s) => bool::from_str(&s.to_lowercase())?,
             Err(_) => ALLOW_PAYLOAD_REV_ACTIONS,
         };
-        let ima_ml_path = ima_ml_path_get();
-        let measuredboot_ml_path = Path::new(MEASUREDBOOT_ML).to_path_buf();
 
         let mtls_enabled =
             match config_get("cloud_agent", "mtls_cert_enabled") {
@@ -367,8 +363,6 @@ impl KeylimeConfig {
             revocation_actions_dir,
             allow_payload_revocation_actions,
             work_dir,
-            ima_ml_path: ima_ml_path.display().to_string(),
-            measuredboot_ml_path: measuredboot_ml_path.display().to_string(),
             mtls_enabled,
             enable_insecure_payload,
         })
@@ -409,8 +403,6 @@ impl Default for KeylimeConfig {
             revocation_actions_dir: "/usr/libexec/keylime".to_string(),
             allow_payload_revocation_actions: true,
             work_dir: WORK_DIR.to_string(),
-            ima_ml_path: IMA_ML.to_string(),
-            measuredboot_ml_path: MEASUREDBOOT_ML.to_string(),
             mtls_enabled: true,
             enable_insecure_payload: false,
         }
