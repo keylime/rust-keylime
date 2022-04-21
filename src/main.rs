@@ -104,8 +104,8 @@ pub struct QuoteData {
     allow_payload_revocation_actions: bool,
     secure_size: String,
     work_dir: PathBuf,
-    ima_ml_path: PathBuf,
-    measuredboot_ml_path: PathBuf,
+    ima_ml_file: Option<Mutex<fs::File>>,
+    measuredboot_ml_file: Option<Mutex<fs::File>>,
     ima_ml: Mutex<ImaMeasurementList>,
 }
 
@@ -347,6 +347,46 @@ async fn main() -> Result<()> {
         warn!("INSECURE: Only use Keylime in this mode for testing or debugging purposes.");
     }
 
+    let ima_ml_path = ima_ml_path_get();
+    let ima_ml_file = if ima_ml_path.exists() {
+        match fs::File::open(&ima_ml_path) {
+            Ok(file) => Some(Mutex::new(file)),
+            Err(e) => {
+                warn!(
+                    "IMA measurement list not accessible: {}",
+                    ima_ml_path.display()
+                );
+                None
+            }
+        }
+    } else {
+        warn!(
+            "IMA measurement list not available: {}",
+            ima_ml_path.display()
+        );
+        None
+    };
+
+    let measuredboot_ml_path = Path::new(MEASUREDBOOT_ML);
+    let measuredboot_ml_file = if measuredboot_ml_path.exists() {
+        match fs::File::open(measuredboot_ml_path) {
+            Ok(file) => Some(Mutex::new(file)),
+            Err(e) => {
+                warn!(
+                    "Measured boot measurement list not accessible: {}",
+                    measuredboot_ml_path.display()
+                );
+                None
+            }
+        }
+    } else {
+        warn!(
+            "Measured boot measurement list not available: {}",
+            ima_ml_path.display()
+        );
+        None
+    };
+
     info!("Starting server with API version {}...", API_VERSION);
 
     // Load config
@@ -515,9 +555,6 @@ async fn main() -> Result<()> {
     let actions_dir =
         Path::new(&config.revocation_actions_dir).canonicalize()?;
     let work_dir = Path::new(&config.work_dir).canonicalize()?;
-    let ima_ml_path = Path::new(&config.ima_ml_path).to_path_buf();
-    let measuredboot_ml_path =
-        Path::new(&config.measuredboot_ml_path).to_path_buf();
 
     let quotedata = web::Data::new(QuoteData {
         tpmcontext: Mutex::new(ctx),
@@ -541,8 +578,8 @@ async fn main() -> Result<()> {
             .allow_payload_revocation_actions,
         secure_size: config.secure_size.clone(),
         work_dir,
-        ima_ml_path,
-        measuredboot_ml_path,
+        ima_ml_file,
+        measuredboot_ml_file,
         ima_ml: Mutex::new(ImaMeasurementList::new()),
     });
 
@@ -741,10 +778,19 @@ mod testing {
 
             let ima_ml_path = Path::new(env!("CARGO_MANIFEST_DIR"))
                 .join("test-data/ima/ascii_runtime_measurements");
+            let ima_ml_file = match fs::File::open(ima_ml_path) {
+                Ok(file) => Some(Mutex::new(file)),
+                Err(err) => None,
+            };
 
             let measuredboot_ml_path = Path::new(
                 "/sys/kernel/security/tpm0/binary_bios_measurements",
             );
+            let measuredboot_ml_file =
+                match fs::File::open(measuredboot_ml_path) {
+                    Ok(file) => Some(Mutex::new(file)),
+                    Err(err) => None,
+                };
 
             Ok(QuoteData {
                 tpmcontext: Mutex::new(ctx),
@@ -768,8 +814,8 @@ mod testing {
                     .allow_payload_revocation_actions,
                 secure_size: test_config.secure_size,
                 work_dir,
-                ima_ml_path,
-                measuredboot_ml_path: measuredboot_ml_path.to_path_buf(),
+                ima_ml_file,
+                measuredboot_ml_file,
                 ima_ml: Mutex::new(ImaMeasurementList::new()),
             })
         }
