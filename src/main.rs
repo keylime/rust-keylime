@@ -226,7 +226,7 @@ pub(crate) fn optional_unzip_payload(
         info!("Unzipping payload {} to {:?}", &zipped_payload, unzipped);
 
         let mut source = fs::File::open(&zipped_payload_path)?;
-        uncompress_archive(&mut source, unzipped, Ownership::Preserve)?;
+        uncompress_archive(&mut source, unzipped, Ownership::Ignore)?;
     }
 
     Ok(())
