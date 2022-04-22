@@ -164,9 +164,8 @@ pub(crate) fn run_revocation_actions(
     actions_dir: &Path,
     allow_payload_actions: bool,
     work_dir: &Path,
+    mount: &Path,
 ) -> Result<Vec<Output>> {
-    let mount = secure_mount::mount(work_dir, secure_size)?;
-
     // The actions from the configuration file takes precedence over the actions from the
     // actions_list file
     let mut action_list = config_actions
@@ -267,6 +266,7 @@ pub(crate) fn get_revocation_cert_path(
 }
 
 /// Process revocation message received from REST API or 0mq
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn process_revocation(
     body: Value,
     cert_path: &Path,
@@ -275,6 +275,7 @@ pub(crate) fn process_revocation(
     actions_dir: &Path,
     allow_payload_revocation_actions: bool,
     work_dir: &Path,
+    mount: &Path,
 ) -> Result<()> {
     // Ensure we have a signature, otherwise continue the loop
     let signature = match body["signature"].as_str() {
@@ -334,6 +335,7 @@ pub(crate) fn process_revocation(
                 actions_dir,
                 allow_payload_revocation_actions,
                 work_dir,
+                mount,
             )?;
 
             for output in outputs {
@@ -366,9 +368,9 @@ pub(crate) fn process_revocation(
 #[cfg(feature = "with-zmq")]
 pub(crate) async fn run_revocation_service(
     config: &KeylimeConfig,
+    mount: &Path,
 ) -> Result<()> {
     let work_dir = Path::new(&config.work_dir);
-    let mount = secure_mount::mount(work_dir, &config.secure_size)?;
 
     // Connect to the service via 0mq
     let context = zmq::Context::new();
@@ -414,6 +416,7 @@ pub(crate) async fn run_revocation_service(
             &actions_dir,
             config.allow_payload_revocation_actions,
             work_dir,
+            mount,
         );
     }
     Ok(())
@@ -451,6 +454,7 @@ mod tests {
             actions_dir,
             true,
             work_dir.path(),
+            &tmpfs_dir,
         );
 
         assert!(outputs.is_ok());
@@ -490,6 +494,7 @@ mod tests {
             actions_dir,
             true,
             work_dir.path(),
+            &tmpfs_dir,
         );
         assert!(outputs.is_err());
     }
@@ -520,6 +525,7 @@ mod tests {
             actions_dir,
             true,
             work_dir.path(),
+            &tmpfs_dir,
         );
 
         assert!(outputs.is_ok());
@@ -709,6 +715,7 @@ mod tests {
             Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/actions");
 
         let work_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests");
+        let tmpfs_dir = work_dir.join("tmpfs-dev");
 
         let result = process_revocation(
             body,
@@ -718,6 +725,7 @@ mod tests {
             &actions_dir,
             test_config.allow_payload_revocation_actions,
             &work_dir,
+            &tmpfs_dir,
         );
 
         assert!(result.is_ok());

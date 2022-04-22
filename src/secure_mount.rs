@@ -63,7 +63,7 @@ pub(crate) fn mount(work_dir: &Path, secure_size: &str) -> Result<PathBuf> {
     // is for development environment and does not mount to the system.
     if !MOUNT_SECURE {
         warn!("Using /tmpfs-dev (dev environment)");
-        let secure_dir_path = Path::new(work_dir).join("tmpfs-dev");
+        let secure_dir_path = work_dir.join("tmpfs-dev");
         if !secure_dir_path.exists() {
             fs::create_dir(&secure_dir_path).map_err(|e| {
                 Error::SecureMount(format!(

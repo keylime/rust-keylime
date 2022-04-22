@@ -107,6 +107,7 @@ pub struct QuoteData {
     ima_ml_file: Option<Mutex<fs::File>>,
     measuredboot_ml_file: Option<Mutex<fs::File>>,
     ima_ml: Mutex<ImaMeasurementList>,
+    secure_mount: PathBuf,
 }
 
 // Parameters are based on Python codebase:
@@ -129,9 +130,8 @@ pub(crate) fn decrypt_payload(
 // both.
 pub(crate) fn setup_unzipped(
     config: &KeylimeConfig,
+    mount: &Path,
 ) -> Result<(PathBuf, PathBuf, PathBuf)> {
-    let work_dir = Path::new(&config.work_dir);
-    let mount = secure_mount::mount(work_dir, &config.secure_size)?;
     let unzipped = mount.join("unzipped");
 
     // clear any old data
@@ -236,6 +236,7 @@ pub(crate) async fn run_encrypted_payload(
     symm_key_cvar: Arc<Condvar>,
     payload: Arc<Mutex<Vec<u8>>>,
     config: &KeylimeConfig,
+    mount: &Path,
 ) -> Result<()> {
     // do nothing until actix server's handlers have updated the symmetric key
     let mut key = symm_key.lock().unwrap(); //#[allow_ci]
@@ -246,7 +247,8 @@ pub(crate) async fn run_encrypted_payload(
     let key = key.as_ref().unwrap(); //#[allow_ci]
     let dec_payload = decrypt_payload(payload, key)?;
 
-    let (unzipped, dec_payload_path, key_path) = setup_unzipped(config)?;
+    let (unzipped, dec_payload_path, key_path) =
+        setup_unzipped(config, mount)?;
 
     write_out_key_and_payload(
         &dec_payload,
@@ -308,11 +310,18 @@ async fn worker(
     symm_key_cvar: Arc<Condvar>,
     payload: Arc<Mutex<Vec<u8>>>,
     config: KeylimeConfig,
+    mount: PathBuf,
 ) -> Result<()> {
     // Only run payload scripts if mTLS is enabled or 'enable_insecure_payload' option is set
     if config.mtls_enabled || config.enable_insecure_payload {
-        run_encrypted_payload(symm_key, symm_key_cvar, payload, &config)
-            .await?;
+        run_encrypted_payload(
+            symm_key,
+            symm_key_cvar,
+            payload,
+            &config,
+            &mount,
+        )
+        .await?;
     } else {
         warn!("agent mTLS is disabled, and unless 'enable_insecure_payload' is set to 'True', payloads cannot be deployed'");
     }
@@ -320,7 +329,7 @@ async fn worker(
     // If with-zmq feature is enabled, run the service listening for ZeroMQ messages
     #[cfg(feature = "with-zmq")]
     if config.run_revocation {
-        return revocation::run_revocation_service(&config).await;
+        return revocation::run_revocation_service(&config, &mount).await;
     }
 
     Ok(())
@@ -337,15 +346,6 @@ async fn main() -> Result<()> {
         .get_matches();
 
     pretty_env_logger::init();
-    let mut ctx = tpm::get_tpm2_ctx()?;
-
-    //  Retrieve the TPM Vendor, this allows us to warn if someone is using a
-    // Software TPM ("SW")
-    if tss_esapi::utils::get_tpm_vendor(&mut ctx)?.contains("SW") {
-        warn!("INSECURE: Keylime is using a software TPM emulator rather than a real hardware TPM.");
-        warn!("INSECURE: The security of Keylime is NOT linked to a hardware root of trust.");
-        warn!("INSECURE: Only use Keylime in this mode for testing or debugging purposes.");
-    }
 
     let ima_ml_path = ima_ml_path_get();
     let ima_ml_file = if ima_ml_path.exists() {
@@ -387,8 +387,6 @@ async fn main() -> Result<()> {
         None
     };
 
-    info!("Starting server with API version {}...", API_VERSION);
-
     // Load config
     let config = KeylimeConfig::build()?;
 
@@ -402,6 +400,21 @@ async fn main() -> Result<()> {
 
         error!("Configuration error: {}", &message);
         return Err(Error::Configuration(message));
+    }
+
+    let work_dir = Path::new(&config.work_dir);
+    let mount = secure_mount::mount(work_dir, &config.secure_size)?;
+
+    info!("Starting server with API version {}...", API_VERSION);
+
+    let mut ctx = tpm::get_tpm2_ctx()?;
+
+    //  Retrieve the TPM Vendor, this allows us to warn if someone is using a
+    // Software TPM ("SW")
+    if tss_esapi::utils::get_tpm_vendor(&mut ctx)?.contains("SW") {
+        warn!("INSECURE: Keylime is using a software TPM emulator rather than a real hardware TPM.");
+        warn!("INSECURE: The security of Keylime is NOT linked to a hardware root of trust.");
+        warn!("INSECURE: Only use Keylime in this mode for testing or debugging purposes.");
     }
 
     // Verify if the python shim is installed in the expected location
@@ -581,6 +594,7 @@ async fn main() -> Result<()> {
         ima_ml_file,
         measuredboot_ml_file,
         ima_ml: Mutex::new(ImaMeasurementList::new()),
+        secure_mount: PathBuf::from(&mount),
     });
 
     let actix_server =
@@ -703,9 +717,14 @@ async fn main() -> Result<()> {
 
     let server_handle = server.handle();
     let server_task = rt::spawn(server).map_err(Error::from);
-    let worker_task =
-        rt::spawn(worker(symm_key, symm_key_cvar, payload, config.clone()))
-            .map_err(Error::from);
+    let worker_task = rt::spawn(worker(
+        symm_key,
+        symm_key_cvar,
+        payload,
+        config.clone(),
+        PathBuf::from(&mount),
+    ))
+    .map_err(Error::from);
 
     let result = try_join!(server_task, worker_task);
     server_handle.stop(true).await;
@@ -776,6 +795,8 @@ mod testing {
             let work_dir =
                 Path::new(env!("CARGO_MANIFEST_DIR")).join("tests");
 
+            let secure_mount = work_dir.join("tmpfs-dev");
+
             let ima_ml_path = Path::new(env!("CARGO_MANIFEST_DIR"))
                 .join("test-data/ima/ascii_runtime_measurements");
             let ima_ml_file = match fs::File::open(ima_ml_path) {
@@ -817,6 +838,7 @@ mod testing {
                 ima_ml_file,
                 measuredboot_ml_file,
                 ima_ml: Mutex::new(ImaMeasurementList::new()),
+                secure_mount,
             })
         }
     }
