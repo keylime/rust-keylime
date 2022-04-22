@@ -41,6 +41,7 @@ mod errors_handler;
 mod ima;
 mod keys_handler;
 mod notifications_handler;
+mod permissions;
 mod quotes_handler;
 mod registrar_agent;
 mod revocation;
@@ -404,6 +405,12 @@ async fn main() -> Result<()> {
 
     let work_dir = Path::new(&config.work_dir);
     let mount = secure_mount::mount(work_dir, &config.secure_size)?;
+
+    // Drop privileges
+    if let Some(user_group) = &config.run_as {
+        permissions::chown(user_group, &mount);
+        permissions::run_as(user_group);
+    }
 
     info!("Starting server with API version {}...", API_VERSION);
 

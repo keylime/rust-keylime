@@ -3,6 +3,7 @@
 
 use crate::algorithms::{EncryptionAlgorithm, HashAlgorithm, SignAlgorithm};
 use crate::error::{Error, Result};
+use crate::permissions;
 use ini::Ini;
 use log::*;
 use serde::{Deserialize, Serialize};
@@ -226,6 +227,7 @@ pub(crate) struct KeylimeConfig {
     pub work_dir: String,
     pub mtls_enabled: bool,
     pub enable_insecure_payload: bool,
+    pub run_as: Option<String>,
 }
 
 impl KeylimeConfig {
@@ -321,6 +323,17 @@ impl KeylimeConfig {
             Ok(s) => bool::from_str(&s.to_lowercase())?,
             Err(_) => ALLOW_PAYLOAD_REV_ACTIONS,
         };
+        let run_as = if permissions::get_euid() == 0 {
+            match config_get("cloud_agent", "run_as") {
+                Ok(user_group) => Some(user_group),
+                Err(_) => {
+                    warn!("Cannot drop privileges since 'run_as' is empty or missing in 'cloud_agent' section of keylime.conf.");
+                    None
+                }
+            }
+        } else {
+            None
+        };
 
         let mtls_enabled =
             match config_get("cloud_agent", "mtls_cert_enabled") {
@@ -365,6 +378,7 @@ impl KeylimeConfig {
             work_dir,
             mtls_enabled,
             enable_insecure_payload,
+            run_as,
         })
     }
 }
@@ -373,6 +387,13 @@ impl KeylimeConfig {
 #[cfg(any(test, feature = "testing"))]
 impl Default for KeylimeConfig {
     fn default() -> Self {
+        // In case the tests are executed by privileged user
+        let run_as = if permissions::get_euid() == 0 {
+            Some("keylime:tss".to_string())
+        } else {
+            None
+        };
+
         KeylimeConfig {
             agent_ip: "127.0.0.1".to_string(),
             agent_port: "9002".to_string(),
@@ -405,6 +426,7 @@ impl Default for KeylimeConfig {
             work_dir: WORK_DIR.to_string(),
             mtls_enabled: true,
             enable_insecure_payload: false,
+            run_as,
         }
     }
 }
