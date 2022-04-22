@@ -26,6 +26,8 @@ pub(crate) enum Error {
     Infallible(#[from] std::convert::Infallible),
     #[error("Compress tools error: {0}")]
     CompressTools(#[from] compress_tools::Error),
+    #[error("Conversion error: {0}")]
+    Conversion(String),
     #[error("Configuration error: {0}")]
     Configuration(String),
     #[error("Reqwest error: {0}")]
