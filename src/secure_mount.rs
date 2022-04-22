@@ -130,21 +130,6 @@ pub(crate) fn mount(work_dir: &Path, secure_size: &str) -> Result<PathBuf> {
             &secure_dir_path
         );
 
-        // change the secure path directory owner to root
-        match chownroot(&secure_dir_path) {
-            Ok(_) => {
-                info!("Changed path {:?} owner to root.", &secure_dir_path);
-            }
-            Err(e) => {
-                return Err(Error::SecureMount(
-                    format!(
-                        "unable to change secure path dir owner to root: received exit code {}",
-                        e.exe_code()?.unwrap() //#[allow_ci] : because this is an Option
-                    ),
-                ));
-            }
-        }
-
         // mount tmpfs with secure directory
         match Command::new("mount")
             .args([
