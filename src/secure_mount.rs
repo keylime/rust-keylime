@@ -5,49 +5,71 @@ use super::*;
 
 use crate::error::{Error, Result};
 use std::fs;
+use std::io::BufRead;
 use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 use std::process::Command;
+
+pub static MOUNTINFO: &str = "/proc/self/mountinfo";
+
 /*
- * Input: secure mount directory
+ * Check the mount status of the secure mount directory by parsing /proc/self/mountinfo content.
+ *
+ * /proc/[pid]/mountinfo have 10+ elements separated with spaces (check proc (5) for a complete
+ * description)
+ *
+ * The elements of interest are the mount point (5th element), and the file system type (1st
+ * element after the '-' separator).
+ *
+ * Input: secure mount directory path
  * Return: Result wrap boolean with error message
  *         - true if directory is mounted
  *         - false if not mounted
  *
- * Check the mount status of the secure mount directory. Same
- * implementation as the original python version.
  */
 fn check_mount(secure_dir: &Path) -> Result<bool> {
-    let output = Command::new("mount").output()?;
+    let f = fs::File::open(MOUNTINFO)?;
+    let f = BufReader::new(f);
+    let lines = f.lines();
 
-    let mount_result = String::from_utf8(output.stdout)?;
+    for line in lines.flatten() {
+        let mut iter = line.split(' ');
+        if let Some(mount_point) = &iter.nth(4) {
+            if Path::new(mount_point) == secure_dir {
+                // Skip all fields up to the separator
+                let mut iter = iter.skip_while(|&x| x != "-");
 
-    let lines: Vec<&str> = mount_result.split('\n').collect();
-
-    // Check mount list for secure directory
-    for line in lines {
-        let tokens: Vec<&str> = line.split(' ').collect();
-
-        if tokens.len() < 3 {
-            continue;
-        }
-
-        if Path::new(tokens[2]) == secure_dir {
-            if tokens[0] != "tmpfs" {
-                let msg = format!("secure storage location {:?} already mounted as wrong file system type: {}. Unmount to continue", &secure_dir, tokens[0]);
-                error!("{}", msg);
-                return Err(Error::SecureMount(msg));
-            } else {
-                info!(
-                    "Using existing secure storage tmpsfs mount {:?}",
-                    &secure_dir
-                );
+                if let Some(separator) = iter.next() {
+                    // The file system type is the first element after the separator
+                    if let Some(fs_type) = iter.next() {
+                        if fs_type == "tmpfs" {
+                            debug!("Secure store location {} already mounted on tmpfs", secure_dir.display());
+                            return Ok(true);
+                        } else {
+                            let message = format!("Secure storage location {} already mounted on wrong file system type: {}. Unmount to continue.", secure_dir.display(), fs_type);
+                            error!("Secure mount error: {}", message);
+                            return Err(Error::SecureMount(message));
+                        }
+                    } else {
+                        let message = "Mount information parsing error: missing file system type".to_string();
+                        error!("Secure mount error: {}", &message);
+                        return Err(Error::SecureMount(message));
+                    }
+                } else {
+                    let message = "Separator field not found. Information line cannot be parsed".to_string();
+                    error!("Secure mount error: {}", &message);
+                    return Err(Error::SecureMount(message));
+                }
             }
-            return Ok(true);
+        } else {
+            let message =
+                "Mount information parsing error: not enough elements"
+                    .to_string();
+            error!("Secure mount error: {}", message);
+            return Err(Error::SecureMount(message));
         }
     }
-
-    info!("secure storage location {:?} not mounted.", &secure_dir);
+    debug!("Secure store location {} not mounted", secure_dir.display());
     Ok(false)
 }
 
