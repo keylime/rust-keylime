@@ -309,7 +309,13 @@ async fn worker(
     payload: Arc<Mutex<Vec<u8>>>,
     config: KeylimeConfig,
 ) -> Result<()> {
-    run_encrypted_payload(symm_key, symm_key_cvar, payload, &config).await?;
+    // Only run payload scripts if mTLS is enabled or 'enable_insecure_payload' option is set
+    if config.mtls_enabled || config.enable_insecure_payload {
+        run_encrypted_payload(symm_key, symm_key_cvar, payload, &config)
+            .await?;
+    } else {
+        warn!("agent mTLS is disabled, and unless 'enable_insecure_payload' is set to 'True', payloads cannot be deployed'");
+    }
 
     // If with-zmq feature is enabled, run the service listening for ZeroMQ messages
     #[cfg(feature = "with-zmq")]
@@ -345,6 +351,18 @@ async fn main() -> Result<()> {
 
     // Load config
     let config = KeylimeConfig::build()?;
+
+    // The agent cannot run when a payload script is defined, but mTLS is disabled and insecure
+    // payloads are not explicitly enabled
+    if !&config.mtls_enabled
+        && !&config.enable_insecure_payload
+        && !&config.payload_script.is_empty()
+    {
+        let message = "The agent mTLS is disabled and 'payload_script' is not empty. To allow the agent to run, 'enable_insecure_payload' has to be set to 'True'".to_string();
+
+        error!("Configuration error: {}", &message);
+        return Err(Error::Configuration(message));
+    }
 
     // Verify if the python shim is installed in the expected location
     let python_shim =
@@ -426,7 +444,25 @@ async fn main() -> Result<()> {
     // safeguards u and v keys in transit, is not part of the threat model.
     let (nk_pub, nk_priv) = crypto::rsa_generate_pair(2048)?;
 
-    let mtls_cert = crypto::generate_x509(&nk_priv, &config.agent_uuid)?;
+    let keylime_ca_cert =
+        crypto::load_x509(Path::new(&config.keylime_ca_path))?;
+
+    let cert: openssl::x509::X509;
+    let mtls_cert;
+    let ssl_context;
+    if config.mtls_enabled {
+        cert = crypto::generate_x509(&nk_priv, &config.agent_uuid)?;
+        mtls_cert = Some(&cert);
+        ssl_context = Some(crypto::generate_mtls_context(
+            &cert,
+            &nk_priv,
+            keylime_ca_cert,
+        )?);
+    } else {
+        mtls_cert = None;
+        ssl_context = None;
+        warn!("mTLS disabled, Tenant and Verifier will reach out to agent via HTTP");
+    }
 
     {
         // Request keyblob material
@@ -437,7 +473,7 @@ async fn main() -> Result<()> {
             &ek_tpm2b_pub,
             ek_cert,
             &ak_tpm2b_pub,
-            &mtls_cert,
+            mtls_cert,
             config.agent_contact_ip.clone(),
             config.agent_contact_port,
         )
@@ -463,11 +499,6 @@ async fn main() -> Result<()> {
         .await?;
         info!("SUCCESS: Agent {} activated", config.agent_uuid);
     }
-
-    let keylime_ca_cert =
-        crypto::load_x509(Path::new(&config.keylime_ca_path))?;
-    let ssl_context =
-        crypto::generate_mtls_context(&mtls_cert, &nk_priv, keylime_ca_cert)?;
 
     let mut encr_payload = Vec::new();
 
@@ -604,22 +635,37 @@ async fn main() -> Result<()> {
                 )
                 .default_service(web::to(errors_handler::app_default))
         })
-        .bind_openssl(
-            format!("{}:{}", config.agent_ip, config.agent_port),
-            ssl_context,
-        )?
         // Disable default signal handlers.  See:
         // https://github.com/actix/actix-web/issues/2739
         // for details.
-        .disable_signals()
-        .run();
-    info!(
-        "Listening on https://{}:{}",
-        config.agent_ip, config.agent_port
-    );
+        .disable_signals();
 
-    let server_handle = actix_server.handle();
-    let server_task = rt::spawn(actix_server).map_err(Error::from);
+    let server;
+    if config.mtls_enabled && ssl_context.is_some() {
+        server = actix_server
+            .bind_openssl(
+                format!("{}:{}", config.agent_ip, config.agent_port),
+                ssl_context.unwrap(), //#[allow_ci]
+            )?
+            .run();
+
+        info!(
+            "Listening on https://{}:{}",
+            config.agent_ip, config.agent_port
+        );
+    } else {
+        server = actix_server
+            .bind(format!("{}:{}", config.agent_ip, config.agent_port))?
+            .run();
+
+        info!(
+            "Listening on http://{}:{}",
+            config.agent_ip, config.agent_port
+        );
+    };
+
+    let server_handle = server.handle();
+    let server_task = rt::spawn(server).map_err(Error::from);
     let worker_task =
         rt::spawn(worker(symm_key, symm_key_cvar, payload, config.clone()))
             .map_err(Error::from);

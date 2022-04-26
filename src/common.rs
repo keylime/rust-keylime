@@ -36,6 +36,7 @@ pub static MEASUREDBOOT_ML: &str =
 // The DEFAULT_CA_PATH is relative from WORK_DIR
 pub static DEFAULT_CA_PATH: &str = "cv_ca/cacert.crt";
 pub static KEY: &str = "secret";
+pub const MTLS_ENABLED: bool = true;
 pub static WORK_DIR: &str = "/var/lib/keylime";
 pub static TPM_DATA: &str = "tpmdata.json";
 // Note: The revocation certificate name is generated inside the Python tenant and the
@@ -45,6 +46,7 @@ pub static REV_CERT: &str = "RevocationNotifier-cert.crt";
 pub static REV_ACTIONS_DIR: &str = "/usr/libexec/keylime";
 pub static REV_ACTIONS: &str = "";
 pub static ALLOW_PAYLOAD_REV_ACTIONS: bool = true;
+pub static ALLOW_INSECURE_PAYLOAD: bool = false;
 
 pub const AGENT_UUID_LEN: usize = 36;
 pub const AUTH_TAG_LEN: usize = 96;
@@ -224,6 +226,8 @@ pub(crate) struct KeylimeConfig {
     pub work_dir: String,
     pub ima_ml_path: String,
     pub measuredboot_ml_path: String,
+    pub mtls_enabled: bool,
+    pub enable_insecure_payload: bool,
 }
 
 impl KeylimeConfig {
@@ -322,6 +326,20 @@ impl KeylimeConfig {
         let ima_ml_path = ima_ml_path_get();
         let measuredboot_ml_path = Path::new(MEASUREDBOOT_ML).to_path_buf();
 
+        let mtls_enabled =
+            match config_get("cloud_agent", "mtls_cert_enabled") {
+                Ok(enabled) => bool::from_str(&enabled.to_lowercase())
+                    .or::<Error>(Ok(MTLS_ENABLED))?,
+                Err(_) => true,
+            };
+
+        let enable_insecure_payload =
+            match config_get("cloud_agent", "enable_insecure_payload") {
+                Ok(allowed) => bool::from_str(&allowed.to_lowercase())
+                    .or::<Error>(Ok(ALLOW_INSECURE_PAYLOAD))?,
+                Err(_) => false,
+            };
+
         Ok(KeylimeConfig {
             agent_ip,
             agent_port,
@@ -351,6 +369,8 @@ impl KeylimeConfig {
             work_dir,
             ima_ml_path: ima_ml_path.display().to_string(),
             measuredboot_ml_path: measuredboot_ml_path.display().to_string(),
+            mtls_enabled,
+            enable_insecure_payload,
         })
     }
 }
@@ -391,6 +411,8 @@ impl Default for KeylimeConfig {
             work_dir: WORK_DIR.to_string(),
             ima_ml_path: IMA_ML.to_string(),
             measuredboot_ml_path: MEASUREDBOOT_ML.to_string(),
+            mtls_enabled: true,
+            enable_insecure_payload: false,
         }
     }
 }

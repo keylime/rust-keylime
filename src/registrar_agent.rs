@@ -22,7 +22,7 @@ struct Register<'a> {
     ek_tpm: &'a [u8],
     #[serde(serialize_with = "serialize_as_base64")]
     aik_tpm: &'a [u8],
-    mtls_cert: String,
+    mtls_cert: Option<String>,
     ip: Option<String>,
     port: Option<u32>,
 }
@@ -92,11 +92,14 @@ pub(crate) async fn do_register_agent(
     ek_tpm: &[u8],
     ekcert: Option<Vec<u8>>,
     aik_tpm: &[u8],
-    mtls_cert_x509: &X509,
+    mtls_cert_x509: Option<&X509>,
     ip: Option<String>,
     port: Option<u32>,
 ) -> crate::error::Result<Vec<u8>> {
-    let mtls_cert = String::from_utf8(mtls_cert_x509.to_pem()?)?;
+    let mtls_cert = match mtls_cert_x509 {
+        Some(cert) => Some(String::from_utf8(cert.to_pem()?)?),
+        None => Some("disabled".to_string()),
+    };
 
     let data = Register {
         ekcert,
@@ -181,7 +184,7 @@ mod tests {
             &mock_data,
             Some((&mock_data).to_vec()),
             &mock_data,
-            &cert,
+            Some(&cert),
             None,
             None,
         )
@@ -214,8 +217,15 @@ mod tests {
         let priv_key = crypto::rsa_generate(2048).unwrap(); //#[allow_ci]
         let cert = crypto::generate_x509(&priv_key, "uuid").unwrap(); //#[allow_ci]
         let response = do_register_agent(
-            uri[0], uri[1], "uuid", &mock_data, None, &mock_data, &cert,
-            None, None,
+            uri[0],
+            uri[1],
+            "uuid",
+            &mock_data,
+            None,
+            &mock_data,
+            Some(&cert),
+            None,
+            None,
         )
         .await;
         assert!(response.is_ok());
@@ -248,7 +258,7 @@ mod tests {
             &mock_data,
             Some((&mock_data).to_vec()),
             &mock_data,
-            &cert,
+            Some(&cert),
             None,
             None,
         )
