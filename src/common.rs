@@ -531,7 +531,7 @@ fn config_get(section: &str, key: &str) -> Result<String> {
         // TODO: Make Error::Configuration an alternative with data instead of string
         {
             return Err(Error::Configuration(format!(
-                "Cannot find key {} in fine {}",
+                "Cannot find key {} in file {}",
                 key, conf_name
             )))
         }
