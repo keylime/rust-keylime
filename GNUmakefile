@@ -25,6 +25,7 @@ install: build
 	install -D -t ${DESTDIR}/usr/bin "${TARGETDIR}/${PROFILE}/keylime_agent"
 	install -D -t ${DESTDIR}/usr/bin "${TARGETDIR}/${PROFILE}/keylime_ima_emulator"
 	install -D -m 644 -t ${DESTDIR}$(systemdsystemunitdir) dist/systemd/system/keylime_agent.service
+	install -D -m 644 -t ${DESTDIR}$(systemdsystemunitdir) dist/systemd/system/var-lib-keylime-secure.mount
 
 # This only runs tests without TPM access. See tests/run.sh for
 # running full testsuite with swtpm.
