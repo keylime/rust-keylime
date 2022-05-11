@@ -34,7 +34,7 @@ pub(crate) struct KeylimeQuote {
     pub sign_alg: String,
     pub pubkey: Option<String>,
     pub ima_measurement_list: Option<String>,
-    pub mb_measurement_list: Option<Vec<u8>>,
+    pub mb_measurement_list: Option<String>,
     pub ima_measurement_list_entry: Option<u64>,
 }
 
@@ -213,7 +213,7 @@ pub async fn integrity(
         Ok(true) => {
             let measuredboot_ml = read(&data.measuredboot_ml_path);
             mb_measurement_list = match measuredboot_ml {
-                Ok(ml) => Some(ml),
+                Ok(ml) => Some(base64::encode(ml)),
                 Err(e) => {
                     warn!(
                         "TPM2 event log not available: {}",
