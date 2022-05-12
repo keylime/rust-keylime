@@ -20,6 +20,22 @@ jobs:
       run: cargo fmt --all -- --check
     - name: Check for panics
       run: ./tests/nopanic.ci
+  
+  clippy:
+    name: Clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          override: true
+      - run: rustup component add clippy
+      - uses: actions-rs/cargo@v1
+        with:
+          command: clippy
+          args: --workspace -- -D warnings -D clippy::unwrap_used -D clippy::panic  
 
   tests:
     name: Fedora tests

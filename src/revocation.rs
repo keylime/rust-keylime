@@ -267,6 +267,7 @@ pub(crate) fn get_revocation_cert_path(
 }
 
 /// Process revocation message received from REST API or 0mq
+#[allow(clippy::unwrap_used)]
 pub(crate) fn process_revocation(
     body: Value,
     cert_path: &Path,
@@ -340,13 +341,13 @@ pub(crate) fn process_revocation(
                 if !output.stdout.is_empty() {
                     info!(
                         "Action stdout: {}",
-                        String::from_utf8(output.stdout).unwrap() //#[allow_ci]
+                        String::from_utf8(output.stdout).unwrap()
                     );
                 }
                 if !output.stderr.is_empty() {
                     warn!(
                         "Action stderr: {}",
-                        String::from_utf8(output.stderr).unwrap() //#[allow_ci])
+                        String::from_utf8(output.stderr).unwrap()
                     );
                 }
             }
@@ -434,16 +435,16 @@ mod tests {
             env!("CARGO_MANIFEST_DIR"),
             "/tests/unzipped/test_ok.json"
         );
-        let json_str = std::fs::read_to_string(json_file).unwrap(); //#[allow_ci]
-        let json = serde_json::from_str(&json_str).unwrap(); //#[allow_ci]
+        let json_str = std::fs::read_to_string(json_file).unwrap();
+        let json = serde_json::from_str(&json_str).unwrap();
         let actions_dir =
             &Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/actions/");
-        let work_dir = tempfile::tempdir().unwrap(); //#[allow_ci]
-        let tmpfs_dir = work_dir.path().join("tmpfs-dev"); //#[allow_ci]
-        fs::create_dir(&tmpfs_dir).unwrap(); //#[allow_ci]
+        let work_dir = tempfile::tempdir().unwrap();
+        let tmpfs_dir = work_dir.path().join("tmpfs-dev");
+        fs::create_dir(&tmpfs_dir).unwrap();
         let unzipped_dir =
             &Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/unzipped");
-        symlink(unzipped_dir, tmpfs_dir.join("unzipped")).unwrap(); //#[allow_ci]
+        symlink(unzipped_dir, tmpfs_dir.join("unzipped")).unwrap();
         let outputs = run_revocation_actions(
             json,
             &test_config.secure_size,
@@ -454,13 +455,13 @@ mod tests {
         );
 
         assert!(outputs.is_ok());
-        let outputs = outputs.unwrap(); //#[allow_ci]
+        let outputs = outputs.unwrap();
 
         assert!(outputs.len() == 4);
 
         for output in outputs {
             assert_eq!(
-                String::from_utf8(output.stdout).unwrap(), //#[allow_ci]
+                String::from_utf8(output.stdout).unwrap(),
                 "there\n"
             );
         }
@@ -473,16 +474,16 @@ mod tests {
             env!("CARGO_MANIFEST_DIR"),
             "/tests/unzipped/test_err.json"
         );
-        let json_str = std::fs::read_to_string(json_file).unwrap(); //#[allow_ci]
-        let json = serde_json::from_str(&json_str).unwrap(); //#[allow_ci]
+        let json_str = std::fs::read_to_string(json_file).unwrap();
+        let json = serde_json::from_str(&json_str).unwrap();
         let actions_dir =
             &Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/actions/");
-        let work_dir = tempfile::tempdir().unwrap(); //#[allow_ci]
-        let tmpfs_dir = work_dir.path().join("tmpfs-dev"); //#[allow_ci]
-        fs::create_dir(&tmpfs_dir).unwrap(); //#[allow_ci]
+        let work_dir = tempfile::tempdir().unwrap();
+        let tmpfs_dir = work_dir.path().join("tmpfs-dev");
+        fs::create_dir(&tmpfs_dir).unwrap();
         let unzipped_dir =
             &Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/unzipped");
-        symlink(unzipped_dir, tmpfs_dir.join("unzipped")).unwrap(); //#[allow_ci]
+        symlink(unzipped_dir, tmpfs_dir.join("unzipped")).unwrap();
         let outputs = run_revocation_actions(
             json,
             &test_config.secure_size,
@@ -503,16 +504,16 @@ mod tests {
         );
         test_config.revocation_actions =
             String::from("local_action_hello, local_action_payload");
-        let json_str = std::fs::read_to_string(json_file).unwrap(); //#[allow_ci]
-        let json = serde_json::from_str(&json_str).unwrap(); //#[allow_ci]
+        let json_str = std::fs::read_to_string(json_file).unwrap();
+        let json = serde_json::from_str(&json_str).unwrap();
         let actions_dir =
             &Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/actions/");
-        let work_dir = tempfile::tempdir().unwrap(); //#[allow_ci]
-        let tmpfs_dir = work_dir.path().join("tmpfs-dev"); //#[allow_ci]
-        fs::create_dir(&tmpfs_dir).unwrap(); //#[allow_ci]
+        let work_dir = tempfile::tempdir().unwrap();
+        let tmpfs_dir = work_dir.path().join("tmpfs-dev");
+        fs::create_dir(&tmpfs_dir).unwrap();
         let unzipped_dir =
             &Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/unzipped");
-        symlink(unzipped_dir, tmpfs_dir.join("unzipped")).unwrap(); //#[allow_ci]
+        symlink(unzipped_dir, tmpfs_dir.join("unzipped")).unwrap();
         let outputs = run_revocation_actions(
             json,
             &test_config.secure_size,
@@ -523,13 +524,13 @@ mod tests {
         );
 
         assert!(outputs.is_ok());
-        let outputs = outputs.unwrap(); //#[allow_ci]
+        let outputs = outputs.unwrap();
 
         assert!(outputs.len() == 6);
 
         for output in outputs {
             assert_eq!(
-                String::from_utf8(output.stdout).unwrap(), //#[allow_ci]
+                String::from_utf8(output.stdout).unwrap(),
                 "there\n"
             );
         }
@@ -539,7 +540,7 @@ mod tests {
     fn get_revocation_cert_path_default() {
         let test_config = KeylimeConfig::default();
         let revocation_cert_path =
-            get_revocation_cert_path(&test_config).unwrap(); //#[allow_ci]
+            get_revocation_cert_path(&test_config).unwrap();
         let mut expected = PathBuf::from(&test_config.work_dir);
         expected.push("secure/unzipped/");
         expected.push(REV_CERT);
@@ -553,7 +554,7 @@ mod tests {
             ..Default::default()
         };
         let revocation_cert_path =
-            get_revocation_cert_path(&test_config).unwrap(); //#[allow_ci]
+            get_revocation_cert_path(&test_config).unwrap();
         assert_eq!(revocation_cert_path, PathBuf::from("/test/cert.crt"));
     }
 
@@ -564,7 +565,7 @@ mod tests {
             ..Default::default()
         };
         let revocation_cert_path =
-            get_revocation_cert_path(&test_config).unwrap(); //#[allow_ci]
+            get_revocation_cert_path(&test_config).unwrap();
         let mut expected = Path::new(&test_config.work_dir).join("cert.crt");
         assert_eq!(revocation_cert_path, expected);
     }
@@ -597,7 +598,7 @@ mod tests {
                 "local_action_hello",
                 true
             )
-            .unwrap(), //#[allow_ci]
+            .unwrap(),
             (expected, true, false)
         );
 
@@ -614,7 +615,7 @@ mod tests {
                 "local_action_hello_shell.sh",
                 true
             )
-            .unwrap(), //#[allow_ci]
+            .unwrap(),
             (expected, false, false)
         );
 
@@ -628,7 +629,7 @@ mod tests {
                 "local_action_payload",
                 true,
             )
-            .unwrap(), //#[allow_ci]
+            .unwrap(),
             (expected, true, true),
         );
 
@@ -645,7 +646,7 @@ mod tests {
                 "local_action_payload_shell.sh",
                 true
             )
-            .unwrap(), //#[allow_ci]
+            .unwrap(),
             (expected, false, true)
         );
 
@@ -691,11 +692,11 @@ mod tests {
 
         let sig_path = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("test-data/revocation.sig");
-        let signature = fs::read_to_string(sig_path).unwrap(); //#[allow_ci]
+        let signature = fs::read_to_string(sig_path).unwrap();
 
         let message_path = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("test-data/test_ok.json");
-        let message = fs::read_to_string(message_path).unwrap(); //#[allow_ci]
+        let message = fs::read_to_string(message_path).unwrap();
 
         let body = json!({
             "msg": message,

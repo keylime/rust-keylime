@@ -111,6 +111,7 @@ pub(crate) fn create_ek(
 // Multiple TPM objects need to be marshaled for Quoting. This macro will
 // create the appropriate functions when called below. The macro is intended
 // to help with any future similar marshaling functions.
+#[allow(clippy::unwrap_used)]
 macro_rules! create_marshal_fn {
     ($func:ident, $tpmobj:ty, $marshal:ident) => {
         fn $func(t: $tpmobj) -> Vec<u8> {
@@ -122,11 +123,11 @@ macro_rules! create_marshal_fn {
                 let res = $marshal(
                     &t,
                     tpm_vec.as_mut_ptr(),
-                    tpm_vec.capacity().try_into().unwrap(), //#[allow_ci]
+                    tpm_vec.capacity().try_into().unwrap(),
                     &mut offset,
                 );
                 if res != 0 {
-                    panic!("out of memory or invalid data from TPM"); //#[allow_ci]
+                    panic!("out of memory or invalid data from TPM");
                 }
 
                 // offset is a buffer, so after marshaling function is called it holds the
@@ -258,11 +259,12 @@ pub(crate) fn load_ak(
 
 const TSS_MAGIC: u32 = 3135029470;
 
+#[allow(clippy::unwrap_used)]
 fn parse_cred_and_secret(
     keyblob: Vec<u8>,
 ) -> Result<(IdObject, EncryptedSecret)> {
-    let magic = u32::from_be_bytes(keyblob[0..4].try_into().unwrap()); //#[allow_ci]
-    let version = u32::from_be_bytes(keyblob[4..8].try_into().unwrap()); //#[allow_ci]
+    let magic = u32::from_be_bytes(keyblob[0..4].try_into().unwrap());
+    let version = u32::from_be_bytes(keyblob[4..8].try_into().unwrap());
 
     if magic != TSS_MAGIC {
         return Err(KeylimeError::Other(format!("Error parsing cred and secret; TSS_MAGIC number {} does not match expected value {}", magic, TSS_MAGIC)));
@@ -274,11 +276,11 @@ fn parse_cred_and_secret(
         )));
     }
 
-    let credsize = u16::from_be_bytes(keyblob[8..10].try_into().unwrap()); //#[allow_ci]
+    let credsize = u16::from_be_bytes(keyblob[8..10].try_into().unwrap());
     let secretsize = u16::from_be_bytes(
         keyblob[(10 + credsize as usize)..(12 + credsize as usize)]
             .try_into()
-            .unwrap(), //#[allow_ci]
+            .unwrap(),
     );
 
     let credential = &keyblob[10..(10 + credsize as usize)];
@@ -290,6 +292,7 @@ fn parse_cred_and_secret(
     Ok((credential, secret))
 }
 
+#[allow(clippy::unwrap_used)]
 fn create_empty_session(
     ctx: &mut Context,
     ses_type: SessionType,
@@ -306,8 +309,8 @@ fn create_empty_session(
         .with_encrypt(true)
         .with_decrypt(true)
         .build();
-    ctx.tr_sess_set_attributes(session.unwrap(), ses_attrs, ses_attrs_mask)?; //#[allow_ci]
-    Ok(session.unwrap()) //#[allow_ci]
+    ctx.tr_sess_set_attributes(session.unwrap(), ses_attrs, ses_attrs_mask)?;
+    Ok(session.unwrap())
 }
 
 pub(crate) fn activate_credential(
@@ -637,7 +640,7 @@ pub(crate) fn quote(
 
     // must unwrap here due to lock mechanism
     // https://github.com/rust-lang-nursery/failure/issues/192
-    let mut context = data.tpmcontext.lock().unwrap(); //#[allow_ci]
+    let mut context = data.tpmcontext.lock().unwrap();
 
     let pcrlist =
         build_pcr_list(&mut context, nk_digest, mask, data.hash_alg.into())?;
@@ -789,6 +792,7 @@ pub mod testing {
     //
     // Reference:
     // https://github.com/tpm2-software/tpm2-tools/blob/master/tools/tpm2_checkquote.c
+    #[allow(clippy::unwrap_used)]
     pub(crate) fn check_quote(
         context: &mut Context,
         ak_handle: KeyHandle,
@@ -803,7 +807,7 @@ pub mod testing {
         let mut hasher = Hasher::new(MessageDigest::sha256())?;
         hasher.update(att.value())?;
         let digest = hasher.finish()?;
-        let digest: Digest = digest.as_ref().try_into().unwrap(); //#[allow_ci]
+        let digest: Digest = digest.as_ref().try_into().unwrap();
         match context.verify_signature(ak_handle, digest, sig) {
             Ok(ticket) if ticket.tag() == StructureTag::Verified => {}
             _ => {
@@ -885,19 +889,19 @@ fn quote_encode_decode() {
 #[ignore] // This will only work as an integration test because it needs keylime.conf
 #[test]
 fn pubkey_to_digest() {
-    let (key, _) = crate::crypto::rsa_generate_pair(2048).unwrap(); //#[allow_ci]
-    let digest = pubkey_to_tpm_digest(&key).unwrap(); //#[allow_ci]
+    let (key, _) = crate::crypto::rsa_generate_pair(2048).unwrap();
+    let digest = pubkey_to_tpm_digest(&key).unwrap();
 }
 
 #[test]
 fn ek_from_hex() {
     assert_eq!(
-        ek_from_hex_str("0x81000000").unwrap(), //#[allow_ci]
-        ek_from_hex_str("81000000").unwrap()    //#[allow_ci]
+        ek_from_hex_str("0x81000000").unwrap(),
+        ek_from_hex_str("81000000").unwrap()
     );
     assert_eq!(
-        ek_from_hex_str("0xdeadbeef").unwrap(), //#[allow_ci]
-        ek_from_hex_str("deadbeef").unwrap()    //#[allow_ci]
+        ek_from_hex_str("0xdeadbeef").unwrap(),
+        ek_from_hex_str("deadbeef").unwrap()
     );
 
     assert!(ek_from_hex_str("a").is_ok());
@@ -911,28 +915,28 @@ fn ek_from_hex() {
 
 #[test]
 fn mask() {
-    assert_eq!(read_mask("0x0").unwrap(), vec![]); //#[allow_ci]
+    assert_eq!(read_mask("0x0").unwrap(), vec![]);
 
-    assert_eq!(read_mask("0x1").unwrap(), vec![PcrSlot::Slot0]); //#[allow_ci]
+    assert_eq!(read_mask("0x1").unwrap(), vec![PcrSlot::Slot0]);
 
-    assert_eq!(read_mask("0x2").unwrap(), vec![PcrSlot::Slot1]); //#[allow_ci]
+    assert_eq!(read_mask("0x2").unwrap(), vec![PcrSlot::Slot1]);
 
-    assert_eq!(read_mask("0x4").unwrap(), vec![PcrSlot::Slot2]); //#[allow_ci]
+    assert_eq!(read_mask("0x4").unwrap(), vec![PcrSlot::Slot2]);
 
     assert_eq!(
-        read_mask("0x5").unwrap(), //#[allow_ci]
+        read_mask("0x5").unwrap(),
         vec![PcrSlot::Slot0, PcrSlot::Slot2]
     );
 
     assert_eq!(
-        read_mask("0x6").unwrap(), //#[allow_ci]
+        read_mask("0x6").unwrap(),
         vec![PcrSlot::Slot1, PcrSlot::Slot2]
     );
 
-    assert_eq!(read_mask("0x800000").unwrap(), vec![PcrSlot::Slot23]); //#[allow_ci]
+    assert_eq!(read_mask("0x800000").unwrap(), vec![PcrSlot::Slot23]);
 
     assert_eq!(
-        read_mask("0xffffff").unwrap(), //#[allow_ci]
+        read_mask("0xffffff").unwrap(),
         vec![
             PcrSlot::Slot0,
             PcrSlot::Slot1,

@@ -112,6 +112,7 @@ pub async fn identity(
 // by the mask. It should return this data:
 // { QuoteAIK(nonce, 16:H(NK_pub), xi:yi), NK_pub}
 // where xi:yi are additional PCRs to be included in the quote.
+#[allow(clippy::unwrap_used)]
 pub async fn integrity(
     req: HttpRequest,
     param: web::Query<Integ>,
@@ -239,7 +240,7 @@ pub async fn integrity(
     let ima_ml_path = &data.ima_ml_path;
     let (ima_measurement_list, ima_measurement_list_entry, num_entries) =
         match read_measurement_list(
-            &mut data.ima_ml.lock().unwrap(), //#[allow_ci]
+            &mut data.ima_ml.lock().unwrap(),
             ima_ml_path,
             nth_entry,
         ) {
@@ -278,7 +279,7 @@ mod tests {
 
     #[actix_rt::test]
     async fn test_identity() {
-        let quotedata = web::Data::new(QuoteData::fixture().unwrap()); //#[allow_ci]
+        let quotedata = web::Data::new(QuoteData::fixture().unwrap());
         let mut app =
             test::init_service(App::new().app_data(quotedata.clone()).route(
                 &format!("/{}/quotes/identity", API_VERSION),
@@ -302,13 +303,13 @@ mod tests {
         assert_eq!(result.results.enc_alg.as_str(), "rsa");
         assert_eq!(result.results.sign_alg.as_str(), "rsassa");
         assert!(
-            pkey_pub_from_pem(&result.results.pubkey.unwrap()) //#[allow_ci]
-                .unwrap() //#[allow_ci]
+            pkey_pub_from_pem(&result.results.pubkey.unwrap())
+                .unwrap()
                 .public_eq(&quotedata.pub_key)
         );
         assert!(result.results.quote.starts_with('r'));
 
-        let mut context = quotedata.tpmcontext.lock().unwrap(); //#[allow_ci]
+        let mut context = quotedata.tpmcontext.lock().unwrap();
         tpm::testing::check_quote(
             &mut context,
             quotedata.ak_handle,
@@ -320,7 +321,7 @@ mod tests {
 
     #[actix_rt::test]
     async fn test_integrity_pre() {
-        let quotedata = web::Data::new(QuoteData::fixture().unwrap()); //#[allow_ci]
+        let quotedata = web::Data::new(QuoteData::fixture().unwrap());
         let mut app =
             test::init_service(App::new().app_data(quotedata.clone()).route(
                 &format!("/{}/quotes/integrity", API_VERSION),
@@ -344,20 +345,20 @@ mod tests {
         assert_eq!(result.results.enc_alg.as_str(), "rsa");
         assert_eq!(result.results.sign_alg.as_str(), "rsassa");
         assert!(
-            pkey_pub_from_pem(&result.results.pubkey.unwrap()) //#[allow_ci]
-                .unwrap() //#[allow_ci]
+            pkey_pub_from_pem(&result.results.pubkey.unwrap())
+                .unwrap()
                 .public_eq(&quotedata.pub_key)
         );
 
         let ima_ml_path = &quotedata.ima_ml_path;
-        let ima_ml = read_to_string(ima_ml_path).unwrap(); //#[allow_ci]
+        let ima_ml = read_to_string(ima_ml_path).unwrap();
         assert_eq!(
-            result.results.ima_measurement_list.unwrap().as_str(), //#[allow_ci]
+            result.results.ima_measurement_list.unwrap().as_str(),
             ima_ml
         );
         assert!(result.results.quote.starts_with('r'));
 
-        let mut context = quotedata.tpmcontext.lock().unwrap(); //#[allow_ci]
+        let mut context = quotedata.tpmcontext.lock().unwrap();
         tpm::testing::check_quote(
             &mut context,
             quotedata.ak_handle,
@@ -369,7 +370,7 @@ mod tests {
 
     #[actix_rt::test]
     async fn test_integrity_post() {
-        let quotedata = web::Data::new(QuoteData::fixture().unwrap()); //#[allow_ci]
+        let quotedata = web::Data::new(QuoteData::fixture().unwrap());
         let mut app =
             test::init_service(App::new().app_data(quotedata.clone()).route(
                 &format!("/{}/quotes/integrity", API_VERSION),
@@ -394,14 +395,14 @@ mod tests {
         assert_eq!(result.results.sign_alg.as_str(), "rsassa");
 
         let ima_ml_path = &quotedata.ima_ml_path;
-        let ima_ml = read_to_string(&ima_ml_path).unwrap(); //#[allow_ci]
+        let ima_ml = read_to_string(&ima_ml_path).unwrap();
         assert_eq!(
-            result.results.ima_measurement_list.unwrap().as_str(), //#[allow_ci]
+            result.results.ima_measurement_list.unwrap().as_str(),
             ima_ml
         );
         assert!(result.results.quote.starts_with('r'));
 
-        let mut context = quotedata.tpmcontext.lock().unwrap(); //#[allow_ci]
+        let mut context = quotedata.tpmcontext.lock().unwrap();
         tpm::testing::check_quote(
             &mut context,
             quotedata.ak_handle,

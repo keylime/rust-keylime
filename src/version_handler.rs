@@ -12,10 +12,11 @@ struct KeylimeVersion {
 }
 
 // This is the handler for the GET request for the API version
+#[allow(clippy::unwrap_used)]
 pub async fn version(req: HttpRequest) -> impl Responder {
     info!(
         "GET invoked from {:?} with uri {}",
-        req.connection_info().peer_addr().unwrap(), //#[allow_ci]
+        req.connection_info().peer_addr().unwrap(),
         req.uri()
     );
 

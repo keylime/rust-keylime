@@ -58,6 +58,7 @@ fn check_mount(secure_dir: &Path) -> Result<bool> {
  * implementation as the original python version, but the chown/geteuid
  * functions are unsafe function in Rust to use.
  */
+#[allow(clippy::unwrap_used)]
 pub(crate) fn mount(work_dir: &Path, secure_size: &str) -> Result<PathBuf> {
     // Use /tmpfs-dev directory if MOUNT_SECURE flag is not set. This
     // is for development environment and does not mount to the system.
@@ -117,7 +118,7 @@ pub(crate) fn mount(work_dir: &Path, secure_size: &str) -> Result<PathBuf> {
                 return Err(Error::SecureMount(
                     format!(
                         "unable to change secure path dir owner to root: received exit code {}",
-                        e.exe_code()?.unwrap() //#[allow_ci] : because this is an Option
+                        e.exe_code()?.unwrap() // because this is an Option
                     ),
                 ));
             }
@@ -131,7 +132,7 @@ pub(crate) fn mount(work_dir: &Path, secure_size: &str) -> Result<PathBuf> {
                 "-o",
                 format!("size={},mode=0700", secure_size).as_str(),
                 "tmpfs",
-                secure_dir_path.to_str().unwrap(), //#[allow_ci]
+                secure_dir_path.to_str().unwrap(),
             ])
             .output()
         {

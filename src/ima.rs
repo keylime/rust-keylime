@@ -112,30 +112,30 @@ mod tests {
         let mut ima_ml = ImaMeasurementList::new();
 
         let filedata = "0-entry\n1-entry\n2-entry\n";
-        let mut tf = NamedTempFile::new().unwrap(); //#[allow_ci]
+        let mut tf = NamedTempFile::new().unwrap();
         tf.write_all(filedata.as_bytes());
         tf.flush();
 
         // Request the 2nd entry, which is available
         let (ml, nth_entry, num_entries) =
-            read_measurement_list(&mut ima_ml, tf.path(), 2).unwrap(); //#[allow_ci]
+            read_measurement_list(&mut ima_ml, tf.path(), 2).unwrap();
         assert_eq!(num_entries, Some(3));
         assert_eq!(nth_entry, Some(2));
-        assert_eq!(ml.unwrap().find("2-entry").unwrap(), 0); //#[allow_ci]
+        assert_eq!(ml.unwrap().find("2-entry").unwrap(), 0);
 
         // Request the 3rd entry, which is not available yet, thus we get an empty list
         let (ml, nth_entry, num_entries) =
-            read_measurement_list(&mut ima_ml, tf.path(), 3).unwrap(); //#[allow_ci]
+            read_measurement_list(&mut ima_ml, tf.path(), 3).unwrap();
         assert_eq!(num_entries, Some(3));
         assert_eq!(nth_entry, Some(3));
-        assert_eq!(ml.unwrap().len(), 0); //#[allow_ci]
+        assert_eq!(ml.unwrap().len(), 0);
 
         // Request the 4th entry, which is beyond the next entry; since this is wrong,
         // we expect the entire list now.
         let (ml, nth_entry, num_entries) =
-            read_measurement_list(&mut ima_ml, tf.path(), 4).unwrap(); //#[allow_ci]
+            read_measurement_list(&mut ima_ml, tf.path(), 4).unwrap();
         assert_eq!(num_entries, Some(3));
         assert_eq!(nth_entry, Some(0));
-        assert_eq!(ml.unwrap().find("0-entry").unwrap(), 0); //#[allow_ci]
+        assert_eq!(ml.unwrap().find("0-entry").unwrap(), 0);
     }
 }
