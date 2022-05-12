@@ -25,6 +25,7 @@ use crate::{
 };
 
 // Read a X509 cert or cert chain and outputs the first certificate
+#[allow(clippy::unwrap_used)]
 pub(crate) fn load_x509(input_cert_path: &Path) -> Result<X509> {
     let contents = fs::read_to_string(&input_cert_path)?;
     let mut cert_chain = X509::stack_from_pem(contents.as_bytes())?;
@@ -35,7 +36,7 @@ pub(crate) fn load_x509(input_cert_path: &Path) -> Result<X509> {
                 .to_string(),
         ));
     }
-    let cert = cert_chain.pop().unwrap(); //#[allow_ci]
+    let cert = cert_chain.pop().unwrap();
 
     Ok(cert)
 }
@@ -379,7 +380,7 @@ mod tests {
                 "b8558314f515931c8d9b329805978fe77b9bb020b05406c0e",
                 "f189d89846ff8f5f0ca10e387d2c424358171df7f896f9f"
             ),
-            mac.unwrap() //#[allow_ci]
+            mac.unwrap()
         );
     }
 
@@ -393,30 +394,30 @@ mod tests {
         assert_eq!(
             "8a6de415abb8b27de5c572c8137bd14e5658395f9a2346e0b1ad8b9d8b9028af"
                 .to_string(),
-            key.unwrap() //#[allow_ci]
+            key.unwrap()
         );
     }
 
     #[test]
     fn test_hmac_verification() {
         // Generate a keypair
-        let (pub_key, priv_key) = rsa_generate_pair(2048).unwrap(); //#[allow_ci]
+        let (pub_key, priv_key) = rsa_generate_pair(2048).unwrap();
         let data = b"hello, world!";
         let data2 = b"hola, mundo!";
 
         // Sign the data
         let mut signer =
-            Signer::new(MessageDigest::sha256(), &priv_key).unwrap(); //#[allow_ci]
-        signer.update(data).unwrap(); //#[allow_ci]
-        signer.update(data2).unwrap(); //#[allow_ci]
-        let signature = signer.sign_to_vec().unwrap(); //#[allow_ci]
+            Signer::new(MessageDigest::sha256(), &priv_key).unwrap();
+        signer.update(data).unwrap();
+        signer.update(data2).unwrap();
+        let signature = signer.sign_to_vec().unwrap();
 
         // Verify the data
         let mut verifier =
-            Verifier::new(MessageDigest::sha256(), &pub_key).unwrap(); //#[allow_ci]
-        verifier.update(data).unwrap(); //#[allow_ci]
-        verifier.update(data2).unwrap(); //#[allow_ci]
-        assert!(verifier.verify(&signature).unwrap()); //#[allow_ci]
+            Verifier::new(MessageDigest::sha256(), &pub_key).unwrap();
+        verifier.update(data).unwrap();
+        verifier.update(data2).unwrap();
+        assert!(verifier.verify(&signature).unwrap());
     }
 
     #[test]
@@ -446,14 +447,14 @@ mod tests {
         let plaintext = b"test string, longer than the block size";
         let ciphertext = encrypt_aead(&key[..], &iv[..], &plaintext[..])
             .expect("unable to encrypt");
-        let expected = hex::decode("4142434445464748494A4B4C4D4E4F50B2198661586C9839CCDD0B1D5B4FF92FA9C0E6477C4E8E42C19ACD9E8061DD1E759401337DA285A70580E6A2E10B5D3A09994F46D90AB6").unwrap(); //#[allow_ci]
+        let expected = hex::decode("4142434445464748494A4B4C4D4E4F50B2198661586C9839CCDD0B1D5B4FF92FA9C0E6477C4E8E42C19ACD9E8061DD1E759401337DA285A70580E6A2E10B5D3A09994F46D90AB6").unwrap();
         assert_eq!(ciphertext, expected);
     }
 
     #[test]
     fn test_decrypt_aead_short() {
         let key = b"0123456789012345";
-        let ciphertext = hex::decode("4142434445464748494A4B4C4D4E4F50B2198661586C9839CCDD0B1D5B4FF92FA9C0E6477C4E8E42C19ACD9E8061DD1E759401337DA285A70580E6A2E10B5D3A09994F46D90AB6").unwrap(); //#[allow_ci]
+        let ciphertext = hex::decode("4142434445464748494A4B4C4D4E4F50B2198661586C9839CCDD0B1D5B4FF92FA9C0E6477C4E8E42C19ACD9E8061DD1E759401337DA285A70580E6A2E10B5D3A09994F46D90AB6").unwrap();
         let plaintext = decrypt_aead(&key[..], &ciphertext[..])
             .expect("unable to decrypt");
         let expected = b"test string, longer than the block size";
@@ -467,14 +468,14 @@ mod tests {
         let plaintext = b"test string, longer than the block size";
         let ciphertext = encrypt_aead(&key[..], &iv[..], &plaintext[..])
             .expect("unable to encrypt");
-        let expected = hex::decode("4142434445464748494A4B4C4D4E4F50FCE7CA78C08FB1D5E04DB3C4AA6B6ED2F09C4AD7985BD1DB9FF15F9FDA869D0C01B27FF4618737BB53C84D256455AAB53B9AC7EAF88C4B").unwrap(); //#[allow_ci]
+        let expected = hex::decode("4142434445464748494A4B4C4D4E4F50FCE7CA78C08FB1D5E04DB3C4AA6B6ED2F09C4AD7985BD1DB9FF15F9FDA869D0C01B27FF4618737BB53C84D256455AAB53B9AC7EAF88C4B").unwrap();
         assert_eq!(ciphertext, expected);
     }
 
     #[test]
     fn test_decrypt_aead_long() {
         let key = b"01234567890123450123456789012345";
-        let ciphertext = hex::decode("4142434445464748494A4B4C4D4E4F50FCE7CA78C08FB1D5E04DB3C4AA6B6ED2F09C4AD7985BD1DB9FF15F9FDA869D0C01B27FF4618737BB53C84D256455AAB53B9AC7EAF88C4B").unwrap(); //#[allow_ci]
+        let ciphertext = hex::decode("4142434445464748494A4B4C4D4E4F50FCE7CA78C08FB1D5E04DB3C4AA6B6ED2F09C4AD7985BD1DB9FF15F9FDA869D0C01B27FF4618737BB53C84D256455AAB53B9AC7EAF88C4B").unwrap();
         let plaintext = decrypt_aead(&key[..], &ciphertext[..])
             .expect("unable to decrypt");
         let expected = b"test string, longer than the block size";
@@ -502,7 +503,7 @@ mod tests {
     #[test]
     fn test_decrypt_aead_invalid_key_length() {
         let key = b"0123456789012345012345678901234";
-        let ciphertext = hex::decode("4142434445464748494A4B4C4D4E4F50FCE7CA78C08FB1D5E04DB3C4AA6B6ED2F09C4AD7985BD1DB9FF15F9FDA869D0C01B27FF4618737BB53C84D256455AAB53B9AC7EAF88C4B").unwrap(); //#[allow_ci]
+        let ciphertext = hex::decode("4142434445464748494A4B4C4D4E4F50FCE7CA78C08FB1D5E04DB3C4AA6B6ED2F09C4AD7985BD1DB9FF15F9FDA869D0C01B27FF4618737BB53C84D256455AAB53B9AC7EAF88C4B").unwrap();
         let result = decrypt_aead(&key[..], &ciphertext[..]);
         assert!(matches!(result, Err(_)));
     }
@@ -510,7 +511,7 @@ mod tests {
     #[test]
     fn test_decrypt_aead_invalid_ciphertext_length() {
         let key = b"0123456789012345";
-        let ciphertext = hex::decode("41424344").unwrap(); //#[allow_ci]
+        let ciphertext = hex::decode("41424344").unwrap();
         let result = decrypt_aead(&key[..], &ciphertext[..]);
         assert!(matches!(result, Err(Error::InvalidRequest)));
     }
@@ -525,8 +526,8 @@ mod tests {
         // Get RSA keys
         let contents = fs::read_to_string(rsa_key_path);
         let private =
-            PKey::private_key_from_pem(contents.unwrap().as_bytes()).unwrap(); //#[allow_ci]
-        let public = pkey_pub_from_priv(private).unwrap(); //#[allow_ci]
+            PKey::private_key_from_pem(contents.unwrap().as_bytes()).unwrap();
+        let public = pkey_pub_from_priv(private).unwrap();
 
         let message = String::from("Hello World!");
 
@@ -535,8 +536,8 @@ mod tests {
             .join("test-data")
             .join("test-rsa.sig");
 
-        let signature = fs::read_to_string(signature_path).unwrap(); //#[allow_ci]
+        let signature = fs::read_to_string(signature_path).unwrap();
 
-        assert!(asym_verify(&public, &message, &signature).unwrap()) //#[allow_ci]
+        assert!(asym_verify(&public, &message, &signature).unwrap())
     }
 }

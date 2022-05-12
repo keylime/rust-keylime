@@ -84,6 +84,7 @@ pub(crate) async fn do_activate_agent(
     Ok(())
 }
 
+#[allow(clippy::unwrap_used)]
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn do_register_agent(
     registrar_ip: &str,
@@ -140,7 +141,7 @@ pub(crate) async fn do_register_agent(
     let resp: Response<RegisterResponseResults> = resp.json().await?;
 
     if resp.results.blob.is_some() {
-        Ok(resp.results.blob.unwrap()) //#[allow_ci]
+        Ok(resp.results.blob.unwrap())
     } else {
         Ok(Vec::new())
     }
@@ -175,8 +176,8 @@ mod tests {
         let addr = format!("http://{}:{}", uri[0], uri[1]);
 
         let mock_data = [0u8; 1];
-        let priv_key = crypto::rsa_generate(2048).unwrap(); //#[allow_ci]
-        let cert = crypto::generate_x509(&priv_key, "uuid").unwrap(); //#[allow_ci]
+        let priv_key = crypto::rsa_generate(2048).unwrap();
+        let cert = crypto::generate_x509(&priv_key, "uuid").unwrap();
         let response = do_register_agent(
             uri[0],
             uri[1],
@@ -214,8 +215,8 @@ mod tests {
         let addr = format!("http://{}:{}", uri[0], uri[1]);
 
         let mock_data = [0u8; 1];
-        let priv_key = crypto::rsa_generate(2048).unwrap(); //#[allow_ci]
-        let cert = crypto::generate_x509(&priv_key, "uuid").unwrap(); //#[allow_ci]
+        let priv_key = crypto::rsa_generate(2048).unwrap();
+        let cert = crypto::generate_x509(&priv_key, "uuid").unwrap();
         let response = do_register_agent(
             uri[0],
             uri[1],
@@ -249,8 +250,8 @@ mod tests {
         let addr = format!("http://{}:{}", uri[0], uri[1]);
 
         let mock_data = [0u8; 1];
-        let priv_key = crypto::rsa_generate(2048).unwrap(); //#[allow_ci]
-        let cert = crypto::generate_x509(&priv_key, "uuid").unwrap(); //#[allow_ci]
+        let priv_key = crypto::rsa_generate(2048).unwrap();
+        let cert = crypto::generate_x509(&priv_key, "uuid").unwrap();
         let response = do_register_agent(
             uri[0],
             uri[1],
@@ -264,7 +265,7 @@ mod tests {
         )
         .await;
         assert!(response.is_err());
-        assert_eq!(response.err().unwrap().http_code().unwrap(), 404); //#[allow_ci]
+        assert_eq!(response.err().unwrap().http_code().unwrap(), 404);
     }
 
     #[tokio::test]
@@ -311,6 +312,6 @@ mod tests {
 
         let response = do_activate_agent(uri[0], uri[1], "uuid", "tag").await;
         assert!(response.is_err());
-        assert_eq!(response.err().unwrap().http_code().unwrap(), 404); //#[allow_ci]
+        assert_eq!(response.err().unwrap().http_code().unwrap(), 404);
     }
 }

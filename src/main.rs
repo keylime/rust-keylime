@@ -112,11 +112,12 @@ pub struct QuoteData {
 // Parameters are based on Python codebase:
 // https://github.com/keylime/keylime/blob/1ed43ac8f75d5c3bc3a3bbbbb5037f20cf3c5a6a/ \
 // keylime/crypto.py#L189
+#[allow(clippy::unwrap_used)]
 pub(crate) fn decrypt_payload(
     encr: Arc<Mutex<Vec<u8>>>,
     symm_key: &SymmKey,
 ) -> Result<Vec<u8>> {
-    let payload = encr.lock().unwrap(); //#[allow_ci]
+    let payload = encr.lock().unwrap();
 
     let decrypted = crypto::decrypt_aead(symm_key.bytes(), &payload)?;
 
@@ -171,6 +172,7 @@ pub(crate) fn write_out_key_and_payload(
     Ok(())
 }
 
+#[allow(clippy::unwrap_used)]
 // run a script (such as the init script, if any) and check the status
 pub(crate) fn run(dir: &Path, script: &str, agent_uuid: &str) -> Result<()> {
     let script_path = dir.join(script);
@@ -194,7 +196,7 @@ pub(crate) fn run(dir: &Path, script: &str, agent_uuid: &str) -> Result<()> {
 
     match Command::new("sh")
         .arg("-c")
-        .arg(script_path.to_str().unwrap()) //#[allow_ci]
+        .arg(script_path.to_str().unwrap())
         .current_dir(dir)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -231,6 +233,7 @@ pub(crate) fn optional_unzip_payload(
     Ok(())
 }
 
+#[allow(clippy::unwrap_used)]
 pub(crate) async fn run_encrypted_payload(
     symm_key: Arc<Mutex<Option<SymmKey>>>,
     symm_key_cvar: Arc<Condvar>,
@@ -238,12 +241,12 @@ pub(crate) async fn run_encrypted_payload(
     config: &KeylimeConfig,
 ) -> Result<()> {
     // do nothing until actix server's handlers have updated the symmetric key
-    let mut key = symm_key.lock().unwrap(); //#[allow_ci]
+    let mut key = symm_key.lock().unwrap();
     while key.is_none() {
-        key = symm_key_cvar.wait(key).unwrap(); //#[allow_ci]
+        key = symm_key_cvar.wait(key).unwrap();
     }
 
-    let key = key.as_ref().unwrap(); //#[allow_ci]
+    let key = key.as_ref().unwrap();
     let dec_payload = decrypt_payload(payload, key)?;
 
     let (unzipped, dec_payload_path, key_path) = setup_unzipped(config)?;
@@ -326,6 +329,7 @@ async fn worker(
     Ok(())
 }
 
+#[allow(clippy::unwrap_used)]
 #[actix_web::main]
 async fn main() -> Result<()> {
     // Print --help information
@@ -560,7 +564,7 @@ async fn main() -> Result<()> {
                     info!(
                         "{} invoked from {:?} with uri {}",
                         req.head().method,
-                        req.connection_info().peer_addr().unwrap(), //#[allow_ci]
+                        req.connection_info().peer_addr().unwrap(),
                         req.uri()
                     );
                     srv.call(req)
@@ -645,7 +649,7 @@ async fn main() -> Result<()> {
         server = actix_server
             .bind_openssl(
                 format!("{}:{}", config.agent_ip, config.agent_port),
-                ssl_context.unwrap(), //#[allow_ci]
+                ssl_context.unwrap(),
             )?
             .run();
 
@@ -797,23 +801,23 @@ mod tests {
 
     #[test]
     fn test_run() {
-        let dir = tempfile::tempdir().unwrap(); //#[allow_ci]
+        let dir = tempfile::tempdir().unwrap();
         let script_path = dir.path().join("test-script.sh");
         {
-            let mut script_file = fs::File::create(&script_path).unwrap(); //#[allow_ci]
+            let mut script_file = fs::File::create(&script_path).unwrap();
             let script = r#"
 #!/bin/sh
 
 echo hello > test-output
 "#;
-            let _ = script_file.write(script.as_bytes()).unwrap(); //#[allow_ci]
+            let _ = script_file.write(script.as_bytes()).unwrap();
         }
         run(
             dir.path(),
-            script_path.file_name().unwrap().to_str().unwrap(), //#[allow_ci]
+            script_path.file_name().unwrap().to_str().unwrap(),
             "D432FBB3-D2F1-4A97-9EF7-75BD81C0000X",
         )
-        .unwrap(); //#[allow_ci]
+        .unwrap();
         assert!(dir.path().join("test-output").exists());
     }
 }

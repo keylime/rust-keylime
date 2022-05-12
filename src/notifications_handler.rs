@@ -62,7 +62,7 @@ mod tests {
         let quotedata = web::Data::new(QuoteData {
             revocation_cert,
             revocation_actions_dir,
-            ..QuoteData::fixture().unwrap() //#[allow_ci]
+            ..QuoteData::fixture().unwrap()
         });
 
         let mut app =
@@ -74,11 +74,11 @@ mod tests {
 
         let sig_path = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("test-data/revocation.sig");
-        let signature = fs::read_to_string(sig_path).unwrap(); //#[allow_ci]
+        let signature = fs::read_to_string(sig_path).unwrap();
 
         let message_path = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("test-data/test_ok.json");
-        let message = fs::read_to_string(message_path).unwrap(); //#[allow_ci]
+        let message = fs::read_to_string(message_path).unwrap();
 
         // Create the message body with the payload and signature
         let revocation = KeylimeRevocation {

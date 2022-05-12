@@ -601,7 +601,7 @@ mod tests {
 
     #[test]
     fn test_config_file_get() {
-        let conf_orig = option_env!("KEYLIME_CONFIG").or(Some("")).unwrap(); //#[allow_ci]
+        let conf_orig = option_env!("KEYLIME_CONFIG").or(Some("")).unwrap();
 
         // Test with no environment variable
         env::set_var("KEYLIME_CONFIG", "");
@@ -618,7 +618,7 @@ mod tests {
     fn test_get_uuid() {
         assert_eq!(get_uuid("openstack"), "openstack");
         assert_eq!(get_uuid("hash_ek"), "hash_ek");
-        let _ = Uuid::parse_str(&get_uuid("generate")).unwrap(); //#[allow_ci]
+        let _ = Uuid::parse_str(&get_uuid("generate")).unwrap();
         assert_eq!(
             get_uuid("D432FBB3-D2F1-4A97-9EF7-75BD81C00000"),
             "d432fbb3-d2f1-4a97-9ef7-75bd81c00000"
@@ -630,6 +630,6 @@ mod tests {
         let _ = Uuid::parse_str(&get_uuid(
             "D432FBB3-D2F1-4A97-9EF7-75BD81C0000X",
         ))
-        .unwrap(); //#[allow_ci]
+        .unwrap();
     }
 }

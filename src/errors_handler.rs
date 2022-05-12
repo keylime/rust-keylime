@@ -310,7 +310,7 @@ mod tests {
         let headers = resp.headers();
 
         assert!(headers.contains_key("allow"));
-        assert_eq!(headers.get("allow").unwrap().to_str().unwrap(), allow); //#[allow_ci]
+        assert_eq!(headers.get("allow").unwrap().to_str().unwrap(), allow);
 
         let result: JsonWrapper<Value> = test::read_body_json(resp).await;
 
