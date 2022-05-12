@@ -424,15 +424,19 @@ async fn main() -> Result<()> {
         warn!("INSECURE: Only use Keylime in this mode for testing or debugging purposes.");
     }
 
-    // Verify if the python shim is installed in the expected location
-    let python_shim =
-        PathBuf::from(&config.revocation_actions_dir).join("shim.py");
-    if !python_shim.exists() {
-        error!("Could not find python shim at {}", python_shim.display());
-        return Err(Error::Configuration(format!(
-            "Could not find python shim at {}",
-            python_shim.display()
-        )));
+    cfg_if::cfg_if! {
+        if #[cfg(feature = "legacy-python-actions")] {
+            // Verify if the python shim is installed in the expected location
+            let python_shim =
+                PathBuf::from(&config.revocation_actions_dir).join("shim.py");
+            if !python_shim.exists() {
+                error!("Could not find python shim at {}", python_shim.display());
+                return Err(Error::Configuration(format!(
+                    "Could not find python shim at {}",
+                    python_shim.display()
+                )));
+            }
+        }
     }
 
     // Gather EK values and certs

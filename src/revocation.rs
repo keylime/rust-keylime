@@ -22,6 +22,7 @@ use serde_json::Value;
 /// The lookup goes in the following order:
 /// 1. Look for pre-installed action
 /// 2. Look for the action in the tenant-provided initial payload
+/// Then, if python revocation actions are allowed:
 /// 3. Look for pre-installed Python action
 /// 4. Look for the Python action in the tenant-provided initial payload
 fn lookup_action(
@@ -44,7 +45,9 @@ fn lookup_action(
     let possible_paths = [
         (actions_dir.join(action), false, false),
         (payload_dir.join(action), false, true),
+        #[cfg(feature = "legacy-python-actions")]
         (actions_dir.join(&py_action), true, false),
+        #[cfg(feature = "legacy-python-actions")]
         (payload_dir.join(&py_action), true, true),
     ];
 
@@ -460,7 +463,7 @@ mod tests {
         assert!(outputs.is_ok());
         let outputs = outputs.unwrap(); //#[allow_ci]
 
-        assert!(outputs.len() == 4);
+        assert!(outputs.len() == 2);
 
         for output in outputs {
             assert_eq!(
@@ -506,8 +509,16 @@ mod tests {
             env!("CARGO_MANIFEST_DIR"),
             "/tests/unzipped/test_ok.json"
         );
-        test_config.revocation_actions =
-            String::from("local_action_hello, local_action_payload");
+        cfg_if::cfg_if! {
+            if #[cfg(feature = "legacy-python-actions")] {
+                test_config.revocation_actions =
+                    String::from("local_action_hello, local_action_payload, local_action_stand_alone.py, local_action_rev_script1.py");
+            } else {
+                test_config.revocation_actions = String::from(
+                    "local_action_stand_alone.py, local_action_rev_script1.py",
+                );
+            }
+        }
         let json_str = std::fs::read_to_string(json_file).unwrap(); //#[allow_ci]
         let json = serde_json::from_str(&json_str).unwrap(); //#[allow_ci]
         let actions_dir =
@@ -531,7 +542,13 @@ mod tests {
         assert!(outputs.is_ok());
         let outputs = outputs.unwrap(); //#[allow_ci]
 
-        assert!(outputs.len() == 6);
+        cfg_if::cfg_if! {
+            if #[cfg(feature = "legacy-python-actions")] {
+                assert!(outputs.len() == 6);
+            } else {
+                assert!(outputs.len() == 4);
+            }
+        }
 
         for output in outputs {
             assert_eq!(
@@ -593,19 +610,24 @@ mod tests {
         let payload_dir = Path::new(&work_dir).join("unzipped/");
         let actions_dir = Path::new(&work_dir).join("actions/");
 
-        // Test local python action
-        let expected = format!("{}", &actions_dir.join("shim.py").display(),);
+        cfg_if::cfg_if! {
+            if #[cfg(feature = "legacy-python-actions")] {
+                // Test local python action
+                let expected =
+                    format!("{}", &actions_dir.join("shim.py").display(),);
 
-        assert_eq!(
-            lookup_action(
-                &payload_dir,
-                &actions_dir,
-                "local_action_hello",
-                true
-            )
-            .unwrap(), //#[allow_ci]
-            (expected, true, false)
-        );
+                assert_eq!(
+                    lookup_action(
+                        &payload_dir,
+                        &actions_dir,
+                        "local_action_hello",
+                        true
+                    )
+                    .unwrap(), //#[allow_ci]
+                    (expected, true, false)
+                );
+            }
+        }
 
         // Test local non-python action
         let expected = format!(
@@ -624,19 +646,24 @@ mod tests {
             (expected, false, false)
         );
 
-        // Test payload python action
-        let expected = format!("{}", &actions_dir.join("shim.py").display(),);
+        cfg_if::cfg_if! {
+            if #[cfg(feature = "legacy-python-actions")] {
+                // Test payload python action
+                let expected =
+                    format!("{}", &actions_dir.join("shim.py").display(),);
 
-        assert_eq!(
-            lookup_action(
-                &payload_dir,
-                &actions_dir,
-                "local_action_payload",
-                true,
-            )
-            .unwrap(), //#[allow_ci]
-            (expected, true, true),
-        );
+                assert_eq!(
+                    lookup_action(
+                        &payload_dir,
+                        &actions_dir,
+                        "local_action_payload",
+                        true,
+                    )
+                    .unwrap(), //#[allow_ci]
+                    (expected, true, true),
+                );
+            }
+        }
 
         // Test payload non-python action
         let expected = format!(
