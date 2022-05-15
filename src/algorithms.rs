@@ -10,7 +10,6 @@ use tss_esapi::{
         AsymmetricAlgorithm, HashingAlgorithm, SignatureSchemeAlgorithm,
     },
     structures::{HashScheme, SignatureScheme},
-    tss2_esys::TPMT_SIG_SCHEME,
 };
 
 // This error needs to be public because we implement TryFrom for public types

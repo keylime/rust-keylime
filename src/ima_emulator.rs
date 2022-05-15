@@ -1,27 +1,31 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2021 Keylime Authors
 
+mod algorithms;
+use crate::algorithms::HashAlgorithm;
+mod ima_entry;
+use openssl::hash::{hash, MessageDigest};
+
 use log::*;
 
-use std::convert::TryFrom;
+use clap::Parser;
+use std::collections::HashMap;
+use std::convert::{TryFrom, TryInto};
 use std::fs::File;
 use std::io::prelude::*;
 use std::io::BufReader;
+use std::path::{Path, PathBuf};
 
 use thiserror::Error;
 
 use tss_esapi::{
     abstraction::pcr,
     handles::PcrHandle,
-    interface_types::algorithm::HashingAlgorithm,
     structures::{Digest, DigestValues, PcrSelectionListBuilder, PcrSlot},
     Context, Tcti,
 };
 
 const IMA_ML: &str = "/sys/kernel/security/ima/ascii_runtime_measurements";
-
-const START_HASH: &[u8; 20] = &[0u8; 20];
-const FF_HASH: &[u8; 20] = &[0xffu8; 20];
 
 #[derive(Error, Debug)]
 enum ImaEmulatorError {
@@ -31,8 +35,14 @@ enum ImaEmulatorError {
     TssEsapiError(#[from] tss_esapi::Error),
     #[error("Decoding error")]
     FromHexError(#[from] hex::FromHexError),
+    #[error("Algorithm error")]
+    AlgorithmError(#[from] algorithms::AlgorithmError),
+    #[error("OpenSSL error")]
+    OpenSSLError(#[from] openssl::error::ErrorStack),
     #[error("I/O error")]
     IoError(#[from] std::io::Error),
+    #[error("Integer parsing error")]
+    ParseInt(#[from] std::num::ParseIntError),
     #[error("{0}")]
     Other(String),
 }
@@ -41,57 +51,75 @@ type Result<T> = std::result::Result<T, ImaEmulatorError>;
 
 fn ml_extend(
     context: &mut Context,
-    ml: &str,
+    ml: &Path,
     mut position: usize,
+    ima_hash_alg: HashAlgorithm,
+    pcr_hash_alg: HashAlgorithm,
     search_hash: Option<&Digest>,
 ) -> Result<usize> {
     let f = File::open(ml)?;
     let mut reader = BufReader::new(f);
-    let mut running_hash: Vec<u8> = Vec::from(&START_HASH[..]);
+    let ima_digest: MessageDigest = ima_hash_alg.into();
+    let ima_start_hash = ima_entry::Digest::start(ima_hash_alg);
+    let pcr_digest: MessageDigest = pcr_hash_alg.into();
+    let mut running_hash = ima_entry::Digest::start(pcr_hash_alg);
+    let ff_hash = ima_entry::Digest::ff(pcr_hash_alg);
     for line in reader.by_ref().lines().skip(position) {
         let line = line?;
         if line.is_empty() {
             continue;
         }
-        let tokens: Vec<&str> = line.splitn(5, ' ').collect();
-        if tokens.len() < 5 {
-            error!("invalid measurement list file line: -{}-", line);
-        }
+
+        let entry: ima_entry::Entry = line.as_str().try_into()?;
+
         position += 1;
 
-        let path = tokens[4];
-        let template_hash = hex::decode(tokens[1])?;
-        let template_hash = if template_hash == START_HASH {
-            Digest::try_from(&FF_HASH[..])
+        // Set correct hash for time of measure, time of use (ToMToU) errors
+        // and if a file is already opened for write.
+        // https://elixir.bootlin.com/linux/v5.12.12/source/security/integrity/ima/ima_main.c#L101
+        let pcr_template_hash = if entry.template_hash == ima_start_hash {
+            Digest::try_from(ff_hash.value())
         } else {
-            Digest::try_from(template_hash)
+            let mut event_data = vec![];
+            entry.event_data.encode(&mut event_data)?;
+            let pcr_event_hash = hash(pcr_digest, &event_data)?;
+            let ima_event_hash = hash(ima_digest, &event_data)?;
+            if ima_event_hash.as_ref() != entry.template_hash.value() {
+                return Err(ImaEmulatorError::Other(
+                    "IMA template hash doesn't match".to_string(),
+                ));
+            }
+            Digest::try_from(pcr_event_hash.as_ref())
         }?;
 
         match search_hash {
             None => {
                 println!(
                     "extending hash {} for {}",
-                    hex::encode(template_hash.value()),
-                    &path
+                    hex::encode(pcr_template_hash.value()),
+                    entry.event_data.path(),
                 );
                 let mut vals = DigestValues::new();
-                vals.set(HashingAlgorithm::Sha1, template_hash);
-                // TODO: Add support for other hash algorithms
+                vals.set(pcr_hash_alg.into(), pcr_template_hash);
                 context.execute_with_nullauth_session(|ctx| {
                     ctx.pcr_extend(PcrHandle::Pcr10, vals)
                 })?;
             }
             Some(search_hash) => {
-                let mut hasher = openssl::sha::Sha1::new();
-                hasher.update(&running_hash);
-                hasher.update(&template_hash);
-                running_hash = hasher.finish().into();
-                let digest = Digest::try_from(running_hash.as_slice())?;
+                let mut hasher = openssl::hash::Hasher::new(pcr_digest)?;
+                hasher.update(running_hash.value())?;
+                hasher.update(&pcr_template_hash)?;
+                running_hash =
+                    ima_entry::Digest::new(pcr_hash_alg, &hasher.finish()?)?;
+                let digest = Digest::try_from(running_hash.value())?;
                 let mut vals = DigestValues::new();
-                vals.set(HashingAlgorithm::Sha1, digest.clone());
+                vals.set(pcr_hash_alg.into(), digest.clone());
 
                 if digest == *search_hash {
-                    println!("Located last IMA file updated: {}", path);
+                    println!(
+                        "Located last IMA file updated: {}",
+                        entry.event_data.path()
+                    );
                     return Ok(position);
                 }
             }
@@ -106,7 +134,20 @@ fn ml_extend(
     Ok(position)
 }
 
+#[derive(Parser)]
+#[clap(about)]
+struct Args {
+    #[clap(long = "hash_algs", short = 'a', default_value = "sha1")]
+    hash_algs: Vec<String>,
+    #[clap(long, short = 'i', default_value = "sha1")]
+    ima_hash_alg: String,
+    #[clap(long, short = 'f', default_value = IMA_ML)]
+    ima_log: PathBuf,
+}
+
 fn main() -> std::result::Result<(), ImaEmulatorError> {
+    let args = Args::parse();
+
     let tcti =
         match Tcti::from_environment_variable() {
             Ok(tcti) => tcti,
@@ -124,37 +165,64 @@ fn main() -> std::result::Result<(), ImaEmulatorError> {
         ));
     }
 
-    // check if pcr is clean
-    let pcr_list = PcrSelectionListBuilder::new()
-        .with_selection(HashingAlgorithm::Sha1, &[PcrSlot::Slot10])
-        .build()?;
-    let pcr_data = context
-        .execute_without_session(|ctx| pcr::read_all(ctx, pcr_list))?;
-    let digest = pcr_data
-        .pcr_bank(HashingAlgorithm::Sha1)
-        .ok_or_else(|| {
-            ImaEmulatorError::Other(
-                "IMA slot does not have SHA-1 bank".to_string(),
-            )
-        })?
-        .get_digest(PcrSlot::Slot10)
-        .ok_or_else(|| {
-            ImaEmulatorError::Other(
-                "could not read value from IMA PCR".to_string(),
-            )
-        })?;
-
-    let mut pos = 0;
-
-    if digest.value() != START_HASH {
-        log::warn!("IMA PCR is not empty, trying to find the last updated file in the measurement list...");
-        pos = ml_extend(&mut context, IMA_ML, 0, Some(digest))?;
+    let ima_hash_alg: HashAlgorithm =
+        args.ima_hash_alg.as_str().try_into()?;
+    let mut positions = HashMap::new();
+    for pcr_hash_alg in args.hash_algs {
+        let pcr_hash_alg: HashAlgorithm = pcr_hash_alg.as_str().try_into()?;
+        positions.insert(pcr_hash_alg, 0usize);
     }
 
-    println!("Monitoring {}", IMA_ML);
+    for (pcr_hash_alg, position) in positions.iter_mut() {
+        // check if pcr is clean
+        let pcr_list = PcrSelectionListBuilder::new()
+            .with_selection((*pcr_hash_alg).into(), &[PcrSlot::Slot10])
+            .build()?;
+        let pcr_data = context
+            .execute_without_session(|ctx| pcr::read_all(ctx, pcr_list))?;
+        let digest = pcr_data
+            .pcr_bank((*pcr_hash_alg).into())
+            .ok_or_else(|| {
+                ImaEmulatorError::Other(format!(
+                    "IMA slot does not have {} bank",
+                    *pcr_hash_alg,
+                ))
+            })?
+            .get_digest(PcrSlot::Slot10)
+            .ok_or_else(|| {
+                ImaEmulatorError::Other(
+                    "could not read value from IMA PCR".to_string(),
+                )
+            })?;
+
+        let pcr_digest: MessageDigest = (*pcr_hash_alg).into();
+        let pcr_start_hash = vec![0x00u8; pcr_digest.size()];
+        if digest.value() != pcr_start_hash {
+            log::warn!("IMA PCR is not empty, trying to find the last updated file in the measurement list...");
+            *position = ml_extend(
+                &mut context,
+                &args.ima_log,
+                *position,
+                ima_hash_alg,
+                *pcr_hash_alg,
+                Some(digest),
+            )?;
+        }
+    }
+
+    println!("Monitoring {}", args.ima_log.display());
 
     loop {
-        pos = ml_extend(&mut context, IMA_ML, pos, None)?;
+        for (pcr_hash_alg, position) in positions.iter_mut() {
+            *position = ml_extend(
+                &mut context,
+                &args.ima_log,
+                *position,
+                ima_hash_alg,
+                *pcr_hash_alg,
+                None,
+            )?;
+        }
 
         // FIXME: We could poll IMA_ML as in the python implementation, though
         // the file is not pollable:
