@@ -20,8 +20,6 @@ use openssl::{
     pkey::{Id, PKeyRef, Public},
 };
 
-use flate2::{write::ZlibEncoder, Compression};
-
 use tss_esapi::{
     abstraction::{
         ak,
@@ -635,7 +633,6 @@ pub(crate) fn quote(
 #[cfg(test)]
 pub mod testing {
     use super::*;
-    use flate2::read::ZlibDecoder;
     use tss_esapi::constants::structure_tags::StructureTag;
     use tss_esapi::structures::{Attest, AttestBuffer, DigestList, Ticket};
     use tss_esapi::tss2_esys::Tss2_MU_TPMT_SIGNATURE_Unmarshal;
