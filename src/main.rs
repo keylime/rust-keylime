@@ -504,13 +504,13 @@ async fn main() -> Result<()> {
     // safeguards u and v keys in transit, is not part of the threat model.
     let (nk_pub, nk_priv) = crypto::rsa_generate_pair(2048)?;
 
-    let keylime_ca_cert =
-        crypto::load_x509(Path::new(&config.keylime_ca_path))?;
-
     let cert: openssl::x509::X509;
     let mtls_cert;
     let ssl_context;
     if config.mtls_enabled {
+        let keylime_ca_cert =
+            crypto::load_x509(Path::new(&config.keylime_ca_path))?;
+
         cert = crypto::generate_x509(&nk_priv, &config.agent_uuid)?;
         mtls_cert = Some(&cert);
         ssl_context = Some(crypto::generate_mtls_context(
