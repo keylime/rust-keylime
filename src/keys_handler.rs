@@ -18,6 +18,7 @@ use std::{convert::TryInto, sync::Arc};
 pub struct KeylimeUKey {
     auth_tag: String,
     encrypted_key: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
     payload: Option<String>,
 }
 

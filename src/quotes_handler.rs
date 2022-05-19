@@ -35,9 +35,13 @@ pub(crate) struct KeylimeQuote {
     pub hash_alg: String,
     pub enc_alg: String,
     pub sign_alg: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub pubkey: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub ima_measurement_list: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub mb_measurement_list: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub ima_measurement_list_entry: Option<u64>,
 }
 
@@ -435,5 +439,34 @@ mod tests {
             b"1234567890ABCDEFHIJ",
         )
         .expect("unable to verify quote");
+    }
+
+    #[actix_rt::test]
+    async fn test_missing_ima_file() {
+        let mut quotedata = QuoteData::fixture().unwrap(); //#[allow_ci]
+                                                           // Remove the IMA log file from the context
+        quotedata.ima_ml_file = None;
+        let data = web::Data::new(quotedata);
+        let mut app =
+            test::init_service(App::new().app_data(data.clone()).route(
+                &format!("/{}/quotes/integrity", API_VERSION),
+                web::get().to(integrity),
+            ))
+            .await;
+
+        let req = test::TestRequest::get()
+            .uri(&format!(
+                "/{}/quotes/integrity?nonce=1234567890ABCDEFHIJ&mask=0x408000&vmask=0x808000&partial=0",
+                API_VERSION,
+            ))
+            .to_request();
+
+        let resp = test::call_service(&app, req).await;
+        assert!(resp.status().is_success());
+
+        let result: JsonWrapper<KeylimeQuote> =
+            test::read_body_json(resp).await;
+        assert!(result.results.ima_measurement_list.is_none());
+        assert!(result.results.ima_measurement_list_entry.is_none());
     }
 }
