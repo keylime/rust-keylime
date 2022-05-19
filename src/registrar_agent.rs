@@ -22,8 +22,11 @@ struct Register<'a> {
     ek_tpm: &'a [u8],
     #[serde(serialize_with = "serialize_as_base64")]
     aik_tpm: &'a [u8],
+    #[serde(skip_serializing_if = "Option::is_none")]
     mtls_cert: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     ip: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     port: Option<u32>,
 }
 
