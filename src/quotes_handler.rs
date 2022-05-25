@@ -221,6 +221,15 @@ pub async fn integrity(
             if let Some(measuredboot_ml_file) = &data.measuredboot_ml_file {
                 let mut ml = Vec::<u8>::new();
                 let mut f = measuredboot_ml_file.lock().unwrap(); //#[allow_ci]
+                if let Err(e) = f.rewind() {
+                    debug!("Failed to rewind measured boot file: {}", e);
+                    return HttpResponse::InternalServerError().json(
+                        JsonWrapper::error(
+                            500,
+                            "Unable to retrieve quote".to_string(),
+                        ),
+                    );
+                }
                 mb_measurement_list = match f.read_to_end(&mut ml) {
                     Ok(_) => Some(base64::encode(ml)),
                     Err(e) => {
