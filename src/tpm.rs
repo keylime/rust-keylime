@@ -84,6 +84,14 @@ pub(crate) fn get_tpm2_ctx() -> Result<Context> {
     Context::new(tcti).map_err(|e| e.into())
 }
 
+// Holds the output of create_ek
+#[derive(Clone, Debug)]
+pub struct EKResult {
+    pub key_handle: KeyHandle,
+    pub ek_cert: Option<Vec<u8>>,
+    pub public: tss_esapi::structures::Public,
+}
+
 /*
  * Input: Connection context, asymmetric algo (optional)
  * Return: (Key handle, public cert, TPM public object)
@@ -93,7 +101,7 @@ pub(crate) fn get_tpm2_ctx() -> Result<Context> {
 pub(crate) fn create_ek(
     context: &mut Context,
     alg: AsymmetricAlgorithm,
-) -> Result<(KeyHandle, Option<Vec<u8>>, Vec<u8>)> {
+) -> Result<EKResult> {
     // Retrieve EK handle, EK pub cert, and TPM pub object
     let handle = ek::create_ek_object(context, alg, DefaultKey)?;
     let cert = match ek::retrieve_ek_pubcert(context, alg) {
@@ -104,9 +112,11 @@ pub(crate) fn create_ek(
         }
     };
     let (tpm_pub, _, _) = context.read_public(handle)?;
-    let tpm_pub_vec = PublicBuffer::try_from(tpm_pub)?.marshall()?;
-
-    Ok((handle, cert, tpm_pub_vec))
+    Ok(EKResult {
+        key_handle: handle,
+        ek_cert: cert,
+        public: tpm_pub,
+    })
 }
 
 // Ensure that TPML_PCR_SELECTION and TPML_DIGEST have known sizes
