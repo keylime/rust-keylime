@@ -72,7 +72,7 @@ use std::{
 };
 use tss_esapi::{
     handles::KeyHandle, interface_types::algorithm::AsymmetricAlgorithm,
-    Context,
+    traits::Marshall, Context,
 };
 use uuid::Uuid;
 
@@ -440,8 +440,7 @@ async fn main() -> Result<()> {
     }
 
     // Gather EK values and certs
-    let (ek_handle, ek_cert, ek_tpm2b_pub) =
-        tpm::create_ek(&mut ctx, config.enc_alg.into())?;
+    let ek_result = tpm::create_ek(&mut ctx, config.enc_alg.into())?;
 
     // Try to load persistent TPM data
     let tpm_data = config.tpm_data.clone().and_then(|data|
@@ -481,7 +480,7 @@ async fn main() -> Result<()> {
             info!("Generating new AK");
             let new_ak = tpm::create_ak(
                 &mut ctx,
-                ek_handle,
+                ek_result.key_handle,
                 config.hash_alg.into(),
                 config.sign_alg.into(),
             )?;
@@ -534,8 +533,8 @@ async fn main() -> Result<()> {
             &config.registrar_ip,
             &config.registrar_port,
             &config.agent_uuid,
-            &ek_tpm2b_pub,
-            ek_cert,
+            &ek_result.public.clone().marshall()?,
+            ek_result.ek_cert,
             &ak_tpm2b_pub,
             mtls_cert,
             config.agent_contact_ip.clone(),
@@ -545,7 +544,10 @@ async fn main() -> Result<()> {
         info!("SUCCESS: Agent {} registered", config.agent_uuid);
 
         let key = tpm::activate_credential(
-            &mut ctx, keyblob, ak_handle, ek_handle,
+            &mut ctx,
+            keyblob,
+            ak_handle,
+            ek_result.key_handle,
         )?;
         let mackey = base64::encode(key.value());
         let auth_tag = crypto::compute_hmac(
@@ -769,12 +771,12 @@ mod testing {
             let mut ctx = tpm::get_tpm2_ctx()?;
 
             // Gather EK and AK key values and certs
-            let (ek_handle, ek_cert, ek_tpm2b_pub) =
+            let ek_result =
                 tpm::create_ek(&mut ctx, test_config.enc_alg.into())?;
 
             let (ak_handle, ak_name, ak_tpm2b_pub) = tpm::create_ak(
                 &mut ctx,
-                ek_handle,
+                ek_result.key_handle,
                 test_config.hash_alg.into(),
                 test_config.sign_alg.into(),
             )?;
