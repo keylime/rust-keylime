@@ -6,6 +6,11 @@ use crate::error::{Error, Result};
 use crate::permissions;
 use ini::Ini;
 use log::*;
+use openssl::{
+    hash::{hash, MessageDigest},
+    pkey::PKey,
+};
+use picky_asn1_x509::SubjectPublicKeyInfo;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::convert::TryFrom;
@@ -15,7 +20,9 @@ use std::fmt::Debug;
 use std::fs::File;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
-use tss_esapi::{structures::PcrSlot, utils::TpmsContext};
+use tss_esapi::{
+    structures::PcrSlot, structures::Public, utils::TpmsContext,
+};
 use uuid::Uuid;
 
 /*
@@ -380,6 +387,19 @@ impl KeylimeConfig {
             run_as,
         })
     }
+
+    // Update function for the uuid if it is set to "hash_ek"
+    pub fn set_ek_uuid(&mut self, ek_pub: Public) -> Result<()> {
+        // Converting Public TPM key to PEM
+        let key = SubjectPublicKeyInfo::try_from(ek_pub)?;
+        let key_der = picky_asn1_der::to_vec(&key)?;
+        let openssl_key = PKey::public_key_from_der(&key_der)?;
+        let pem = openssl_key.public_key_to_pem()?;
+
+        let mut hash = hash(MessageDigest::sha256(), &pem)?;
+        self.agent_uuid = hex::encode(hash);
+        Ok(())
+    }
 }
 
 // Default test configuration. This should match the defaults in keylime.conf
@@ -437,7 +457,8 @@ fn get_uuid(agent_uuid_config: &str) -> String {
             "openstack".into()
         }
         "hash_ek" => {
-            info!("hash_ek placeholder...");
+            info!("Using hashed EK as UUID");
+            // DO NOT change this to something else. It is used by KeylimeConfig to later set the correct value.
             "hash_ek".into()
         }
         "generate" => {

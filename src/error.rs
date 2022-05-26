@@ -78,6 +78,8 @@ pub(crate) enum Error {
     Persist(#[from] tempfile::PersistError),
     #[error("Error joining threads: {0}")]
     Join(#[from] tokio::task::JoinError),
+    #[error("Asn1DerError: {0}")]
+    PickyAsn1(#[from] picky_asn1_der::Asn1DerError),
     #[error("{0}")]
     Other(String),
 }

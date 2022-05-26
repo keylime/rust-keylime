@@ -72,7 +72,7 @@ use std::{
 };
 use tss_esapi::{
     handles::KeyHandle, interface_types::algorithm::AsymmetricAlgorithm,
-    traits::Marshall, Context,
+    structures::PublicBuffer, traits::Marshall, Context,
 };
 use uuid::Uuid;
 
@@ -389,7 +389,7 @@ async fn main() -> Result<()> {
     };
 
     // Load config
-    let config = KeylimeConfig::build()?;
+    let mut config = KeylimeConfig::build()?;
 
     // The agent cannot run when a payload script is defined, but mTLS is disabled and insecure
     // payloads are not explicitly enabled
@@ -496,6 +496,10 @@ async fn main() -> Result<()> {
         }
     };
 
+    if config.agent_uuid == "hash_ek" {
+        config.set_ek_uuid(ek_result.public.clone())?;
+    }
+
     info!("Agent UUID: {}", config.agent_uuid);
 
     // Generate key pair for secure transmission of u, v keys. The u, v
@@ -533,7 +537,7 @@ async fn main() -> Result<()> {
             &config.registrar_ip,
             &config.registrar_port,
             &config.agent_uuid,
-            &ek_result.public.clone().marshall()?,
+            &PublicBuffer::try_from(ek_result.public.clone())?.marshall()?,
             ek_result.ek_cert,
             &ak_tpm2b_pub,
             mtls_cert,
