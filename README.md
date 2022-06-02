@@ -35,7 +35,7 @@ $ dnf install openssl-devel gcc tpm2-tss-devel zeromq-devel libarchive-devel
 
 For Ubuntu OS, use the following command
 ```
-$ apt-get install openssl-dev gcc libtss-dev libzmq3-dev libarchive-dev
+$ apt-get install libssl-dev gcc libtss-dev libzmq3-dev libarchive-dev
 ```
 
 ### Rust
