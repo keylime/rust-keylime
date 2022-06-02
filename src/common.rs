@@ -3,6 +3,7 @@
 
 use crate::algorithms::{EncryptionAlgorithm, HashAlgorithm, SignAlgorithm};
 use crate::error::{Error, Result};
+use crate::permissions;
 use ini::Ini;
 use log::*;
 use serde::{Deserialize, Serialize};
@@ -12,7 +13,6 @@ use std::env;
 use std::ffi::CString;
 use std::fmt::Debug;
 use std::fs::File;
-use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use tss_esapi::{structures::PcrSlot, utils::TpmsContext};
@@ -224,10 +224,9 @@ pub(crate) struct KeylimeConfig {
     pub revocation_actions_dir: String,
     pub allow_payload_revocation_actions: bool,
     pub work_dir: String,
-    pub ima_ml_path: String,
-    pub measuredboot_ml_path: String,
     pub mtls_enabled: bool,
     pub enable_insecure_payload: bool,
+    pub run_as: Option<String>,
 }
 
 impl KeylimeConfig {
@@ -323,8 +322,17 @@ impl KeylimeConfig {
             Ok(s) => bool::from_str(&s.to_lowercase())?,
             Err(_) => ALLOW_PAYLOAD_REV_ACTIONS,
         };
-        let ima_ml_path = ima_ml_path_get();
-        let measuredboot_ml_path = Path::new(MEASUREDBOOT_ML).to_path_buf();
+        let run_as = if permissions::get_euid() == 0 {
+            match config_get("cloud_agent", "run_as") {
+                Ok(user_group) => Some(user_group),
+                Err(_) => {
+                    warn!("Cannot drop privileges since 'run_as' is empty or missing in 'cloud_agent' section of keylime.conf.");
+                    None
+                }
+            }
+        } else {
+            None
+        };
 
         let mtls_enabled =
             match config_get("cloud_agent", "mtls_cert_enabled") {
@@ -367,10 +375,9 @@ impl KeylimeConfig {
             revocation_actions_dir,
             allow_payload_revocation_actions,
             work_dir,
-            ima_ml_path: ima_ml_path.display().to_string(),
-            measuredboot_ml_path: measuredboot_ml_path.display().to_string(),
             mtls_enabled,
             enable_insecure_payload,
+            run_as,
         })
     }
 }
@@ -379,6 +386,13 @@ impl KeylimeConfig {
 #[cfg(any(test, feature = "testing"))]
 impl Default for KeylimeConfig {
     fn default() -> Self {
+        // In case the tests are executed by privileged user
+        let run_as = if permissions::get_euid() == 0 {
+            Some("keylime:tss".to_string())
+        } else {
+            None
+        };
+
         KeylimeConfig {
             agent_ip: "127.0.0.1".to_string(),
             agent_port: "9002".to_string(),
@@ -409,10 +423,9 @@ impl Default for KeylimeConfig {
             revocation_actions_dir: "/usr/libexec/keylime".to_string(),
             allow_payload_revocation_actions: true,
             work_dir: WORK_DIR.to_string(),
-            ima_ml_path: IMA_ML.to_string(),
-            measuredboot_ml_path: MEASUREDBOOT_ML.to_string(),
             mtls_enabled: true,
             enable_insecure_payload: false,
+            run_as,
         }
     }
 }
@@ -558,33 +571,6 @@ fn config_get_env(section: &str, key: &str, env: &str) -> Result<String> {
             }
         }
         _ => config_get(section, key),
-    }
-}
-
-/*
- * Input: path directory to be changed owner to root
- *
- * If privilege requirement is met, change the owner of the path to root
- * This function is unsafely using libc. Result is returned indicating
- * execution result.
- */
-pub(crate) fn chownroot(path: &Path) -> Result<()> {
-    unsafe {
-        // check privilege
-        if libc::geteuid() != 0 {
-            error!("Privilege level unable to change ownership to root for file: {:?}", &path);
-            return Err(Error::Permission);
-        }
-
-        // change directory owner to root
-        let c_path = CString::new(path.as_os_str().as_bytes())?;
-        if libc::chown(c_path.as_ptr(), 0, 0) != 0 {
-            error!("Failed to change file {:?} owner.", &path);
-            return Err(Error::Permission);
-        }
-
-        info!("Changed file {:?} owner to root.", &path);
-        Ok(())
     }
 }
 

@@ -41,6 +41,7 @@ mod errors_handler;
 mod ima;
 mod keys_handler;
 mod notifications_handler;
+mod permissions;
 mod quotes_handler;
 mod registrar_agent;
 mod revocation;
@@ -104,9 +105,10 @@ pub struct QuoteData {
     allow_payload_revocation_actions: bool,
     secure_size: String,
     work_dir: PathBuf,
-    ima_ml_path: PathBuf,
-    measuredboot_ml_path: PathBuf,
+    ima_ml_file: Option<Mutex<fs::File>>,
+    measuredboot_ml_file: Option<Mutex<fs::File>>,
     ima_ml: Mutex<ImaMeasurementList>,
+    secure_mount: PathBuf,
 }
 
 // Parameters are based on Python codebase:
@@ -129,9 +131,8 @@ pub(crate) fn decrypt_payload(
 // both.
 pub(crate) fn setup_unzipped(
     config: &KeylimeConfig,
+    mount: &Path,
 ) -> Result<(PathBuf, PathBuf, PathBuf)> {
-    let work_dir = Path::new(&config.work_dir);
-    let mount = secure_mount::mount(work_dir, &config.secure_size)?;
     let unzipped = mount.join("unzipped");
 
     // clear any old data
@@ -225,7 +226,7 @@ pub(crate) fn optional_unzip_payload(
         info!("Unzipping payload {} to {:?}", &zipped_payload, unzipped);
 
         let mut source = fs::File::open(&zipped_payload_path)?;
-        uncompress_archive(&mut source, unzipped, Ownership::Preserve)?;
+        uncompress_archive(&mut source, unzipped, Ownership::Ignore)?;
     }
 
     Ok(())
@@ -236,6 +237,7 @@ pub(crate) async fn run_encrypted_payload(
     symm_key_cvar: Arc<Condvar>,
     payload: Arc<Mutex<Vec<u8>>>,
     config: &KeylimeConfig,
+    mount: &Path,
 ) -> Result<()> {
     // do nothing until actix server's handlers have updated the symmetric key
     let mut key = symm_key.lock().unwrap(); //#[allow_ci]
@@ -246,7 +248,8 @@ pub(crate) async fn run_encrypted_payload(
     let key = key.as_ref().unwrap(); //#[allow_ci]
     let dec_payload = decrypt_payload(payload, key)?;
 
-    let (unzipped, dec_payload_path, key_path) = setup_unzipped(config)?;
+    let (unzipped, dec_payload_path, key_path) =
+        setup_unzipped(config, mount)?;
 
     write_out_key_and_payload(
         &dec_payload,
@@ -308,11 +311,18 @@ async fn worker(
     symm_key_cvar: Arc<Condvar>,
     payload: Arc<Mutex<Vec<u8>>>,
     config: KeylimeConfig,
+    mount: PathBuf,
 ) -> Result<()> {
     // Only run payload scripts if mTLS is enabled or 'enable_insecure_payload' option is set
     if config.mtls_enabled || config.enable_insecure_payload {
-        run_encrypted_payload(symm_key, symm_key_cvar, payload, &config)
-            .await?;
+        run_encrypted_payload(
+            symm_key,
+            symm_key_cvar,
+            payload,
+            &config,
+            &mount,
+        )
+        .await?;
     } else {
         warn!("agent mTLS is disabled, and unless 'enable_insecure_payload' is set to 'True', payloads cannot be deployed'");
     }
@@ -320,7 +330,7 @@ async fn worker(
     // If with-zmq feature is enabled, run the service listening for ZeroMQ messages
     #[cfg(feature = "with-zmq")]
     if config.run_revocation {
-        return revocation::run_revocation_service(&config).await;
+        return revocation::run_revocation_service(&config, &mount).await;
     }
 
     Ok(())
@@ -337,17 +347,46 @@ async fn main() -> Result<()> {
         .get_matches();
 
     pretty_env_logger::init();
-    let mut ctx = tpm::get_tpm2_ctx()?;
 
-    //  Retrieve the TPM Vendor, this allows us to warn if someone is using a
-    // Software TPM ("SW")
-    if tss_esapi::utils::get_tpm_vendor(&mut ctx)?.contains("SW") {
-        warn!("INSECURE: Keylime is using a software TPM emulator rather than a real hardware TPM.");
-        warn!("INSECURE: The security of Keylime is NOT linked to a hardware root of trust.");
-        warn!("INSECURE: Only use Keylime in this mode for testing or debugging purposes.");
-    }
+    let ima_ml_path = ima_ml_path_get();
+    let ima_ml_file = if ima_ml_path.exists() {
+        match fs::File::open(&ima_ml_path) {
+            Ok(file) => Some(Mutex::new(file)),
+            Err(e) => {
+                warn!(
+                    "IMA measurement list not accessible: {}",
+                    ima_ml_path.display()
+                );
+                None
+            }
+        }
+    } else {
+        warn!(
+            "IMA measurement list not available: {}",
+            ima_ml_path.display()
+        );
+        None
+    };
 
-    info!("Starting server with API version {}...", API_VERSION);
+    let measuredboot_ml_path = Path::new(MEASUREDBOOT_ML);
+    let measuredboot_ml_file = if measuredboot_ml_path.exists() {
+        match fs::File::open(measuredboot_ml_path) {
+            Ok(file) => Some(Mutex::new(file)),
+            Err(e) => {
+                warn!(
+                    "Measured boot measurement list not accessible: {}",
+                    measuredboot_ml_path.display()
+                );
+                None
+            }
+        }
+    } else {
+        warn!(
+            "Measured boot measurement list not available: {}",
+            ima_ml_path.display()
+        );
+        None
+    };
 
     // Load config
     let config = KeylimeConfig::build()?;
@@ -364,15 +403,40 @@ async fn main() -> Result<()> {
         return Err(Error::Configuration(message));
     }
 
-    // Verify if the python shim is installed in the expected location
-    let python_shim =
-        PathBuf::from(&config.revocation_actions_dir).join("shim.py");
-    if !python_shim.exists() {
-        error!("Could not find python shim at {}", python_shim.display());
-        return Err(Error::Configuration(format!(
-            "Could not find python shim at {}",
-            python_shim.display()
-        )));
+    let work_dir = Path::new(&config.work_dir);
+    let mount = secure_mount::mount(work_dir, &config.secure_size)?;
+
+    // Drop privileges
+    if let Some(user_group) = &config.run_as {
+        permissions::chown(user_group, &mount);
+        permissions::run_as(user_group);
+    }
+
+    info!("Starting server with API version {}...", API_VERSION);
+
+    let mut ctx = tpm::get_tpm2_ctx()?;
+
+    //  Retrieve the TPM Vendor, this allows us to warn if someone is using a
+    // Software TPM ("SW")
+    if tss_esapi::utils::get_tpm_vendor(&mut ctx)?.contains("SW") {
+        warn!("INSECURE: Keylime is using a software TPM emulator rather than a real hardware TPM.");
+        warn!("INSECURE: The security of Keylime is NOT linked to a hardware root of trust.");
+        warn!("INSECURE: Only use Keylime in this mode for testing or debugging purposes.");
+    }
+
+    cfg_if::cfg_if! {
+        if #[cfg(feature = "legacy-python-actions")] {
+            // Verify if the python shim is installed in the expected location
+            let python_shim =
+                PathBuf::from(&config.revocation_actions_dir).join("shim.py");
+            if !python_shim.exists() {
+                error!("Could not find python shim at {}", python_shim.display());
+                return Err(Error::Configuration(format!(
+                    "Could not find python shim at {}",
+                    python_shim.display()
+                )));
+            }
+        }
     }
 
     // Gather EK values and certs
@@ -444,13 +508,13 @@ async fn main() -> Result<()> {
     // safeguards u and v keys in transit, is not part of the threat model.
     let (nk_pub, nk_priv) = crypto::rsa_generate_pair(2048)?;
 
-    let keylime_ca_cert =
-        crypto::load_x509(Path::new(&config.keylime_ca_path))?;
-
     let cert: openssl::x509::X509;
     let mtls_cert;
     let ssl_context;
     if config.mtls_enabled {
+        let keylime_ca_cert =
+            crypto::load_x509(Path::new(&config.keylime_ca_path))?;
+
         cert = crypto::generate_x509(&nk_priv, &config.agent_uuid)?;
         mtls_cert = Some(&cert);
         ssl_context = Some(crypto::generate_mtls_context(
@@ -515,9 +579,6 @@ async fn main() -> Result<()> {
     let actions_dir =
         Path::new(&config.revocation_actions_dir).canonicalize()?;
     let work_dir = Path::new(&config.work_dir).canonicalize()?;
-    let ima_ml_path = Path::new(&config.ima_ml_path).to_path_buf();
-    let measuredboot_ml_path =
-        Path::new(&config.measuredboot_ml_path).to_path_buf();
 
     let quotedata = web::Data::new(QuoteData {
         tpmcontext: Mutex::new(ctx),
@@ -541,9 +602,10 @@ async fn main() -> Result<()> {
             .allow_payload_revocation_actions,
         secure_size: config.secure_size.clone(),
         work_dir,
-        ima_ml_path,
-        measuredboot_ml_path,
+        ima_ml_file,
+        measuredboot_ml_file,
         ima_ml: Mutex::new(ImaMeasurementList::new()),
+        secure_mount: PathBuf::from(&mount),
     });
 
     let actix_server =
@@ -666,9 +728,14 @@ async fn main() -> Result<()> {
 
     let server_handle = server.handle();
     let server_task = rt::spawn(server).map_err(Error::from);
-    let worker_task =
-        rt::spawn(worker(symm_key, symm_key_cvar, payload, config.clone()))
-            .map_err(Error::from);
+    let worker_task = rt::spawn(worker(
+        symm_key,
+        symm_key_cvar,
+        payload,
+        config.clone(),
+        PathBuf::from(&mount),
+    ))
+    .map_err(Error::from);
 
     let result = try_join!(server_task, worker_task);
     server_handle.stop(true).await;
@@ -739,12 +806,23 @@ mod testing {
             let work_dir =
                 Path::new(env!("CARGO_MANIFEST_DIR")).join("tests");
 
+            let secure_mount = work_dir.join("tmpfs-dev");
+
             let ima_ml_path = Path::new(env!("CARGO_MANIFEST_DIR"))
                 .join("test-data/ima/ascii_runtime_measurements");
+            let ima_ml_file = match fs::File::open(ima_ml_path) {
+                Ok(file) => Some(Mutex::new(file)),
+                Err(err) => None,
+            };
 
             let measuredboot_ml_path = Path::new(
                 "/sys/kernel/security/tpm0/binary_bios_measurements",
             );
+            let measuredboot_ml_file =
+                match fs::File::open(measuredboot_ml_path) {
+                    Ok(file) => Some(Mutex::new(file)),
+                    Err(err) => None,
+                };
 
             Ok(QuoteData {
                 tpmcontext: Mutex::new(ctx),
@@ -768,9 +846,10 @@ mod testing {
                     .allow_payload_revocation_actions,
                 secure_size: test_config.secure_size,
                 work_dir,
-                ima_ml_path,
-                measuredboot_ml_path: measuredboot_ml_path.to_path_buf(),
+                ima_ml_file,
+                measuredboot_ml_file,
                 ima_ml: Mutex::new(ImaMeasurementList::new()),
+                secure_mount,
             })
         }
     }

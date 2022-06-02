@@ -22,6 +22,7 @@ use serde_json::Value;
 /// The lookup goes in the following order:
 /// 1. Look for pre-installed action
 /// 2. Look for the action in the tenant-provided initial payload
+/// Then, if python revocation actions are allowed:
 /// 3. Look for pre-installed Python action
 /// 4. Look for the Python action in the tenant-provided initial payload
 fn lookup_action(
@@ -44,7 +45,9 @@ fn lookup_action(
     let possible_paths = [
         (actions_dir.join(action), false, false),
         (payload_dir.join(action), false, true),
+        #[cfg(feature = "legacy-python-actions")]
         (actions_dir.join(&py_action), true, false),
+        #[cfg(feature = "legacy-python-actions")]
         (payload_dir.join(&py_action), true, true),
     ];
 
@@ -164,9 +167,8 @@ pub(crate) fn run_revocation_actions(
     actions_dir: &Path,
     allow_payload_actions: bool,
     work_dir: &Path,
+    mount: &Path,
 ) -> Result<Vec<Output>> {
-    let mount = secure_mount::mount(work_dir, secure_size)?;
-
     // The actions from the configuration file takes precedence over the actions from the
     // actions_list file
     let mut action_list = config_actions
@@ -267,6 +269,7 @@ pub(crate) fn get_revocation_cert_path(
 }
 
 /// Process revocation message received from REST API or 0mq
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn process_revocation(
     body: Value,
     cert_path: &Path,
@@ -275,6 +278,7 @@ pub(crate) fn process_revocation(
     actions_dir: &Path,
     allow_payload_revocation_actions: bool,
     work_dir: &Path,
+    mount: &Path,
 ) -> Result<()> {
     // Ensure we have a signature, otherwise continue the loop
     let signature = match body["signature"].as_str() {
@@ -334,6 +338,7 @@ pub(crate) fn process_revocation(
                 actions_dir,
                 allow_payload_revocation_actions,
                 work_dir,
+                mount,
             )?;
 
             for output in outputs {
@@ -366,9 +371,9 @@ pub(crate) fn process_revocation(
 #[cfg(feature = "with-zmq")]
 pub(crate) async fn run_revocation_service(
     config: &KeylimeConfig,
+    mount: &Path,
 ) -> Result<()> {
     let work_dir = Path::new(&config.work_dir);
-    let mount = secure_mount::mount(work_dir, &config.secure_size)?;
 
     // Connect to the service via 0mq
     let context = zmq::Context::new();
@@ -414,6 +419,7 @@ pub(crate) async fn run_revocation_service(
             &actions_dir,
             config.allow_payload_revocation_actions,
             work_dir,
+            mount,
         );
     }
     Ok(())
@@ -451,12 +457,13 @@ mod tests {
             actions_dir,
             true,
             work_dir.path(),
+            &tmpfs_dir,
         );
 
         assert!(outputs.is_ok());
         let outputs = outputs.unwrap(); //#[allow_ci]
 
-        assert!(outputs.len() == 4);
+        assert!(outputs.len() == 2);
 
         for output in outputs {
             assert_eq!(
@@ -490,6 +497,7 @@ mod tests {
             actions_dir,
             true,
             work_dir.path(),
+            &tmpfs_dir,
         );
         assert!(outputs.is_err());
     }
@@ -501,8 +509,16 @@ mod tests {
             env!("CARGO_MANIFEST_DIR"),
             "/tests/unzipped/test_ok.json"
         );
-        test_config.revocation_actions =
-            String::from("local_action_hello, local_action_payload");
+        cfg_if::cfg_if! {
+            if #[cfg(feature = "legacy-python-actions")] {
+                test_config.revocation_actions =
+                    String::from("local_action_hello, local_action_payload, local_action_stand_alone.py, local_action_rev_script1.py");
+            } else {
+                test_config.revocation_actions = String::from(
+                    "local_action_stand_alone.py, local_action_rev_script1.py",
+                );
+            }
+        }
         let json_str = std::fs::read_to_string(json_file).unwrap(); //#[allow_ci]
         let json = serde_json::from_str(&json_str).unwrap(); //#[allow_ci]
         let actions_dir =
@@ -520,12 +536,19 @@ mod tests {
             actions_dir,
             true,
             work_dir.path(),
+            &tmpfs_dir,
         );
 
         assert!(outputs.is_ok());
         let outputs = outputs.unwrap(); //#[allow_ci]
 
-        assert!(outputs.len() == 6);
+        cfg_if::cfg_if! {
+            if #[cfg(feature = "legacy-python-actions")] {
+                assert!(outputs.len() == 6);
+            } else {
+                assert!(outputs.len() == 4);
+            }
+        }
 
         for output in outputs {
             assert_eq!(
@@ -587,19 +610,24 @@ mod tests {
         let payload_dir = Path::new(&work_dir).join("unzipped/");
         let actions_dir = Path::new(&work_dir).join("actions/");
 
-        // Test local python action
-        let expected = format!("{}", &actions_dir.join("shim.py").display(),);
+        cfg_if::cfg_if! {
+            if #[cfg(feature = "legacy-python-actions")] {
+                // Test local python action
+                let expected =
+                    format!("{}", &actions_dir.join("shim.py").display(),);
 
-        assert_eq!(
-            lookup_action(
-                &payload_dir,
-                &actions_dir,
-                "local_action_hello",
-                true
-            )
-            .unwrap(), //#[allow_ci]
-            (expected, true, false)
-        );
+                assert_eq!(
+                    lookup_action(
+                        &payload_dir,
+                        &actions_dir,
+                        "local_action_hello",
+                        true
+                    )
+                    .unwrap(), //#[allow_ci]
+                    (expected, true, false)
+                );
+            }
+        }
 
         // Test local non-python action
         let expected = format!(
@@ -618,19 +646,24 @@ mod tests {
             (expected, false, false)
         );
 
-        // Test payload python action
-        let expected = format!("{}", &actions_dir.join("shim.py").display(),);
+        cfg_if::cfg_if! {
+            if #[cfg(feature = "legacy-python-actions")] {
+                // Test payload python action
+                let expected =
+                    format!("{}", &actions_dir.join("shim.py").display(),);
 
-        assert_eq!(
-            lookup_action(
-                &payload_dir,
-                &actions_dir,
-                "local_action_payload",
-                true,
-            )
-            .unwrap(), //#[allow_ci]
-            (expected, true, true),
-        );
+                assert_eq!(
+                    lookup_action(
+                        &payload_dir,
+                        &actions_dir,
+                        "local_action_payload",
+                        true,
+                    )
+                    .unwrap(), //#[allow_ci]
+                    (expected, true, true),
+                );
+            }
+        }
 
         // Test payload non-python action
         let expected = format!(
@@ -709,6 +742,7 @@ mod tests {
             Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/actions");
 
         let work_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests");
+        let tmpfs_dir = work_dir.join("tmpfs-dev");
 
         let result = process_revocation(
             body,
@@ -718,6 +752,7 @@ mod tests {
             &actions_dir,
             test_config.allow_payload_revocation_actions,
             &work_dir,
+            &tmpfs_dir,
         );
 
         assert!(result.is_ok());

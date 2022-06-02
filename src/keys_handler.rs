@@ -18,6 +18,7 @@ use std::{convert::TryInto, sync::Arc};
 pub struct KeylimeUKey {
     auth_tag: String,
     encrypted_key: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
     payload: Option<String>,
 }
 
@@ -280,13 +281,22 @@ mod tests {
     };
     use std::env;
     use std::fs;
-    use std::path::Path;
+    use std::path::{Path, PathBuf};
     use std::sync::Arc;
 
     #[cfg(feature = "testing")]
     async fn test_u_or_v_key(key_len: usize, payload: Option<&[u8]>) {
         let test_config = KeylimeConfig::default();
-        let quotedata = web::Data::new(QuoteData::fixture().unwrap()); //#[allow_ci]
+        let mut fixture = QuoteData::fixture().unwrap(); //#[allow_ci]
+
+        // Create temporary working directory and secure mount
+        let temp_workdir = tempfile::tempdir().unwrap(); //#[allow_ci]
+        fixture.secure_mount =
+            PathBuf::from(&temp_workdir.path().join("tmpfs-dev"));
+        fs::create_dir(&fixture.secure_mount).unwrap(); //#[allow_ci]
+
+        let quotedata = web::Data::new(fixture);
+
         let mut app = test::init_service(
             App::new()
                 .app_data(quotedata.clone())
@@ -308,18 +318,20 @@ mod tests {
             Arc::clone(&quotedata.payload_symm_key_cvar);
         let encr_payload_clone = Arc::clone(&quotedata.encr_payload);
         let test_config_clone = test_config.clone();
+        let secure_mount = PathBuf::from(&quotedata.secure_mount);
 
         assert!(arbiter.spawn(Box::pin(async move {
-            if crate::run_encrypted_payload(
+            let result = crate::run_encrypted_payload(
                 payload_symm_key_clone,
                 payload_symm_key_cvar_clone,
                 encr_payload_clone,
                 &test_config_clone,
+                &secure_mount,
             )
-            .await
-            .is_err()
-            {
-                debug!("payload run failed");
+            .await;
+
+            if result.is_err() {
+                debug!("payload run failed: {:?}", result);
             }
             if !Arbiter::current().stop() {
                 debug!("couldn't stop current arbiter");

@@ -10,7 +10,10 @@ use crate::serialization::serialize_maybe_base64;
 use actix_web::{web, HttpRequest, HttpResponse, Responder};
 use log::*;
 use serde::{Deserialize, Serialize};
-use std::fs::{read, read_to_string};
+use std::{
+    fs::{read, read_to_string},
+    io::{Read, Seek},
+};
 use tss_esapi::structures::PcrSlot;
 
 #[derive(Deserialize)]
@@ -32,9 +35,13 @@ pub(crate) struct KeylimeQuote {
     pub hash_alg: String,
     pub enc_alg: String,
     pub sign_alg: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub pubkey: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub ima_measurement_list: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub mb_measurement_list: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub ima_measurement_list_entry: Option<u64>,
 }
 
@@ -211,16 +218,16 @@ pub async fn integrity(
     let mut mb_measurement_list = None;
     match tpm::check_mask(&param.mask, &PcrSlot::Slot0) {
         Ok(true) => {
-            let measuredboot_ml = read(&data.measuredboot_ml_path);
-            mb_measurement_list = match measuredboot_ml {
-                Ok(ml) => Some(base64::encode(ml)),
-                Err(e) => {
-                    warn!(
-                        "TPM2 event log not available: {}",
-                        data.measuredboot_ml_path.display()
-                    );
-                    None
-                }
+            if let Some(measuredboot_ml_file) = &data.measuredboot_ml_file {
+                let mut ml = Vec::<u8>::new();
+                let mut f = measuredboot_ml_file.lock().unwrap(); //#[allow_ci]
+                mb_measurement_list = match f.read_to_end(&mut ml) {
+                    Ok(_) => Some(base64::encode(ml)),
+                    Err(e) => {
+                        warn!("Could not read TPM2 event log: {}", e);
+                        None
+                    }
+                };
             }
         }
         Err(e) => {
@@ -236,23 +243,26 @@ pub async fn integrity(
     }
 
     // Generate the measurement list
-    let ima_ml_path = &data.ima_ml_path;
     let (ima_measurement_list, ima_measurement_list_entry, num_entries) =
-        match read_measurement_list(
-            &mut data.ima_ml.lock().unwrap(), //#[allow_ci]
-            ima_ml_path,
-            nth_entry,
-        ) {
-            Ok(result) => result,
-            Err(e) => {
-                debug!("Unable to read measurement list: {:?}", e);
-                return HttpResponse::InternalServerError().json(
-                    JsonWrapper::error(
-                        500,
-                        "Unable to retrieve quote".to_string(),
-                    ),
-                );
+        if let Some(ima_file) = &data.ima_ml_file {
+            match read_measurement_list(
+                &mut data.ima_ml.lock().unwrap(), //#[allow_ci]
+                &mut ima_file.lock().unwrap(),    //#[allow_ci]
+                nth_entry,
+            ) {
+                Ok(result) => result,
+                Err(e) => {
+                    debug!("Unable to read measurement list: {:?}", e);
+                    return HttpResponse::InternalServerError().json(
+                        JsonWrapper::error(
+                            500,
+                            "Unable to retrieve quote".to_string(),
+                        ),
+                    );
+                }
             }
+        } else {
+            (None, None, None)
         };
 
     // Generate the final quote based on the ID quote
@@ -349,22 +359,32 @@ mod tests {
                 .public_eq(&quotedata.pub_key)
         );
 
-        let ima_ml_path = &quotedata.ima_ml_path;
-        let ima_ml = read_to_string(ima_ml_path).unwrap(); //#[allow_ci]
-        assert_eq!(
-            result.results.ima_measurement_list.unwrap().as_str(), //#[allow_ci]
-            ima_ml
-        );
-        assert!(result.results.quote.starts_with('r'));
+        if let Some(ima_mutex) = &quotedata.ima_ml_file {
+            let mut ima_ml_file = ima_mutex.lock().unwrap(); //#[allow_ci]
+            ima_ml_file.rewind().unwrap(); //#[allow_ci]
+            let mut ima_ml = String::new();
+            match ima_ml_file.read_to_string(&mut ima_ml) {
+                Ok(_) => {
+                    assert_eq!(
+                        result.results.ima_measurement_list.unwrap().as_str(), //#[allow_ci]
+                        ima_ml
+                    );
+                    assert!(result.results.quote.starts_with('r'));
 
-        let mut context = quotedata.tpmcontext.lock().unwrap(); //#[allow_ci]
-        tpm::testing::check_quote(
-            &mut context,
-            quotedata.ak_handle,
-            &result.results.quote,
-            b"1234567890ABCDEFHIJ",
-        )
-        .expect("unable to verify quote");
+                    let mut context = quotedata.tpmcontext.lock().unwrap(); //#[allow_ci]
+                    tpm::testing::check_quote(
+                        &mut context,
+                        quotedata.ak_handle,
+                        &result.results.quote,
+                        b"1234567890ABCDEFHIJ",
+                    )
+                    .expect("unable to verify quote");
+                }
+                Err(e) => panic!("Could not read IMA file: {}", e), //#[allow_ci]
+            }
+        } else {
+            panic!("IMA file was None"); //#[allow_ci]
+        }
     }
 
     #[actix_rt::test]
@@ -393,13 +413,23 @@ mod tests {
         assert_eq!(result.results.enc_alg.as_str(), "rsa");
         assert_eq!(result.results.sign_alg.as_str(), "rsassa");
 
-        let ima_ml_path = &quotedata.ima_ml_path;
-        let ima_ml = read_to_string(&ima_ml_path).unwrap(); //#[allow_ci]
-        assert_eq!(
-            result.results.ima_measurement_list.unwrap().as_str(), //#[allow_ci]
-            ima_ml
-        );
-        assert!(result.results.quote.starts_with('r'));
+        if let Some(ima_mutex) = &quotedata.ima_ml_file {
+            let mut ima_ml_file = ima_mutex.lock().unwrap(); //#[allow_ci]
+            ima_ml_file.rewind().unwrap(); //#[allow_ci]
+            let mut ima_ml = String::new();
+            match ima_ml_file.read_to_string(&mut ima_ml) {
+                Ok(_) => {
+                    assert_eq!(
+                        result.results.ima_measurement_list.unwrap().as_str(), //#[allow_ci]
+                        ima_ml
+                    );
+                    assert!(result.results.quote.starts_with('r'));
+                }
+                Err(e) => panic!("Could not read IMA file: {}", e), //#[allow_ci]
+            }
+        } else {
+            panic!("IMA file was None"); //#[allow_ci]
+        }
 
         let mut context = quotedata.tpmcontext.lock().unwrap(); //#[allow_ci]
         tpm::testing::check_quote(
@@ -409,5 +439,34 @@ mod tests {
             b"1234567890ABCDEFHIJ",
         )
         .expect("unable to verify quote");
+    }
+
+    #[actix_rt::test]
+    async fn test_missing_ima_file() {
+        let mut quotedata = QuoteData::fixture().unwrap(); //#[allow_ci]
+                                                           // Remove the IMA log file from the context
+        quotedata.ima_ml_file = None;
+        let data = web::Data::new(quotedata);
+        let mut app =
+            test::init_service(App::new().app_data(data.clone()).route(
+                &format!("/{}/quotes/integrity", API_VERSION),
+                web::get().to(integrity),
+            ))
+            .await;
+
+        let req = test::TestRequest::get()
+            .uri(&format!(
+                "/{}/quotes/integrity?nonce=1234567890ABCDEFHIJ&mask=0x408000&vmask=0x808000&partial=0",
+                API_VERSION,
+            ))
+            .to_request();
+
+        let resp = test::call_service(&app, req).await;
+        assert!(resp.status().is_success());
+
+        let result: JsonWrapper<KeylimeQuote> =
+            test::read_body_json(resp).await;
+        assert!(result.results.ima_measurement_list.is_none());
+        assert!(result.results.ima_measurement_list_entry.is_none());
     }
 }
