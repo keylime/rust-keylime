@@ -3,10 +3,10 @@
 
 #[macro_use]
 use log::*;
-
 use std::convert::{TryFrom, TryInto};
 use std::io::prelude::*;
 use std::str::FromStr;
+use tss_esapi::structures::PublicBuffer;
 
 use crate::{
     quotes_handler::KeylimeQuote, Error as KeylimeError, QuoteData, Result,
@@ -48,6 +48,7 @@ use tss_esapi::{
         PcrSelectionListBuilder, PcrSlot, Signature, SignatureScheme,
     },
     tcti_ldr::TctiNameConf,
+    traits::Marshall,
     tss2_esys::{
         Tss2_MU_TPM2B_PUBLIC_Marshal, Tss2_MU_TPMS_ATTEST_Marshal,
         Tss2_MU_TPMS_ATTEST_Unmarshal, Tss2_MU_TPMT_SIGNATURE_Marshal,
@@ -103,58 +104,10 @@ pub(crate) fn create_ek(
         }
     };
     let (tpm_pub, _, _) = context.read_public(handle)?;
-    let tpm_pub_vec = pub_to_vec(tpm_pub.try_into()?);
+    let tpm_pub_vec = PublicBuffer::try_from(tpm_pub)?.marshall()?;
 
     Ok((handle, cert, tpm_pub_vec))
 }
-
-// Multiple TPM objects need to be marshaled for Quoting. This macro will
-// create the appropriate functions when called below. The macro is intended
-// to help with any future similar marshaling functions.
-macro_rules! create_marshal_fn {
-    ($func:ident, $tpmobj:ty, $marshal:ident) => {
-        fn $func(t: $tpmobj) -> Vec<u8> {
-            let mut offset = 0;
-            let size = std::mem::size_of::<$tpmobj>();
-
-            let mut tpm_vec = Vec::with_capacity(size);
-            unsafe {
-                let res = $marshal(
-                    &t,
-                    tpm_vec.as_mut_ptr(),
-                    tpm_vec.capacity().try_into().unwrap(), //#[allow_ci]
-                    &mut offset,
-                );
-                if res != 0 {
-                    panic!("out of memory or invalid data from TPM"); //#[allow_ci]
-                }
-
-                // offset is a buffer, so after marshaling function is called it holds the
-                // number of bytes written to the vector
-                tpm_vec.set_len(offset as usize);
-            }
-
-            tpm_vec
-        }
-    };
-}
-
-// These marshaling functions use the macro above and are based on this format:
-// https://github.com/fedora-iot/clevis-pin-tpm2/blob/main/src/tpm_objects.rs#L64
-// ... and on these marshaling functions:
-// https://github.com/parallaxsecond/rust-tss-esapi/blob/main/tss-esapi-sys/src/ \
-// bindings/x86_64-unknown-linux-gnu.rs#L16010
-//
-// Functions can be created using the following form:
-// create_marshal_fn!(name_of_function_to_create, struct_to_be_marshaled, marshaling_function);
-//
-create_marshal_fn!(pub_to_vec, TPM2B_PUBLIC, Tss2_MU_TPM2B_PUBLIC_Marshal);
-create_marshal_fn!(
-    sig_to_vec,
-    TPMT_SIGNATURE,
-    Tss2_MU_TPMT_SIGNATURE_Marshal
-);
-create_marshal_fn!(tpms_att_to_vec, TPMS_ATTEST, Tss2_MU_TPMS_ATTEST_Marshal);
 
 // Ensure that TPML_PCR_SELECTION and TPML_DIGEST have known sizes
 assert_eq_size!(TPML_PCR_SELECTION, [u8; 132]);
@@ -230,7 +183,7 @@ pub(crate) fn create_ak(
     let ak =
         ak::create_ak(ctx, handle, hash_alg, sign_alg, None, DefaultKey)?;
     let ak_tpm2b_pub = ak.out_public.clone();
-    let tpm2_pub_vec = pub_to_vec(ak_tpm2b_pub.try_into()?);
+    let tpm2_pub_vec = PublicBuffer::try_from(ak_tpm2b_pub)?.marshall()?;
     let ak_handle =
         ak::load_ak(ctx, handle, None, ak.out_private, ak.out_public)?;
     let (_, name, _) = ctx.read_public(ak_handle)?;
@@ -252,7 +205,7 @@ pub(crate) fn load_ak(
     let ak_handle: KeyHandle = ctx.context_load(ak)?.into();
 
     let (ak_public, ak_name, _) = ctx.read_public(ak_handle)?;
-    let ak_pub_vec = pub_to_vec(ak_public.try_into()?);
+    let ak_pub_vec = PublicBuffer::try_from(ak_public)?.marshall()?;
     Ok((ak_handle, ak_name, ak_pub_vec))
 }
 
@@ -453,8 +406,8 @@ pub(crate) fn encode_quote_string(
 ) -> Result<String> {
     // marshal structs to vec in expected formats. these formats are
     // dictated by tpm2_tools.
-    let att_vec = tpms_att_to_vec(att.into());
-    let sig_vec = sig_to_vec(sig.try_into()?);
+    let att_vec = att.marshall()?;
+    let sig_vec = sig.marshall()?;
     let pcr_vec = pcrdata_to_vec(pcrs_read, pcr_data);
 
     // base64 encoding
