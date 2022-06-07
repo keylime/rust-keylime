@@ -3,6 +3,8 @@
 
 #[macro_use]
 use log::*;
+use serde::ser::{Error, Serialize, SerializeStruct, Serializer};
+use serde::Deserialize;
 use std::convert::{TryFrom, TryInto};
 use std::io::prelude::*;
 use std::str::FromStr;
@@ -177,46 +179,41 @@ pub(crate) fn ek_from_hex_str(val: &str) -> Result<KeyHandle> {
     Ok(KeyHandle::from(u32::from_str_radix(val, 16)?))
 }
 
-/* Creates AK and returns a tuple of its handle, name, and tpm2b_public as a vector.
- *
- * Input: Connection context, parent key's KeyHandle.
- * Return: (Key handle, key name, TPM public object as a vector)
- * Example call:
- * let (key, name, tpm_pub) = tpm::create_ak(context, ek_handle)
+#[derive(Debug, Clone)]
+pub(crate) struct AKResult {
+    pub public: tss_esapi::structures::Public,
+    pub private: tss_esapi::structures::Private,
+}
+
+/* Creates AK
 */
 pub(crate) fn create_ak(
     ctx: &mut Context,
     handle: KeyHandle,
     hash_alg: HashingAlgorithm,
     sign_alg: SignatureSchemeAlgorithm,
-) -> Result<(KeyHandle, Name, Vec<u8>)> {
+) -> Result<AKResult> {
     let ak =
         ak::create_ak(ctx, handle, hash_alg, sign_alg, None, DefaultKey)?;
-    let ak_tpm2b_pub = ak.out_public.clone();
-    let tpm2_pub_vec = PublicBuffer::try_from(ak_tpm2b_pub)?.marshall()?;
-    let ak_handle =
-        ak::load_ak(ctx, handle, None, ak.out_private, ak.out_public)?;
-    let (_, name, _) = ctx.read_public(ak_handle)?;
-    Ok((ak_handle, name, tpm2_pub_vec))
-}
-
-pub(crate) fn store_ak(
-    ctx: &mut Context,
-    ak_handle: KeyHandle,
-) -> Result<TpmsContext> {
-    let ak_context = ctx.context_save(ak_handle.into())?;
-    Ok(ak_context)
+    Ok(AKResult {
+        public: ak.out_public,
+        private: ak.out_private,
+    })
 }
 
 pub(crate) fn load_ak(
     ctx: &mut Context,
-    ak: TpmsContext,
-) -> Result<(KeyHandle, Name, Vec<u8>)> {
-    let ak_handle: KeyHandle = ctx.context_load(ak)?.into();
-
-    let (ak_public, ak_name, _) = ctx.read_public(ak_handle)?;
-    let ak_pub_vec = PublicBuffer::try_from(ak_public)?.marshall()?;
-    Ok((ak_handle, ak_name, ak_pub_vec))
+    handle: KeyHandle,
+    ak: &AKResult,
+) -> Result<KeyHandle> {
+    let ak_handle = ak::load_ak(
+        ctx,
+        handle,
+        None,
+        ak.private.clone(),
+        ak.public.clone(),
+    )?;
+    Ok(ak_handle)
 }
 
 const TSS_MAGIC: u32 = 3135029470;

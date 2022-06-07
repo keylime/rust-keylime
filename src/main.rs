@@ -442,57 +442,54 @@ async fn main() -> Result<()> {
     // Gather EK values and certs
     let ek_result = tpm::create_ek(&mut ctx, config.enc_alg.into())?;
 
-    // Try to load persistent TPM data
-    let tpm_data = config.tpm_data.clone().and_then(|data|
+    // Try to load persistent Agent data
+    let agent_data = config.agent_data.clone().and_then(|data|
         match data.valid(config.hash_alg, config.sign_alg) {
             true => Some(data),
             false => {
                 warn!(
                     "Not using old {} because it is not valid with current configuration",
-                    TPM_DATA
+                    AGENT_DATA
                 );
                 None
             },
         }
     );
 
-    // Try to reuse old AK from TpmData
-    let old_ak = tpm_data.and_then(|data| {
-        match tpm::load_ak(&mut ctx, data.ak_context) {
-            Ok(ak_data) => {
-                info!("Loaded old AK context from {}", TPM_DATA);
-                Some(ak_data)
-            }
-            Err(e) => {
-                warn!(
-                    "Loading old AK context from {} failed: {}",
-                    TPM_DATA, e
-                );
-                None
+    // Try to reuse old AK from Agent Data
+    let old_ak = match &agent_data {
+        Some(data) => {
+            let ak_result = data.get_ak()?;
+            match tpm::load_ak(&mut ctx, ek_result.key_handle, &ak_result) {
+                Ok(ak_handle) => {
+                    info!("Loaded old AK key from {}", AGENT_DATA);
+                    Some((ak_handle, ak_result))
+                }
+                Err(e) => {
+                    warn!(
+                        "Loading old AK key from {} failed: {}",
+                        AGENT_DATA, e
+                    );
+                    None
+                }
             }
         }
-    });
+        None => None,
+    };
 
-    // Use old AK or generate a new one and update the TpmData
-    let (ak_handle, ak_name, ak_tpm2b_pub) = match old_ak {
-        Some(data) => data,
+    // Use old AK or generate a new one and update the AgentData
+    let (ak_handle, ak) = match old_ak {
+        Some((ak_handle, ak)) => (ak_handle, ak),
         None => {
-            info!("Generating new AK");
             let new_ak = tpm::create_ak(
                 &mut ctx,
                 ek_result.key_handle,
                 config.hash_alg.into(),
                 config.sign_alg.into(),
             )?;
-            // Only updating tpmdata.json if a new AK was used
-            info!("Storing updated TPM data in {}", TPM_DATA);
-            TpmData {
-                ak_hash_alg: config.hash_alg,
-                ak_sign_alg: config.sign_alg,
-                ak_context: tpm::store_ak(&mut ctx, new_ak.0)?,
-            }
-            .store(Path::new(&config.tpm_data_path))?;
-            new_ak
+            let ak_handle =
+                tpm::load_ak(&mut ctx, ek_result.key_handle, &new_ak)?;
+            (ak_handle, new_ak)
         }
     };
 
@@ -509,7 +506,11 @@ async fn main() -> Result<()> {
     //
     // Since we store the u key in memory, discarding this key, which
     // safeguards u and v keys in transit, is not part of the threat model.
-    let (nk_pub, nk_priv) = crypto::rsa_generate_pair(2048)?;
+
+    let (nk_pub, nk_priv) = match &agent_data {
+        Some(data) => data.get_nk()?,
+        None => crypto::rsa_generate_pair(2048)?,
+    };
 
     let cert: openssl::x509::X509;
     let mtls_cert;
@@ -518,7 +519,13 @@ async fn main() -> Result<()> {
         let keylime_ca_cert =
             crypto::load_x509(Path::new(&config.keylime_ca_path))?;
 
-        cert = crypto::generate_x509(&nk_priv, &config.agent_uuid)?;
+        cert = match &agent_data {
+            Some(data) => match data.get_mtls_cert()? {
+                Some(cert) => cert,
+                None => crypto::generate_x509(&nk_priv, &config.agent_uuid)?,
+            },
+            None => crypto::generate_x509(&nk_priv, &config.agent_uuid)?,
+        };
         mtls_cert = Some(&cert);
         ssl_context = Some(crypto::generate_mtls_context(
             &cert,
@@ -531,6 +538,17 @@ async fn main() -> Result<()> {
         warn!("mTLS disabled, Tenant and Verifier will reach out to agent via HTTP");
     }
 
+    // Store new AgentData
+    let agent_data_new = AgentData::create(
+        config.hash_alg,
+        config.sign_alg,
+        &ak,
+        &nk_pub,
+        &nk_priv,
+        &mtls_cert,
+    )?;
+    agent_data_new.store(Path::new(&config.agent_data_path))?;
+
     {
         // Request keyblob material
         let keyblob = registrar_agent::do_register_agent(
@@ -539,7 +557,7 @@ async fn main() -> Result<()> {
             &config.agent_uuid,
             &PublicBuffer::try_from(ek_result.public.clone())?.marshall()?,
             ek_result.ek_cert,
-            &ak_tpm2b_pub,
+            &PublicBuffer::try_from(ak.public)?.marshall()?,
             mtls_cert,
             config.agent_contact_ip.clone(),
             config.agent_contact_port,
@@ -778,12 +796,16 @@ mod testing {
             let ek_result =
                 tpm::create_ek(&mut ctx, test_config.enc_alg.into())?;
 
-            let (ak_handle, ak_name, ak_tpm2b_pub) = tpm::create_ak(
+            let ak_result = tpm::create_ak(
                 &mut ctx,
                 ek_result.key_handle,
                 test_config.hash_alg.into(),
                 test_config.sign_alg.into(),
             )?;
+            let ak_handle =
+                tpm::load_ak(&mut ctx, ek_result.key_handle, &ak_result)?;
+            let ak_tpm2b_pub =
+                PublicBuffer::try_from(ak_result.public)?.marshall()?;
 
             let rsa_key_path = Path::new(env!("CARGO_MANIFEST_DIR"))
                 .join("test-data")
