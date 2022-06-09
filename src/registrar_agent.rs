@@ -149,6 +149,7 @@ pub(crate) async fn do_register_agent(
     }
 }
 
+#[cfg(feature = "testing")]
 #[cfg(test)]
 mod tests {
     use super::*;
