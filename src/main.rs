@@ -51,7 +51,7 @@ mod tpm;
 mod version_handler;
 
 use actix_web::{dev::Service, http, middleware, rt, web, App, HttpServer};
-use clap::{App as ClapApp, Arg};
+use clap::{Arg, Command as ClapApp};
 use common::*;
 use compress_tools::*;
 use error::{Error, Result};
