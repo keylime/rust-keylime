@@ -43,16 +43,19 @@ tss-esapi = "7.1.0"
 thiserror = "1.0"
 uuid = {version = "0.8", features = ["v4"]}
 zmq = {version = "0.9.2", optional = true}
+# wiremock was moved to be a regular dependency because optional
+# dev-dependencies are not supported
+# see: https://github.com/rust-lang/cargo/issues/1596
+wiremock = {version = "0.5", optional = true}
 
 [dev-dependencies]
 actix-rt = "2"
-wiremock = "0.5"
 
 [features]
 # The features enabled by default
 default = ["with-zmq", "legacy-python-actions"]
 # this should change to dev-dependencies when we have integration testing
-testing = []
+testing = ["wiremock"]
 # Whether the agent should be compiled with support to listen for notification
 # messages on ZeroMQ
 with-zmq = ["zmq"]
