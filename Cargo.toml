@@ -41,7 +41,7 @@ tempfile = "3.0.4"
 tokio = {version = "1.13.1", features = ["full"]}
 tss-esapi = "7.1.0"
 thiserror = "1.0"
-uuid = {version = "0.8", features = ["v4"]}
+uuid = {version = "1.1", features = ["v4"]}
 zmq = {version = "0.9.2", optional = true}
 # wiremock was moved to be a regular dependency because optional
 # dev-dependencies are not supported
