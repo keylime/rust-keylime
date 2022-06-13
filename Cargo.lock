@@ -1062,7 +1062,7 @@ dependencies = [
  "log",
  "openssl",
  "picky-asn1-der 0.3.1",
- "picky-asn1-x509",
+ "picky-asn1-x509 0.7.1",
  "pretty_env_logger",
  "reqwest",
  "rust-ini",
@@ -1432,6 +1432,19 @@ dependencies = [
  "oid",
  "picky-asn1 0.3.3",
  "picky-asn1-der 0.2.5",
+ "serde",
+]
+
+[[package]]
+name = "picky-asn1-x509"
+version = "0.7.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "43aa17ded8046e4809d21f0a007439ebcd1aa23e88003a6d68ba9992b26c96f7"
+dependencies = [
+ "base64",
+ "oid",
+ "picky-asn1 0.5.0",
+ "picky-asn1-der 0.3.1",
  "serde",
 ]
 
@@ -2117,7 +2130,7 @@ dependencies = [
  "num-traits",
  "oid",
  "picky-asn1 0.3.3",
- "picky-asn1-x509",
+ "picky-asn1-x509 0.6.1",
  "regex",
  "serde",
  "tss-esapi-sys",
