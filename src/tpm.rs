@@ -52,15 +52,20 @@ use tss_esapi::{
     tss2_esys::{
         Tss2_MU_TPM2B_PUBLIC_Marshal, Tss2_MU_TPMS_ATTEST_Marshal,
         Tss2_MU_TPMS_ATTEST_Unmarshal, Tss2_MU_TPMT_SIGNATURE_Marshal,
-        TPM2B_ATTEST, TPM2B_PUBLIC, TPML_DIGEST, TPML_PCR_SELECTION,
-        TPMS_ATTEST, TPMS_SCHEME_HASH, TPMT_SIGNATURE, TPMT_SIG_SCHEME,
-        TPMU_SIG_SCHEME,
+        TPM2B_ATTEST, TPM2B_DIGEST, TPM2B_PUBLIC, TPML_DIGEST,
+        TPML_PCR_SELECTION, TPMS_ATTEST, TPMS_PCR_SELECTION,
+        TPMS_SCHEME_HASH, TPMT_SIGNATURE, TPMT_SIG_SCHEME, TPMU_SIG_SCHEME,
     },
     utils::TpmsContext,
     Context,
 };
 
 pub const MAX_NONCE_SIZE: usize = 64;
+pub const TPML_DIGEST_SIZE: usize = std::mem::size_of::<TPML_DIGEST>();
+pub const TPML_PCR_SELECTION_SIZE: usize =
+    std::mem::size_of::<TPML_PCR_SELECTION>();
+pub const TPMS_PCR_SELECTION_SIZE: usize =
+    std::mem::size_of::<TPMS_PCR_SELECTION>();
 
 /*
  * Input: None
@@ -123,6 +128,95 @@ pub(crate) fn create_ek(
 assert_eq_size!(TPML_PCR_SELECTION, [u8; 132]);
 assert_eq_size!(TPML_DIGEST, [u8; 532]);
 
+// Serialize a TPML_PCR_SELECTION into a Vec<u8>
+// The serialization will adjust the data endianness as necessary and add paddings to keep the
+// memory aligment.
+pub(crate) fn serialize_pcrsel(
+    pcr_selection: &TPML_PCR_SELECTION,
+) -> Vec<u8> {
+    let mut output = Vec::with_capacity(TPML_PCR_SELECTION_SIZE);
+    output.extend(u32::to_le_bytes(pcr_selection.count));
+    for selection in pcr_selection.pcrSelections.iter() {
+        output.extend(selection.hash.to_le_bytes());
+        output.extend(selection.sizeofSelect.to_le_bytes());
+        output.extend(selection.pcrSelect);
+        output.extend([0u8; 1]); // padding to keep the memory alignment
+    }
+    output
+}
+
+// Deserialize a TPML_PCR_SELECTION from a &[u8] slice.
+// The deserialization will adjust the data endianness as necessary.
+pub(crate) fn deserialize_pcrsel(
+    pcrsel_vec: &[u8],
+) -> Result<TPML_PCR_SELECTION> {
+    if pcrsel_vec.len() != TPML_PCR_SELECTION_SIZE {
+        return Err(KeylimeError::InvalidRequest);
+    }
+
+    let mut reader = std::io::Cursor::new(pcrsel_vec);
+    let mut count_vec = [0u8; 4];
+    reader.read_exact(&mut count_vec)?;
+    let count = u32::from_le_bytes(count_vec);
+
+    let mut pcr_selections: [TPMS_PCR_SELECTION; 16] =
+        [TPMS_PCR_SELECTION::default(); 16];
+
+    for selection in &mut pcr_selections {
+        let mut hash_vec = [0u8; 2];
+        reader.read_exact(&mut hash_vec)?;
+        selection.hash = u16::from_le_bytes(hash_vec);
+
+        let mut size_vec = [0u8; 1];
+        reader.read_exact(&mut size_vec)?;
+        selection.sizeofSelect = u8::from_le_bytes(size_vec);
+
+        reader.read_exact(&mut selection.pcrSelect)?;
+    }
+
+    Ok(TPML_PCR_SELECTION {
+        count,
+        pcrSelections: pcr_selections,
+    })
+}
+
+// Serialize a TPML_DIGEST into a Vec<u8>
+// The serialization will adjust the data endianness as necessary.
+pub(crate) fn serialize_digest(digest_list: &TPML_DIGEST) -> Vec<u8> {
+    let mut output = Vec::with_capacity(TPML_DIGEST_SIZE);
+    output.extend(u32::to_le_bytes(digest_list.count));
+    for digest in digest_list.digests.iter() {
+        output.extend(digest.size.to_le_bytes());
+        output.extend(digest.buffer);
+    }
+    output
+}
+
+// Deserialize a TPML_DIGEST from a &[u8] slice.
+// The deserialization will adjust the data endianness as necessary.
+pub(crate) fn deserialize_digest(digest_vec: &[u8]) -> Result<TPML_DIGEST> {
+    if digest_vec.len() != TPML_DIGEST_SIZE {
+        return Err(KeylimeError::InvalidRequest);
+    }
+
+    let mut reader = std::io::Cursor::new(digest_vec);
+    let mut count_vec = [0u8; 4];
+
+    reader.read_exact(&mut count_vec)?;
+    let count = u32::from_le_bytes(count_vec);
+
+    let mut digests: [TPM2B_DIGEST; 8] = [TPM2B_DIGEST::default(); 8];
+
+    for digest in &mut digests {
+        let mut size_vec = [0u8; 2];
+        reader.read_exact(&mut size_vec)?;
+        digest.size = u16::from_le_bytes(size_vec);
+        reader.read_exact(&mut digest.buffer)?;
+    }
+
+    Ok(TPML_DIGEST { count, digests })
+}
+
 // Recreate how tpm2-tools creates the PCR out file. Roughly, this is a
 // TPML_PCR_SELECTION + number of TPML_DIGESTS + TPML_DIGESTs.
 // Reference:
@@ -140,16 +234,14 @@ pub(crate) fn pcrdata_to_vec(
     const DIGEST_SIZE: usize = std::mem::size_of::<TPML_DIGEST>();
 
     let mut pcrsel: TPML_PCR_SELECTION = selection_list.into();
-    pcrsel.count = pcrsel.count.to_le();
-    let pcrsel_vec: [u8; PCRSEL_SIZE] =
-        unsafe { std::mem::transmute(pcrsel) };
+    let pcrsel_vec = serialize_pcrsel(&pcrsel);
 
     let digest: Vec<TPML_DIGEST> = pcrdata.into();
     let num_tpml_digests = digest.len() as u32;
     let mut digest_vec = Vec::with_capacity(digest.len() * DIGEST_SIZE);
 
     for d in digest {
-        let vec: [u8; DIGEST_SIZE] = unsafe { std::mem::transmute(d) };
+        let vec = serialize_digest(&d);
         digest_vec.extend(vec);
     }
 
@@ -665,41 +757,24 @@ pub mod testing {
     );
 
     fn vec_to_pcrdata(val: &[u8]) -> Result<(PcrSelectionList, PcrData)> {
-        const PCRSEL_SIZE: usize = std::mem::size_of::<TPML_PCR_SELECTION>();
-        const DIGEST_SIZE: usize = std::mem::size_of::<TPML_DIGEST>();
-
         let mut reader = std::io::Cursor::new(val);
-        let mut pcrsel_vec = [0u8; PCRSEL_SIZE];
-        let len = reader.read(&mut pcrsel_vec)?;
-        if len != pcrsel_vec.len() {
-            return Err(KeylimeError::InvalidRequest);
-        }
-        let mut pcrsel = unsafe {
-            std::mem::transmute::<[u8; PCRSEL_SIZE], TPML_PCR_SELECTION>(
-                pcrsel_vec,
-            )
-        };
+        let mut pcrsel_vec = [0u8; TPML_PCR_SELECTION_SIZE];
+        reader.read_exact(&mut pcrsel_vec)?;
+
+        let pcrsel = deserialize_pcrsel(&pcrsel_vec)?;
         let pcrlist: PcrSelectionList = pcrsel.try_into()?;
 
         let mut count_vec = [0u8; 4];
-        let len = reader.read(&mut count_vec)?;
-        if len < count_vec.len() {
-            return Err(KeylimeError::InvalidRequest);
-        }
+        reader.read_exact(&mut count_vec)?;
         let count = u32::from_le_bytes(count_vec);
         // Always 1 PCR digest should follow
         if count != 1 {
             return Err(KeylimeError::InvalidRequest);
         }
 
-        let mut digest_vec = [0u8; DIGEST_SIZE];
-        let len = reader.read(&mut digest_vec)?;
-        if len != digest_vec.len() {
-            return Err(KeylimeError::InvalidRequest);
-        }
-        let mut digest = unsafe {
-            std::mem::transmute::<[u8; DIGEST_SIZE], TPML_DIGEST>(digest_vec)
-        };
+        let mut digest_vec = [0u8; TPML_DIGEST_SIZE];
+        reader.read_exact(&mut digest_vec)?;
+        let digest = deserialize_digest(&digest_vec)?;
         let mut digest_list = DigestList::new();
         for i in 0..digest.count {
             digest_list.add(digest.digests[i as usize].try_into()?);
