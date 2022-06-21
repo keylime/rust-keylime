@@ -516,8 +516,15 @@ async fn main() -> Result<()> {
     let mtls_cert;
     let ssl_context;
     if config.mtls_enabled {
-        let keylime_ca_cert =
-            crypto::load_x509(Path::new(&config.keylime_ca_path))?;
+        let keylime_ca_cert = crypto::load_x509(Path::new(
+            &config.keylime_ca_path,
+        ))
+        .map_err(|e| {
+            Error::Other(format!(
+                "Could not load mTLS CA certificate from: {}. {}",
+                &config.keylime_ca_path, e
+            ))
+        })?;
 
         cert = match &agent_data {
             Some(data) => match data.get_mtls_cert()? {
