@@ -259,7 +259,6 @@ pub(crate) async fn run_encrypted_payload(
     )?;
 
     optional_unzip_payload(&unzipped, config)?;
-
     // there may also be also a separate init script
     match config.payload_script.as_str() {
         "" => {
@@ -517,7 +516,16 @@ async fn main() -> Result<()> {
     let ssl_context;
     if config.mtls_enabled {
         let keylime_ca_cert =
-            crypto::load_x509(Path::new(&config.keylime_ca_path))?;
+            match crypto::load_x509(Path::new(&config.keylime_ca_path)) {
+                Ok(t) => Ok(t),
+                Err(e) => {
+                    error!(
+                        "Certificate not installed: {}",
+                        config.keylime_ca_path
+                    );
+                    Err(e)
+                }
+            }?;
 
         cert = match &agent_data {
             Some(data) => match data.get_mtls_cert()? {
