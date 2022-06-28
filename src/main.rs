@@ -608,9 +608,22 @@ async fn main() -> Result<()> {
     let payload = Arc::clone(&encr_payload_arc);
 
     let revocation_cert = revocation::get_revocation_cert_path(&config)?;
-    let actions_dir =
-        Path::new(&config.revocation_actions_dir).canonicalize()?;
-    let work_dir = Path::new(&config.work_dir).canonicalize()?;
+    let actions_dir = Path::new(&config.revocation_actions_dir)
+        .canonicalize()
+        .map_err(|e| {
+            Error::Configuration(format!(
+                "Path {} set in revocation_actions_dir not found: {}",
+                &config.revocation_actions_dir, e
+            ))
+        })?;
+
+    let work_dir =
+        Path::new(&config.work_dir).canonicalize().map_err(|e| {
+            Error::Configuration(format!(
+                "Path {} set in keylime_dir not found: {}",
+                &config.work_dir, e
+            ))
+        })?;
 
     let quotedata = web::Data::new(QuoteData {
         tpmcontext: Mutex::new(ctx),
