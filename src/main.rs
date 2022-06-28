@@ -327,9 +327,12 @@ async fn worker(
     }
 
     // If with-zmq feature is enabled, run the service listening for ZeroMQ messages
-    #[cfg(feature = "with-zmq")]
-    if config.run_revocation {
-        return revocation::run_revocation_service(&config, &mount).await;
+    cfg_if::cfg_if! {
+        if #[cfg(feature = "with-zmq")] {
+            if config.run_revocation {
+                return revocation::run_revocation_service(&config, &mount).await
+            }
+        }
     }
 
     Ok(())
