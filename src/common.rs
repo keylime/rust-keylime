@@ -636,33 +636,8 @@ fn config_file_get() -> String {
     }
 }
 
-/// Returns revocation ip from keylime.conf if env var not present
-fn revocation_ip_get(conf_name: &String, conf: &Ini) -> Result<String> {
-    config_get_env(
-        conf_name,
-        conf,
-        "general",
-        "receive_revocation_ip",
-        "REVOCATION_IP",
-    )
-}
-
-/// Returns revocation port from keylime.conf if env var not present
-fn revocation_port_get(conf_name: &String, conf: &Ini) -> Result<String> {
-    config_get_env(
-        conf_name,
-        conf,
-        "general",
-        "receive_revocation_port",
-        "REVOCATION_PORT",
-    )
-}
-
 /// Returns the contact ip for the agent if set
-fn cloudagent_contact_ip_get(
-    conf_name: &String,
-    conf: &Ini,
-) -> Option<String> {
+fn cloudagent_contact_ip_get(conf_name: &str, conf: &Ini) -> Option<String> {
     match config_get_env(
         conf_name,
         conf,
@@ -677,7 +652,7 @@ fn cloudagent_contact_ip_get(
 
 /// Returns the contact ip for the agent if set
 fn cloudagent_contact_port_get(
-    conf_name: &String,
+    conf_name: &str,
     conf: &Ini,
 ) -> Result<Option<u32>> {
     match config_get_env(
@@ -706,7 +681,7 @@ fn cloudagent_contact_port_get(
  * let port = common::config_get(conf_file_name, file_Ini,"general","cloudagent_port");
  */
 fn config_get(
-    conf_name: &String,
+    conf_name: &str,
     conf: &Ini,
     section: &str,
     key: &str,
@@ -745,7 +720,7 @@ fn config_get(
  * let port = common::config_get_env(conf_file_name, file_Ini, "general","cloudagent_port", "CLOUDAGENT_PORT");
  */
 fn config_get_env(
-    conf_name: &String,
+    conf_name: &str,
     conf: &Ini,
     section: &str,
     key: &str,
