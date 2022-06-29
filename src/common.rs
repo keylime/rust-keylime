@@ -703,7 +703,7 @@ fn cloudagent_contact_port_get(
  * Return: Returns the matched key
  *
  * Example call:
- * let port = common::config_get("general","cloudagent_port");
+ * let port = common::config_get(conf_file_name, file_Ini,"general","cloudagent_port");
  */
 fn config_get(
     conf_name: &String,
@@ -738,11 +738,11 @@ fn config_get(
 }
 
 /*
- * Input: [section] and key and environment variable
+ * Input: conf_name, conf,[section] and key and environment variable
  * Return: Returns the matched key
  *
  * Example call:
- * let port = common::config_get_env("general","cloudagent_port", "CLOUDAGENT_PORT");
+ * let port = common::config_get_env(conf_file_name, file_Ini, "general","cloudagent_port", "CLOUDAGENT_PORT");
  */
 fn config_get_env(
     conf_name: &String,
