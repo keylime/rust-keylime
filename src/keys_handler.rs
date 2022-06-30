@@ -94,49 +94,53 @@ pub async fn u_key(
 ) -> impl Responder {
     debug!("Received ukey");
 
-    // must unwrap when using lock
-    // https://github.com/rust-lang-nursery/failure/issues/192
-    let mut global_current_keyset = quote_data.ukeys.lock().unwrap(); //#[allow_ci]
-    let mut global_other_keyset = quote_data.vkeys.lock().unwrap(); //#[allow_ci]
-    let mut global_symm_key = quote_data.payload_symm_key.lock().unwrap(); //#[allow_ci]
-    let mut global_encr_payload = quote_data.encr_payload.lock().unwrap(); //#[allow_ci]
-    let mut global_auth_tag = quote_data.auth_tag.lock().unwrap(); //#[allow_ci]
+    // Use scope to unlock the mutexes before calling await
+    {
+        // must unwrap when using lock
+        // https://github.com/rust-lang-nursery/failure/issues/192
+        let mut global_current_keyset = quote_data.ukeys.lock().unwrap(); //#[allow_ci]
+        let mut global_other_keyset = quote_data.vkeys.lock().unwrap(); //#[allow_ci]
+        let mut global_symm_key = quote_data.payload_symm_key.lock().unwrap(); //#[allow_ci]
+        let mut global_encr_payload = quote_data.encr_payload.lock().unwrap(); //#[allow_ci]
+        let mut global_auth_tag = quote_data.auth_tag.lock().unwrap(); //#[allow_ci]
 
-    // get key and decode it from web data
-    let encrypted_key =
-        base64::decode(&body.encrypted_key).map_err(Error::from)?;
-    // Uses NK (key for encrypting data from verifier or tenant to agent in transit) to
-    // decrypt U and V keys, which will be combined into one key that can decrypt the
-    // payload.
-    //
-    // Reference:
-    // https://github.com/keylime/keylime/blob/f3c31b411dd3dd971fd9d614a39a150655c6797c/ \
-    // keylime/crypto.py#L118
-    let decrypted_key =
-        crypto::rsa_oaep_decrypt(&quote_data.priv_key, &encrypted_key)?;
+        // get key and decode it from web data
+        let encrypted_key =
+            base64::decode(&body.encrypted_key).map_err(Error::from)?;
+        // Uses NK (key for encrypting data from verifier or tenant to agent in transit) to
+        // decrypt U and V keys, which will be combined into one key that can decrypt the
+        // payload.
+        //
+        // Reference:
+        // https://github.com/keylime/keylime/blob/f3c31b411dd3dd971fd9d614a39a150655c6797c/ \
+        // keylime/crypto.py#L118
+        let decrypted_key =
+            crypto::rsa_oaep_decrypt(&quote_data.priv_key, &encrypted_key)?;
 
-    let decrypted_key: SymmKey = decrypted_key.as_slice().try_into().unwrap(); //#[allow_ci]
+        let decrypted_key: SymmKey =
+            decrypted_key.as_slice().try_into().unwrap(); //#[allow_ci]
 
-    global_current_keyset.push(decrypted_key);
+        global_current_keyset.push(decrypted_key);
 
-    // note: the auth_tag shouldn't be base64 decoded here
-    global_auth_tag.copy_from_slice(body.auth_tag.as_bytes());
+        // note: the auth_tag shouldn't be base64 decoded here
+        global_auth_tag.copy_from_slice(body.auth_tag.as_bytes());
 
-    if let Some(payload) = &body.payload {
-        let encr_payload = base64::decode(&payload).map_err(Error::from)?;
-        global_encr_payload.extend(encr_payload.iter());
+        if let Some(payload) = &body.payload {
+            let encr_payload =
+                base64::decode(&payload).map_err(Error::from)?;
+            global_encr_payload.extend(encr_payload.iter());
+        }
+
+        if let Some(symm_key) = try_combine_keys(
+            &mut global_current_keyset,
+            &mut global_other_keyset,
+            quote_data.agent_uuid.as_bytes(),
+            &global_auth_tag,
+        )? {
+            let _ = global_symm_key.replace(symm_key);
+            quote_data.payload_symm_key_cvar.notify_one();
+        }
     }
-
-    if let Some(symm_key) = try_combine_keys(
-        &mut global_current_keyset,
-        &mut global_other_keyset,
-        quote_data.agent_uuid.as_bytes(),
-        &global_auth_tag,
-    )? {
-        let _ = global_symm_key.replace(symm_key);
-        quote_data.payload_symm_key_cvar.notify_one();
-    }
-
     HttpResponse::Ok().await
 }
 
@@ -147,40 +151,44 @@ pub async fn v_key(
 ) -> impl Responder {
     debug!("Received vkey");
 
-    // must unwrap when using lock
-    // https://github.com/rust-lang-nursery/failure/issues/192
-    let mut global_current_keyset = quote_data.vkeys.lock().unwrap(); //#[allow_ci]
-    let mut global_other_keyset = quote_data.ukeys.lock().unwrap(); //#[allow_ci]
-    let mut global_symm_key = quote_data.payload_symm_key.lock().unwrap(); //#[allow_ci]
-    let mut global_encr_payload = quote_data.encr_payload.lock().unwrap(); //#[allow_ci]
-    let mut global_auth_tag = quote_data.auth_tag.lock().unwrap(); //#[allow_ci]
+    // Use scope to unlock the mutexes before calling await
+    {
+        // must unwrap when using lock
+        // https://github.com/rust-lang-nursery/failure/issues/192
+        let mut global_current_keyset = quote_data.vkeys.lock().unwrap(); //#[allow_ci]
+        let mut global_other_keyset = quote_data.ukeys.lock().unwrap(); //#[allow_ci]
+        let mut global_symm_key = quote_data.payload_symm_key.lock().unwrap(); //#[allow_ci]
+        let mut global_encr_payload = quote_data.encr_payload.lock().unwrap(); //#[allow_ci]
+        let mut global_auth_tag = quote_data.auth_tag.lock().unwrap(); //#[allow_ci]
 
-    // get key and decode it from web data
-    let encrypted_key =
-        base64::decode(&body.encrypted_key).map_err(Error::from)?;
+        // get key and decode it from web data
+        let encrypted_key =
+            base64::decode(&body.encrypted_key).map_err(Error::from)?;
 
-    // Uses NK (key for encrypting data from verifier or tenant to agent in transit) to
-    // decrypt U and V keys, which will be combined into one key that can decrypt the
-    // payload.
-    //
-    // Reference:
-    // https://github.com/keylime/keylime/blob/f3c31b411dd3dd971fd9d614a39a150655c6797c/ \
-    // keylime/crypto.py#L118
-    let decrypted_key =
-        crypto::rsa_oaep_decrypt(&quote_data.priv_key, &encrypted_key)?;
+        // Uses NK (key for encrypting data from verifier or tenant to agent in transit) to
+        // decrypt U and V keys, which will be combined into one key that can decrypt the
+        // payload.
+        //
+        // Reference:
+        // https://github.com/keylime/keylime/blob/f3c31b411dd3dd971fd9d614a39a150655c6797c/ \
+        // keylime/crypto.py#L118
+        let decrypted_key =
+            crypto::rsa_oaep_decrypt(&quote_data.priv_key, &encrypted_key)?;
 
-    let decrypted_key: SymmKey = decrypted_key.as_slice().try_into().unwrap(); //#[allow_ci]
+        let decrypted_key: SymmKey =
+            decrypted_key.as_slice().try_into().unwrap(); //#[allow_ci]
 
-    global_current_keyset.push(decrypted_key);
+        global_current_keyset.push(decrypted_key);
 
-    if let Some(symm_key) = try_combine_keys(
-        &mut global_current_keyset,
-        &mut global_other_keyset,
-        quote_data.agent_uuid.as_bytes(),
-        &global_auth_tag,
-    )? {
-        let _ = global_symm_key.replace(symm_key);
-        quote_data.payload_symm_key_cvar.notify_one();
+        if let Some(symm_key) = try_combine_keys(
+            &mut global_current_keyset,
+            &mut global_other_keyset,
+            quote_data.agent_uuid.as_bytes(),
+            &global_auth_tag,
+        )? {
+            let _ = global_symm_key.replace(symm_key);
+            quote_data.payload_symm_key_cvar.notify_one();
+        }
     }
 
     HttpResponse::Ok().await
