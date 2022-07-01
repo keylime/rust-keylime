@@ -14,16 +14,21 @@ endif
 
 systemdsystemunitdir := $(shell pkg-config systemd --variable=systemdsystemunitdir)
 
-.PHONY: all
+programs = \
+	${TARGETDIR}/${PROFILE}/keylime_agent \
+	${TARGETDIR}/${PROFILE}/keylime_ima_emulator
 
-.PHONY: build
-build:
+.PHONY: all
+all: $(programs)
+
+$(programs):
 	cargo build --target-dir="${TARGETDIR}" ${CARGO_ARGS}
 
 .PHONY: install
-install: build
-	install -D -t ${DESTDIR}/usr/bin "${TARGETDIR}/${PROFILE}/keylime_agent"
-	install -D -t ${DESTDIR}/usr/bin "${TARGETDIR}/${PROFILE}/keylime_ima_emulator"
+install: all
+	for f in $(programs); do \
+		install -D -t ${DESTDIR}/usr/bin "$$f"; \
+	done
 	install -D -m 644 -t ${DESTDIR}$(systemdsystemunitdir) dist/systemd/system/keylime_agent.service
 	install -D -m 644 -t ${DESTDIR}$(systemdsystemunitdir) dist/systemd/system/var-lib-keylime-secure.mount
 	# Remove when https://github.com/keylime/rust-keylime/issues/325 is fixed
@@ -32,5 +37,5 @@ install: build
 # This only runs tests without TPM access. See tests/run.sh for
 # running full testsuite with swtpm.
 .PHONY: check
-check: build
+check: all
 	cargo test --target-dir="${TARGETDIR}"

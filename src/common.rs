@@ -294,59 +294,122 @@ pub(crate) struct KeylimeConfig {
 
 impl KeylimeConfig {
     pub fn build() -> Result<Self> {
-        let agent_ip =
-            config_get_env("cloud_agent", "cloudagent_ip", "CLOUDAGENT_IP")?;
+        let conf_name = config_file_get();
+        let conf = Ini::load_from_file(&conf_name)?;
+
+        let agent_ip = config_get_env(
+            &conf_name,
+            &conf,
+            "cloud_agent",
+            "cloudagent_ip",
+            "CLOUDAGENT_IP",
+        )?;
         let agent_port = config_get_env(
+            &conf_name,
+            &conf,
             "cloud_agent",
             "cloudagent_port",
             "CLOUDAGENT_PORT",
         )?;
-        let registrar_ip =
-            config_get_env("cloud_agent", "registrar_ip", "REGISTRAR_IP")?;
+        let registrar_ip = config_get_env(
+            &conf_name,
+            &conf,
+            "cloud_agent",
+            "registrar_ip",
+            "REGISTRAR_IP",
+        )?;
         let registrar_port = config_get_env(
+            &conf_name,
+            &conf,
             "cloud_agent",
             "registrar_port",
             "REGISTRAR_PORT",
         )?;
-        let agent_uuid_config = config_get("cloud_agent", "agent_uuid")?;
+        let agent_uuid_config =
+            config_get(&conf_name, &conf, "cloud_agent", "agent_uuid")?;
         let agent_uuid = get_uuid(&agent_uuid_config);
-        let agent_contact_ip = cloudagent_contact_ip_get();
-        let agent_contact_port = cloudagent_contact_port_get()?;
+        let agent_contact_ip = cloudagent_contact_ip_get(&conf_name, &conf);
+        let agent_contact_port =
+            cloudagent_contact_port_get(&conf_name, &conf)?;
         let hash_alg = HashAlgorithm::try_from(
-            config_get("cloud_agent", "tpm_hash_alg")?.as_str(),
+            config_get(&conf_name, &conf, "cloud_agent", "tpm_hash_alg")?
+                .as_str(),
         )?;
         let enc_alg = EncryptionAlgorithm::try_from(
-            config_get("cloud_agent", "tpm_encryption_alg")?.as_str(),
+            config_get(
+                &conf_name,
+                &conf,
+                "cloud_agent",
+                "tpm_encryption_alg",
+            )?
+            .as_str(),
         )?;
         let sign_alg = SignAlgorithm::try_from(
-            config_get("cloud_agent", "tpm_signing_alg")?.as_str(),
+            config_get(&conf_name, &conf, "cloud_agent", "tpm_signing_alg")?
+                .as_str(),
         )?;
         // There was a typo in Python Keylime and this accounts for having a version
         // of Keylime installed that still has this typo. TODO: Remove later
         let run_revocation = bool::from_str(
-            &config_get("cloud_agent", "listen_notifications")
-                .or_else(|_| {
-                    config_get("cloud_agent", "listen_notfications")
-                })?
-                .to_lowercase(),
+            &config_get(
+                &conf_name,
+                &conf,
+                "cloud_agent",
+                "listen_notifications",
+            )
+            .or_else(|_| {
+                config_get(
+                    &conf_name,
+                    &conf,
+                    "cloud_agent",
+                    "listen_notfications",
+                )
+            })?
+            .to_lowercase(),
         )?;
-        let revocation_cert = config_get("cloud_agent", "revocation_cert")?;
-        let revocation_ip = config_get("general", "receive_revocation_ip")?;
-        let revocation_port =
-            config_get("general", "receive_revocation_port")?;
 
-        let secure_size = config_get("cloud_agent", "secure_size")?;
-        let payload_script = config_get("cloud_agent", "payload_script")?;
+        let revocation_cert =
+            config_get(&conf_name, &conf, "cloud_agent", "revocation_cert")?;
+        let revocation_ip = config_get(
+            &conf_name,
+            &conf,
+            "general",
+            "receive_revocation_ip",
+        )?;
+        let revocation_port = config_get(
+            &conf_name,
+            &conf,
+            "general",
+            "receive_revocation_port",
+        )?;
+
+        let secure_size =
+            config_get(&conf_name, &conf, "cloud_agent", "secure_size")?;
+        let payload_script =
+            config_get(&conf_name, &conf, "cloud_agent", "payload_script")?;
         let dec_payload_filename =
-            config_get("cloud_agent", "dec_payload_file")?;
-        let key_filename = config_get("cloud_agent", "enc_keyname")?;
+            config_get(&conf_name, &conf, "cloud_agent", "dec_payload_file")?;
+
+        let key_filename =
+            config_get(&conf_name, &conf, "cloud_agent", "enc_keyname")?;
         let extract_payload_zip = bool::from_str(
-            &config_get("cloud_agent", "extract_payload_zip")?.to_lowercase(),
+            &config_get(
+                &conf_name,
+                &conf,
+                "cloud_agent",
+                "extract_payload_zip",
+            )?
+            .to_lowercase(),
         )?;
 
-        let work_dir =
-            config_get_env("cloud_agent", "keylime_dir", "KEYLIME_DIR")
-                .or_else::<Error, _>(|_| Ok(String::from(WORK_DIR)))?;
+        let work_dir = config_get_env(
+            &conf_name,
+            &conf,
+            "cloud_agent",
+            "keylime_dir",
+            "KEYLIME_DIR",
+        )
+        .or_else::<Error, _>(|_| Ok(String::from(WORK_DIR)))?;
 
         let agent_data_path = PathBuf::from(&work_dir).join(AGENT_DATA);
         let agent_data = if agent_data_path.exists() {
@@ -365,20 +428,31 @@ impl KeylimeConfig {
             None
         };
 
-        let mut keylime_ca_path = config_get("cloud_agent", "keylime_ca")?;
+        let mut keylime_ca_path =
+            config_get(&conf_name, &conf, "cloud_agent", "keylime_ca")?;
         if keylime_ca_path == "default" {
             keylime_ca_path = Path::new(&work_dir)
                 .join(DEFAULT_CA_PATH)
                 .display()
                 .to_string();
         }
-        let revocation_actions =
-            config_get("cloud_agent", "revocation_actions")
-                .or_else::<Error, _>(|_| Ok(String::from(REV_ACTIONS)))?;
-        let revocation_actions_dir =
-            config_get("cloud_agent", "revocation_actions_dir")
-                .or_else::<Error, _>(|_| Ok(String::from(REV_ACTIONS_DIR)))?;
+        let revocation_actions = config_get(
+            &conf_name,
+            &conf,
+            "cloud_agent",
+            "revocation_actions",
+        )
+        .or_else::<Error, _>(|_| Ok(String::from(REV_ACTIONS)))?;
+        let revocation_actions_dir = config_get(
+            &conf_name,
+            &conf,
+            "cloud_agent",
+            "revocation_actions_dir",
+        )
+        .or_else::<Error, _>(|_| Ok(String::from(REV_ACTIONS_DIR)))?;
         let allow_payload_revocation_actions = match config_get(
+            &conf_name,
+            &conf,
             "cloud_agent",
             "allow_payload_revocation_actions",
         ) {
@@ -386,7 +460,7 @@ impl KeylimeConfig {
             Err(_) => ALLOW_PAYLOAD_REV_ACTIONS,
         };
         let run_as = if permissions::get_euid() == 0 {
-            match config_get("cloud_agent", "run_as") {
+            match config_get(&conf_name, &conf, "cloud_agent", "run_as") {
                 Ok(user_group) => Some(user_group),
                 Err(_) => {
                     warn!("Cannot drop privileges since 'run_as' is empty or missing in 'cloud_agent' section of keylime.conf.");
@@ -397,19 +471,27 @@ impl KeylimeConfig {
             None
         };
 
-        let mtls_enabled =
-            match config_get("cloud_agent", "mtls_cert_enabled") {
-                Ok(enabled) => bool::from_str(&enabled.to_lowercase())
-                    .or::<Error>(Ok(MTLS_ENABLED))?,
-                Err(_) => true,
-            };
+        let mtls_enabled = match config_get(
+            &conf_name,
+            &conf,
+            "cloud_agent",
+            "mtls_cert_enabled",
+        ) {
+            Ok(enabled) => bool::from_str(&enabled.to_lowercase())
+                .or::<Error>(Ok(MTLS_ENABLED))?,
+            Err(_) => true,
+        };
 
-        let enable_insecure_payload =
-            match config_get("cloud_agent", "enable_insecure_payload") {
-                Ok(allowed) => bool::from_str(&allowed.to_lowercase())
-                    .or::<Error>(Ok(ALLOW_INSECURE_PAYLOAD))?,
-                Err(_) => false,
-            };
+        let enable_insecure_payload = match config_get(
+            &conf_name,
+            &conf,
+            "cloud_agent",
+            "enable_insecure_payload",
+        ) {
+            Ok(allowed) => bool::from_str(&allowed.to_lowercase())
+                .or::<Error>(Ok(ALLOW_INSECURE_PAYLOAD))?,
+            Err(_) => false,
+        };
 
         Ok(KeylimeConfig {
             agent_ip,
@@ -554,19 +636,11 @@ fn config_file_get() -> String {
     }
 }
 
-/// Returns revocation ip from keylime.conf if env var not present
-fn revocation_ip_get() -> Result<String> {
-    config_get_env("general", "receive_revocation_ip", "REVOCATION_IP")
-}
-
-/// Returns revocation port from keylime.conf if env var not present
-fn revocation_port_get() -> Result<String> {
-    config_get_env("general", "receive_revocation_port", "REVOCATION_PORT")
-}
-
 /// Returns the contact ip for the agent if set
-fn cloudagent_contact_ip_get() -> Option<String> {
+fn cloudagent_contact_ip_get(conf_name: &str, conf: &Ini) -> Option<String> {
     match config_get_env(
+        conf_name,
+        conf,
         "cloud_agent",
         "agent_contact_ip",
         "KEYLIME_AGENT_CONTACT_IP",
@@ -577,8 +651,13 @@ fn cloudagent_contact_ip_get() -> Option<String> {
 }
 
 /// Returns the contact ip for the agent if set
-fn cloudagent_contact_port_get() -> Result<Option<u32>> {
+fn cloudagent_contact_port_get(
+    conf_name: &str,
+    conf: &Ini,
+) -> Result<Option<u32>> {
     match config_get_env(
+        conf_name,
+        conf,
         "cloud_agent",
         "agent_contact_port",
         "KEYLIME_AGENT_CONTACT_PORT",
@@ -595,15 +674,18 @@ fn cloudagent_contact_port_get() -> Result<Option<u32>> {
 }
 
 /*
- * Input: [section] and key
+ * Input: conf_name, conf, [section] and key
  * Return: Returns the matched key
  *
  * Example call:
- * let port = common::config_get("general","cloudagent_port");
+ * let port = common::config_get(conf_file_name, file_Ini,"general","cloudagent_port");
  */
-fn config_get(section: &str, key: &str) -> Result<String> {
-    let conf_name = config_file_get();
-    let conf = Ini::load_from_file(&conf_name)?;
+fn config_get(
+    conf_name: &str,
+    conf: &Ini,
+    section: &str,
+    key: &str,
+) -> Result<String> {
     let section = match conf.section(Some(section.to_owned())) {
         Some(section) => section,
         None =>
@@ -631,23 +713,29 @@ fn config_get(section: &str, key: &str) -> Result<String> {
 }
 
 /*
- * Input: [section] and key and environment variable
+ * Input: conf_name, conf,[section] and key and environment variable
  * Return: Returns the matched key
  *
  * Example call:
- * let port = common::config_get_env("general","cloudagent_port", "CLOUDAGENT_PORT");
+ * let port = common::config_get_env(conf_file_name, file_Ini, "general","cloudagent_port", "CLOUDAGENT_PORT");
  */
-fn config_get_env(section: &str, key: &str, env: &str) -> Result<String> {
+fn config_get_env(
+    conf_name: &str,
+    conf: &Ini,
+    section: &str,
+    key: &str,
+    env: &str,
+) -> Result<String> {
     match env::var(env) {
         Ok(ip) => {
             // The variable length must be larger than 0 to accept
             if !ip.is_empty() {
                 Ok(ip)
             } else {
-                config_get(section, key)
+                config_get(conf_name, conf, section, key)
             }
         }
-        _ => config_get(section, key),
+        _ => config_get(conf_name, conf, section, key),
     }
 }
 
