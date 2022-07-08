@@ -408,7 +408,12 @@ async fn main() -> Result<()> {
     // Drop privileges
     if let Some(user_group) = &config.run_as {
         permissions::chown(user_group, &mount);
-        permissions::run_as(user_group);
+        if let Err(e) = permissions::run_as(user_group) {
+            let message = "The user running the Keylime agent should be set in keylime.conf, using the parameter `run_as`, with the format `user:group`".to_string();
+
+            error!("Configuration error: {}", &message);
+            return Err(Error::Configuration(message));
+        }
     }
 
     info!("Starting server with API version {}...", API_VERSION);
