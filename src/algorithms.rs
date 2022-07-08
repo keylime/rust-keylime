@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2021 Keylime Authors
+use openssl::hash::MessageDigest;
 use serde::{Deserialize, Serialize};
 use std::convert::TryFrom;
 use std::fmt;
@@ -9,7 +10,6 @@ use tss_esapi::{
         AsymmetricAlgorithm, HashingAlgorithm, SignatureSchemeAlgorithm,
     },
     structures::{HashScheme, SignatureScheme},
-    tss2_esys::TPMT_SIG_SCHEME,
 };
 
 // This error needs to be public because we implement TryFrom for public types
@@ -70,6 +70,18 @@ impl From<HashAlgorithm> for HashingAlgorithm {
             HashAlgorithm::Sha384 => HashingAlgorithm::Sha384,
             HashAlgorithm::Sha512 => HashingAlgorithm::Sha512,
             HashAlgorithm::Sm3_256 => HashingAlgorithm::Sm3_256,
+        }
+    }
+}
+
+impl From<HashAlgorithm> for MessageDigest {
+    fn from(hash_algorithm: HashAlgorithm) -> Self {
+        match hash_algorithm {
+            HashAlgorithm::Sha1 => MessageDigest::sha1(),
+            HashAlgorithm::Sha256 => MessageDigest::sha256(),
+            HashAlgorithm::Sha384 => MessageDigest::sha384(),
+            HashAlgorithm::Sha512 => MessageDigest::sha512(),
+            HashAlgorithm::Sm3_256 => MessageDigest::sm3(),
         }
     }
 }
