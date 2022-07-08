@@ -459,11 +459,19 @@ impl KeylimeConfig {
             Ok(s) => bool::from_str(&s.to_lowercase())?,
             Err(_) => ALLOW_PAYLOAD_REV_ACTIONS,
         };
+
         let run_as = if permissions::get_euid() == 0 {
             match config_get(&conf_name, &conf, "cloud_agent", "run_as") {
-                Ok(user_group) => Some(user_group),
+                Ok(user_group) => {
+                    if user_group.is_empty() {
+                        warn!("Cannot drop privileges since 'run_as' is empty in 'cloud_agent' section of keylime.conf.");
+                        None
+                    } else {
+                        Some(user_group)
+                    }
+                }
                 Err(_) => {
-                    warn!("Cannot drop privileges since 'run_as' is empty or missing in 'cloud_agent' section of keylime.conf.");
+                    warn!("Cannot drop privileges since 'run_as' is missing in 'cloud_agent' section of keylime.conf.");
                     None
                 }
             }
@@ -698,7 +706,7 @@ fn config_get(
         }
     };
     let value = match section.get(key) {
-        Some(value) => value,
+        Some(value) => value.trim(),
         None =>
         // TODO: Make Error::Configuration an alternative with data instead of string
         {
@@ -707,6 +715,10 @@ fn config_get(
                 key, conf_name
             )))
         }
+    };
+
+    if value.is_empty() {
+        warn!("Cannot find value for key {} in file {}", key, conf_name);
     };
 
     Ok(value.to_string())
