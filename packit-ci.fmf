@@ -6,6 +6,9 @@
     TPM_BINARY_MEASUREMENTS: /var/tmp/binary_bios_measurements
     RUST_IMA_EMULATOR: 1
 
+  context:
+    swtpm: yes
+
   prepare:
     how: shell
     script:
