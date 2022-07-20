@@ -268,6 +268,20 @@ pub(crate) fn pcrdata_to_vec(
     data_vec
 }
 
+/* Converts a hex value in the form of a string (ex. from keylime-agent.conf's
+ * ek_handle) to a key handle.
+ *
+ * Input: &str
+ * Return: Key handle
+ *
+ * Example call:
+ * let ek_handle = tpm::ek_from_hex_str("0x81000000");
+ */
+pub(crate) fn ek_from_hex_str(val: &str) -> Result<KeyHandle> {
+    let val = val.trim_start_matches("0x");
+    Ok(KeyHandle::from(u32::from_str_radix(val, 16)?))
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct AKResult {
     pub public: tss_esapi::structures::Public,
@@ -425,7 +439,7 @@ pub(crate) fn pubkey_to_tpm_digest(
 //
 // The masks are sent from the tenant and cloud verifier to indicate
 // the PCRs to include in a Quote. The LSB in the mask corresponds to
-// PCR0. For example, keylime.conf specifies PCRs 15 and 22 under
+// PCR0. For example, keylime-agent.conf specifies PCRs 15 and 22 under
 // [tenant][tpm_policy]. As a bit mask, this would be represented as
 // 0b010000001000000000000000, which translates to 0x408000.
 //
@@ -908,7 +922,8 @@ fn quote_encode_decode() {
     assert_eq!(encoded, buf);
 }
 
-#[ignore] // This will only work as an integration test because it needs keylime.conf
+#[ignore]
+// This will only work as an integration test because it needs keylime-agent.conf
 #[test]
 fn pubkey_to_digest() {
     let (key, _) = crate::crypto::rsa_generate_pair(2048).unwrap(); //#[allow_ci]

@@ -37,7 +37,7 @@ pub const STUB_VTPM: bool = false;
 pub const STUB_IMA: bool = true;
 pub const TPM_DATA_PCR: usize = 16;
 pub const IMA_PCR: usize = 10;
-pub static DEFAULT_CONFIG: &str = "/etc/keylime.conf";
+pub static DEFAULT_CONFIG: &str = "/etc/keylime-agent.conf";
 pub static RSA_PUBLICKEY_EXPORTABLE: &str = "rsa placeholder";
 pub static TPM_TOOLS_PATH: &str = "/usr/local/bin/";
 pub static IMA_ML: &str =
@@ -466,14 +466,14 @@ impl KeylimeConfig {
             match config_get(&conf_name, &conf, "cloud_agent", "run_as") {
                 Ok(user_group) => {
                     if user_group.is_empty() {
-                        warn!("Cannot drop privileges since 'run_as' is empty in 'cloud_agent' section of keylime.conf.");
+                        warn!("Cannot drop privileges since 'run_as' is empty in 'cloud_agent' section of keylime-agent.conf.");
                         None
                     } else {
                         Some(user_group)
                     }
                 }
                 Err(_) => {
-                    warn!("Cannot drop privileges since 'run_as' is missing in 'cloud_agent' section of keylime.conf.");
+                    warn!("Cannot drop privileges since 'run_as' is missing in 'cloud_agent' section of keylime-agent.conf.");
                     None
                 }
             }
@@ -562,7 +562,7 @@ impl KeylimeConfig {
     }
 }
 
-// Default test configuration. This should match the defaults in keylime.conf
+// Default test configuration. This should match the defaults in keylime-agent.conf
 #[cfg(any(test, feature = "testing"))]
 impl Default for KeylimeConfig {
     fn default() -> Self {
@@ -641,7 +641,7 @@ fn get_uuid(agent_uuid_config: &str) -> String {
 
 /*
  * Return: Returns the configuration file provided in the environment variable
- * KEYLIME_CONFIG or defaults to /etc/keylime.conf
+ * KEYLIME_CONFIG or defaults to /etc/keylime-agent.conf
  *
  * Example call:
  * let config = config_file_get();
@@ -774,7 +774,7 @@ mod tests {
 
     #[test]
     fn test_config_get_parameters_exist() {
-        //let result = config_get("keylime.conf", "general", "cloudagent_port");
+        //let result = config_get("keylime-agent.conf", "general", "cloudagent_port");
         //assert_eq!(result, "9002");
     }
 
@@ -784,7 +784,10 @@ mod tests {
 
         // Test with no environment variable
         env::set_var("KEYLIME_CONFIG", "");
-        assert_eq!(config_file_get(), String::from("/etc/keylime.conf"));
+        assert_eq!(
+            config_file_get(),
+            String::from("/etc/keylime-agent.conf")
+        );
 
         // Test with an environment variable
         env::set_var("KEYLIME_CONFIG", "/tmp/testing.conf");

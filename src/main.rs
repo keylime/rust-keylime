@@ -217,7 +217,7 @@ pub(crate) fn run(dir: &Path, script: &str, agent_uuid: &str) -> Result<()> {
     }
 }
 
-// checks if keylime.conf indicates the payload should be unzipped, and does so if needed.
+// checks if keylime-agent.conf indicates the payload should be unzipped, and does so if needed.
 // the input string is the directory where the unzipped file(s) should be stored.
 pub(crate) fn optional_unzip_payload(
     unzipped: &Path,
@@ -413,7 +413,7 @@ async fn main() -> Result<()> {
     if let Some(user_group) = &config.run_as {
         permissions::chown(user_group, &mount);
         if let Err(e) = permissions::run_as(user_group) {
-            let message = "The user running the Keylime agent should be set in keylime.conf, using the parameter `run_as`, with the format `user:group`".to_string();
+            let message = "The user running the Keylime agent should be set in keylime-agent.conf, using the parameter `run_as`, with the format `user:group`".to_string();
 
             error!("Configuration error: {}", &message);
             return Err(Error::Configuration(message));
