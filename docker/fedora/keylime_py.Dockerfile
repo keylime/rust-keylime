@@ -76,8 +76,8 @@ RUN dnf install -y \
 WORKDIR ${HOME}
 RUN git clone https://github.com/keylime/keylime.git && \
 cd keylime && \
-sed -e 's/127.0.0.1/0.0.0.0/g' keylime.conf > tmp_keylime.conf && \
-mv tmp_keylime.conf keylime.conf && \
+sed -e 's/127.0.0.1/0.0.0.0/g' keylime-agent.conf > tmp_keylime-agent.conf && \
+mv tmp_keylime-agent.conf keylime-agent.conf && \
 python3 ${KEYLIME_HOME}/setup.py install && \
 pip3 install -r $KEYLIME_HOME/requirements.txt && \
 ${KEYLIME_HOME}/services/installer.sh

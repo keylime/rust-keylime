@@ -3,6 +3,7 @@
 
 RELEASE ?= 0
 TARGETDIR ?= target
+CONFFILE ?= ./keylime-agent.conf
 
 ifeq ($(RELEASE),1)
         PROFILE ?= release
@@ -26,6 +27,7 @@ $(programs):
 
 .PHONY: install
 install: all
+	cp ${CONFFILE} /etc/${CONFFILE}
 	for f in $(programs); do \
 		install -D -t ${DESTDIR}/usr/bin "$$f"; \
 	done
