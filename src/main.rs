@@ -71,8 +71,12 @@ use std::{
     time::Duration,
 };
 use tss_esapi::{
-    handles::KeyHandle, interface_types::algorithm::AsymmetricAlgorithm,
-    structures::PublicBuffer, traits::Marshall, Context,
+    handles::KeyHandle,
+    interface_types::algorithm::AsymmetricAlgorithm,
+    interface_types::resource_handles::Hierarchy,
+    structures::{Auth, PublicBuffer},
+    traits::Marshall,
+    Context,
 };
 use uuid::Uuid;
 
@@ -443,8 +447,24 @@ async fn main() -> Result<()> {
         }
     }
 
+    // When the EK handle is given, set auth for the Owner and
+    // Endorsement hierarchies.  Note in the Python implementation,
+    // tpm_ownerpassword option is also used for claiming ownership of
+    // TPM access, which is not yet implemented here.
+    if config.ek_handle.is_some() {
+        if let Some(ref v) = config.tpm_ownerpassword {
+            let auth = Auth::try_from(v.as_bytes())?;
+            ctx.tr_set_auth(Hierarchy::Owner.into(), auth.clone())?;
+            ctx.tr_set_auth(Hierarchy::Endorsement.into(), auth)?;
+        }
+    }
+
     // Gather EK values and certs
-    let ek_result = tpm::create_ek(&mut ctx, config.enc_alg.into())?;
+    let ek_result = tpm::create_ek(
+        &mut ctx,
+        config.enc_alg.into(),
+        config.ek_handle.as_deref(),
+    )?;
 
     // Try to load persistent Agent data
     let agent_data = config.agent_data.clone().and_then(|data|
@@ -584,6 +604,10 @@ async fn main() -> Result<()> {
             ak_handle,
             ek_result.key_handle,
         )?;
+        // Flush EK if we created it
+        if config.ek_handle.is_none() {
+            ctx.flush_context(ek_result.key_handle.into())?;
+        }
         let mackey = base64::encode(key.value());
         let auth_tag = crypto::compute_hmac(
             mackey.as_bytes(),
@@ -820,7 +844,7 @@ mod testing {
 
             // Gather EK and AK key values and certs
             let ek_result =
-                tpm::create_ek(&mut ctx, test_config.enc_alg.into())?;
+                tpm::create_ek(&mut ctx, test_config.enc_alg.into(), None)?;
 
             let ak_result = tpm::create_ak(
                 &mut ctx,

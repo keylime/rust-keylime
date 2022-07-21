@@ -290,6 +290,8 @@ pub(crate) struct KeylimeConfig {
     pub mtls_enabled: bool,
     pub enable_insecure_payload: bool,
     pub run_as: Option<String>,
+    pub tpm_ownerpassword: Option<String>,
+    pub ek_handle: Option<String>,
 }
 
 impl KeylimeConfig {
@@ -501,6 +503,16 @@ impl KeylimeConfig {
             Err(_) => false,
         };
 
+        let tpm_ownerpassword =
+            config_get(&conf_name, &conf, "cloud_agent", "tpm_ownerpassword")
+                .ok()
+                .filter(|s| s != "generate");
+
+        let ek_handle =
+            config_get(&conf_name, &conf, "cloud_agent", "ek_handle")
+                .ok()
+                .filter(|s| s != "generate");
+
         Ok(KeylimeConfig {
             agent_ip,
             agent_port,
@@ -531,6 +543,8 @@ impl KeylimeConfig {
             mtls_enabled,
             enable_insecure_payload,
             run_as,
+            tpm_ownerpassword,
+            ek_handle,
         })
     }
 
@@ -592,6 +606,8 @@ impl Default for KeylimeConfig {
             mtls_enabled: true,
             enable_insecure_payload: false,
             run_as,
+            tpm_ownerpassword: None,
+            ek_handle: None,
         }
     }
 }
