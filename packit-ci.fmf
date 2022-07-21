@@ -34,6 +34,8 @@
        - /functional/basic-attestation-with-ima-signatures
        - /functional/basic-attestation-without-mtls
        - /functional/basic-attestation-with-unpriviledged-agent
+       - /functional/ek-cert-use-ek_check_script
+       - /functional/ek-cert-use-ek_handle-custom-ca_certs
        - /functional/install-rpm-with-ima-signature
        - /functional/keylime_tenant-commands-on-localhost
        - /functional/db-postgresql-sanity-on-localhost

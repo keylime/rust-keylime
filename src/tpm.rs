@@ -35,7 +35,9 @@ use tss_esapi::{
         session_type::SessionType,
         tss::{TPM2_ALG_NULL, TPM2_ST_ATTEST_QUOTE},
     },
-    handles::{AuthHandle, KeyHandle, PcrHandle},
+    handles::{
+        AuthHandle, KeyHandle, PcrHandle, PersistentTpmHandle, TpmHandle,
+    },
     interface_types::{
         algorithm::{
             AsymmetricAlgorithm, HashingAlgorithm, SignatureSchemeAlgorithm,
@@ -98,17 +100,28 @@ pub struct EKResult {
 }
 
 /*
- * Input: Connection context, asymmetric algo (optional)
+ * Input: Connection context, asymmetric algo, existing key handle in hex (optional)
  * Return: (Key handle, public cert, TPM public object)
  * Example call:
- * let (key, cert, tpm_pub) = tpm::create_ek(context, Some(AsymmetricAlgorithm::Rsa))
+ * let (key, cert, tpm_pub) = tpm::create_ek(context, AsymmetricAlgorithm::Rsa, None)
  */
 pub(crate) fn create_ek(
     context: &mut Context,
     alg: AsymmetricAlgorithm,
+    handle: Option<&str>,
 ) -> Result<EKResult> {
     // Retrieve EK handle, EK pub cert, and TPM pub object
-    let handle = ek::create_ek_object(context, alg, DefaultKey)?;
+    let key_handle = match handle {
+        Some(v) => {
+            let handle = u32::from_str_radix(v.trim_start_matches("0x"), 16)?;
+            context
+                .tr_from_tpm_public(TpmHandle::Persistent(
+                    PersistentTpmHandle::new(handle)?,
+                ))?
+                .into()
+        }
+        None => ek::create_ek_object(context, alg, DefaultKey)?,
+    };
     let cert = match ek::retrieve_ek_pubcert(context, alg) {
         Ok(v) => Some(v),
         Err(_) => {
@@ -116,9 +129,9 @@ pub(crate) fn create_ek(
             None
         }
     };
-    let (tpm_pub, _, _) = context.read_public(handle)?;
+    let (tpm_pub, _, _) = context.read_public(key_handle)?;
     Ok(EKResult {
-        key_handle: handle,
+        key_handle,
         ek_cert: cert,
         public: tpm_pub,
     })
@@ -255,20 +268,6 @@ pub(crate) fn pcrdata_to_vec(
     data_vec
 }
 
-/* Converts a hex value in the form of a string (ex. from keylime.conf's
- * ek_handle) to a key handle.
- *
- * Input: &str
- * Return: Key handle
- *
- * Example call:
- * let ek_handle = tpm::ek_from_hex_str("0x81000000");
- */
-pub(crate) fn ek_from_hex_str(val: &str) -> Result<KeyHandle> {
-    let val = val.trim_start_matches("0x");
-    Ok(KeyHandle::from(u32::from_str_radix(val, 16)?))
-}
-
 #[derive(Debug, Clone)]
 pub(crate) struct AKResult {
     pub public: tss_esapi::structures::Public,
@@ -382,16 +381,11 @@ pub(crate) fn activate_credential(
         )
     })?;
 
-    let resp = ctx
-        .execute_with_sessions(
-            (Some(AuthSession::Password), Some(ek_auth), None),
-            |context| context.activate_credential(ak, ek, credential, secret),
-        )
-        .map_err(KeylimeError::from);
-
-    ctx.flush_context(ek.into())?;
-
-    resp
+    ctx.execute_with_sessions(
+        (Some(AuthSession::Password), Some(ek_auth), None),
+        |context| context.activate_credential(ak, ek, credential, secret),
+    )
+    .map_err(KeylimeError::from)
 }
 
 // Takes a public PKey and returns a DigestValue of it.
@@ -919,26 +913,6 @@ fn quote_encode_decode() {
 fn pubkey_to_digest() {
     let (key, _) = crate::crypto::rsa_generate_pair(2048).unwrap(); //#[allow_ci]
     let digest = pubkey_to_tpm_digest(&key).unwrap(); //#[allow_ci]
-}
-
-#[test]
-fn ek_from_hex() {
-    assert_eq!(
-        ek_from_hex_str("0x81000000").unwrap(), //#[allow_ci]
-        ek_from_hex_str("81000000").unwrap()    //#[allow_ci]
-    );
-    assert_eq!(
-        ek_from_hex_str("0xdeadbeef").unwrap(), //#[allow_ci]
-        ek_from_hex_str("deadbeef").unwrap()    //#[allow_ci]
-    );
-
-    assert!(ek_from_hex_str("a").is_ok());
-    assert!(ek_from_hex_str("18bb9").is_ok());
-
-    assert!(ek_from_hex_str("qqq").is_err());
-    assert!(ek_from_hex_str("0xqqq").is_err());
-    assert!(ek_from_hex_str("0xdeadbeefqwerty").is_err());
-    assert!(ek_from_hex_str("0x0x0x").is_err());
 }
 
 #[test]
