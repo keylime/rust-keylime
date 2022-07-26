@@ -450,7 +450,7 @@ async fn main() -> Result<()> {
     // When the EK handle is given, set auth for the Owner and
     // Endorsement hierarchies.  Note in the Python implementation,
     // tpm_ownerpassword option is also used for claiming ownership of
-    // TPM access, which is not yet implemented here.
+    // TPM access, which will not be implemented here.
     if config.ek_handle.is_some() {
         if let Some(ref v) = config.tpm_ownerpassword {
             let auth = Auth::try_from(v.as_bytes())?;
