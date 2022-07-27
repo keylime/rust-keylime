@@ -34,12 +34,12 @@ RUST_BACKTRACE=1 cargo build
 echo "-------- Testing"
 mkdir -p /var/lib/keylime
 TCTI=tabrmd:bus_type=session RUST_BACKTRACE=1 RUST_LOG=info \
-KEYLIME_CONFIG=$PWD/keylime.conf \
+KEYLIME_CONFIG=$PWD/keylime-agent.conf \
 cargo test --features testing -- --nocapture
 
 echo "-------- Testing with coverage"
 TCTI=tabrmd:bus_type=session RUST_BACKTRACE=1 RUST_LOG=info \
-KEYLIME_CONFIG=$PWD/keylime.conf \
+KEYLIME_CONFIG=$PWD/keylime-agent.conf \
 cargo tarpaulin -v \
       --target-dir target/tarpaulin \
       --workspace \
