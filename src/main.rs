@@ -386,7 +386,7 @@ async fn main() -> Result<()> {
     } else {
         warn!(
             "Measured boot measurement list not available: {}",
-            ima_ml_path.display()
+            measuredboot_ml_path.display()
         );
         None
     };
