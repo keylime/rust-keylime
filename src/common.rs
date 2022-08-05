@@ -297,7 +297,16 @@ pub(crate) struct KeylimeConfig {
 impl KeylimeConfig {
     pub fn build() -> Result<Self> {
         let conf_name = config_file_get();
-        let conf = Ini::load_from_file(&conf_name)?;
+        let conf = match Ini::load_from_file(&conf_name) {
+            Ok(file) => file,
+            Err(e) => {
+                error!(
+                    "Could not load keylime config file: {} due to error: {}",
+                    conf_name, e
+                );
+                return Err(Error::Ini(e));
+            }
+        };
 
         let agent_ip = config_get_env(
             &conf_name,
