@@ -240,7 +240,7 @@ pub(crate) fn get_revocation_cert_path(
     config: &KeylimeConfig,
 ) -> Result<PathBuf> {
     let default_path =
-        &format!("{}/secure/unzipped/{}", &config.work_dir, REV_CERT);
+        &format!("{}/secure/unzipped/{}", &config.keylime_dir, REV_CERT);
 
     // Unlike the python agent we do not attempt lazy loading. We either
     // have the certificate, or we don't. If we don't have a key or can't load
@@ -259,7 +259,7 @@ pub(crate) fn get_revocation_cert_path(
     // If the path is not absolute, expand from the WORK_DIR
     if cert_path_buf.as_path().is_relative() {
         let rel_path = cert_path_buf;
-        cert_path_buf = PathBuf::from(&config.work_dir);
+        cert_path_buf = PathBuf::from(&config.keylime_dir);
         cert_path_buf.push(rel_path);
     }
 
@@ -371,7 +371,7 @@ pub(crate) async fn run_revocation_service(
     config: &KeylimeConfig,
     mount: &Path,
 ) -> Result<()> {
-    let work_dir = Path::new(&config.work_dir);
+    let work_dir = Path::new(&config.keylime_dir);
 
     // Connect to the service via 0mq
     let context = zmq::Context::new();
@@ -379,8 +379,11 @@ pub(crate) async fn run_revocation_service(
 
     mysock.set_subscribe(b"")?;
 
-    let endpoint =
-        format!("tcp://{}:{}", config.revocation_ip, config.revocation_port);
+    let endpoint = format!(
+        "tcp://{}:{}",
+        config.revocation_notification_ip,
+        config.revocation_notification_port
+    );
 
     info!("Connecting to revocation endpoint at {}...", endpoint);
 
@@ -561,7 +564,7 @@ mod tests {
         let test_config = KeylimeConfig::default();
         let revocation_cert_path =
             get_revocation_cert_path(&test_config).unwrap(); //#[allow_ci]
-        let mut expected = PathBuf::from(&test_config.work_dir);
+        let mut expected = PathBuf::from(&test_config.keylime_dir);
         expected.push("secure/unzipped/");
         expected.push(REV_CERT);
         assert_eq!(*revocation_cert_path, expected);
@@ -586,7 +589,8 @@ mod tests {
         };
         let revocation_cert_path =
             get_revocation_cert_path(&test_config).unwrap(); //#[allow_ci]
-        let mut expected = Path::new(&test_config.work_dir).join("cert.crt");
+        let mut expected =
+            Path::new(&test_config.keylime_dir).join("cert.crt");
         assert_eq!(revocation_cert_path, expected);
     }
 
