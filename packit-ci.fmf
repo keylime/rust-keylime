@@ -8,6 +8,8 @@
 
   context:
     swtpm: yes
+    agent: rust
+    faked_measured_boot_log: true
 
   prepare:
     how: shell
