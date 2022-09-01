@@ -59,12 +59,10 @@ fn lookup_action(
         })
         .find(|(path, _, _)| path.exists())
     {
-        None => {
-            return Err(Error::Io(std::io::Error::new(
-                ErrorKind::NotFound,
-                format!("Could not find action {}", action),
-            )));
-        }
+        None => Err(Error::Io(std::io::Error::new(
+            ErrorKind::NotFound,
+            format!("Could not find action {}", action),
+        ))),
         Some((script, is_python, is_payload)) => {
             // If the script is python, add the shim to the command.  It is expected to be
             // installed on pre-installed actions directory.
