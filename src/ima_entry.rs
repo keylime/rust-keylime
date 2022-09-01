@@ -20,7 +20,7 @@ pub trait EncodeLegacy {
     fn encode_legacy(&self, writer: &mut dyn Write) -> Result<()>;
 }
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Eq)]
 pub struct Digest {
     pub algorithm: HashAlgorithm,
     value: Vec<u8>,

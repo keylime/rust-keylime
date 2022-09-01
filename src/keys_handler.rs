@@ -463,11 +463,10 @@ mod tests {
 
         let test_key: Vec<u8> = (0..32).collect();
 
-        let mut symkey = quotedata.payload_symm_key.lock().unwrap(); //#[allow_ci]
-        *symkey = Some(test_key.as_slice().try_into().unwrap()); //#[allow_ci]
-
-        // Drop to unlock the mutex after setting the value
-        drop(symkey);
+        {
+            let mut symkey = quotedata.payload_symm_key.lock().unwrap(); //#[allow_ci]
+            *symkey = Some(test_key.as_slice().try_into().unwrap()); //#[allow_ci]
+        }
 
         let mut app =
             test::init_service(App::new().app_data(quotedata.clone()).route(
