@@ -21,7 +21,7 @@ pub async fn revocation(
 ) -> impl Responder {
     info!("Received revocation");
 
-    let json_body = serde_json::from_slice(&body.to_vec())?;
+    let json_body = serde_json::from_slice(&body)?;
     let revocation_cert = &data.revocation_cert;
     let secure_size = &data.secure_size;
     let revocation_actions = &data.revocation_actions;
@@ -30,7 +30,7 @@ pub async fn revocation(
     let work_dir = &data.work_dir;
     let mount = &data.secure_mount;
 
-    let result = revocation::process_revocation(
+    revocation::process_revocation(
         json_body,
         revocation_cert,
         secure_size,

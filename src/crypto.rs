@@ -64,12 +64,10 @@ pub(crate) fn pkey_pub_from_priv(
             .map_err(Error::Crypto)?;
             PKey::from_rsa(rsa).map_err(Error::Crypto)
         }
-        id => {
-            return Err(Error::Other(format!(
-                "pkey_pub_from_priv not yet implemented for key type {:?}",
-                id
-            )));
-        }
+        id => Err(Error::Other(format!(
+            "pkey_pub_from_priv not yet implemented for key type {:?}",
+            id
+        ))),
     }
 }
 
