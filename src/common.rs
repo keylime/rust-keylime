@@ -290,7 +290,6 @@ pub(crate) struct KeylimeConfig {
     pub tpm_signing_alg: SignAlgorithm,
     pub ek_handle: Option<String>,
     pub run_as: Option<String>,
-    pub agent_data: Option<AgentData>,
     pub agent_data_path: String,
 }
 
@@ -400,21 +399,37 @@ impl KeylimeConfig {
         )
         .or_else::<Error, _>(|_| Ok(String::from(WORK_DIR)))?;
 
-        let agent_data_path = PathBuf::from(&keylime_dir).join(AGENT_DATA);
-        let agent_data = if agent_data_path.exists() {
-            match AgentData::load(&agent_data_path) {
-                Ok(data) => Some(data),
-                Err(e) => {
-                    warn!("Could not load TPM data");
-                    None
+        let agent_data_path = match config_get(
+            &conf_name,
+            &conf,
+            "agent",
+            "agent_data_path",
+        ) {
+            Ok(path) => {
+                if path.is_empty() {
+                    Path::new(&keylime_dir)
+                        .join(AGENT_DATA)
+                        .display()
+                        .to_string()
+                } else {
+                    let path = Path::new(&path);
+                    if path.is_relative() {
+                        Path::new(&keylime_dir)
+                            .join(&path)
+                            .display()
+                            .to_string()
+                    } else {
+                        path.display().to_string()
+                    }
                 }
             }
-        } else {
-            warn!(
-                "Agent Data not available under: {}",
-                agent_data_path.display()
-            );
-            None
+            Err(e) => {
+                warn!("Could not get agent data path from configuration file: {}", e);
+                Path::new(&keylime_dir)
+                    .join(AGENT_DATA)
+                    .display()
+                    .to_string()
+            }
         };
 
         let mut trusted_client_ca =
@@ -518,8 +533,7 @@ impl KeylimeConfig {
             tpm_signing_alg,
             ek_handle,
             run_as,
-            agent_data,
-            agent_data_path: agent_data_path.display().to_string(),
+            agent_data_path,
         })
     }
 
@@ -559,7 +573,6 @@ impl Default for KeylimeConfig {
             tpm_hash_alg: HashAlgorithm::Sha256,
             tpm_encryption_alg: EncryptionAlgorithm::Rsa,
             tpm_signing_alg: SignAlgorithm::RsaSsa,
-            agent_data: None,
             agent_data_path: Path::new(WORK_DIR)
                 .join(AGENT_DATA)
                 .display()

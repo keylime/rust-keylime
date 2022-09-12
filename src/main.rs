@@ -470,18 +470,31 @@ async fn main() -> Result<()> {
     )?;
 
     // Try to load persistent Agent data
-    let agent_data = config.agent_data.clone().and_then(|data|
-        match data.valid(config.tpm_hash_alg, config.tpm_signing_alg) {
-            true => Some(data),
-            false => {
-                warn!(
-                    "Not using old {} because it is not valid with current configuration",
-                    AGENT_DATA
-                );
+    let agent_data_path = Path::new(&config.agent_data_path);
+    let agent_data = if agent_data_path.exists() {
+        match AgentData::load(agent_data_path) {
+            Ok(data) => {
+                match data.valid(config.tpm_hash_alg, config.tpm_signing_alg)
+                {
+                    true => Some(data),
+                    false => {
+                        warn!(
+                            "Not using old {} because it is not valid with current configuration",
+                            agent_data_path.display()
+                        );
+                        None
+                    }
+                }
+            }
+            Err(e) => {
+                warn!("Could not load TPM data");
                 None
-            },
+            }
         }
-    );
+    } else {
+        warn!("Agent Data not found in: {}", agent_data_path.display());
+        None
+    };
 
     // Try to reuse old AK from Agent Data
     let old_ak = match &agent_data {
@@ -489,13 +502,17 @@ async fn main() -> Result<()> {
             let ak_result = data.get_ak()?;
             match tpm::load_ak(&mut ctx, ek_result.key_handle, &ak_result) {
                 Ok(ak_handle) => {
-                    info!("Loaded old AK key from {}", AGENT_DATA);
+                    info!(
+                        "Loaded old AK key from {}",
+                        agent_data_path.display()
+                    );
                     Some((ak_handle, ak_result))
                 }
                 Err(e) => {
                     warn!(
                         "Loading old AK key from {} failed: {}",
-                        AGENT_DATA, e
+                        agent_data_path.display(),
+                        e
                     );
                     None
                 }
