@@ -470,55 +470,63 @@ async fn main() -> Result<()> {
     )?;
 
     // Try to load persistent Agent data
-    let agent_data_path = Path::new(&config.agent_data_path);
-    let agent_data = if agent_data_path.exists() {
-        match AgentData::load(agent_data_path) {
-            Ok(data) => {
-                match data.valid(config.tpm_hash_alg, config.tpm_signing_alg)
-                {
-                    true => Some(data),
-                    false => {
-                        warn!(
-                            "Not using old {} because it is not valid with current configuration",
-                            agent_data_path.display()
-                        );
+    let old_ak = match &config.agent_data_path {
+        Some(path) => {
+            let path = Path::new(&path);
+            if path.exists() {
+                match AgentData::load(path) {
+                    Ok(data) => {
+                        match data.valid(
+                            config.tpm_hash_alg,
+                            config.tpm_signing_alg,
+                        ) {
+                            true => {
+                                let ak_result = data.get_ak()?;
+                                match tpm::load_ak(
+                                    &mut ctx,
+                                    ek_result.key_handle,
+                                    &ak_result,
+                                ) {
+                                    Ok(ak_handle) => {
+                                        info!(
+                                            "Loaded old AK key from {}",
+                                            path.display()
+                                        );
+                                        Some((ak_handle, ak_result))
+                                    }
+                                    Err(e) => {
+                                        warn!(
+                                            "Loading old AK key from {} failed: {}",
+                                            path.display(),
+                                            e
+                                        );
+                                        None
+                                    }
+                                }
+                            }
+                            false => {
+                                warn!(
+                                    "Not using old {} because it is not valid with current configuration",
+                                    path.display()
+                                );
+                                None
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        warn!("Could not load agent data: {}", e);
                         None
                     }
                 }
-            }
-            Err(e) => {
-                warn!("Could not load TPM data");
+            } else {
+                info!("Agent Data not found in: {}", path.display());
                 None
             }
         }
-    } else {
-        warn!("Agent Data not found in: {}", agent_data_path.display());
-        None
-    };
-
-    // Try to reuse old AK from Agent Data
-    let old_ak = match &agent_data {
-        Some(data) => {
-            let ak_result = data.get_ak()?;
-            match tpm::load_ak(&mut ctx, ek_result.key_handle, &ak_result) {
-                Ok(ak_handle) => {
-                    info!(
-                        "Loaded old AK key from {}",
-                        agent_data_path.display()
-                    );
-                    Some((ak_handle, ak_result))
-                }
-                Err(e) => {
-                    warn!(
-                        "Loading old AK key from {} failed: {}",
-                        agent_data_path.display(),
-                        e
-                    );
-                    None
-                }
-            }
+        None => {
+            info!("Agent Data path not set in the configuration file");
+            None
         }
-        None => None,
     };
 
     // Use old AK or generate a new one and update the AgentData
@@ -537,11 +545,25 @@ async fn main() -> Result<()> {
         }
     };
 
-    if config.uuid == "hash_ek" {
-        config.set_ek_uuid(ek_result.public.clone())?;
+    // Store new AgentData
+    let agent_data_new =
+        AgentData::create(config.tpm_hash_alg, config.tpm_signing_alg, &ak)?;
+
+    match &config.agent_data_path {
+        Some(path) => {
+            agent_data_new.store(Path::new(&path))?;
+        }
+        None => {
+            info!("Agent Data not stored");
+        }
     }
 
-    info!("Agent UUID: {}", config.uuid);
+    let uuid = match config.uuid.as_str() {
+        "hash_ek" => hash_ek_pubkey(ek_result.public.clone())?,
+        s => s.to_string(),
+    };
+
+    info!("Agent UUID: {}", uuid);
 
     // Generate key pair for secure transmission of u, v keys. The u, v
     // keys are two halves of the key used to decrypt the workload after
@@ -551,34 +573,100 @@ async fn main() -> Result<()> {
     // Since we store the u key in memory, discarding this key, which
     // safeguards u and v keys in transit, is not part of the threat model.
 
-    let (nk_pub, nk_priv) = match &agent_data {
-        Some(data) => data.get_nk()?,
-        None => crypto::rsa_generate_pair(2048)?,
+    let (nk_pub, nk_priv) = match config.server_key {
+        Some(ref path) => {
+            let key_path = Path::new(&path);
+            if key_path.exists() {
+                debug!(
+                    "Loading existing key pair from {}",
+                    key_path.display()
+                );
+                crypto::load_key_pair(key_path)?
+            } else {
+                debug!("Generating new key pair");
+                let (public, private) = crypto::rsa_generate_pair(2048)?;
+                {
+                    // Write the generated key to the file
+                    let mut file = std::fs::File::create(key_path)?;
+                    _ = file.write(&private.private_key_to_pem_pkcs8()?)?;
+                    fs::set_permissions(
+                        key_path,
+                        fs::Permissions::from_mode(0o600),
+                    )?
+                }
+                (public, private)
+            }
+        }
+        None => {
+            debug!(
+                "The server_key option was not set in the configuration file"
+            );
+            debug!("Generating new key pair");
+            crypto::rsa_generate_pair(2048)?
+        }
     };
 
     let cert: openssl::x509::X509;
     let mtls_cert;
     let ssl_context;
     if config.enable_agent_mtls {
-        let keylime_ca_cert =
-            match crypto::load_x509(Path::new(&config.trusted_client_ca)) {
-                Ok(t) => Ok(t),
-                Err(e) => {
-                    error!(
-                        "Certificate not installed: {}",
-                        config.trusted_client_ca
+        cert = match config.server_cert {
+            Some(ref path) => {
+                let cert_path = Path::new(&path);
+                if cert_path.exists() {
+                    debug!(
+                        "Loading existing mTLS certificate from {}",
+                        cert_path.display()
                     );
-                    Err(e)
+                    crypto::load_x509(cert_path)?
+                } else {
+                    debug!("Generating new mTLS certificate");
+                    let cert = crypto::generate_x509(&nk_priv, &uuid)?;
+                    {
+                        // Write the generated key to the file
+                        let mut file = std::fs::File::create(cert_path)?;
+                        _ = file.write(&cert.to_pem()?)?;
+                    }
+                    cert
                 }
-            }?;
-
-        cert = match &agent_data {
-            Some(data) => match data.get_mtls_cert()? {
-                Some(cert) => cert,
-                None => crypto::generate_x509(&nk_priv, &config.uuid)?,
-            },
-            None => crypto::generate_x509(&nk_priv, &config.uuid)?,
+            }
+            None => {
+                debug!("The server_cert option was not set in the configuration file");
+                crypto::generate_x509(&nk_priv, &uuid)?
+            }
         };
+
+        let ca_cert_path = match config.trusted_client_ca {
+            None => {
+                error!("Agent mTLS is enabled, but trusted_client_ca option was not provided");
+                return Err(Error::Configuration("Agent mTLS is enabled, but trusted_client_ca option was not provided".to_string()));
+            }
+            Some(ref path) => PathBuf::from(&path),
+        };
+
+        if !ca_cert_path.exists() {
+            error!(
+                "Trusted client CA certificate not found: {} does not exist",
+                ca_cert_path.display()
+            );
+            return Err(Error::Configuration(format!(
+                "Trusted client CA certificate not found: {} does not exist",
+                ca_cert_path.display()
+            )));
+        }
+
+        let keylime_ca_cert = match crypto::load_x509(&ca_cert_path) {
+            Ok(t) => Ok(t),
+            Err(e) => {
+                error!(
+                    "Failed to load trusted CA certificate {}: {}",
+                    ca_cert_path.display(),
+                    e
+                );
+                Err(e)
+            }
+        }?;
+
         mtls_cert = Some(&cert);
         ssl_context = Some(crypto::generate_mtls_context(
             &cert,
@@ -591,23 +679,12 @@ async fn main() -> Result<()> {
         warn!("mTLS disabled, Tenant and Verifier will reach out to agent via HTTP");
     }
 
-    // Store new AgentData
-    let agent_data_new = AgentData::create(
-        config.tpm_hash_alg,
-        config.tpm_signing_alg,
-        &ak,
-        &nk_pub,
-        &nk_priv,
-        &mtls_cert,
-    )?;
-    agent_data_new.store(Path::new(&config.agent_data_path))?;
-
     {
         // Request keyblob material
         let keyblob = registrar_agent::do_register_agent(
             &config.registrar_ip,
             &config.registrar_port,
-            &config.uuid,
+            &uuid,
             &PublicBuffer::try_from(ek_result.public.clone())?.marshall()?,
             ek_result.ek_cert,
             &PublicBuffer::try_from(ak.public)?.marshall()?,
@@ -616,7 +693,7 @@ async fn main() -> Result<()> {
             config.contact_port,
         )
         .await?;
-        info!("SUCCESS: Agent {} registered", config.uuid);
+        info!("SUCCESS: Agent {} registered", &uuid);
 
         let key = tpm::activate_credential(
             &mut ctx,
@@ -630,17 +707,17 @@ async fn main() -> Result<()> {
         }
         let mackey = base64::encode(key.value());
         let auth_tag =
-            crypto::compute_hmac(mackey.as_bytes(), config.uuid.as_bytes())?;
+            crypto::compute_hmac(mackey.as_bytes(), uuid.as_bytes())?;
         let auth_tag = hex::encode(&auth_tag);
 
         registrar_agent::do_activate_agent(
             &config.registrar_ip,
             &config.registrar_port,
-            &config.uuid,
+            &uuid,
             &auth_tag,
         )
         .await?;
-        info!("SUCCESS: Agent {} activated", config.uuid);
+        info!("SUCCESS: Agent {} activated", &uuid);
     }
 
     let mut encr_payload = Vec::new();
