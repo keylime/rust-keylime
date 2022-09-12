@@ -45,6 +45,8 @@ pub static IMA_ML: &str =
 pub static MEASUREDBOOT_ML: &str =
     "/sys/kernel/security/tpm0/binary_bios_measurements";
 // The DEFAULT_CA_PATH is relative from WORK_DIR
+pub static DEFAULT_KEY_PATH: &str = "server-key.pem";
+pub static DEFAULT_CERT_PATH: &str = "server-cert.crt";
 pub static DEFAULT_CA_PATH: &str = "cv_ca/cacert.crt";
 pub static KEY: &str = "secret";
 pub const MTLS_ENABLED: bool = true;
@@ -184,9 +186,6 @@ pub(crate) struct AgentData {
     pub ak_sign_alg: SignAlgorithm,
     ak_public: Vec<u8>,
     ak_private: Vec<u8>,
-    nk_pub: Vec<u8>,
-    nk_priv: Vec<u8>,
-    mtls_cert: Option<Vec<u8>>,
 }
 
 impl AgentData {
@@ -194,24 +193,14 @@ impl AgentData {
         ak_hash_alg: HashAlgorithm,
         ak_sign_alg: SignAlgorithm,
         ak: &tpm::AKResult,
-        nk_pub: &PKey<openssl::pkey::Public>,
-        nk_priv: &PKey<openssl::pkey::Private>,
-        mtls_cert: &Option<&X509>,
     ) -> Result<Self> {
         let ak_public = ak.public.marshall()?;
         let ak_private: Vec<u8> = ak.private.to_vec();
-        let mtls_cert = match mtls_cert {
-            Some(cert) => Some(cert.to_pem()?),
-            None => None,
-        };
         Ok(Self {
             ak_hash_alg,
             ak_sign_alg,
             ak_public,
             ak_private,
-            nk_pub: nk_pub.public_key_to_pem()?,
-            nk_priv: nk_priv.private_key_to_pem_pkcs8()?,
-            mtls_cert,
         })
     }
 
@@ -234,22 +223,6 @@ impl AgentData {
         Ok(tpm::AKResult { public, private })
     }
 
-    pub(crate) fn get_nk(
-        &self,
-    ) -> Result<(PKey<openssl::pkey::Public>, PKey<openssl::pkey::Private>)>
-    {
-        let nk_pub = PKey::public_key_from_pem(&self.nk_pub)?;
-        let nk_priv = PKey::private_key_from_pem(&self.nk_priv)?;
-        Ok((nk_pub, nk_priv))
-    }
-
-    pub(crate) fn get_mtls_cert(&self) -> Result<Option<X509>> {
-        match &self.mtls_cert {
-            Some(cert) => Ok(Some(X509::from_pem(cert)?)),
-            None => Ok(None),
-        }
-    }
-
     pub(crate) fn valid(
         &self,
         hash_alg: HashAlgorithm,
@@ -270,7 +243,9 @@ pub(crate) struct KeylimeConfig {
     pub registrar_port: String,
     pub enable_agent_mtls: bool,
     pub keylime_dir: String,
-    pub trusted_client_ca: String,
+    pub server_key: Option<String>,
+    pub server_cert: Option<String>,
+    pub trusted_client_ca: Option<String>,
     pub enc_keyname: String,
     pub dec_payload_file: String,
     pub secure_size: String,
@@ -290,7 +265,7 @@ pub(crate) struct KeylimeConfig {
     pub tpm_signing_alg: SignAlgorithm,
     pub ek_handle: Option<String>,
     pub run_as: Option<String>,
-    pub agent_data_path: String,
+    pub agent_data_path: Option<String>,
 }
 
 impl KeylimeConfig {
@@ -399,47 +374,42 @@ impl KeylimeConfig {
         )
         .or_else::<Error, _>(|_| Ok(String::from(WORK_DIR)))?;
 
-        let agent_data_path = match config_get(
+        let mut agent_data_path = config_get_file_path(
             &conf_name,
             &conf,
             "agent",
             "agent_data_path",
-        ) {
-            Ok(path) => {
-                if path.is_empty() {
-                    Path::new(&keylime_dir)
-                        .join(AGENT_DATA)
-                        .display()
-                        .to_string()
-                } else {
-                    let path = Path::new(&path);
-                    if path.is_relative() {
-                        Path::new(&keylime_dir)
-                            .join(&path)
-                            .display()
-                            .to_string()
-                    } else {
-                        path.display().to_string()
-                    }
-                }
-            }
-            Err(e) => {
-                warn!("Could not get agent data path from configuration file: {}", e);
-                Path::new(&keylime_dir)
-                    .join(AGENT_DATA)
-                    .display()
-                    .to_string()
-            }
-        };
+            &keylime_dir,
+            AGENT_DATA,
+        )?;
 
-        let mut trusted_client_ca =
-            config_get(&conf_name, &conf, "agent", "trusted_client_ca")?;
-        if trusted_client_ca == "default" {
-            trusted_client_ca = Path::new(&keylime_dir)
-                .join(DEFAULT_CA_PATH)
-                .display()
-                .to_string();
-        }
+        let mut server_key = config_get_file_path(
+            &conf_name,
+            &conf,
+            "agent",
+            "server_key",
+            &keylime_dir,
+            DEFAULT_KEY_PATH,
+        )?;
+
+        let mut server_cert = config_get_file_path(
+            &conf_name,
+            &conf,
+            "agent",
+            "server_cert",
+            &keylime_dir,
+            DEFAULT_CERT_PATH,
+        )?;
+
+        let mut trusted_client_ca = config_get_file_path(
+            &conf_name,
+            &conf,
+            "agent",
+            "trusted_client_ca",
+            &keylime_dir,
+            DEFAULT_CA_PATH,
+        )?;
+
         let revocation_actions =
             config_get(&conf_name, &conf, "agent", "revocation_actions")
                 .or_else::<Error, _>(|_| Ok(String::from(REV_ACTIONS)))?;
@@ -513,6 +483,8 @@ impl KeylimeConfig {
             registrar_port,
             enable_agent_mtls,
             keylime_dir,
+            server_key,
+            server_cert,
             trusted_client_ca,
             enc_keyname,
             dec_payload_file,
@@ -536,19 +508,21 @@ impl KeylimeConfig {
             agent_data_path,
         })
     }
+}
 
-    // Update function for the uuid if it is set to "hash_ek"
-    pub fn set_ek_uuid(&mut self, ek_pub: Public) -> Result<()> {
-        // Converting Public TPM key to PEM
-        let key = SubjectPublicKeyInfo::try_from(ek_pub)?;
-        let key_der = picky_asn1_der::to_vec(&key)?;
-        let openssl_key = PKey::public_key_from_der(&key_der)?;
-        let pem = openssl_key.public_key_to_pem()?;
+/// Calculate the SHA-256 hash of the TPM public key in PEM format
+///
+/// This is used as the agent UUID when the configuration option 'uuid' is set as 'hash_ek'
+pub(crate) fn hash_ek_pubkey(ek_pub: Public) -> Result<String> {
+    // Converting Public TPM key to PEM
+    let key = SubjectPublicKeyInfo::try_from(ek_pub)?;
+    let key_der = picky_asn1_der::to_vec(&key)?;
+    let openssl_key = PKey::public_key_from_der(&key_der)?;
+    let pem = openssl_key.public_key_to_pem()?;
 
-        let mut hash = hash(MessageDigest::sha256(), &pem)?;
-        self.uuid = hex::encode(hash);
-        Ok(())
-    }
+    // Calculate the SHA-256 hash of the public key in PEM format
+    let mut hash = hash(MessageDigest::sha256(), &pem)?;
+    Ok(hex::encode(hash))
 }
 
 // Default test configuration. This should match the defaults in keylime-agent.conf
@@ -573,10 +547,9 @@ impl Default for KeylimeConfig {
             tpm_hash_alg: HashAlgorithm::Sha256,
             tpm_encryption_alg: EncryptionAlgorithm::Rsa,
             tpm_signing_alg: SignAlgorithm::RsaSsa,
-            agent_data_path: Path::new(WORK_DIR)
-                .join(AGENT_DATA)
-                .display()
-                .to_string(),
+            agent_data_path: Some(
+                Path::new(WORK_DIR).join(AGENT_DATA).display().to_string(),
+            ),
             enable_revocation_notifications: true,
             revocation_cert: "default".to_string(),
             revocation_notification_ip: "127.0.0.1".to_string(),
@@ -586,7 +559,24 @@ impl Default for KeylimeConfig {
             dec_payload_file: "decrypted_payload".to_string(),
             enc_keyname: "derived_tci_key".to_string(),
             extract_payload_zip: true,
-            trusted_client_ca: DEFAULT_CA_PATH.to_string(),
+            server_key: Some(
+                Path::new(WORK_DIR)
+                    .join(DEFAULT_KEY_PATH)
+                    .display()
+                    .to_string(),
+            ),
+            server_cert: Some(
+                Path::new(WORK_DIR)
+                    .join(DEFAULT_CERT_PATH)
+                    .display()
+                    .to_string(),
+            ),
+            trusted_client_ca: Some(
+                Path::new(WORK_DIR)
+                    .join(DEFAULT_CA_PATH)
+                    .display()
+                    .to_string(),
+            ),
             revocation_actions: "".to_string(),
             revocation_actions_dir: "/usr/libexec/keylime".to_string(),
             allow_payload_revocation_actions: true,
@@ -726,6 +716,45 @@ fn config_get(
     };
 
     Ok(value.to_string())
+}
+
+/// Get a file path from the configuration file.
+///
+/// If the value is set as "default", return the provided default path relative from the provided
+/// work_dir.
+///
+/// If the option is empty, return Ok(None)
+///
+/// If the option is not found in the provided configuration file, return error
+fn config_get_file_path(
+    conf_name: &str,
+    conf: &Ini,
+    section: &str,
+    key: &str,
+    work_dir: &str,
+    default: &str,
+) -> Result<Option<String>> {
+    match config_get(conf_name, conf, section, key) {
+        Ok(path) => {
+            if path == "default" {
+                Ok(Some(
+                    Path::new(work_dir).join(default).display().to_string(),
+                ))
+            } else if path.is_empty() {
+                Ok(None)
+            } else {
+                let path = Path::new(&path);
+                if path.is_relative() {
+                    Ok(Some(
+                        Path::new(work_dir).join(path).display().to_string(),
+                    ))
+                } else {
+                    Ok(Some(path.display().to_string()))
+                }
+            }
+        }
+        Err(e) => Err(e),
+    }
 }
 
 /*

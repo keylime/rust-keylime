@@ -40,6 +40,16 @@ pub(crate) fn load_x509(input_cert_path: &Path) -> Result<X509> {
     Ok(cert)
 }
 
+/// Read a PEM file and returns the public and private keys
+pub(crate) fn load_key_pair(
+    key_path: &Path,
+) -> Result<(PKey<Public>, PKey<Private>)> {
+    let pem = std::fs::read(key_path)?;
+    let private = PKey::private_key_from_pem(&pem)?;
+    let public = pkey_pub_from_priv(private.clone())?;
+    Ok((public, private))
+}
+
 pub(crate) fn rsa_generate(key_size: u32) -> Result<PKey<Private>> {
     PKey::from_rsa(Rsa::generate(key_size)?).map_err(Error::Crypto)
 }
