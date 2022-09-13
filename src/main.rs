@@ -58,7 +58,10 @@ use error::{Error, Result};
 use futures::{future::TryFutureExt, try_join};
 use ima::ImaMeasurementList;
 use log::*;
-use openssl::pkey::{PKey, Private, Public};
+use openssl::{
+    pkey::{PKey, Private, Public},
+    x509::X509,
+};
 use std::{
     convert::TryFrom,
     fs,
@@ -589,19 +592,16 @@ async fn main() -> Result<()> {
                     "Loading existing key pair from {}",
                     key_path.display()
                 );
-                crypto::load_key_pair(key_path)?
+                crypto::load_key_pair(key_path, &config.server_key_password)?
             } else {
                 debug!("Generating new key pair");
                 let (public, private) = crypto::rsa_generate_pair(2048)?;
-                {
-                    // Write the generated key to the file
-                    let mut file = std::fs::File::create(key_path)?;
-                    _ = file.write(&private.private_key_to_pem_pkcs8()?)?;
-                    fs::set_permissions(
-                        key_path,
-                        fs::Permissions::from_mode(0o600),
-                    )?
-                }
+                // Write the generated key to the file
+                crypto::write_key_pair(
+                    &private,
+                    key_path,
+                    &config.server_key_password,
+                );
                 (public, private)
             }
         }
@@ -614,7 +614,7 @@ async fn main() -> Result<()> {
         }
     };
 
-    let cert: openssl::x509::X509;
+    let cert: X509;
     let mtls_cert;
     let ssl_context;
     if config.enable_agent_mtls {
@@ -630,11 +630,8 @@ async fn main() -> Result<()> {
                 } else {
                     debug!("Generating new mTLS certificate");
                     let cert = crypto::generate_x509(&nk_priv, &uuid)?;
-                    {
-                        // Write the generated key to the file
-                        let mut file = std::fs::File::create(cert_path)?;
-                        _ = file.write(&cert.to_pem()?)?;
-                    }
+                    // Write the generated certificate
+                    crypto::write_x509(&cert, cert_path)?;
                     cert
                 }
             }

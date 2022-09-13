@@ -16,9 +16,13 @@ use openssl::{
     x509::store::X509StoreBuilder,
     x509::{X509Name, X509},
 };
-use std::fs;
-use std::path::Path;
-use std::string::String;
+use std::{
+    fs::{read_to_string, set_permissions, File, Permissions},
+    io::{Read, Write},
+    os::unix::fs::PermissionsExt,
+    path::Path,
+    string::String,
+};
 
 use crate::{
     Error, Result, AES_128_KEY_LEN, AES_256_KEY_LEN, AES_BLOCK_SIZE,
@@ -26,7 +30,7 @@ use crate::{
 
 // Read a X509 cert or cert chain and outputs the first certificate
 pub(crate) fn load_x509(input_cert_path: &Path) -> Result<X509> {
-    let contents = fs::read_to_string(&input_cert_path)?;
+    let contents = read_to_string(&input_cert_path)?;
     let mut cert_chain = X509::stack_from_pem(contents.as_bytes())?;
 
     if cert_chain.len() != 1 {
@@ -40,14 +44,60 @@ pub(crate) fn load_x509(input_cert_path: &Path) -> Result<X509> {
     Ok(cert)
 }
 
+/// Write a X509 certificate to a file in PEM format
+pub(crate) fn write_x509(cert: &X509, file_path: &Path) -> Result<()> {
+    let mut file = std::fs::File::create(file_path)?;
+    _ = file.write(&cert.to_pem()?)?;
+    Ok(())
+}
+
 /// Read a PEM file and returns the public and private keys
 pub(crate) fn load_key_pair(
     key_path: &Path,
+    key_password: &Option<String>,
 ) -> Result<(PKey<Public>, PKey<Private>)> {
     let pem = std::fs::read(key_path)?;
-    let private = PKey::private_key_from_pem(&pem)?;
+    let private = match key_password {
+        Some(ref pw) => {
+            if pw.is_empty() {
+                PKey::private_key_from_pem(&pem)?
+            } else {
+                PKey::private_key_from_pem_passphrase(&pem, pw.as_bytes())?
+            }
+        }
+        None => PKey::private_key_from_pem(&pem)?,
+    };
     let public = pkey_pub_from_priv(private.clone())?;
     Ok((public, private))
+}
+
+/// Write a private key to a file.
+///
+/// If a passphrase is provided, the key will be stored encrypted using AES-256-CBC
+pub(crate) fn write_key_pair(
+    key: &PKey<Private>,
+    file_path: &Path,
+    passphrase: &Option<String>,
+) -> Result<()> {
+    // Write the generated key to the file
+    let mut file = std::fs::File::create(file_path)?;
+    match passphrase {
+        Some(ref pw) => {
+            if pw.is_empty() {
+                _ = file.write(&key.private_key_to_pem_pkcs8()?)?;
+            } else {
+                _ = file.write(&key.private_key_to_pem_pkcs8_passphrase(
+                    openssl::symm::Cipher::aes_256_cbc(),
+                    pw.as_bytes(),
+                )?)?;
+            }
+        }
+        None => {
+            _ = file.write(&key.private_key_to_pem_pkcs8()?)?;
+        }
+    }
+    set_permissions(file_path, Permissions::from_mode(0o600))?;
+    Ok(())
 }
 
 pub(crate) fn rsa_generate(key_size: u32) -> Result<PKey<Private>> {
@@ -293,7 +343,7 @@ pub mod testing {
     pub(crate) fn rsa_import_pair(
         path: impl AsRef<Path>,
     ) -> Result<(PKey<Public>, PKey<Private>)> {
-        let contents = fs::read_to_string(path)?;
+        let contents = read_to_string(path)?;
         let private = PKey::private_key_from_pem(contents.as_bytes())?;
         let public = pkey_pub_from_priv(private.clone())?;
         Ok((public, private))
@@ -531,7 +581,7 @@ mod tests {
             .join("test-rsa.pem");
 
         // Get RSA keys
-        let contents = fs::read_to_string(rsa_key_path);
+        let contents = read_to_string(rsa_key_path);
         let private =
             PKey::private_key_from_pem(contents.unwrap().as_bytes()).unwrap(); //#[allow_ci]
         let public = pkey_pub_from_priv(private).unwrap(); //#[allow_ci]
@@ -543,8 +593,70 @@ mod tests {
             .join("test-data")
             .join("test-rsa.sig");
 
-        let signature = fs::read_to_string(signature_path).unwrap(); //#[allow_ci]
+        let signature = read_to_string(signature_path).unwrap(); //#[allow_ci]
 
         assert!(asym_verify(&public, &message, &signature).unwrap()) //#[allow_ci]
+    }
+
+    #[test]
+    fn test_password() {
+        // Import test keypair
+        let rsa_key_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("test-data")
+            .join("test-rsa.pem");
+
+        // Get RSA keys
+        let (public, private) = rsa_import_pair(rsa_key_path).unwrap(); //#[allow_ci]
+
+        // Create temporary directory and files names
+        let temp_dir = tempfile::tempdir().unwrap(); //#[allow_ci]
+        let encrypted_path =
+            Path::new(&temp_dir.path()).join("encrypted.pem");
+        let empty_pw_path = Path::new(&temp_dir.path()).join("empty_pw.pem");
+        let none_pw_path = Path::new(&temp_dir.path()).join("none_pw.pem");
+
+        let message = b"Hello World!";
+
+        // Write keys to files
+        assert!(write_key_pair(
+            &private,
+            &encrypted_path,
+            &Some("password".to_string())
+        )
+        .is_ok());
+        assert!(write_key_pair(
+            &private,
+            &empty_pw_path,
+            &Some("".to_string())
+        )
+        .is_ok());
+        assert!(write_key_pair(&private, &none_pw_path, &None).is_ok());
+
+        // Read keys from files
+        let (_, priv_from_encrypted) =
+            load_key_pair(&encrypted_path, &Some("password".to_string()))
+                .unwrap(); //#[allow_ci]
+        let (_, priv_from_empty) =
+            load_key_pair(&empty_pw_path, &Some("".to_string())).unwrap(); //#[allow_ci]
+        let (_, priv_from_none) =
+            load_key_pair(&none_pw_path, &None).unwrap(); //#[allow_ci]
+
+        for keypair in [
+            priv_from_encrypted.as_ref(),
+            priv_from_empty.as_ref(),
+            priv_from_none.as_ref(),
+        ] {
+            // Sign the data
+            let mut signer =
+                Signer::new(MessageDigest::sha256(), keypair).unwrap(); //#[allow_ci]
+            signer.update(message).unwrap(); //#[allow_ci]
+            let signature = signer.sign_to_vec().unwrap(); //#[allow_ci]
+
+            // Verify the data
+            let mut verifier =
+                Verifier::new(MessageDigest::sha256(), keypair).unwrap(); //#[allow_ci]
+            verifier.update(message).unwrap(); //#[allow_ci]
+            assert!(verifier.verify(&signature).unwrap()); //#[allow_ci]
+        }
     }
 }
