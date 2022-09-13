@@ -252,6 +252,7 @@ pub(crate) struct KeylimeConfig {
     pub keylime_dir: String,
     pub server_key: Option<String>,
     pub server_cert: Option<String>,
+    pub server_key_password: Option<String>,
     pub trusted_client_ca: Option<String>,
     pub enc_keyname: String,
     pub dec_payload_file: String,
@@ -417,6 +418,10 @@ impl KeylimeConfig {
             DEFAULT_CA_PATH,
         )?;
 
+        let server_key_password =
+            config_get(&conf_name, &conf, "agent", "server_key_password")
+                .ok();
+
         let revocation_actions =
             config_get(&conf_name, &conf, "agent", "revocation_actions")
                 .or_else::<Error, _>(|_| Ok(String::from(REV_ACTIONS)))?;
@@ -492,6 +497,7 @@ impl KeylimeConfig {
             keylime_dir,
             server_key,
             server_cert,
+            server_key_password,
             trusted_client_ca,
             enc_keyname,
             dec_payload_file,
@@ -572,6 +578,7 @@ impl Default for KeylimeConfig {
                     .display()
                     .to_string(),
             ),
+            server_key_password: None,
             server_cert: Some(
                 Path::new(WORK_DIR)
                     .join(DEFAULT_CERT_PATH)
