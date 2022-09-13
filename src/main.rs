@@ -469,6 +469,9 @@ async fn main() -> Result<()> {
         config.ek_handle.as_deref(),
     )?;
 
+    // Calculate the SHA-256 hash of the public key in PEM format
+    let ek_hash = hash_ek_pubkey(ek_result.public.clone())?;
+
     // Try to load persistent Agent data
     let old_ak = match &config.agent_data_path {
         Some(path) => {
@@ -479,6 +482,7 @@ async fn main() -> Result<()> {
                         match data.valid(
                             config.tpm_hash_alg,
                             config.tpm_signing_alg,
+                            ek_hash.as_bytes(),
                         ) {
                             true => {
                                 let ak_result = data.get_ak()?;
@@ -546,8 +550,12 @@ async fn main() -> Result<()> {
     };
 
     // Store new AgentData
-    let agent_data_new =
-        AgentData::create(config.tpm_hash_alg, config.tpm_signing_alg, &ak)?;
+    let agent_data_new = AgentData::create(
+        config.tpm_hash_alg,
+        config.tpm_signing_alg,
+        &ak,
+        ek_hash.as_bytes(),
+    )?;
 
     match &config.agent_data_path {
         Some(path) => {
