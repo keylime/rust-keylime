@@ -448,17 +448,19 @@ async fn main() -> Result<()> {
         }
     }
 
-    // When the EK handle is given, set auth for the Owner and
-    // Endorsement hierarchies.  Note in the Python implementation,
-    // tpm_ownerpassword option is also used for claiming ownership of
-    // TPM access, which will not be implemented here.
-    if config.ek_handle.is_some() {
-        if let Some(ref v) = config.tpm_ownerpassword {
-            let auth = Auth::try_from(v.as_bytes())?;
-            ctx.tr_set_auth(Hierarchy::Owner.into(), auth.clone())?;
-            ctx.tr_set_auth(Hierarchy::Endorsement.into(), auth)?;
-        }
-    }
+    // When the tpm_ownerpassword is given, set auth for the Endorsement hierarchy.
+    // Note in the Python implementation, tpm_ownerpassword option is also used for claiming
+    // ownership of TPM access, which will not be implemented here.
+    if let Some(ref v) = config.tpm_ownerpassword {
+        let auth = Auth::try_from(v.as_bytes())?;
+        ctx.tr_set_auth(Hierarchy::Endorsement.into(), auth)
+            .map_err(|e| {
+                Error::Configuration(format!(
+                    "Failed to set TPM context password for Endorsement Hierarchy: {}",
+                    e
+                ))
+            })?;
+    };
 
     // Gather EK values and certs
     let ek_result = tpm::create_ek(
