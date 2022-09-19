@@ -21,7 +21,7 @@ pub(crate) enum Error {
     #[allow(unused)]
     InvalidRequest,
     #[error("Configuration loading error: {0}")]
-    Ini(#[from] ini::Error),
+    Config(#[from] config::ConfigError),
     #[error("Infallible: {0}")]
     Infallible(#[from] std::convert::Infallible),
     #[error("Compress tools error: {0}")]
@@ -38,6 +38,10 @@ pub(crate) enum Error {
     Serde(#[from] serde_json::Error),
     #[error("Permission error")]
     Permission,
+    #[error("Glob error")]
+    Glob(#[from] glob::GlobError),
+    #[error("Glob pattern error")]
+    GlobPattern(#[from] glob::PatternError),
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
     #[error("Text decoding error: {0}")]

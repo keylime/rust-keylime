@@ -23,7 +23,9 @@ base64 = "0.13"
 cfg-if = "1"
 clap = { version = "~3.1.18", features = ["derive"] }
 compress-tools = "0.12"
+config = { version = "0.13", features = ["toml"] }
 futures = "0.3.6"
+glob = "0.3"
 hex = "0.4"
 libc = "0.2.43"
 log = "0.4"
@@ -39,6 +41,7 @@ serde_json = { version = "1.0", features = ["raw_value"] }
 static_assertions = "1"
 tempfile = "3.0.4"
 tokio = {version = "1.13.1", features = ["full"]}
+toml = "0.5"
 tss-esapi = "7.1.0"
 thiserror = "1.0"
 uuid = {version = "0.8", features = ["v4"]}

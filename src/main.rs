@@ -35,6 +35,7 @@
 
 mod algorithms;
 mod common;
+mod config;
 mod crypto;
 mod error;
 mod errors_handler;
@@ -106,9 +107,9 @@ pub struct QuoteData {
     enc_alg: algorithms::EncryptionAlgorithm,
     sign_alg: algorithms::SignAlgorithm,
     agent_uuid: String,
-    revocation_cert: PathBuf,
-    revocation_actions: String,
-    revocation_actions_dir: PathBuf,
+    revocation_cert: Option<PathBuf>,
+    revocation_actions: Option<String>,
+    revocation_actions_dir: Option<PathBuf>,
     allow_payload_revocation_actions: bool,
     secure_size: String,
     work_dir: PathBuf,
@@ -137,7 +138,7 @@ pub(crate) fn decrypt_payload(
 // writing out symmetric key and encrypted payload. returns file paths for
 // both.
 pub(crate) fn setup_unzipped(
-    config: &KeylimeConfig,
+    config: &config::KeylimeConfig,
     mount: &Path,
 ) -> Result<(PathBuf, PathBuf, PathBuf)> {
     let unzipped = mount.join("unzipped");
@@ -147,8 +148,8 @@ pub(crate) fn setup_unzipped(
         fs::remove_dir_all(&unzipped)?;
     }
 
-    let dec_payload_path = unzipped.join(&config.dec_payload_file);
-    let key_path = unzipped.join(&config.enc_keyname);
+    let dec_payload_path = unzipped.join(&config.agent.dec_payload_file);
+    let key_path = unzipped.join(&config.agent.enc_keyname);
 
     fs::create_dir(&unzipped)?;
 
@@ -224,10 +225,10 @@ pub(crate) fn run(dir: &Path, script: &str, uuid: &str) -> Result<()> {
 // the input string is the directory where the unzipped file(s) should be stored.
 pub(crate) fn optional_unzip_payload(
     unzipped: &Path,
-    config: &KeylimeConfig,
+    config: &config::KeylimeConfig,
 ) -> Result<()> {
-    if config.extract_payload_zip {
-        let zipped_payload = &config.dec_payload_file;
+    if config.agent.extract_payload_zip {
+        let zipped_payload = &config.agent.dec_payload_file;
         let zipped_payload_path = unzipped.join(zipped_payload);
 
         info!("Unzipping payload {} to {:?}", &zipped_payload, unzipped);
@@ -243,7 +244,7 @@ pub(crate) async fn run_encrypted_payload(
     symm_key: Arc<Mutex<Option<SymmKey>>>,
     symm_key_cvar: Arc<Condvar>,
     payload: Arc<Mutex<Vec<u8>>>,
-    config: &KeylimeConfig,
+    config: &config::KeylimeConfig,
     mount: &Path,
 ) -> Result<()> {
     // do nothing until actix server's handlers have updated the symmetric key
@@ -267,13 +268,13 @@ pub(crate) async fn run_encrypted_payload(
 
     optional_unzip_payload(&unzipped, config)?;
     // there may also be also a separate init script
-    match config.payload_script.as_str() {
+    match config.agent.payload_script.as_str() {
         "" => {
             info!("No payload script specified, skipping");
         }
         script => {
             info!("Payload init script indicated: {}", script);
-            run(&unzipped, script, config.uuid.as_str())?;
+            run(&unzipped, script, config.agent.uuid.as_str())?;
         }
     }
 
@@ -316,11 +317,12 @@ async fn worker(
     symm_key: Arc<Mutex<Option<SymmKey>>>,
     symm_key_cvar: Arc<Condvar>,
     payload: Arc<Mutex<Vec<u8>>>,
-    config: KeylimeConfig,
+    config: config::KeylimeConfig,
     mount: PathBuf,
 ) -> Result<()> {
     // Only run payload scripts if mTLS is enabled or 'enable_insecure_payload' option is set
-    if config.enable_agent_mtls || config.enable_insecure_payload {
+    if config.agent.enable_agent_mtls || config.agent.enable_insecure_payload
+    {
         run_encrypted_payload(
             symm_key,
             symm_key_cvar,
@@ -335,7 +337,7 @@ async fn worker(
 
     // If with-zmq feature is enabled, run the service listening for ZeroMQ messages
     #[cfg(feature = "with-zmq")]
-    if config.enable_revocation_notifications {
+    if config.agent.enable_revocation_notifications {
         return revocation::run_revocation_service(&config, &mount).await;
     }
 
@@ -395,13 +397,13 @@ async fn main() -> Result<()> {
     };
 
     // Load config
-    let mut config = KeylimeConfig::build()?;
+    let mut config = config::KeylimeConfig::new()?;
 
     // The agent cannot run when a payload script is defined, but mTLS is disabled and insecure
     // payloads are not explicitly enabled
-    if !&config.enable_agent_mtls
-        && !&config.enable_insecure_payload
-        && !&config.payload_script.is_empty()
+    if !&config.agent.enable_agent_mtls
+        && !&config.agent.enable_insecure_payload
+        && !&config.agent.payload_script.is_empty()
     {
         let message = "The agent mTLS is disabled and 'payload_script' is not empty. To allow the agent to run, 'enable_insecure_payload' has to be set to 'True'".to_string();
 
@@ -409,11 +411,25 @@ async fn main() -> Result<()> {
         return Err(Error::Configuration(message));
     }
 
-    let work_dir = Path::new(&config.keylime_dir);
-    let mount = secure_mount::mount(work_dir, &config.secure_size)?;
+    let work_dir = Path::new(&config.agent.keylime_dir);
+    let mount = secure_mount::mount(work_dir, &config.agent.secure_size)?;
+
+    let run_as = if permissions::get_euid() == 0 {
+        if let Some(ref run_as) = config.agent.run_as {
+            Some(run_as.to_string())
+        } else {
+            warn!("Cannot drop privileges since 'run_as' is empty in 'agent' section of 'keylime-agent.conf'.");
+            None
+        }
+    } else {
+        error!("Cannot drop privileges: not enough permission");
+        return Err(Error::Configuration(
+            "Cannot drop privileges: not enough permission".to_string(),
+        ));
+    };
 
     // Drop privileges
-    if let Some(user_group) = &config.run_as {
+    if let Some(user_group) = &run_as {
         permissions::chown(user_group, &mount)?;
         if let Err(e) = permissions::run_as(user_group) {
             let message = "The user running the Keylime agent should be set in keylime-agent.conf, using the parameter `run_as`, with the format `user:group`".to_string();
@@ -438,15 +454,22 @@ async fn main() -> Result<()> {
 
     cfg_if::cfg_if! {
         if #[cfg(feature = "legacy-python-actions")] {
-            // Verify if the python shim is installed in the expected location
-            let python_shim =
-                PathBuf::from(&config.revocation_actions_dir).join("shim.py");
-            if !python_shim.exists() {
-                error!("Could not find python shim at {}", python_shim.display());
-                return Err(Error::Configuration(format!(
-                    "Could not find python shim at {}",
-                    python_shim.display()
-                )));
+            match config.agent.revocation_actions_dir {
+                Some(ref actions_dir) => {
+                    // Verify if the python shim is installed in the expected location
+                    let python_shim = Path::new(&actions_dir).join("shim.py");
+                    if !python_shim.exists() {
+                        error!("Could not find python shim at {}", python_shim.display());
+                        return Err(Error::Configuration(format!(
+                            "Could not find python shim at {}",
+                            python_shim.display()
+                        )));
+                    }
+                },
+                None => {
+                    error!("The revocation actions directory was not set in 'revocation_actions_dir'");
+                    return Err(Error::Configuration("The revocation actions directory was not set in 'revocation_actions_dir'".to_string()));
+                }
             }
         }
     }
@@ -454,7 +477,7 @@ async fn main() -> Result<()> {
     // When the tpm_ownerpassword is given, set auth for the Endorsement hierarchy.
     // Note in the Python implementation, tpm_ownerpassword option is also used for claiming
     // ownership of TPM access, which will not be implemented here.
-    if let Some(ref v) = config.tpm_ownerpassword {
+    if let Some(ref v) = config.agent.tpm_ownerpassword {
         let auth = Auth::try_from(v.as_bytes())?;
         ctx.tr_set_auth(Hierarchy::Endorsement.into(), auth)
             .map_err(|e| {
@@ -465,26 +488,36 @@ async fn main() -> Result<()> {
             })?;
     };
 
+    let tpm_encryption_alg = algorithms::EncryptionAlgorithm::try_from(
+        config.agent.tpm_encryption_alg.as_str(),
+    )?;
+    let tpm_hash_alg = algorithms::HashAlgorithm::try_from(
+        config.agent.tpm_hash_alg.as_str(),
+    )?;
+    let tpm_signing_alg = algorithms::SignAlgorithm::try_from(
+        config.agent.tpm_signing_alg.as_str(),
+    )?;
+
     // Gather EK values and certs
     let ek_result = tpm::create_ek(
         &mut ctx,
-        config.tpm_encryption_alg.into(),
-        config.ek_handle.as_deref(),
+        tpm_encryption_alg.into(),
+        config.agent.ek_handle.as_deref(),
     )?;
 
     // Calculate the SHA-256 hash of the public key in PEM format
     let ek_hash = hash_ek_pubkey(ek_result.public.clone())?;
 
     // Try to load persistent Agent data
-    let old_ak = match &config.agent_data_path {
+    let old_ak = match &config.agent.agent_data_path {
         Some(path) => {
             let path = Path::new(&path);
             if path.exists() {
                 match AgentData::load(path) {
                     Ok(data) => {
                         match data.valid(
-                            config.tpm_hash_alg,
-                            config.tpm_signing_alg,
+                            tpm_hash_alg,
+                            tpm_signing_alg,
                             ek_hash.as_bytes(),
                         ) {
                             true => {
@@ -543,8 +576,8 @@ async fn main() -> Result<()> {
             let new_ak = tpm::create_ak(
                 &mut ctx,
                 ek_result.key_handle,
-                config.tpm_hash_alg.into(),
-                config.tpm_signing_alg.into(),
+                tpm_hash_alg.into(),
+                tpm_signing_alg.into(),
             )?;
             let ak_handle =
                 tpm::load_ak(&mut ctx, ek_result.key_handle, &new_ak)?;
@@ -554,13 +587,13 @@ async fn main() -> Result<()> {
 
     // Store new AgentData
     let agent_data_new = AgentData::create(
-        config.tpm_hash_alg,
-        config.tpm_signing_alg,
+        tpm_hash_alg,
+        tpm_signing_alg,
         &ak,
         ek_hash.as_bytes(),
     )?;
 
-    match &config.agent_data_path {
+    match &config.agent.agent_data_path {
         Some(path) => {
             agent_data_new.store(Path::new(&path))?;
         }
@@ -569,7 +602,7 @@ async fn main() -> Result<()> {
         }
     }
 
-    let uuid = match config.uuid.as_str() {
+    let uuid = match config.agent.uuid.as_str() {
         "hash_ek" => hash_ek_pubkey(ek_result.public.clone())?,
         s => s.to_string(),
     };
@@ -584,7 +617,7 @@ async fn main() -> Result<()> {
     // Since we store the u key in memory, discarding this key, which
     // safeguards u and v keys in transit, is not part of the threat model.
 
-    let (nk_pub, nk_priv) = match config.server_key {
+    let (nk_pub, nk_priv) = match config.agent.server_key {
         Some(ref path) => {
             let key_path = Path::new(&path);
             if key_path.exists() {
@@ -592,7 +625,10 @@ async fn main() -> Result<()> {
                     "Loading existing key pair from {}",
                     key_path.display()
                 );
-                crypto::load_key_pair(key_path, &config.server_key_password)?
+                crypto::load_key_pair(
+                    key_path,
+                    &config.agent.server_key_password,
+                )?
             } else {
                 debug!("Generating new key pair");
                 let (public, private) = crypto::rsa_generate_pair(2048)?;
@@ -600,7 +636,7 @@ async fn main() -> Result<()> {
                 crypto::write_key_pair(
                     &private,
                     key_path,
-                    &config.server_key_password,
+                    &config.agent.server_key_password,
                 );
                 (public, private)
             }
@@ -617,8 +653,8 @@ async fn main() -> Result<()> {
     let cert: X509;
     let mtls_cert;
     let ssl_context;
-    if config.enable_agent_mtls {
-        cert = match config.server_cert {
+    if config.agent.enable_agent_mtls {
+        cert = match config.agent.server_cert {
             Some(ref path) => {
                 let cert_path = Path::new(&path);
                 if cert_path.exists() {
@@ -641,7 +677,7 @@ async fn main() -> Result<()> {
             }
         };
 
-        let ca_cert_path = match config.trusted_client_ca {
+        let ca_cert_path = match config.agent.trusted_client_ca {
             None => {
                 error!("Agent mTLS is enabled, but trusted_client_ca option was not provided");
                 return Err(Error::Configuration("Agent mTLS is enabled, but trusted_client_ca option was not provided".to_string()));
@@ -687,15 +723,15 @@ async fn main() -> Result<()> {
     {
         // Request keyblob material
         let keyblob = registrar_agent::do_register_agent(
-            &config.registrar_ip,
-            &config.registrar_port,
+            &config.agent.registrar_ip,
+            &config.agent.registrar_port.to_string(),
             &uuid,
             &PublicBuffer::try_from(ek_result.public.clone())?.marshall()?,
             ek_result.ek_cert,
             &PublicBuffer::try_from(ak.public)?.marshall()?,
             mtls_cert,
-            config.contact_ip.clone(),
-            config.contact_port,
+            config.agent.contact_ip.clone(),
+            config.agent.contact_port,
         )
         .await?;
         info!("SUCCESS: Agent {} registered", &uuid);
@@ -707,7 +743,7 @@ async fn main() -> Result<()> {
             ek_result.key_handle,
         )?;
         // Flush EK if we created it
-        if config.ek_handle.is_none() {
+        if config.agent.ek_handle.is_none() {
             ctx.flush_context(ek_result.key_handle.into())?;
         }
         let mackey = base64::encode(key.value());
@@ -716,8 +752,8 @@ async fn main() -> Result<()> {
         let auth_tag = hex::encode(&auth_tag);
 
         registrar_agent::do_activate_agent(
-            &config.registrar_ip,
-            &config.registrar_port,
+            &config.agent.registrar_ip,
+            &config.agent.registrar_port.to_string(),
             &uuid,
             &auth_tag,
         )
@@ -736,21 +772,21 @@ async fn main() -> Result<()> {
     let symm_key_cvar = Arc::clone(&symm_key_cvar_arc);
     let payload = Arc::clone(&encr_payload_arc);
 
-    let revocation_cert = revocation::get_revocation_cert_path(&config)?;
-    let actions_dir = Path::new(&config.revocation_actions_dir)
+    let revocation_cert =
+        config.agent.revocation_cert.as_ref().map(PathBuf::from);
+
+    let actions_dir = config
+        .agent
+        .revocation_actions_dir
+        .as_ref()
+        .map(PathBuf::from);
+
+    let work_dir = Path::new(&config.agent.keylime_dir)
         .canonicalize()
         .map_err(|e| {
             Error::Configuration(format!(
-                "Path {} set in revocation_actions_dir not found: {}",
-                &config.revocation_actions_dir, e
-            ))
-        })?;
-
-    let work_dir =
-        Path::new(&config.keylime_dir).canonicalize().map_err(|e| {
-            Error::Configuration(format!(
                 "Path {} set in keylime_dir not found: {}",
-                &config.keylime_dir, e
+                &config.agent.keylime_dir, e
             ))
         })?;
 
@@ -765,16 +801,17 @@ async fn main() -> Result<()> {
         payload_symm_key_cvar: symm_key_cvar_arc,
         encr_payload: encr_payload_arc,
         auth_tag: Mutex::new([0u8; AUTH_TAG_LEN]),
-        hash_alg: config.tpm_hash_alg,
-        enc_alg: config.tpm_encryption_alg,
-        sign_alg: config.tpm_signing_alg,
-        agent_uuid: config.uuid.clone(),
+        hash_alg: tpm_hash_alg,
+        enc_alg: tpm_encryption_alg,
+        sign_alg: tpm_signing_alg,
+        agent_uuid: config.agent.uuid.clone(),
         revocation_cert,
-        revocation_actions: config.revocation_actions.clone(),
+        revocation_actions: config.agent.revocation_actions.clone(),
         revocation_actions_dir: actions_dir,
         allow_payload_revocation_actions: config
+            .agent
             .allow_payload_revocation_actions,
-        secure_size: config.secure_size.clone(),
+        secure_size: config.agent.secure_size.clone(),
         work_dir,
         ima_ml_file,
         measuredboot_ml_file,
@@ -877,21 +914,27 @@ async fn main() -> Result<()> {
         .disable_signals();
 
     let server;
-    if config.enable_agent_mtls && ssl_context.is_some() {
+    if config.agent.enable_agent_mtls && ssl_context.is_some() {
         server = actix_server
             .bind_openssl(
-                format!("{}:{}", config.ip, config.port),
+                format!("{}:{}", config.agent.ip, config.agent.port),
                 ssl_context.unwrap(), //#[allow_ci]
             )?
             .run();
 
-        info!("Listening on https://{}:{}", config.ip, config.port);
+        info!(
+            "Listening on https://{}:{}",
+            config.agent.ip, config.agent.port
+        );
     } else {
         server = actix_server
-            .bind(format!("{}:{}", config.ip, config.port))?
+            .bind(format!("{}:{}", config.agent.ip, config.agent.port))?
             .run();
 
-        info!("Listening on http://{}:{}", config.ip, config.port);
+        info!(
+            "Listening on http://{}:{}",
+            config.agent.ip, config.agent.port
+        );
     };
 
     let server_handle = server.handle();
@@ -930,24 +973,35 @@ fn read_in_file(path: String) -> std::io::Result<String> {
 #[cfg(feature = "testing")]
 mod testing {
     use super::*;
+    use crate::config::KeylimeConfig;
 
     impl QuoteData {
         pub(crate) fn fixture() -> Result<Self> {
             let test_config = KeylimeConfig::default();
             let mut ctx = tpm::get_tpm2_ctx()?;
 
+            let tpm_encryption_alg =
+                algorithms::EncryptionAlgorithm::try_from(
+                    test_config.agent.tpm_encryption_alg.as_str(),
+                )?;
+
             // Gather EK and AK key values and certs
-            let ek_result = tpm::create_ek(
-                &mut ctx,
-                test_config.tpm_encryption_alg.into(),
-                None,
+            let ek_result =
+                tpm::create_ek(&mut ctx, tpm_encryption_alg.into(), None)?;
+
+            let tpm_hash_alg = algorithms::HashAlgorithm::try_from(
+                test_config.agent.tpm_hash_alg.as_str(),
+            )?;
+
+            let tpm_signing_alg = algorithms::SignAlgorithm::try_from(
+                test_config.agent.tpm_signing_alg.as_str(),
             )?;
 
             let ak_result = tpm::create_ak(
                 &mut ctx,
                 ek_result.key_handle,
-                test_config.tpm_hash_alg.into(),
-                test_config.tpm_signing_alg.into(),
+                tpm_hash_alg.into(),
+                tpm_signing_alg.into(),
             )?;
             let ak_handle =
                 tpm::load_ak(&mut ctx, ek_result.key_handle, &ak_result)?;
@@ -973,10 +1027,11 @@ mod testing {
             let payload = Arc::clone(&encr_payload_arc);
 
             let revocation_cert =
-                revocation::get_revocation_cert_path(&test_config)?;
+                test_config.agent.revocation_cert.map(PathBuf::from);
 
-            let actions_dir =
-                Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/actions/");
+            let actions_dir = Some(
+                Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/actions/"),
+            );
 
             let work_dir =
                 Path::new(env!("CARGO_MANIFEST_DIR")).join("tests");
@@ -1013,13 +1068,14 @@ mod testing {
                 hash_alg: algorithms::HashAlgorithm::Sha256,
                 enc_alg: algorithms::EncryptionAlgorithm::Rsa,
                 sign_alg: algorithms::SignAlgorithm::RsaSsa,
-                agent_uuid: test_config.uuid,
+                agent_uuid: test_config.agent.uuid,
                 revocation_cert,
-                revocation_actions: String::from(""),
+                revocation_actions: None,
                 revocation_actions_dir: actions_dir,
                 allow_payload_revocation_actions: test_config
+                    .agent
                     .allow_payload_revocation_actions,
-                secure_size: test_config.secure_size,
+                secure_size: test_config.agent.secure_size,
                 work_dir,
                 ima_ml_file,
                 measuredboot_ml_file,

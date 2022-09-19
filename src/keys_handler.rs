@@ -273,13 +273,14 @@ pub async fn verify(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::common::{
-        KeylimeConfig, AES_128_KEY_LEN, AES_256_KEY_LEN, API_VERSION,
-    };
-    use crate::crypto::compute_hmac;
     #[cfg(feature = "testing")]
     use crate::crypto::testing::{
         encrypt_aead, pkey_pub_from_pem, rsa_oaep_encrypt,
+    };
+    use crate::{
+        common::{AES_128_KEY_LEN, AES_256_KEY_LEN, API_VERSION},
+        config::KeylimeConfig,
+        crypto::compute_hmac,
     };
     use actix_rt::Arbiter;
     use actix_web::{test, web, App};
@@ -363,7 +364,7 @@ mod tests {
             rsa_oaep_encrypt(&quotedata.pub_key, u.bytes()).unwrap(); //#[allow_ci]
 
         let auth_tag =
-            compute_hmac(k.bytes(), test_config.agent_uuid.as_bytes())
+            compute_hmac(k.bytes(), test_config.agent.uuid.as_bytes())
                 .unwrap(); //#[allow_ci]
 
         let ukey = KeylimeUKey {
