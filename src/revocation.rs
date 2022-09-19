@@ -4,7 +4,7 @@
 #[macro_use]
 use log::*;
 
-use crate::common::{KeylimeConfig, REV_CERT};
+use crate::config::{AgentConfig, KeylimeConfig};
 use crate::crypto;
 use crate::error::*;
 use crate::secure_mount;
@@ -229,43 +229,6 @@ pub(crate) fn run_revocation_actions(
     Ok(outputs)
 }
 
-/// Get the revocation certificate path according to the revocation_cert entry
-/// from the configuration file
-///
-/// If the revocation_cert entry is "default", then use the default path;
-/// If the revocation_cert entry is an absolute path, then use the specified path;
-/// If the revocation_cert entry is a relative path, then expand from the WORK_DIR;
-/// If the revocation_cert is empty, return error.
-pub(crate) fn get_revocation_cert_path(
-    config: &KeylimeConfig,
-) -> Result<PathBuf> {
-    let default_path =
-        &format!("{}/secure/unzipped/{}", &config.keylime_dir, REV_CERT);
-
-    // Unlike the python agent we do not attempt lazy loading. We either
-    // have the certificate, or we don't. If we don't have a key or can't load
-    // the key we return a Configuration error as the service will not work.
-    let mut cert_path_buf = match config.revocation_cert.trim() {
-        "default" => PathBuf::from(&default_path),
-        "" => {
-            error!("revocation_cert is not set in configuration");
-            return Err(Error::Configuration(String::from(
-                "revocation_cert is not set in configuration",
-            )));
-        }
-        _ => PathBuf::from(config.revocation_cert.trim()),
-    };
-
-    // If the path is not absolute, expand from the WORK_DIR
-    if cert_path_buf.as_path().is_relative() {
-        let rel_path = cert_path_buf;
-        cert_path_buf = PathBuf::from(&config.keylime_dir);
-        cert_path_buf.push(rel_path);
-    }
-
-    Ok(cert_path_buf)
-}
-
 /// Process revocation message received from REST API or 0mq
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn process_revocation(
@@ -371,7 +334,7 @@ pub(crate) async fn run_revocation_service(
     config: &KeylimeConfig,
     mount: &Path,
 ) -> Result<()> {
-    let work_dir = Path::new(&config.keylime_dir);
+    let work_dir = Path::new(&config.agent.keylime_dir);
 
     // Connect to the service via 0mq
     let context = zmq::Context::new();
@@ -379,18 +342,57 @@ pub(crate) async fn run_revocation_service(
 
     mysock.set_subscribe(b"")?;
 
-    let endpoint = format!(
-        "tcp://{}:{}",
-        config.revocation_notification_ip,
-        config.revocation_notification_port
-    );
+    let ip = if let Some(i) = &config.agent.revocation_notification_ip {
+        i
+    } else {
+        error!("No IP set in 'revocation_notification_ip' option");
+        return Err(Error::Configuration(
+            "No IP set in 'revocation_notification_ip' option".to_string(),
+        ));
+    };
 
-    info!("Connecting to revocation endpoint at {}...", endpoint);
+    let port = if let Some(p) = &config.agent.revocation_notification_port {
+        p
+    } else {
+        error!("No port set in 'revocation_notification_port' option");
+        return Err(Error::Configuration(
+            "No port set in 'revocation_notification_port' option"
+                .to_string(),
+        ));
+    };
+
+    let endpoint = format!("tcp://{}:{}", ip, port);
+
+    info!(
+        "Connecting to revocation notification endpoint at {}...",
+        endpoint
+    );
 
     mysock.connect(endpoint.as_str())?;
 
-    let revocation_cert = get_revocation_cert_path(config)?;
-    let actions_dir = PathBuf::from(&config.revocation_actions_dir.trim());
+    let revocation_cert = if let Some(cert) = &config.agent.revocation_cert {
+        Path::new(cert)
+    } else {
+        error!("No revocation certificate set in 'revocation_cert' option");
+        return Err(Error::Configuration(
+            "No revocation certificate set in 'revocation_cert' option"
+                .to_string(),
+        ));
+    };
+
+    let actions_dir = if let Some(dir) = &config.agent.revocation_actions_dir
+    {
+        Path::new(dir)
+    } else {
+        error!("No revocation actions directory set in 'revocation_actions_dir' option");
+        return Err(Error::Configuration("No revocation actions directory set in 'revocation_actions_dir' option".to_string()));
+    };
+
+    let actions = if let Some(a) = &config.agent.revocation_actions {
+        a
+    } else {
+        ""
+    };
 
     info!("Waiting for revocation messages on 0mq {}", endpoint);
 
@@ -414,11 +416,11 @@ pub(crate) async fn run_revocation_service(
         let body: Value = serde_json::from_str(rawbody.as_str())?;
         let _ = process_revocation(
             body,
-            &revocation_cert,
-            &config.secure_size,
-            &config.revocation_actions,
-            &actions_dir,
-            config.allow_payload_revocation_actions,
+            revocation_cert,
+            &config.agent.secure_size,
+            actions,
+            actions_dir,
+            config.agent.allow_payload_revocation_actions,
             work_dir,
             mount,
         );
@@ -453,8 +455,8 @@ mod tests {
         symlink(unzipped_dir, tmpfs_dir.join("unzipped")).unwrap(); //#[allow_ci]
         let outputs = run_revocation_actions(
             json,
-            &test_config.secure_size,
-            &test_config.revocation_actions,
+            &test_config.agent.secure_size,
+            "",
             actions_dir,
             true,
             work_dir.path(),
@@ -493,8 +495,8 @@ mod tests {
         symlink(unzipped_dir, tmpfs_dir.join("unzipped")).unwrap(); //#[allow_ci]
         let outputs = run_revocation_actions(
             json,
-            &test_config.secure_size,
-            &test_config.revocation_actions,
+            &test_config.agent.secure_size,
+            "",
             actions_dir,
             true,
             work_dir.path(),
@@ -512,12 +514,9 @@ mod tests {
         );
         cfg_if::cfg_if! {
             if #[cfg(feature = "legacy-python-actions")] {
-                test_config.revocation_actions =
-                    String::from("local_action_hello, local_action_payload, local_action_stand_alone.py, local_action_rev_script1.py");
+                let revocation_actions = "local_action_hello, local_action_payload, local_action_stand_alone.py, local_action_rev_script1.py";
             } else {
-                test_config.revocation_actions = String::from(
-                    "local_action_stand_alone.py, local_action_rev_script1.py",
-                );
+                let revocation_actions = "local_action_stand_alone.py, local_action_rev_script1.py";
             }
         }
         let json_str = std::fs::read_to_string(json_file).unwrap(); //#[allow_ci]
@@ -532,8 +531,8 @@ mod tests {
         symlink(unzipped_dir, tmpfs_dir.join("unzipped")).unwrap(); //#[allow_ci]
         let outputs = run_revocation_actions(
             json,
-            &test_config.secure_size,
-            &test_config.revocation_actions,
+            &test_config.agent.secure_size,
+            revocation_actions,
             actions_dir,
             true,
             work_dir.path(),
@@ -557,53 +556,6 @@ mod tests {
                 "there\n"
             );
         }
-    }
-
-    #[test]
-    fn get_revocation_cert_path_default() {
-        let test_config = KeylimeConfig::default();
-        let revocation_cert_path =
-            get_revocation_cert_path(&test_config).unwrap(); //#[allow_ci]
-        let mut expected = PathBuf::from(&test_config.keylime_dir);
-        expected.push("secure/unzipped/");
-        expected.push(REV_CERT);
-        assert_eq!(*revocation_cert_path, expected);
-    }
-
-    #[test]
-    fn get_revocation_cert_path_absolute() {
-        let mut test_config = KeylimeConfig {
-            revocation_cert: String::from("/test/cert.crt"),
-            ..Default::default()
-        };
-        let revocation_cert_path =
-            get_revocation_cert_path(&test_config).unwrap(); //#[allow_ci]
-        assert_eq!(revocation_cert_path, PathBuf::from("/test/cert.crt"));
-    }
-
-    #[test]
-    fn get_revocation_cert_path_relative() {
-        let mut test_config = KeylimeConfig {
-            revocation_cert: String::from("cert.crt"),
-            ..Default::default()
-        };
-        let revocation_cert_path =
-            get_revocation_cert_path(&test_config).unwrap(); //#[allow_ci]
-        let mut expected =
-            Path::new(&test_config.keylime_dir).join("cert.crt");
-        assert_eq!(revocation_cert_path, expected);
-    }
-
-    #[test]
-    fn get_revocation_cert_path_empty() {
-        let mut test_config = KeylimeConfig {
-            revocation_cert: String::from(""),
-            ..Default::default()
-        };
-        assert!(
-            get_revocation_cert_path(&test_config).is_err(),
-            "revocation_cert is not set in configuration"
-        );
     }
 
     #[test]
@@ -749,10 +701,10 @@ mod tests {
         let result = process_revocation(
             body,
             &cert_path,
-            &test_config.secure_size,
-            &test_config.revocation_actions,
+            &test_config.agent.secure_size,
+            "",
             &actions_dir,
-            test_config.allow_payload_revocation_actions,
+            test_config.agent.allow_payload_revocation_actions,
             &work_dir,
             &tmpfs_dir,
         );

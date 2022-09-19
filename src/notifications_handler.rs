@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2021 Keylime Authors
 
-use crate::{common::KeylimeConfig, revocation, Error, QuoteData, Result};
+use crate::{common::JsonWrapper, revocation, Error, QuoteData, Result};
 use actix_web::{web, HttpRequest, HttpResponse, Responder};
 use log::*;
 use serde::{Deserialize, Serialize};
@@ -21,33 +21,68 @@ pub async fn revocation(
 ) -> impl Responder {
     info!("Received revocation");
 
-    let json_body = serde_json::from_slice(&body)?;
-    let revocation_cert = &data.revocation_cert;
+    let json_body = match serde_json::from_slice(&body) {
+        Ok(body) => body,
+        Err(e) => {
+            return HttpResponse::BadRequest().json(JsonWrapper::error(
+                400,
+                format!("JSON parsing error: {}", e),
+            ));
+        }
+    };
+
+    let revocation_cert = match &data.revocation_cert {
+        Some(cert) => cert,
+        None => {
+            return HttpResponse::InternalServerError().json(
+                JsonWrapper::error(501, "Revocation certificate not set."),
+            );
+        }
+    };
+
     let secure_size = &data.secure_size;
-    let revocation_actions = &data.revocation_actions;
-    let actions_dir = PathBuf::from(&data.revocation_actions_dir);
+    let revocation_actions = match &data.revocation_actions {
+        Some(actions) => actions,
+        None => "",
+    };
+
+    let actions_dir = match &data.revocation_actions_dir {
+        Some(dir) => dir,
+        None => {
+            return HttpResponse::InternalServerError().json(
+                JsonWrapper::error(
+                    501,
+                    "Revocation actions directory not set",
+                ),
+            );
+        }
+    };
+
     let payload_actions_allowed = data.allow_payload_revocation_actions;
     let work_dir = &data.work_dir;
     let mount = &data.secure_mount;
 
-    revocation::process_revocation(
+    match revocation::process_revocation(
         json_body,
         revocation_cert,
         secure_size,
         revocation_actions,
-        &actions_dir,
+        actions_dir,
         payload_actions_allowed,
         work_dir,
         mount,
-    )?;
-
-    HttpResponse::Ok().await
+    ) {
+        Ok(_) => HttpResponse::Ok().json(JsonWrapper::success(())),
+        Err(e) => HttpResponse::InternalServerError().json(
+            JsonWrapper::error(501, "Revocation actions directory not set"),
+        ),
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::common::{KeylimeConfig, API_VERSION};
+    use crate::common::API_VERSION;
     use actix_web::{test, web, App};
     use serde_json::json;
     use std::{fs, path::Path};
@@ -55,11 +90,14 @@ mod tests {
     #[cfg(feature = "testing")]
     #[actix_rt::test]
     async fn test_revocation() {
-        let revocation_cert = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("test-data/test-cert.pem");
+        let revocation_cert = Some(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("test-data/test-cert.pem"),
+        );
 
-        let revocation_actions_dir =
-            Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/actions");
+        let revocation_actions_dir = Some(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/actions"),
+        );
 
         let quotedata = web::Data::new(QuoteData {
             revocation_cert,
