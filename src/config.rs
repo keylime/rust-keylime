@@ -58,8 +58,8 @@ pub static DEFAULT_TPM_SIGNING_ALG: &str = "rsassa";
 pub static DEFAULT_EK_HANDLE: &str = "generate";
 pub static DEFAULT_RUN_AS: &str = "keylime:tss";
 pub static DEFAULT_AGENT_DATA_PATH: &str = "agent_data.json";
-pub static DEFAULT_CONFIG: &str = "/etc/keylime-agent.conf";
-pub static DEFAULT_CONFIG_SYS: &str = "/usr/etc/keylime-agent.conf";
+pub static DEFAULT_CONFIG: &str = "/etc/keylime/agent.conf";
+pub static DEFAULT_CONFIG_SYS: &str = "/usr/etc/keylime/agent.conf";
 
 impl Source for KeylimeConfig {
     fn collect(&self) -> Result<Map<String, Value>, ConfigError> {
@@ -382,7 +382,7 @@ fn config_get_file_setting() -> Result<ConfigBuilder<DefaultState>, Error> {
         )
         // Add system configuration snippets
         .add_source(
-            glob("/usr/etc/keylime-agent.conf.d/*")
+            glob("/usr/etc/keylime/agent.conf.d/*")
                 .map_err(Error::GlobPattern)?
                 .filter_map(|entry| entry.ok())
                 .map(|path| {
@@ -396,7 +396,7 @@ fn config_get_file_setting() -> Result<ConfigBuilder<DefaultState>, Error> {
         )
         // Add user configuration snippets
         .add_source(
-            glob("/etc/keylime-agent.conf.d/*")
+            glob("/etc/keylime/agent.conf.d/*")
                 .map_err(Error::GlobPattern)?
                 .filter_map(|entry| entry.ok())
                 .map(|path| {
