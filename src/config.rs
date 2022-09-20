@@ -20,6 +20,7 @@ use std::{
 use toml::value::Table;
 use uuid::Uuid;
 
+pub static CONFIG_VERSION: &str = "2.0";
 pub static DEFAULT_UUID: &str = "d432fbb3-d2f1-4a97-9ef7-75bd81c00000";
 pub static DEFAULT_IP: &str = "127.0.0.1";
 pub static DEFAULT_PORT: u32 = 9002;
@@ -63,6 +64,7 @@ pub static DEFAULT_CONFIG_SYS: &str = "/usr/etc/keylime-agent.conf";
 impl Source for KeylimeConfig {
     fn collect(&self) -> Result<Map<String, Value>, ConfigError> {
         let agent: Map<String, Value> = Map::from([
+            ("version".to_string(), self.agent.version.to_string().into()),
             ("uuid".to_string(), self.agent.uuid.to_string().into()),
             ("ip".to_string(), self.agent.ip.to_string().into()),
             ("port".to_string(), Value::from(self.agent.port)),
@@ -263,6 +265,7 @@ pub(crate) struct KeylimeConfig {
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub(crate) struct AgentConfig {
+    pub version: String,
     pub uuid: String,
     pub ip: String,
     pub port: u32,
@@ -308,6 +311,7 @@ impl Default for AgentConfig {
         };
 
         AgentConfig {
+            version: CONFIG_VERSION.to_string(),
             ip: DEFAULT_IP.to_string(),
             port: DEFAULT_PORT,
             registrar_ip: DEFAULT_REGISTRAR_IP.to_string(),
