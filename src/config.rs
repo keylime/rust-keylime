@@ -439,33 +439,45 @@ fn config_translate_keywords(
 ) -> Result<KeylimeConfig, Error> {
     let uuid = get_uuid(&config.agent.uuid);
 
+    let env_keylime_dir = env::var("KEYLIME_DIR").ok();
+    let keylime_dir = match env_keylime_dir {
+        Some(ref dir) => {
+            if !dir.is_empty() {
+                dir.to_string()
+            } else {
+                config.agent.keylime_dir.to_string()
+            }
+        }
+        None => config.agent.keylime_dir.to_string(),
+    };
+
     let mut agent_data_path = config_get_file_path(
         &config.agent.agent_data_path,
-        &config.agent.keylime_dir,
+        &keylime_dir,
         DEFAULT_AGENT_DATA_PATH,
     );
 
     let mut server_key = config_get_file_path(
         &config.agent.server_key,
-        &config.agent.keylime_dir,
+        &keylime_dir,
         DEFAULT_SERVER_KEY,
     );
 
     let mut server_cert = config_get_file_path(
         &config.agent.server_cert,
-        &config.agent.keylime_dir,
+        &keylime_dir,
         DEFAULT_SERVER_CERT,
     );
 
     let mut trusted_client_ca = config_get_file_path(
         &config.agent.trusted_client_ca,
-        &config.agent.keylime_dir,
+        &keylime_dir,
         DEFAULT_TRUSTED_CLIENT_CA,
     );
 
     let mut revocation_cert = config_get_file_path(
         &config.agent.revocation_cert,
-        &config.agent.keylime_dir,
+        &keylime_dir,
         &format!("secure/unzipped/{}", DEFAULT_REVOCATION_CERT),
     );
 
@@ -527,6 +539,7 @@ fn config_translate_keywords(
 
     Ok(KeylimeConfig {
         agent: AgentConfig {
+            keylime_dir,
             uuid,
             server_key,
             server_cert,
