@@ -27,7 +27,9 @@ $(programs):
 
 .PHONY: install
 install: all
-	cp ${CONFFILE} /etc/${CONFFILE}
+	mkdir -p /etc/keylime/
+	mkdir -p /etc/keylime/agent.conf.d
+	cp ${CONFFILE} /etc/keylime/agent.conf
 	for f in $(programs); do \
 		install -D -t ${DESTDIR}/usr/bin "$$f"; \
 	done
