@@ -42,7 +42,7 @@ static_assertions = "1"
 tempfile = "3.0.4"
 tokio = {version = "1.13.1", features = ["full"]}
 toml = "0.5"
-tss-esapi = "7.1.0"
+tss-esapi = {version = "7.1.0", features = ["generate-bindings"]}
 thiserror = "1.0"
 uuid = {version = "0.8", features = ["v4"]}
 zmq = {version = "0.9.2", optional = true}
