@@ -161,3 +161,17 @@ pub(crate) fn mount(work_dir: &Path, secure_size: &str) -> Result<PathBuf> {
 
     Ok(secure_dir_path)
 }
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_secure_mount() {
+        let path = "/var/lib/keylime";
+        let work_dir = Path::new(&path);
+        let secure_dir_path = Path::new(work_dir).join("secure");
+        let secure_size = "1m";
+        let test_mount = mount(&secure_dir_path, secure_size);
+        assert!(check_mount(&secure_dir_path).is_ok());
+    }
+}
