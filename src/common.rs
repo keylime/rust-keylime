@@ -233,3 +233,89 @@ pub(crate) fn hash_ek_pubkey(ek_pub: Public) -> Result<String> {
     let mut hash = hash(MessageDigest::sha256(), &pem)?;
     Ok(hex::encode(hash))
 }
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::algorithms::{
+        EncryptionAlgorithm, HashAlgorithm, SignAlgorithm,
+    };
+    use crate::config::KeylimeConfig;
+    use std::convert::TryFrom;
+    use tss_esapi::{
+        handles::KeyHandle,
+        interface_types::algorithm::AsymmetricAlgorithm,
+        interface_types::resource_handles::Hierarchy,
+        structures::{Auth, PublicBuffer},
+        traits::Marshall,
+        Context,
+    };
+
+    #[test]
+    fn test_agent_data() -> Result<()> {
+        let mut config = KeylimeConfig::default();
+
+        let mut ctx = tpm::get_tpm2_ctx()?;
+
+        let tpm_encryption_alg = EncryptionAlgorithm::try_from(
+            config.agent.tpm_encryption_alg.as_str(),
+        )?;
+
+        let tpm_hash_alg =
+            HashAlgorithm::try_from(config.agent.tpm_hash_alg.as_str())?;
+
+        let tpm_signing_alg =
+            SignAlgorithm::try_from(config.agent.tpm_signing_alg.as_str())?;
+
+        let ek_result = tpm::create_ek(
+            &mut ctx,
+            tpm_encryption_alg.into(),
+            config.agent.ek_handle.as_deref(),
+        )?;
+
+        let ek_hash = hash_ek_pubkey(ek_result.public)?;
+
+        let ak = tpm::create_ak(
+            &mut ctx,
+            ek_result.key_handle,
+            tpm_hash_alg.into(),
+            tpm_signing_alg.into(),
+        )?;
+
+        let agent_data_test = AgentData::create(
+            tpm_hash_alg,
+            tpm_signing_alg,
+            &ak,
+            ek_hash.as_bytes(),
+        )?;
+
+        let valid = AgentData::valid(
+            &agent_data_test,
+            tpm_hash_alg,
+            tpm_signing_alg,
+            ek_hash.as_bytes(),
+        );
+        assert!(valid);
+        Ok(())
+    }
+    #[test]
+    fn test_hash() -> Result<()> {
+        let mut config = KeylimeConfig::default();
+
+        let mut ctx = tpm::get_tpm2_ctx()?;
+
+        let tpm_encryption_alg = EncryptionAlgorithm::try_from(
+            config.agent.tpm_encryption_alg.as_str(),
+        )?;
+
+        let ek_result = tpm::create_ek(
+            &mut ctx,
+            tpm_encryption_alg.into(),
+            config.agent.ek_handle.as_deref(),
+        )?;
+
+        let result = hash_ek_pubkey(ek_result.public);
+
+        assert!(result.is_ok());
+        Ok(())
+    }
+}

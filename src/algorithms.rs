@@ -195,3 +195,23 @@ impl fmt::Display for SignAlgorithm {
         write!(f, "{}", value)
     }
 }
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_hash_tryfrom() {
+        let result = HashAlgorithm::try_from("sha1");
+        assert!(result.is_ok());
+    }
+    #[test]
+    fn test_encrypt_try_from() {
+        let result = EncryptionAlgorithm::try_from("rsa");
+        assert!(result.is_ok());
+    }
+    #[test]
+    fn test_sign_tryfrom() {
+        let result = SignAlgorithm::try_from("rsassa");
+        assert!(result.is_ok());
+    }
+}
