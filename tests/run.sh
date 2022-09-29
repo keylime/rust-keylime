@@ -46,4 +46,4 @@ cargo tarpaulin -v \
       --exclude-files 'target/*' \
       --ignore-panics --ignore-tests \
       --out Html --out Json \
-      --features testing
+      --all-features
