@@ -21,7 +21,8 @@ Most keylime operations rely on TPM co-processor; therefore, the server needs
 a physical TPM chip (or a TPM emulator) to perform keylime operations.  The
 TPM emulator is a program that runs in the daemon to mimic TPM commands.
 
-The rust keylime agent is in early development and not ready for production use.
+The rust-keylime agent is the official agent (starting with version 0.1.0) and
+replaces the Python implementation.
 
 ## Prerequisites
 
@@ -48,7 +49,7 @@ instructions can be found [here](https://www.rust-lang.org/en-US/install.html).
 To run with `pretty-env-logger` trace logging active, set cargo run
 within `RUST_LOG`, as follows:
 
-    $ RUST_LOG=keylime_agent=trace cargo run
+    $ RUST_LOG=keylime_agent=trace cargo run --bin keylime_agent
 
 ## Testing
 
