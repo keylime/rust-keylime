@@ -39,6 +39,7 @@
        - /functional/ek-cert-use-ek_check_script
        - /functional/ek-cert-use-ek_handle-custom-ca_certs
        - /functional/install-rpm-with-ima-signature
+       - /functional/use-multiple-ima-sign-verification-keys
        - /functional/keylime_tenant-commands-on-localhost
        - /functional/db-postgresql-sanity-on-localhost
        - /functional/db-mariadb-sanity-on-localhost
