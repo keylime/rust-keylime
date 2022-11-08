@@ -17,7 +17,6 @@ use std::{
     env,
     path::{Path, PathBuf},
 };
-use toml::value::Table;
 use uuid::Uuid;
 
 pub static CONFIG_VERSION: &str = "2.0";
