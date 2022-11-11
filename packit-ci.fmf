@@ -45,6 +45,11 @@
        - /functional/db-mysql-sanity-on-localhost
        - /functional/tenant-allowlist-sanity
        - /functional/measured-boot-swtpm-sanity
+       - /functional/tpm-issuer-cert-using-ecc
+       - /functional/tpm_policy-sanity-on-localhost
+       - /functional/keylime-non-default-ports
+       - /functional/keylime_tenant-ima-signature-sanity
+       - /functional/use-multiple-ima-sign-verification-keys
 
   adjust:
    # prepare step adjustments
