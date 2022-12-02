@@ -1,0 +1,31 @@
+name: PR code coverage measurement on codecov.io
+
+on: [pull_request]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    name: Submit code coverage from Packit tests
+    defaults:
+      run:
+        working-directory: scripts
+    steps:
+    - uses: actions/checkout@v3
+    - name: Wait for Packit tests to finish and download e2e_coverage.txt and upstream_coverage.xml files.
+      run: ./download_packit_coverage.sh
+      env:
+        MAX_DURATION: 5400
+        SLEEP_DELAY: 120
+    - name: List downloaded files.
+      run: ls
+    - name: Upload e2e_coverage.txt report to Codecov with GitHub Action.
+      uses: codecov/codecov-action@v2
+      with:
+        files: scripts/e2e_coverage.txt
+        flags: e2e-testsuite
+    - name: Upload upstream_coverage.xml report to Codecov with GitHub Action.
+      uses: codecov/codecov-action@v2
+      with:
+        files: scripts/upstream_coverage.xml
+        flags: upstream-unit-tests

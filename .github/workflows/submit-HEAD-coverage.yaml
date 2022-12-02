@@ -1,0 +1,36 @@
+name: Upload code coverage for a merged PR to codecov.io
+
+on:
+  push:
+    branches:
+    - master
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    name: Submit code coverage from merged PR
+    steps:
+    - uses: actions/checkout@v3
+    - name: Install testing-farm script
+      run: pip3 -v install tft-cli
+    - name: Run tests on Testing Farm
+      run: testing-farm request --context distro=fedora-37 --arch x86_64 --compose Fedora-37 --plan '/e2e' -e UPLOAD_COVERAGE=1 2>&1 | tee tt_output
+      env:
+        TESTING_FARM_API_TOKEN: ${{ secrets.TESTING_FARM_API_TOKEN }}
+    - name: Find PR Packit tests to finish and download e2e_coverage.txt and upstream_coverage.xml coverage files.
+      run: grep -q 'tests passed' tt_output && sleep 20 && scripts/download_packit_coverage.sh --testing-farm-log tt_output
+      env:
+        MAX_DURATION: 120
+        SLEEP_DELAY: 20
+    - name: List downloaded files.
+      run: ls 
+    - name: Upload e2e_coverage report to Codecov with GitHub Action.
+      uses: codecov/codecov-action@v2
+      with:
+        files: e2e_coverage.txt
+        flags: e2e-testsuite
+    - name: Upload upstream_coverage report to Codecov with GitHub Action.
+      uses: codecov/codecov-action@v2
+      with:
+        files: upstream_coverage.xml
+        flags: upstream-unit-tests
