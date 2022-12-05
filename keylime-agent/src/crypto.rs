@@ -30,7 +30,7 @@ use crate::{
 
 // Read a X509 cert or cert chain and outputs the first certificate
 pub(crate) fn load_x509(input_cert_path: &Path) -> Result<X509> {
-    let contents = read_to_string(&input_cert_path)?;
+    let contents = read_to_string(input_cert_path)?;
     let mut cert_chain = X509::stack_from_pem(contents.as_bytes())?;
 
     if cert_chain.len() != 1 {

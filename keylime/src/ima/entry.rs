@@ -13,20 +13,24 @@ use std::convert::{TryFrom, TryInto};
 use std::io::{Error, ErrorKind, Result, Write};
 
 pub trait Encode {
+    /// Encodes this type and writes the output to `writer`.
     fn encode(&self, writer: &mut dyn Write) -> Result<()>;
 }
 
 pub trait EncodeLegacy {
+    /// Encodes this type in legacy mode and writes the output to `writer`.
     fn encode_legacy(&self, writer: &mut dyn Write) -> Result<()>;
 }
 
-#[derive(PartialEq, Eq)]
+/// Wrapper around a IMA digest value.
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Digest {
     pub algorithm: HashAlgorithm,
     value: Vec<u8>,
 }
 
 impl Digest {
+    /// Creates a new `Digest` with `algorithm` and `value`.
     pub fn new(algorithm: HashAlgorithm, value: &[u8]) -> Result<Self> {
         let digest: MessageDigest = algorithm.into();
         if value.len() != digest.size() {
@@ -43,10 +47,13 @@ impl Digest {
         })
     }
 
+    /// Retrieves the value held in this `Digest`.
     pub fn value(&self) -> &[u8] {
         &self.value
     }
 
+    /// Returns a pre-defined digest value used to indicate the start
+    /// of the IMA measurement list.
     pub fn start(algorithm: HashAlgorithm) -> Self {
         let digest: MessageDigest = algorithm.into();
         Self {
@@ -55,6 +62,8 @@ impl Digest {
         }
     }
 
+    /// Returns a pre-defined digest value used to indicate the ToMToU
+    /// error in the IMA measurement list.
     pub fn ff(algorithm: HashAlgorithm) -> Self {
         let digest: MessageDigest = algorithm.into();
         Self {
@@ -72,7 +81,7 @@ impl TryFrom<&str> for Digest {
         if tokens.len() == 1 {
             Ok(Digest {
                 algorithm: HashAlgorithm::Sha1,
-                value: hex::decode(&tokens[0]).map_err(|_| {
+                value: hex::decode(tokens[0]).map_err(|_| {
                     Error::new(
                         ErrorKind::InvalidInput,
                         "invalid hex encoding",
@@ -84,7 +93,7 @@ impl TryFrom<&str> for Digest {
                 algorithm: tokens[0].try_into().map_err(|_| {
                     Error::new(ErrorKind::InvalidInput, "invalid algorithm")
                 })?,
-                value: hex::decode(&tokens[1]).map_err(|_| {
+                value: hex::decode(tokens[1]).map_err(|_| {
                     Error::new(
                         ErrorKind::InvalidInput,
                         "invalid hex encoding",
@@ -381,6 +390,7 @@ impl Encode for ImaBuf {
     }
 }
 
+/// Represents a single entry in the IMA measurement list.
 pub struct Entry {
     pub template_hash: Digest,
     pub event_data: Box<dyn EventData>,
@@ -397,7 +407,7 @@ impl TryFrom<&str> for Entry {
 
         let template_hash = Digest {
             algorithm: HashAlgorithm::Sha1,
-            value: hex::decode(&tokens[1]).map_err(|_| {
+            value: hex::decode(tokens[1]).map_err(|_| {
                 Error::new(ErrorKind::InvalidInput, "invalid hex encoding")
             })?,
         };

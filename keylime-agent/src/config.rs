@@ -1,16 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2022 Keylime Authors
 
-use crate::{
-    algorithms::{EncryptionAlgorithm, HashAlgorithm, SignAlgorithm},
-    error::Error,
-    permissions, tpm,
-};
+use crate::{error::Error, permissions, tpm};
 use config::{
     builder::DefaultState, Config, ConfigBuilder, ConfigError, Environment,
     File, FileFormat, Map, Source, Value,
 };
 use glob::glob;
+use keylime::algorithms::{
+    EncryptionAlgorithm, HashAlgorithm, SignAlgorithm,
+};
 use log::*;
 use serde::{Deserialize, Serialize};
 use std::{

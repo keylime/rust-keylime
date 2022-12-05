@@ -6,16 +6,22 @@ Copyright 2021 Keylime Authors
 To prevent CI failing for approved instance of banned words, add a comment: //#[allow_ci]
 '''
 
-import os
+import pathlib
 
 banned = ["unwrap(", "panic!("]
 
-srcs = os.listdir("src")
+toplevel = ["keylime", "keylime-agent", "keylime-ima-emulator"]
+
+srcs = []
+
+for d in toplevel:
+    srcs += list(pathlib.Path(d).glob("**/*.rs"))
+
 print("Files to check: %s" % srcs)
 
 failed = False
 for f in srcs:
-    with open("src/" + f) as src_file:
+    with open(f) as src_file:
         for line_no, line in enumerate(src_file):
             for b in banned:
                 if b not in line or "//#[allow_ci]" in line:

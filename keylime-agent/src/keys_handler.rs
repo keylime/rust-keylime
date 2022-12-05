@@ -127,7 +127,7 @@ pub async fn u_key(
 
         if let Some(payload) = &body.payload {
             let encr_payload =
-                base64::decode(&payload).map_err(Error::from)?;
+                base64::decode(payload).map_err(Error::from)?;
             global_encr_payload.extend(encr_payload.iter());
         }
 

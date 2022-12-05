@@ -36,7 +36,7 @@ install: all
 	install -D -m 644 -t ${DESTDIR}$(systemdsystemunitdir) dist/systemd/system/keylime_agent.service
 	install -D -m 644 -t ${DESTDIR}$(systemdsystemunitdir) dist/systemd/system/var-lib-keylime-secure.mount
 	# Remove when https://github.com/keylime/rust-keylime/issues/325 is fixed
-	install -D -t ${DESTDIR}/usr/libexec/keylime tests/actions/shim.py
+	install -D -t ${DESTDIR}/usr/libexec/keylime keylime-agent/tests/actions/shim.py
 
 # This only runs tests without TPM access. See tests/run.sh for
 # running full testsuite with swtpm.

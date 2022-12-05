@@ -5,7 +5,6 @@ use crate::{tpm, Error as KeylimeError, QuoteData};
 
 use crate::common::JsonWrapper;
 use crate::crypto;
-use crate::ima::read_measurement_list;
 use crate::serialization::serialize_maybe_base64;
 use actix_web::{web, HttpRequest, HttpResponse, Responder};
 use log::*;
@@ -254,12 +253,14 @@ pub async fn integrity(
     // Generate the measurement list
     let (ima_measurement_list, ima_measurement_list_entry, num_entries) =
         if let Some(ima_file) = &data.ima_ml_file {
-            match read_measurement_list(
-                &mut data.ima_ml.lock().unwrap(), //#[allow_ci]
-                &mut ima_file.lock().unwrap(),    //#[allow_ci]
+            let mut ima_ml = data.ima_ml.lock().unwrap(); //#[allow_ci]
+            match ima_ml.read(
+                &mut ima_file.lock().unwrap(), //#[allow_ci]
                 nth_entry,
             ) {
-                Ok(result) => result,
+                Ok(result) => {
+                    (Some(result.0), Some(result.1), Some(result.2))
+                }
                 Err(e) => {
                     debug!("Unable to read measurement list: {:?}", e);
                     return HttpResponse::InternalServerError().json(

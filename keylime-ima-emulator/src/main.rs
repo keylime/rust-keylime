@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2021 Keylime Authors
 
-mod algorithms;
-use crate::algorithms::HashAlgorithm;
-mod ima_entry;
+use keylime::algorithms::HashAlgorithm;
+use keylime::ima;
 use openssl::hash::{hash, MessageDigest};
 
 use log::*;
@@ -36,7 +35,7 @@ enum ImaEmulatorError {
     #[error("Decoding error")]
     FromHexError(#[from] hex::FromHexError),
     #[error("Algorithm error")]
-    AlgorithmError(#[from] algorithms::AlgorithmError),
+    AlgorithmError(#[from] keylime::algorithms::AlgorithmError),
     #[error("OpenSSL error")]
     OpenSSLError(#[from] openssl::error::ErrorStack),
     #[error("I/O error")]
@@ -60,17 +59,17 @@ fn ml_extend(
     let f = File::open(ml)?;
     let mut reader = BufReader::new(f);
     let ima_digest: MessageDigest = ima_hash_alg.into();
-    let ima_start_hash = ima_entry::Digest::start(ima_hash_alg);
+    let ima_start_hash = ima::Digest::start(ima_hash_alg);
     let pcr_digest: MessageDigest = pcr_hash_alg.into();
-    let mut running_hash = ima_entry::Digest::start(pcr_hash_alg);
-    let ff_hash = ima_entry::Digest::ff(pcr_hash_alg);
+    let mut running_hash = ima::Digest::start(pcr_hash_alg);
+    let ff_hash = ima::Digest::ff(pcr_hash_alg);
     for line in reader.by_ref().lines().skip(position) {
         let line = line?;
         if line.is_empty() {
             continue;
         }
 
-        let entry: ima_entry::Entry = line.as_str().try_into()?;
+        let entry: ima::Entry = line.as_str().try_into()?;
 
         position += 1;
 
@@ -110,7 +109,7 @@ fn ml_extend(
                 hasher.update(running_hash.value())?;
                 hasher.update(&pcr_template_hash)?;
                 running_hash =
-                    ima_entry::Digest::new(pcr_hash_alg, &hasher.finish()?)?;
+                    ima::Digest::new(pcr_hash_alg, &hasher.finish()?)?;
                 let digest = Digest::try_from(running_hash.value())?;
                 let mut vals = DigestValues::new();
                 vals.set(pcr_hash_alg.into(), digest.clone());

@@ -1152,6 +1152,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "keylime"
+version = "0.1.0"
+dependencies = [
+ "hex",
+ "openssl",
+ "serde",
+ "serde_derive",
+ "tempfile",
+ "thiserror",
+ "tss-esapi",
+]
+
+[[package]]
 name = "keylime_agent"
 version = "0.1.0"
 dependencies = [
@@ -1165,6 +1178,7 @@ dependencies = [
  "futures",
  "glob",
  "hex",
+ "keylime",
  "libc",
  "log",
  "openssl",
@@ -1183,6 +1197,19 @@ dependencies = [
  "uuid",
  "wiremock",
  "zmq",
+]
+
+[[package]]
+name = "keylime_ima_emulator"
+version = "0.1.0"
+dependencies = [
+ "clap 3.1.18",
+ "hex",
+ "keylime",
+ "log",
+ "openssl",
+ "thiserror",
+ "tss-esapi",
 ]
 
 [[package]]

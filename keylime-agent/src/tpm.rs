@@ -262,7 +262,7 @@ pub(crate) fn pcrdata_to_vec(
         Vec::with_capacity(pcrsel_vec.len() + 4 + digest_vec.len());
 
     data_vec.extend(&pcrsel_vec);
-    data_vec.extend(&num_tpml_digests.to_le_bytes());
+    data_vec.extend(num_tpml_digests.to_le_bytes());
     data_vec.extend(&digest_vec);
 
     data_vec

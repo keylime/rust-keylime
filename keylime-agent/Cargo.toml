@@ -1,0 +1,58 @@
+[package]
+authors = ["Keylime Authors"]
+edition = "2021"
+name = "keylime_agent"
+version = "0.1.0"
+license = "Apache-2.0"
+description = "Rust agent for Keylime"
+repository = "https://github.com/keylime/rust-keylime"
+
+[dependencies]
+actix-web =  { version = "4", features = ["openssl"] }
+base64 = "0.13"
+cfg-if = "1"
+clap = { version = "~3.1.18", features = ["derive"] }
+compress-tools = "0.12"
+config = { version = "0.13", features = ["toml"] }
+futures = "0.3.6"
+glob = "0.3"
+hex = "0.4"
+keylime = { path = "../keylime" }
+libc = "0.2.43"
+log = "0.4"
+openssl = "0.10.15"
+picky-asn1-der = "0.3.1"
+picky-asn1-x509 = "0.6.1"
+pretty_env_logger = "0.4"
+reqwest = {version = "0.11", features = ["json"]}
+serde = "1.0.80"
+serde_derive = "1.0.80"
+serde_json = { version = "1.0", features = ["raw_value"] }
+static_assertions = "1"
+tempfile = "3.0.4"
+tokio = {version = "1.13.1", features = ["full"]}
+tss-esapi = {version = "7.1.0", features = ["generate-bindings"]}
+thiserror = "1.0"
+uuid = {version = "0.8", features = ["v4"]}
+zmq = {version = "0.9.2", optional = true}
+# wiremock was moved to be a regular dependency because optional
+# dev-dependencies are not supported
+# see: https://github.com/rust-lang/cargo/issues/1596
+wiremock = {version = "0.5", optional = true}
+
+[dev-dependencies]
+actix-rt = "2"
+
+[features]
+# The features enabled by default
+default = ["with-zmq", "legacy-python-actions"]
+# this should change to dev-dependencies when we have integration testing
+testing = ["wiremock"]
+# Whether the agent should be compiled with support to listen for notification
+# messages on ZeroMQ
+with-zmq = ["zmq"]
+# Whether the agent should be compiled with support for python revocation
+# actions loaded as modules, which is the only kind supported by the python
+# agent (unless the enhancement-55 is implemented). See:
+# https://github.com/keylime/enhancements/blob/master/55_revocation_actions_without_python.md
+legacy-python-actions = []

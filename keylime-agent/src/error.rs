@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2021 Keylime Authors
 
-use crate::algorithms;
 use thiserror::Error;
 use tss_esapi::{
     constants::response_code::Tss2ResponseCodeKind, Error::Tss2Error,
@@ -71,7 +70,7 @@ pub(crate) enum Error {
     #[error("from hex error: {0}")]
     FromHex(#[from] hex::FromHexError),
     #[error("Keylime algorithm error: {0}")]
-    Algorithm(#[from] algorithms::AlgorithmError),
+    Algorithm(#[from] keylime::algorithms::AlgorithmError),
     #[error("Error converting number: {0}")]
     TryFromInt(#[from] std::num::TryFromIntError),
     #[error("C string is not NUL-terminated: {0}")]
@@ -122,7 +121,7 @@ impl Error {
     }
 }
 
-impl std::convert::TryFrom<std::process::Output> for Error {
+impl TryFrom<std::process::Output> for Error {
     type Error = Error;
     fn try_from(output: std::process::Output) -> Result<Self> {
         let code = output.status.code();

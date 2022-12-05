@@ -33,13 +33,11 @@
 //  missing_docs: there is many functions missing documentations for now
 #![allow(unused, missing_docs)]
 
-mod algorithms;
 mod common;
 mod config;
 mod crypto;
 mod error;
 mod errors_handler;
-mod ima;
 mod keys_handler;
 mod notifications_handler;
 mod permissions;
@@ -57,7 +55,7 @@ use common::*;
 use compress_tools::*;
 use error::{Error, Result};
 use futures::{future::TryFutureExt, try_join};
-use ima::ImaMeasurementList;
+use keylime::ima::MeasurementList;
 use log::*;
 use openssl::{
     pkey::{PKey, Private, Public},
@@ -103,9 +101,9 @@ pub struct QuoteData {
     payload_symm_key_cvar: Arc<Condvar>,
     encr_payload: Arc<Mutex<Vec<u8>>>,
     auth_tag: Mutex<[u8; AUTH_TAG_LEN]>,
-    hash_alg: algorithms::HashAlgorithm,
-    enc_alg: algorithms::EncryptionAlgorithm,
-    sign_alg: algorithms::SignAlgorithm,
+    hash_alg: keylime::algorithms::HashAlgorithm,
+    enc_alg: keylime::algorithms::EncryptionAlgorithm,
+    sign_alg: keylime::algorithms::SignAlgorithm,
     agent_uuid: String,
     revocation_cert: Option<PathBuf>,
     revocation_actions: Option<String>,
@@ -115,7 +113,7 @@ pub struct QuoteData {
     work_dir: PathBuf,
     ima_ml_file: Option<Mutex<fs::File>>,
     measuredboot_ml_file: Option<Mutex<fs::File>>,
-    ima_ml: Mutex<ImaMeasurementList>,
+    ima_ml: Mutex<MeasurementList>,
     secure_mount: PathBuf,
 }
 
@@ -488,13 +486,14 @@ async fn main() -> Result<()> {
             })?;
     };
 
-    let tpm_encryption_alg = algorithms::EncryptionAlgorithm::try_from(
-        config.agent.tpm_encryption_alg.as_str(),
-    )?;
-    let tpm_hash_alg = algorithms::HashAlgorithm::try_from(
+    let tpm_encryption_alg =
+        keylime::algorithms::EncryptionAlgorithm::try_from(
+            config.agent.tpm_encryption_alg.as_str(),
+        )?;
+    let tpm_hash_alg = keylime::algorithms::HashAlgorithm::try_from(
         config.agent.tpm_hash_alg.as_str(),
     )?;
-    let tpm_signing_alg = algorithms::SignAlgorithm::try_from(
+    let tpm_signing_alg = keylime::algorithms::SignAlgorithm::try_from(
         config.agent.tpm_signing_alg.as_str(),
     )?;
 
@@ -821,7 +820,7 @@ async fn main() -> Result<()> {
         work_dir,
         ima_ml_file,
         measuredboot_ml_file,
-        ima_ml: Mutex::new(ImaMeasurementList::new()),
+        ima_ml: Mutex::new(MeasurementList::new()),
         secure_mount: PathBuf::from(&mount),
     });
 
@@ -987,7 +986,7 @@ mod testing {
             let mut ctx = tpm::get_tpm2_ctx()?;
 
             let tpm_encryption_alg =
-                algorithms::EncryptionAlgorithm::try_from(
+                keylime::algorithms::EncryptionAlgorithm::try_from(
                     test_config.agent.tpm_encryption_alg.as_str(),
                 )?;
 
@@ -995,13 +994,14 @@ mod testing {
             let ek_result =
                 tpm::create_ek(&mut ctx, tpm_encryption_alg.into(), None)?;
 
-            let tpm_hash_alg = algorithms::HashAlgorithm::try_from(
+            let tpm_hash_alg = keylime::algorithms::HashAlgorithm::try_from(
                 test_config.agent.tpm_hash_alg.as_str(),
             )?;
 
-            let tpm_signing_alg = algorithms::SignAlgorithm::try_from(
-                test_config.agent.tpm_signing_alg.as_str(),
-            )?;
+            let tpm_signing_alg =
+                keylime::algorithms::SignAlgorithm::try_from(
+                    test_config.agent.tpm_signing_alg.as_str(),
+                )?;
 
             let ak_result = tpm::create_ak(
                 &mut ctx,
@@ -1071,9 +1071,9 @@ mod testing {
                 payload_symm_key_cvar: symm_key_cvar_arc,
                 encr_payload: encr_payload_arc,
                 auth_tag: Mutex::new([0u8; AUTH_TAG_LEN]),
-                hash_alg: algorithms::HashAlgorithm::Sha256,
-                enc_alg: algorithms::EncryptionAlgorithm::Rsa,
-                sign_alg: algorithms::SignAlgorithm::RsaSsa,
+                hash_alg: keylime::algorithms::HashAlgorithm::Sha256,
+                enc_alg: keylime::algorithms::EncryptionAlgorithm::Rsa,
+                sign_alg: keylime::algorithms::SignAlgorithm::RsaSsa,
                 agent_uuid: test_config.agent.uuid,
                 revocation_cert,
                 revocation_actions: None,
@@ -1085,7 +1085,7 @@ mod testing {
                 work_dir,
                 ima_ml_file,
                 measuredboot_ml_file,
-                ima_ml: Mutex::new(ImaMeasurementList::new()),
+                ima_ml: Mutex::new(MeasurementList::new()),
                 secure_mount,
             })
         }

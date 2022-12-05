@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2021 Keylime Authors
 
-use crate::algorithms::{EncryptionAlgorithm, HashAlgorithm, SignAlgorithm};
 use crate::error::{Error, Result};
 use crate::{permissions, tpm};
+use keylime::algorithms::{
+    EncryptionAlgorithm, HashAlgorithm, SignAlgorithm,
+};
 use log::*;
 use openssl::{
     hash::{hash, MessageDigest},
@@ -236,10 +238,10 @@ pub(crate) fn hash_ek_pubkey(ek_pub: Public) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::algorithms::{
+    use crate::config::KeylimeConfig;
+    use keylime::algorithms::{
         EncryptionAlgorithm, HashAlgorithm, SignAlgorithm,
     };
-    use crate::config::KeylimeConfig;
     use std::convert::TryFrom;
     use tss_esapi::{
         handles::KeyHandle,
