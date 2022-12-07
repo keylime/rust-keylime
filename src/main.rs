@@ -508,6 +508,14 @@ async fn main() -> Result<()> {
     // Calculate the SHA-256 hash of the public key in PEM format
     let ek_hash = hash_ek_pubkey(ek_result.public.clone())?;
 
+    // Replace the uuid with the actual EK hash if the option was set.
+    // We cannot do that when the configuration is loaded initially,
+    // because only have later access to the the TPM.
+    config.agent.uuid = match config.agent.uuid.as_str() {
+        "hash_ek" => ek_hash.clone(),
+        s => s.to_string(),
+    };
+
     // Try to load persistent Agent data
     let old_ak = match &config.agent.agent_data_path {
         Some(path) => {
@@ -602,12 +610,7 @@ async fn main() -> Result<()> {
         }
     }
 
-    let uuid = match config.agent.uuid.as_str() {
-        "hash_ek" => hash_ek_pubkey(ek_result.public.clone())?,
-        s => s.to_string(),
-    };
-
-    info!("Agent UUID: {}", uuid);
+    info!("Agent UUID: {}", config.agent.uuid);
 
     // Generate key pair for secure transmission of u, v keys. The u, v
     // keys are two halves of the key used to decrypt the workload after
@@ -665,7 +668,8 @@ async fn main() -> Result<()> {
                     crypto::load_x509(cert_path)?
                 } else {
                     debug!("Generating new mTLS certificate");
-                    let cert = crypto::generate_x509(&nk_priv, &uuid)?;
+                    let cert =
+                        crypto::generate_x509(&nk_priv, &config.agent.uuid)?;
                     // Write the generated certificate
                     crypto::write_x509(&cert, cert_path)?;
                     cert
@@ -673,7 +677,7 @@ async fn main() -> Result<()> {
             }
             None => {
                 debug!("The server_cert option was not set in the configuration file");
-                crypto::generate_x509(&nk_priv, &uuid)?
+                crypto::generate_x509(&nk_priv, &config.agent.uuid)?
             }
         };
 
@@ -725,7 +729,7 @@ async fn main() -> Result<()> {
         let keyblob = registrar_agent::do_register_agent(
             &config.agent.registrar_ip,
             &config.agent.registrar_port.to_string(),
-            &uuid,
+            &config.agent.uuid,
             &PublicBuffer::try_from(ek_result.public.clone())?.marshall()?,
             ek_result.ek_cert,
             &PublicBuffer::try_from(ak.public)?.marshall()?,
@@ -734,7 +738,7 @@ async fn main() -> Result<()> {
             config.agent.contact_port,
         )
         .await?;
-        info!("SUCCESS: Agent {} registered", &uuid);
+        info!("SUCCESS: Agent {} registered", &config.agent.uuid);
 
         let key = tpm::activate_credential(
             &mut ctx,
@@ -747,18 +751,20 @@ async fn main() -> Result<()> {
             ctx.flush_context(ek_result.key_handle.into())?;
         }
         let mackey = base64::encode(key.value());
-        let auth_tag =
-            crypto::compute_hmac(mackey.as_bytes(), uuid.as_bytes())?;
+        let auth_tag = crypto::compute_hmac(
+            mackey.as_bytes(),
+            config.agent.uuid.as_bytes(),
+        )?;
         let auth_tag = hex::encode(&auth_tag);
 
         registrar_agent::do_activate_agent(
             &config.agent.registrar_ip,
             &config.agent.registrar_port.to_string(),
-            &uuid,
+            &config.agent.uuid,
             &auth_tag,
         )
         .await?;
-        info!("SUCCESS: Agent {} activated", &uuid);
+        info!("SUCCESS: Agent {} activated", &config.agent.uuid);
     }
 
     let mut encr_payload = Vec::new();
