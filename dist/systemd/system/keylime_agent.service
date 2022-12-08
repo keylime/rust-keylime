@@ -4,6 +4,8 @@ StartLimitInterval=10s
 StartLimitBurst=5
 Requires=var-lib-keylime-secure.mount
 After=var-lib-keylime-secure.mount
+After=network-online.target
+Wants=network-online.target
 Wants=tpm2-abrmd.service
 After=tpm2-abrmd.service
 # If the service should start only when hardware TPMs are available, uncomment the below lines
