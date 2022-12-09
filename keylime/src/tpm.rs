@@ -1,25 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2021 Keylime Authors
 
-#[macro_use]
+use crate::algorithms::{EncryptionAlgorithm, HashAlgorithm, SignAlgorithm};
 use log::*;
-use serde::ser::{Error, Serialize, SerializeStruct, Serializer};
-use serde::Deserialize;
 use std::convert::{TryFrom, TryInto};
-use std::io::prelude::*;
 use std::str::FromStr;
-use tss_esapi::structures::PublicBuffer;
-
-use crate::{
-    quotes_handler::KeylimeQuote, Error as KeylimeError, QuoteData, Result,
-};
-
-use actix_web::web::Data;
+use thiserror::Error;
 
 use openssl::{
     hash::{Hasher, MessageDigest},
     memcmp,
-    pkey::{Id, PKeyRef, Public},
+    pkey::{HasPublic, Id, PKeyRef, Public},
 };
 
 use tss_esapi::{
@@ -32,66 +23,73 @@ use tss_esapi::{
     },
     attributes::session::SessionAttributesBuilder,
     constants::{
-        session_type::SessionType,
-        tss::{TPM2_ALG_NULL, TPM2_ST_ATTEST_QUOTE},
+        response_code::Tss2ResponseCodeKind, session_type::SessionType,
     },
     handles::{
         AuthHandle, KeyHandle, PcrHandle, PersistentTpmHandle, TpmHandle,
     },
     interface_types::{
-        algorithm::{
-            AsymmetricAlgorithm, HashingAlgorithm, SignatureSchemeAlgorithm,
-        },
-        session_handles::AuthSession,
+        algorithm::HashingAlgorithm, session_handles::AuthSession,
     },
     structures::{
-        Attest, AttestInfo, Digest, DigestValues, EncryptedSecret,
-        HashScheme, IdObject, Name, PcrSelectionList,
-        PcrSelectionListBuilder, PcrSlot, Signature, SignatureScheme,
+        Attest, AttestInfo, Digest, DigestValues, EncryptedSecret, IdObject,
+        PcrSelectionList, PcrSelectionListBuilder, PcrSlot, Signature,
+        SignatureScheme,
     },
     tcti_ldr::TctiNameConf,
     traits::Marshall,
-    tss2_esys::{
-        Tss2_MU_TPM2B_PUBLIC_Marshal, Tss2_MU_TPMS_ATTEST_Marshal,
-        Tss2_MU_TPMS_ATTEST_Unmarshal, Tss2_MU_TPMT_SIGNATURE_Marshal,
-        TPM2B_ATTEST, TPM2B_DIGEST, TPM2B_PUBLIC, TPML_DIGEST,
-        TPML_PCR_SELECTION, TPMS_ATTEST, TPMS_PCR_SELECTION,
-        TPMS_SCHEME_HASH, TPMT_SIGNATURE, TPMT_SIG_SCHEME, TPMU_SIG_SCHEME,
-    },
-    utils::TpmsContext,
-    Context,
+    tss2_esys::{TPML_DIGEST, TPML_PCR_SELECTION},
+    Error::Tss2Error,
 };
 
+/// Maximum size of nonce used in `quote`.
 pub const MAX_NONCE_SIZE: usize = 64;
-pub const TPML_DIGEST_SIZE: usize = std::mem::size_of::<TPML_DIGEST>();
-pub const TPML_PCR_SELECTION_SIZE: usize =
+const TPML_DIGEST_SIZE: usize = std::mem::size_of::<TPML_DIGEST>();
+const TPML_PCR_SELECTION_SIZE: usize =
     std::mem::size_of::<TPML_PCR_SELECTION>();
-pub const TPMS_PCR_SELECTION_SIZE: usize =
-    std::mem::size_of::<TPMS_PCR_SELECTION>();
 
-/*
- * Input: None
- * Return: Connection context
- *
- * Example call:
- * let mut ctx = tpm::get_tpm2_ctx();
- */
-pub(crate) fn get_tpm2_ctx() -> Result<Context> {
-    let tcti_path = match std::env::var("TCTI") {
-        Ok(val) => val,
-        Err(_) => if std::path::Path::new("/dev/tpmrm0").exists() {
-            "device:/dev/tpmrm0"
-        } else {
-            "device:/dev/tpm0"
-        }
-        .to_string(),
-    };
-
-    let tcti = TctiNameConf::from_str(&tcti_path)?;
-    Context::new(tcti).map_err(|e| e.into())
+#[derive(Error, Debug)]
+pub enum TpmError {
+    #[error("TSS2 Error: {err:?}, kind: {kind:?}, {message}")]
+    Tss2 {
+        err: tss_esapi::Error,
+        kind: Option<Tss2ResponseCodeKind>,
+        message: String,
+    },
+    #[error("Infallible: {0}")]
+    Infallible(#[from] std::convert::Infallible),
+    #[error("IO error: {0}")]
+    Io(#[from] std::io::Error),
+    #[error("Number parsing error: {0}")]
+    NumParse(#[from] std::num::ParseIntError),
+    #[error("OpenSSL error: {0}")]
+    OpenSSL(#[from] openssl::error::ErrorStack),
+    #[error("Error converting number: {0}")]
+    TryFromInt(#[from] std::num::TryFromIntError),
+    #[error("base64 decode error: {0}")]
+    Base64(#[from] base64::DecodeError),
+    #[error("Invalid request")]
+    InvalidRequest,
+    #[error("{0}")]
+    Other(String),
 }
 
-// Holds the output of create_ek
+impl From<tss_esapi::Error> for TpmError {
+    fn from(err: tss_esapi::Error) -> Self {
+        let kind = if let Tss2Error(tss2_rc) = err {
+            tss2_rc.kind()
+        } else {
+            None
+        };
+        let message = format!("{}", err);
+
+        TpmError::Tss2 { err, kind, message }
+    }
+}
+
+type Result<T> = std::result::Result<T, TpmError>;
+
+/// Holds the output of create_ek.
 #[derive(Clone, Debug)]
 pub struct EKResult {
     pub key_handle: KeyHandle,
@@ -99,42 +97,248 @@ pub struct EKResult {
     pub public: tss_esapi::structures::Public,
 }
 
-/*
- * Input: Connection context, asymmetric algo, existing key handle in hex (optional)
- * Return: (Key handle, public cert, TPM public object)
- * Example call:
- * let (key, cert, tpm_pub) = tpm::create_ek(context, AsymmetricAlgorithm::Rsa, None)
- */
-pub(crate) fn create_ek(
-    context: &mut Context,
-    alg: AsymmetricAlgorithm,
-    handle: Option<&str>,
-) -> Result<EKResult> {
-    // Retrieve EK handle, EK pub cert, and TPM pub object
-    let key_handle = match handle {
-        Some(v) => {
-            let handle = u32::from_str_radix(v.trim_start_matches("0x"), 16)?;
-            context
-                .tr_from_tpm_public(TpmHandle::Persistent(
-                    PersistentTpmHandle::new(handle)?,
-                ))?
-                .into()
+/// Holds the output of create_ak.
+#[derive(Clone, Debug)]
+pub struct AKResult {
+    pub public: tss_esapi::structures::Public,
+    pub private: tss_esapi::structures::Private,
+}
+
+/// Wrapper around tss_esapi::Context.
+#[derive(Debug)]
+pub struct Context {
+    inner: tss_esapi::Context,
+}
+
+impl AsRef<tss_esapi::Context> for Context {
+    fn as_ref(&self) -> &tss_esapi::Context {
+        &self.inner
+    }
+}
+
+impl AsMut<tss_esapi::Context> for Context {
+    fn as_mut(&mut self) -> &mut tss_esapi::Context {
+        &mut self.inner
+    }
+}
+
+impl Context {
+    /// Creates a connection context.
+    pub fn new() -> Result<Self> {
+        let tcti_path = match std::env::var("TCTI") {
+            Ok(val) => val,
+            Err(_) => if std::path::Path::new("/dev/tpmrm0").exists() {
+                "device:/dev/tpmrm0"
+            } else {
+                "device:/dev/tpm0"
+            }
+            .to_string(),
+        };
+
+        let tcti = TctiNameConf::from_str(&tcti_path)?;
+        Ok(Self {
+            inner: tss_esapi::Context::new(tcti)?,
+        })
+    }
+
+    /// Creates an EK, returns the key handle and public certificate
+    /// in `EKResult`.
+    pub fn create_ek(
+        &mut self,
+        alg: EncryptionAlgorithm,
+        handle: Option<&str>,
+    ) -> Result<EKResult> {
+        // Retrieve EK handle, EK pub cert, and TPM pub object
+        let key_handle = match handle {
+            Some(v) => {
+                let handle =
+                    u32::from_str_radix(v.trim_start_matches("0x"), 16)?;
+                self.inner
+                    .tr_from_tpm_public(TpmHandle::Persistent(
+                        PersistentTpmHandle::new(handle)?,
+                    ))?
+                    .into()
+            }
+            None => {
+                ek::create_ek_object(&mut self.inner, alg.into(), DefaultKey)?
+            }
+        };
+        let cert = match ek::retrieve_ek_pubcert(&mut self.inner, alg.into())
+        {
+            Ok(v) => Some(v),
+            Err(_) => {
+                warn!("No EK certificate found in TPM NVRAM");
+                None
+            }
+        };
+        let (tpm_pub, _, _) = self.inner.read_public(key_handle)?;
+        Ok(EKResult {
+            key_handle,
+            ek_cert: cert,
+            public: tpm_pub,
+        })
+    }
+
+    /// Creates an AK.
+    pub fn create_ak(
+        &mut self,
+        handle: KeyHandle,
+        hash_alg: HashAlgorithm,
+        sign_alg: SignAlgorithm,
+    ) -> Result<AKResult> {
+        let ak = ak::create_ak(
+            &mut self.inner,
+            handle,
+            hash_alg.into(),
+            sign_alg.into(),
+            None,
+            DefaultKey,
+        )?;
+        Ok(AKResult {
+            public: ak.out_public,
+            private: ak.out_private,
+        })
+    }
+
+    /// Loads an existing AK associated with `handle` and `ak`.
+    pub fn load_ak(
+        &mut self,
+        handle: KeyHandle,
+        ak: &AKResult,
+    ) -> Result<KeyHandle> {
+        let ak_handle = ak::load_ak(
+            &mut self.inner,
+            handle,
+            None,
+            ak.private.clone(),
+            ak.public.clone(),
+        )?;
+        Ok(ak_handle)
+    }
+
+    fn create_empty_session(
+        &mut self,
+        ses_type: SessionType,
+    ) -> Result<AuthSession> {
+        let session = self.inner.start_auth_session(
+            None,
+            None,
+            None,
+            ses_type,
+            Cipher::aes_128_cfb().try_into()?,
+            HashingAlgorithm::Sha256,
+        )?;
+        let (ses_attrs, ses_attrs_mask) = SessionAttributesBuilder::new()
+            .with_encrypt(true)
+            .with_decrypt(true)
+            .build();
+        self.inner.tr_sess_set_attributes(
+            session.unwrap(), //#[allow_ci]
+            ses_attrs,
+            ses_attrs_mask,
+        )?;
+        Ok(session.unwrap()) //#[allow_ci]
+    }
+
+    /// Activates credentials with given secret `keyblob`, AK, and EK.
+    pub fn activate_credential(
+        &mut self,
+        keyblob: Vec<u8>,
+        ak: KeyHandle,
+        ek: KeyHandle,
+    ) -> Result<Digest> {
+        let (credential, secret) = parse_cred_and_secret(keyblob)?;
+
+        let ek_auth = self.create_empty_session(SessionType::Policy)?;
+
+        // We authorize ses2 with PolicySecret(ENDORSEMENT) as per PolicyA
+        let _ = self.inner.execute_with_nullauth_session(|context| {
+            context.policy_secret(
+                ek_auth.try_into()?,
+                AuthHandle::Endorsement,
+                Default::default(),
+                Default::default(),
+                Default::default(),
+                None,
+            )
+        })?;
+
+        self.inner
+            .execute_with_sessions(
+                (Some(AuthSession::Password), Some(ek_auth), None),
+                |context| {
+                    context.activate_credential(ak, ek, credential, secret)
+                },
+            )
+            .map_err(TpmError::from)
+    }
+
+    // This function extends Pcr16 with the digest, then creates a PcrList
+    // from the given mask and pcr16.
+    // Note: Currently, this will build the list for both SHA256 and SHA1 as
+    // necessary for the Python components of Keylime.
+    fn build_pcr_list(
+        &mut self,
+        digest: DigestValues,
+        mask: u32,
+        hash_alg: HashingAlgorithm,
+    ) -> Result<PcrSelectionList> {
+        // extend digest into pcr16
+        self.inner.execute_with_nullauth_session(|ctx| {
+            ctx.pcr_reset(PcrHandle::Pcr16)?;
+            ctx.pcr_extend(PcrHandle::Pcr16, digest.to_owned())
+        })?;
+
+        // translate mask to vec of pcrs
+        let mut pcrs = read_mask(mask)?;
+
+        // add pcr16 if it isn't in the vec already
+        if !pcrs.iter().any(|&pcr| pcr == PcrSlot::Slot16) {
+            let mut slot16 = vec![PcrSlot::Slot16];
+            pcrs.append(&mut slot16);
         }
-        None => ek::create_ek_object(context, alg, DefaultKey)?,
-    };
-    let cert = match ek::retrieve_ek_pubcert(context, alg) {
-        Ok(v) => Some(v),
-        Err(_) => {
-            warn!("No EK certificate found in TPM NVRAM");
-            None
-        }
-    };
-    let (tpm_pub, _, _) = context.read_public(key_handle)?;
-    Ok(EKResult {
-        key_handle,
-        ek_cert: cert,
-        public: tpm_pub,
-    })
+
+        let mut pcrlist = PcrSelectionListBuilder::new();
+        pcrlist = pcrlist.with_selection(hash_alg, &pcrs);
+        let pcrlist = pcrlist.build()?;
+
+        Ok(pcrlist)
+    }
+
+    /// Calculates a TPM quote of `nonce` over PCRs indicated with `mask`.
+    ///
+    /// `mask` is a `u32` value, e.g., 0x408000, translating bits that
+    /// are set to pcrs to include in the list. The LSB in the mask
+    /// corresponds to PCR0. Note that PCR16 is always included even
+    /// if the bit is not set in `mask`.
+    pub fn quote(
+        &mut self,
+        nonce: &[u8],
+        mask: u32,
+        pubkey: &PKeyRef<Public>,
+        ak_handle: KeyHandle,
+        hash_alg: HashAlgorithm,
+        sign_alg: SignAlgorithm,
+    ) -> Result<String> {
+        let nk_digest = pubkey_to_tpm_digest(pubkey)?;
+
+        let pcrlist =
+            self.build_pcr_list(nk_digest, mask, hash_alg.into())?;
+
+        let (attestation, sig, pcrs_read, pcr_data) =
+            self.inner.execute_with_nullauth_session(|ctx| {
+                perform_quote_and_pcr_read(
+                    ctx,
+                    ak_handle,
+                    nonce,
+                    pcrlist,
+                    sign_alg.to_signature_scheme(hash_alg),
+                    hash_alg.into(),
+                )
+            })?;
+
+        encode_quote_string(attestation, sig, pcrs_read, pcr_data)
+    }
 }
 
 // Ensure that TPML_PCR_SELECTION and TPML_DIGEST have known sizes
@@ -144,9 +348,7 @@ assert_eq_size!(TPML_DIGEST, [u8; 532]);
 // Serialize a TPML_PCR_SELECTION into a Vec<u8>
 // The serialization will adjust the data endianness as necessary and add paddings to keep the
 // memory aligment.
-pub(crate) fn serialize_pcrsel(
-    pcr_selection: &TPML_PCR_SELECTION,
-) -> Vec<u8> {
+fn serialize_pcrsel(pcr_selection: &TPML_PCR_SELECTION) -> Vec<u8> {
     let mut output = Vec::with_capacity(TPML_PCR_SELECTION_SIZE);
     output.extend(u32::to_le_bytes(pcr_selection.count));
     for selection in pcr_selection.pcrSelections.iter() {
@@ -158,44 +360,9 @@ pub(crate) fn serialize_pcrsel(
     output
 }
 
-// Deserialize a TPML_PCR_SELECTION from a &[u8] slice.
-// The deserialization will adjust the data endianness as necessary.
-pub(crate) fn deserialize_pcrsel(
-    pcrsel_vec: &[u8],
-) -> Result<TPML_PCR_SELECTION> {
-    if pcrsel_vec.len() != TPML_PCR_SELECTION_SIZE {
-        return Err(KeylimeError::InvalidRequest);
-    }
-
-    let mut reader = std::io::Cursor::new(pcrsel_vec);
-    let mut count_vec = [0u8; 4];
-    reader.read_exact(&mut count_vec)?;
-    let count = u32::from_le_bytes(count_vec);
-
-    let mut pcr_selections: [TPMS_PCR_SELECTION; 16] =
-        [TPMS_PCR_SELECTION::default(); 16];
-
-    for selection in &mut pcr_selections {
-        let mut hash_vec = [0u8; 2];
-        reader.read_exact(&mut hash_vec)?;
-        selection.hash = u16::from_le_bytes(hash_vec);
-
-        let mut size_vec = [0u8; 1];
-        reader.read_exact(&mut size_vec)?;
-        selection.sizeofSelect = u8::from_le_bytes(size_vec);
-
-        reader.read_exact(&mut selection.pcrSelect)?;
-    }
-
-    Ok(TPML_PCR_SELECTION {
-        count,
-        pcrSelections: pcr_selections,
-    })
-}
-
 // Serialize a TPML_DIGEST into a Vec<u8>
 // The serialization will adjust the data endianness as necessary.
-pub(crate) fn serialize_digest(digest_list: &TPML_DIGEST) -> Vec<u8> {
+fn serialize_digest(digest_list: &TPML_DIGEST) -> Vec<u8> {
     let mut output = Vec::with_capacity(TPML_DIGEST_SIZE);
     output.extend(u32::to_le_bytes(digest_list.count));
     for digest in digest_list.digests.iter() {
@@ -203,31 +370,6 @@ pub(crate) fn serialize_digest(digest_list: &TPML_DIGEST) -> Vec<u8> {
         output.extend(digest.buffer);
     }
     output
-}
-
-// Deserialize a TPML_DIGEST from a &[u8] slice.
-// The deserialization will adjust the data endianness as necessary.
-pub(crate) fn deserialize_digest(digest_vec: &[u8]) -> Result<TPML_DIGEST> {
-    if digest_vec.len() != TPML_DIGEST_SIZE {
-        return Err(KeylimeError::InvalidRequest);
-    }
-
-    let mut reader = std::io::Cursor::new(digest_vec);
-    let mut count_vec = [0u8; 4];
-
-    reader.read_exact(&mut count_vec)?;
-    let count = u32::from_le_bytes(count_vec);
-
-    let mut digests: [TPM2B_DIGEST; 8] = [TPM2B_DIGEST::default(); 8];
-
-    for digest in &mut digests {
-        let mut size_vec = [0u8; 2];
-        reader.read_exact(&mut size_vec)?;
-        digest.size = u16::from_le_bytes(size_vec);
-        reader.read_exact(&mut digest.buffer)?;
-    }
-
-    Ok(TPML_DIGEST { count, digests })
 }
 
 // Recreate how tpm2-tools creates the PCR out file. Roughly, this is a
@@ -239,14 +381,13 @@ pub(crate) fn deserialize_digest(digest_vec: &[u8]) -> Result<TPML_DIGEST> {
 // so the below code recreates the idiosyncratic format tpm2-tools expects. The lengths
 // of the vectors were determined by introspection into running tpm2-tools code. This is
 // not ideal, and we should aim to move away from it if possible.
-pub(crate) fn pcrdata_to_vec(
+fn pcrdata_to_vec(
     selection_list: PcrSelectionList,
     pcrdata: PcrData,
 ) -> Vec<u8> {
-    const PCRSEL_SIZE: usize = std::mem::size_of::<TPML_PCR_SELECTION>();
     const DIGEST_SIZE: usize = std::mem::size_of::<TPML_DIGEST>();
 
-    let mut pcrsel: TPML_PCR_SELECTION = selection_list.into();
+    let pcrsel: TPML_PCR_SELECTION = selection_list.into();
     let pcrsel_vec = serialize_pcrsel(&pcrsel);
 
     let digest: Vec<TPML_DIGEST> = pcrdata.into();
@@ -268,57 +409,6 @@ pub(crate) fn pcrdata_to_vec(
     data_vec
 }
 
-/* Converts a hex value in the form of a string (ex. from keylime-agent.conf's
- * ek_handle) to a key handle.
- *
- * Input: &str
- * Return: Key handle
- *
- * Example call:
- * let ek_handle = tpm::ek_from_hex_str("0x81000000");
- */
-pub(crate) fn ek_from_hex_str(val: &str) -> Result<KeyHandle> {
-    let val = val.trim_start_matches("0x");
-    Ok(KeyHandle::from(u32::from_str_radix(val, 16)?))
-}
-
-#[derive(Debug, Clone)]
-pub(crate) struct AKResult {
-    pub public: tss_esapi::structures::Public,
-    pub private: tss_esapi::structures::Private,
-}
-
-/* Creates AK
-*/
-pub(crate) fn create_ak(
-    ctx: &mut Context,
-    handle: KeyHandle,
-    hash_alg: HashingAlgorithm,
-    sign_alg: SignatureSchemeAlgorithm,
-) -> Result<AKResult> {
-    let ak =
-        ak::create_ak(ctx, handle, hash_alg, sign_alg, None, DefaultKey)?;
-    Ok(AKResult {
-        public: ak.out_public,
-        private: ak.out_private,
-    })
-}
-
-pub(crate) fn load_ak(
-    ctx: &mut Context,
-    handle: KeyHandle,
-    ak: &AKResult,
-) -> Result<KeyHandle> {
-    let ak_handle = ak::load_ak(
-        ctx,
-        handle,
-        None,
-        ak.private.clone(),
-        ak.public.clone(),
-    )?;
-    Ok(ak_handle)
-}
-
 const TSS_MAGIC: u32 = 3135029470;
 
 fn parse_cred_and_secret(
@@ -328,17 +418,17 @@ fn parse_cred_and_secret(
     let version = u32::from_be_bytes(keyblob[4..8].try_into().unwrap()); //#[allow_ci]
 
     if magic != TSS_MAGIC {
-        return Err(KeylimeError::Other(format!("Error parsing cred and secret; TSS_MAGIC number {} does not match expected value {}", magic, TSS_MAGIC)));
+        return Err(TpmError::Other(format!("Error parsing cred and secret; TSS_MAGIC number {} does not match expected value {}", magic, TSS_MAGIC)));
     }
     if version != 1 {
-        return Err(KeylimeError::Other(format!(
+        return Err(TpmError::Other(format!(
             "Error parsing cred and secret; version {} is not 1",
             version
         )));
     }
 
     let credsize = u16::from_be_bytes(keyblob[8..10].try_into().unwrap()); //#[allow_ci]
-    let secretsize = u16::from_be_bytes(
+    let _secretsize = u16::from_be_bytes(
         keyblob[(10 + credsize as usize)..(12 + credsize as usize)]
             .try_into()
             .unwrap(), //#[allow_ci]
@@ -353,67 +443,18 @@ fn parse_cred_and_secret(
     Ok((credential, secret))
 }
 
-fn create_empty_session(
-    ctx: &mut Context,
-    ses_type: SessionType,
-) -> Result<AuthSession> {
-    let session = ctx.start_auth_session(
-        None,
-        None,
-        None,
-        ses_type,
-        Cipher::aes_128_cfb().try_into()?,
-        HashingAlgorithm::Sha256,
-    )?;
-    let (ses_attrs, ses_attrs_mask) = SessionAttributesBuilder::new()
-        .with_encrypt(true)
-        .with_decrypt(true)
-        .build();
-    ctx.tr_sess_set_attributes(session.unwrap(), ses_attrs, ses_attrs_mask)?; //#[allow_ci]
-    Ok(session.unwrap()) //#[allow_ci]
-}
-
-pub(crate) fn activate_credential(
-    ctx: &mut Context,
-    keyblob: Vec<u8>,
-    ak: KeyHandle,
-    ek: KeyHandle,
-) -> Result<Digest> {
-    let (credential, secret) = parse_cred_and_secret(keyblob)?;
-
-    let ek_auth = create_empty_session(ctx, SessionType::Policy)?;
-
-    // We authorize ses2 with PolicySecret(ENDORSEMENT) as per PolicyA
-    let _ = ctx.execute_with_nullauth_session(|context| {
-        context.policy_secret(
-            ek_auth.try_into()?,
-            AuthHandle::Endorsement,
-            Default::default(),
-            Default::default(),
-            Default::default(),
-            None,
-        )
-    })?;
-
-    ctx.execute_with_sessions(
-        (Some(AuthSession::Password), Some(ek_auth), None),
-        |context| context.activate_credential(ak, ek, credential, secret),
-    )
-    .map_err(KeylimeError::from)
-}
-
 // Takes a public PKey and returns a DigestValue of it.
 // Note: Currently, this creates a DigestValue including both SHA256 and
 // SHA1 because these banks are checked by Keylime on the Python side.
-pub(crate) fn pubkey_to_tpm_digest(
-    pubkey: &PKeyRef<Public>,
+fn pubkey_to_tpm_digest<T: HasPublic>(
+    pubkey: &PKeyRef<T>,
 ) -> Result<DigestValues> {
     let mut keydigest = DigestValues::new();
 
     let keybytes = match pubkey.id() {
         Id::RSA => pubkey.rsa()?.public_key_to_pem()?,
         other_id => {
-            return Err(KeylimeError::Other(format!(
+            return Err(TpmError::Other(format!(
             "Converting to digest value for key type {:?} is not yet implemented",
             other_id
             )));
@@ -423,19 +464,18 @@ pub(crate) fn pubkey_to_tpm_digest(
     // SHA256
     let mut hasher = openssl::sha::Sha256::new();
     hasher.update(&keybytes);
-    let mut hashvec: Vec<u8> = hasher.finish().into();
+    let hashvec: Vec<u8> = hasher.finish().into();
     keydigest.set(HashingAlgorithm::Sha256, Digest::try_from(hashvec)?);
     // SHA1
     let mut hasher = openssl::sha::Sha1::new();
     hasher.update(&keybytes);
-    let mut hashvec: Vec<u8> = hasher.finish().into();
+    let hashvec: Vec<u8> = hasher.finish().into();
     keydigest.set(HashingAlgorithm::Sha1, Digest::try_from(hashvec)?);
 
     Ok(keydigest)
 }
 
-// Reads a mask in the form of some hex value, ex. "0x408000",
-// translating bits that are set to pcrs to include in the list.
+// Reads a mask indicating PCRs to include.
 //
 // The masks are sent from the tenant and cloud verifier to indicate
 // the PCRs to include in a Quote. The LSB in the mask corresponds to
@@ -447,14 +487,12 @@ pub(crate) fn pubkey_to_tpm_digest(
 // and verifier. The output from this function can be used to call a
 // Quote from the TSS ESAPI.
 //
-pub(crate) fn read_mask(mask: &str) -> Result<Vec<PcrSlot>> {
+fn read_mask(mask: u32) -> Result<Vec<PcrSlot>> {
     let mut pcrs = Vec::new();
-
-    let num = u32::from_str_radix(mask.trim_start_matches("0x"), 16)?;
 
     // check which bits are set
     for i in 0..32 {
-        if num & (1 << i) != 0 {
+        if mask & (1 << i) != 0 {
             pcrs.push(
                 match i {
                     0 => PcrSlot::Slot0,
@@ -481,7 +519,7 @@ pub(crate) fn read_mask(mask: &str) -> Result<Vec<PcrSlot>> {
                     21 => PcrSlot::Slot21,
                     22 => PcrSlot::Slot22,
                     23 => PcrSlot::Slot23,
-                    bit => return Err(KeylimeError::Other(format!("malformed mask in integrity quote: only pcrs 0-23 can be included, but mask included pcr {:?}", bit))),
+                    bit => return Err(TpmError::Other(format!("malformed mask in integrity quote: only pcrs 0-23 can be included, but mask included pcr {:?}", bit))),
                 },
             )
         }
@@ -490,8 +528,8 @@ pub(crate) fn read_mask(mask: &str) -> Result<Vec<PcrSlot>> {
     Ok(pcrs)
 }
 
-//This checks if a PCR is contained in a mask
-pub(crate) fn check_mask(mask: &str, pcr: &PcrSlot) -> Result<bool> {
+/// Checks if `pcr` is included in `mask`.
+pub fn check_mask(mask: u32, pcr: &PcrSlot) -> Result<bool> {
     let selected_pcrs = read_mask(mask)?;
     Ok(selected_pcrs.contains(pcr))
 }
@@ -503,7 +541,7 @@ pub(crate) fn check_mask(mask: &str, pcr: &PcrSlot) -> Result<bool> {
 // Reference:
 // https://github.com/keylime/keylime/blob/2dd9e5c968f33bf77110092af9268d13db1806c6 \
 // /keylime/tpm/tpm_main.py#L964-L975
-pub(crate) fn encode_quote_string(
+fn encode_quote_string(
     att: Attest,
     sig: Signature,
     pcrs_read: PcrSelectionList,
@@ -532,41 +570,6 @@ pub(crate) fn encode_quote_string(
     Ok(quote)
 }
 
-// This function extends Pcr16 with the digest, then creates a PcrList
-// from the given mask and pcr16.
-// Note: Currently, this will build the list for both SHA256 and SHA1 as
-// necessary for the Python components of Keylime.
-pub(crate) fn build_pcr_list(
-    context: &mut Context,
-    digest: DigestValues,
-    mask: Option<&str>,
-    hash_alg: HashingAlgorithm,
-) -> Result<PcrSelectionList> {
-    // extend digest into pcr16
-    context.execute_with_nullauth_session(|ctx| {
-        ctx.pcr_reset(PcrHandle::Pcr16)?;
-        ctx.pcr_extend(PcrHandle::Pcr16, digest.to_owned())
-    })?;
-
-    // translate mask to vec of pcrs
-    let mut pcrs = match mask {
-        Some(m) => read_mask(m)?,
-        None => Vec::new(),
-    };
-
-    // add pcr16 if it isn't in the vec already
-    if !pcrs.iter().any(|&pcr| pcr == PcrSlot::Slot16) {
-        let mut slot16 = vec![PcrSlot::Slot16];
-        pcrs.append(&mut slot16);
-    }
-
-    let mut pcrlist = PcrSelectionListBuilder::new();
-    pcrlist = pcrlist.with_selection(hash_alg, &pcrs);
-    let pcrlist = pcrlist.build()?;
-
-    Ok(pcrlist)
-}
-
 // The pcr blob corresponds to the pcr out file that records the list of PCR values,
 // specified by tpm2tools, ex. 'tpm2_quote ... -o <pcrfilename>'. Read more here:
 // https://github.com/tpm2-software/tpm2-tools/blob/master/man/tpm2_quote.1.md
@@ -580,8 +583,8 @@ pub(crate) fn build_pcr_list(
 // https://github.com/keylime/keylime/blob/2dd9e5c968f33bf77110092af9268d13db1806c6/ \
 // keylime/tpm/tpm_main.py#L965
 //
-pub(crate) fn make_pcr_blob(
-    context: &mut Context,
+fn make_pcr_blob(
+    context: &mut tss_esapi::Context,
     pcrlist: PcrSelectionList,
 ) -> Result<(PcrSelectionList, PcrData)> {
     let pcr_data = context
@@ -597,7 +600,7 @@ fn hash_alg_to_message_digest(
     match hash_alg {
         HashingAlgorithm::Sha256 => Ok(MessageDigest::sha256()),
         HashingAlgorithm::Sha1 => Ok(MessageDigest::sha1()),
-        other => Err(KeylimeError::Other(format!(
+        other => Err(TpmError::Other(format!(
             "Unsupported hashing algorithm: {:?}",
             other
         ))),
@@ -613,7 +616,7 @@ fn check_if_pcr_data_and_attestation_match(
     let quote_info = match attestation.attested() {
         AttestInfo::Quote { info } => info,
         _ => {
-            return Err(KeylimeError::Other(format!(
+            return Err(TpmError::Other(format!(
                 "Expected attestation type TPM2_ST_ATTEST_QUOTE, got {:?}",
                 attestation.attestation_type()
             )));
@@ -643,7 +646,7 @@ fn check_if_pcr_data_and_attestation_match(
 const NUM_ATTESTATION_ATTEMPTS: i32 = 5;
 
 fn perform_quote_and_pcr_read(
-    mut context: &mut Context,
+    context: &mut tss_esapi::Context,
     ak_handle: KeyHandle,
     nonce: &[u8],
     pcrlist: PcrSelectionList,
@@ -665,11 +668,11 @@ fn perform_quote_and_pcr_read(
         )?;
 
         // Check whether the attestation and pcr_data match
-        if (check_if_pcr_data_and_attestation_match(
+        if check_if_pcr_data_and_attestation_match(
             hash_alg,
             &pcr_data,
             attestation.clone(),
-        )?) {
+        )? {
             return Ok((attestation, sig, pcrs_read, pcr_data));
         }
 
@@ -680,59 +683,21 @@ fn perform_quote_and_pcr_read(
     }
 
     log::error!("PCR data and attestation data mismatched on all {} attempts, giving up", NUM_ATTESTATION_ATTEMPTS);
-    Err(KeylimeError::Other(
+    Err(TpmError::Other(
         "Consistent race condition: can't make attestation match pcr_data"
             .to_string(),
     ))
 }
 
-pub(crate) fn quote(
-    nonce: &[u8],
-    mask: Option<&str>,
-    data: Data<QuoteData>,
-) -> Result<KeylimeQuote> {
-    let nk_digest = pubkey_to_tpm_digest(&data.pub_key)?;
-
-    // must unwrap here due to lock mechanism
-    // https://github.com/rust-lang-nursery/failure/issues/192
-    let mut context = data.tpmcontext.lock().unwrap(); //#[allow_ci]
-
-    let pcrlist =
-        build_pcr_list(&mut context, nk_digest, mask, data.hash_alg.into())?;
-
-    let (attestation, sig, pcrs_read, pcr_data) = context
-        .execute_with_nullauth_session(|ctx| {
-            perform_quote_and_pcr_read(
-                ctx,
-                data.ak_handle,
-                nonce,
-                pcrlist,
-                data.sign_alg.to_signature_scheme(data.hash_alg),
-                data.hash_alg.into(),
-            )
-        })?;
-
-    let tpm_quote =
-        encode_quote_string(attestation, sig, pcrs_read, pcr_data)?;
-
-    Ok(KeylimeQuote {
-        quote: tpm_quote,
-        hash_alg: data.hash_alg.to_string(),
-        enc_alg: data.enc_alg.to_string(),
-        sign_alg: data.sign_alg.to_string(),
-        pubkey: None,
-        ima_measurement_list: None,
-        mb_measurement_list: None,
-        ima_measurement_list_entry: None,
-    })
-}
-
-#[cfg(test)]
 pub mod testing {
     use super::*;
+    use std::io::prelude::*;
     use tss_esapi::constants::structure_tags::StructureTag;
     use tss_esapi::structures::{Attest, AttestBuffer, DigestList, Ticket};
-    use tss_esapi::tss2_esys::Tss2_MU_TPMT_SIGNATURE_Unmarshal;
+    use tss_esapi::tss2_esys::{
+        Tss2_MU_TPMT_SIGNATURE_Unmarshal, TPM2B_ATTEST, TPM2B_DIGEST,
+        TPMS_PCR_SELECTION, TPMT_SIGNATURE,
+    };
 
     macro_rules! create_unmarshal_fn {
         ($func:ident, $tpmobj:ty, $unmarshal:ident) => {
@@ -748,7 +713,7 @@ pub mod testing {
                         &mut resp,
                     );
                     if res != 0 {
-                        return Err(KeylimeError::Other(format!(
+                        return Err(TpmError::Other(format!(
                             "Error converting"
                         )));
                     }
@@ -764,6 +729,64 @@ pub mod testing {
         Tss2_MU_TPMT_SIGNATURE_Unmarshal
     );
 
+    // Deserialize a TPML_PCR_SELECTION from a &[u8] slice.
+    // The deserialization will adjust the data endianness as necessary.
+    fn deserialize_pcrsel(pcrsel_vec: &[u8]) -> Result<TPML_PCR_SELECTION> {
+        if pcrsel_vec.len() != TPML_PCR_SELECTION_SIZE {
+            return Err(TpmError::InvalidRequest);
+        }
+
+        let mut reader = std::io::Cursor::new(pcrsel_vec);
+        let mut count_vec = [0u8; 4];
+        reader.read_exact(&mut count_vec)?;
+        let count = u32::from_le_bytes(count_vec);
+
+        let mut pcr_selections: [TPMS_PCR_SELECTION; 16] =
+            [TPMS_PCR_SELECTION::default(); 16];
+
+        for selection in &mut pcr_selections {
+            let mut hash_vec = [0u8; 2];
+            reader.read_exact(&mut hash_vec)?;
+            selection.hash = u16::from_le_bytes(hash_vec);
+
+            let mut size_vec = [0u8; 1];
+            reader.read_exact(&mut size_vec)?;
+            selection.sizeofSelect = u8::from_le_bytes(size_vec);
+
+            reader.read_exact(&mut selection.pcrSelect)?;
+        }
+
+        Ok(TPML_PCR_SELECTION {
+            count,
+            pcrSelections: pcr_selections,
+        })
+    }
+
+    // Deserialize a TPML_DIGEST from a &[u8] slice.
+    // The deserialization will adjust the data endianness as necessary.
+    fn deserialize_digest(digest_vec: &[u8]) -> Result<TPML_DIGEST> {
+        if digest_vec.len() != TPML_DIGEST_SIZE {
+            return Err(TpmError::InvalidRequest);
+        }
+
+        let mut reader = std::io::Cursor::new(digest_vec);
+        let mut count_vec = [0u8; 4];
+
+        reader.read_exact(&mut count_vec)?;
+        let count = u32::from_le_bytes(count_vec);
+
+        let mut digests: [TPM2B_DIGEST; 8] = [TPM2B_DIGEST::default(); 8];
+
+        for digest in &mut digests {
+            let mut size_vec = [0u8; 2];
+            reader.read_exact(&mut size_vec)?;
+            digest.size = u16::from_le_bytes(size_vec);
+            reader.read_exact(&mut digest.buffer)?;
+        }
+
+        Ok(TPML_DIGEST { count, digests })
+    }
+
     fn vec_to_pcrdata(val: &[u8]) -> Result<(PcrSelectionList, PcrData)> {
         let mut reader = std::io::Cursor::new(val);
         let mut pcrsel_vec = [0u8; TPML_PCR_SELECTION_SIZE];
@@ -777,7 +800,7 @@ pub mod testing {
         let count = u32::from_le_bytes(count_vec);
         // Always 1 PCR digest should follow
         if count != 1 {
-            return Err(KeylimeError::InvalidRequest);
+            return Err(TpmError::InvalidRequest);
         }
 
         let mut digest_vec = [0u8; TPML_DIGEST_SIZE];
@@ -785,7 +808,7 @@ pub mod testing {
         let digest = deserialize_digest(&digest_vec)?;
         let mut digest_list = DigestList::new();
         for i in 0..digest.count {
-            digest_list.add(digest.digests[i as usize].try_into()?);
+            digest_list.add(digest.digests[i as usize].try_into()?)?;
         }
 
         let pcrdata = PcrData::create(&pcrlist, &digest_list)?;
@@ -796,13 +819,13 @@ pub mod testing {
         quote: &str,
     ) -> Result<(AttestBuffer, Signature, PcrSelectionList, PcrData)> {
         if !quote.starts_with('r') {
-            return Err(KeylimeError::InvalidRequest);
+            return Err(TpmError::InvalidRequest);
         }
         // extract components from the concatenated string
         let mut split = quote[1..].split(':');
-        let att_str = split.next().ok_or(KeylimeError::InvalidRequest)?;
-        let sig_str = split.next().ok_or(KeylimeError::InvalidRequest)?;
-        let pcr_str = split.next().ok_or(KeylimeError::InvalidRequest)?;
+        let att_str = split.next().ok_or(TpmError::InvalidRequest)?;
+        let sig_str = split.next().ok_or(TpmError::InvalidRequest)?;
+        let pcr_str = split.next().ok_or(TpmError::InvalidRequest)?;
 
         // base64 decoding
         let att_comp_finished = base64::decode(att_str)?;
@@ -816,7 +839,7 @@ pub mod testing {
             size: att_comp_finished
                 .len()
                 .try_into()
-                .or(Err(KeylimeError::InvalidRequest))?,
+                .or(Err(TpmError::InvalidRequest))?,
             ..Default::default()
         };
         att.attestationData[0..att_comp_finished.len()]
@@ -829,8 +852,8 @@ pub mod testing {
     //
     // Reference:
     // https://github.com/tpm2-software/tpm2-tools/blob/master/tools/tpm2_checkquote.c
-    pub(crate) fn check_quote(
-        context: &mut Context,
+    pub fn check_quote(
+        context: &mut tss_esapi::Context,
         ak_handle: KeyHandle,
         quote: &str,
         nonce: &[u8],
@@ -847,7 +870,7 @@ pub mod testing {
         match context.verify_signature(ak_handle, digest, sig) {
             Ok(ticket) if ticket.tag() == StructureTag::Verified => {}
             _ => {
-                return Err(KeylimeError::Other(
+                return Err(TpmError::Other(
                     "unable to verify quote signature".to_string(),
                 ))
             }
@@ -856,16 +879,13 @@ pub mod testing {
         // Ensure nonce is the same as given
         let attestation: Attest = att.try_into()?;
         if attestation.extra_data().value() != nonce {
-            return Err(KeylimeError::Other(
-                "nonce does not match".to_string(),
-            ));
+            return Err(TpmError::Other("nonce does not match".to_string()));
         }
 
         // Also ensure digest from quote matches PCR digest
-        let pcrbank =
-            pcrdata.pcr_bank(HashingAlgorithm::Sha256).ok_or_else(|| {
-                KeylimeError::Other("no SHA256 bank".to_string())
-            })?;
+        let pcrbank = pcrdata
+            .pcr_bank(HashingAlgorithm::Sha256)
+            .ok_or_else(|| TpmError::Other("no SHA256 bank".to_string()))?;
         let mut hasher = Hasher::new(MessageDigest::sha256())?;
         for &sel in pcrsel.get_selections() {
             for i in &sel.selected() {
@@ -878,14 +898,14 @@ pub mod testing {
         let quote_info = match attestation.attested() {
             AttestInfo::Quote { info } => info,
             _ => {
-                return Err(KeylimeError::Other(format!(
+                return Err(TpmError::Other(format!(
                     "Expected attestation type TPM2_ST_ATTEST_QUOTE, got {:?}",
                     attestation.attestation_type()
                 )));
             }
         };
         if quote_info.pcr_digest().value() != digest.as_ref() {
-            return Err(KeylimeError::Other(
+            return Err(TpmError::Other(
                 "PCR digest does not match".to_string(),
             ));
         }
@@ -897,7 +917,7 @@ pub mod testing {
 #[test]
 fn quote_encode_decode() {
     use std::fs::File;
-    use std::io::BufReader;
+    use std::io::{BufRead, BufReader};
     use std::path::Path;
 
     let quote_path = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -922,38 +942,41 @@ fn quote_encode_decode() {
     assert_eq!(encoded, buf);
 }
 
-#[ignore]
-// This will only work as an integration test because it needs keylime-agent.conf
 #[test]
 fn pubkey_to_digest() {
-    let (key, _) = crate::crypto::rsa_generate_pair(2048).unwrap(); //#[allow_ci]
-    let digest = pubkey_to_tpm_digest(&key).unwrap(); //#[allow_ci]
+    use openssl::pkey::PKey;
+    use openssl::rsa::Rsa;
+
+    let rsa = Rsa::generate(2048).unwrap(); //#[allow_ci]
+    let pkey = PKey::from_rsa(rsa).unwrap(); //#[allow_ci]
+
+    assert!(pubkey_to_tpm_digest(pkey.as_ref()).is_ok());
 }
 
 #[test]
 fn mask() {
-    assert_eq!(read_mask("0x0").unwrap(), vec![]); //#[allow_ci]
+    assert_eq!(read_mask(0x0).unwrap(), vec![]); //#[allow_ci]
 
-    assert_eq!(read_mask("0x1").unwrap(), vec![PcrSlot::Slot0]); //#[allow_ci]
+    assert_eq!(read_mask(0x1).unwrap(), vec![PcrSlot::Slot0]); //#[allow_ci]
 
-    assert_eq!(read_mask("0x2").unwrap(), vec![PcrSlot::Slot1]); //#[allow_ci]
+    assert_eq!(read_mask(0x2).unwrap(), vec![PcrSlot::Slot1]); //#[allow_ci]
 
-    assert_eq!(read_mask("0x4").unwrap(), vec![PcrSlot::Slot2]); //#[allow_ci]
+    assert_eq!(read_mask(0x4).unwrap(), vec![PcrSlot::Slot2]); //#[allow_ci]
 
     assert_eq!(
-        read_mask("0x5").unwrap(), //#[allow_ci]
+        read_mask(0x5).unwrap(), //#[allow_ci]
         vec![PcrSlot::Slot0, PcrSlot::Slot2]
     );
 
     assert_eq!(
-        read_mask("0x6").unwrap(), //#[allow_ci]
+        read_mask(0x6).unwrap(), //#[allow_ci]
         vec![PcrSlot::Slot1, PcrSlot::Slot2]
     );
 
-    assert_eq!(read_mask("0x800000").unwrap(), vec![PcrSlot::Slot23]); //#[allow_ci]
+    assert_eq!(read_mask(0x800000).unwrap(), vec![PcrSlot::Slot23]); //#[allow_ci]
 
     assert_eq!(
-        read_mask("0xffffff").unwrap(), //#[allow_ci]
+        read_mask(0xffffff).unwrap(), //#[allow_ci]
         vec![
             PcrSlot::Slot0,
             PcrSlot::Slot1,
@@ -982,5 +1005,5 @@ fn mask() {
         ]
     );
 
-    assert!(read_mask("0x1ffffff").is_err());
+    assert!(read_mask(0x1ffffff).is_err());
 }

@@ -2,10 +2,11 @@
 // Copyright 2021 Keylime Authors
 
 use crate::error::{Error, Result};
-use crate::{permissions, tpm};
+use crate::permissions;
 use keylime::algorithms::{
     EncryptionAlgorithm, HashAlgorithm, SignAlgorithm,
 };
+use keylime::tpm;
 use log::*;
 use openssl::{
     hash::{hash, MessageDigest},
@@ -256,7 +257,7 @@ mod tests {
     fn test_agent_data() -> Result<()> {
         let mut config = KeylimeConfig::default();
 
-        let mut ctx = tpm::get_tpm2_ctx()?;
+        let mut ctx = tpm::Context::new()?;
 
         let tpm_encryption_alg = EncryptionAlgorithm::try_from(
             config.agent.tpm_encryption_alg.as_str(),
@@ -268,19 +269,17 @@ mod tests {
         let tpm_signing_alg =
             SignAlgorithm::try_from(config.agent.tpm_signing_alg.as_str())?;
 
-        let ek_result = tpm::create_ek(
-            &mut ctx,
-            tpm_encryption_alg.into(),
+        let ek_result = ctx.create_ek(
+            tpm_encryption_alg,
             config.agent.ek_handle.as_deref(),
         )?;
 
         let ek_hash = hash_ek_pubkey(ek_result.public)?;
 
-        let ak = tpm::create_ak(
-            &mut ctx,
+        let ak = ctx.create_ak(
             ek_result.key_handle,
-            tpm_hash_alg.into(),
-            tpm_signing_alg.into(),
+            tpm_hash_alg,
+            tpm_signing_alg,
         )?;
 
         let agent_data_test = AgentData::create(
@@ -303,15 +302,14 @@ mod tests {
     fn test_hash() -> Result<()> {
         let mut config = KeylimeConfig::default();
 
-        let mut ctx = tpm::get_tpm2_ctx()?;
+        let mut ctx = tpm::Context::new()?;
 
         let tpm_encryption_alg = EncryptionAlgorithm::try_from(
             config.agent.tpm_encryption_alg.as_str(),
         )?;
 
-        let ek_result = tpm::create_ek(
-            &mut ctx,
-            tpm_encryption_alg.into(),
+        let ek_result = ctx.create_ek(
+            tpm_encryption_alg,
             config.agent.ek_handle.as_deref(),
         )?;
 
