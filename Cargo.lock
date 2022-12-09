@@ -1155,10 +1155,13 @@ dependencies = [
 name = "keylime"
 version = "0.1.0"
 dependencies = [
+ "base64",
  "hex",
+ "log",
  "openssl",
  "serde",
  "serde_derive",
+ "static_assertions",
  "tempfile",
  "thiserror",
  "tss-esapi",

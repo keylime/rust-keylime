@@ -10,12 +10,14 @@ use tss_esapi::{
 pub(crate) enum Error {
     #[error("HttpServer error: {0}")]
     ActixWeb(#[from] actix_web::Error),
-    #[error("TPM Error: {err:?}, kind: {kind:?}, {message}")]
-    Tpm {
+    #[error("TSS2 Error: {err:?}, kind: {kind:?}, {message}")]
+    Tss2 {
         err: tss_esapi::Error,
         kind: Option<Tss2ResponseCodeKind>,
         message: String,
     },
+    #[error("Keylime TPM error: {0}")]
+    Tpm(#[from] keylime::tpm::TpmError),
     #[error("Invalid request")]
     #[allow(unused)]
     InvalidRequest,
@@ -139,7 +141,7 @@ impl From<tss_esapi::Error> for Error {
         };
         let message = format!("{}", err);
 
-        Error::Tpm { err, kind, message }
+        Error::Tss2 { err, kind, message }
     }
 }
 

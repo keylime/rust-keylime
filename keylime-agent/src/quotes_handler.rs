@@ -28,7 +28,7 @@ pub struct Integ {
     ima_ml_entry: Option<String>,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Default)]
 pub(crate) struct KeylimeQuote {
     pub quote: String, // 'r' + quote + sig + pcrblob
     pub hash_alg: String,
@@ -81,19 +81,37 @@ pub async fn identity(
 
     debug!("Calling Identity Quote with nonce: {}", param.nonce);
 
-    let mut quote =
-        match tpm::quote(param.nonce.as_bytes(), None, data.clone()) {
-            Ok(quote) => quote,
-            Err(e) => {
-                debug!("Unable to retrieve quote: {:?}", e);
-                return HttpResponse::InternalServerError().json(
-                    JsonWrapper::error(
-                        500,
-                        "Unable to retrieve quote".to_string(),
-                    ),
-                );
-            }
-        };
+    // must unwrap here due to lock mechanism
+    // https://github.com/rust-lang-nursery/failure/issues/192
+    let mut context = data.tpmcontext.lock().unwrap(); //#[allow_ci]
+
+    let tpm_quote = match context.quote(
+        param.nonce.as_bytes(),
+        0,
+        &data.pub_key,
+        data.ak_handle,
+        data.hash_alg,
+        data.sign_alg,
+    ) {
+        Ok(quote) => quote,
+        Err(e) => {
+            debug!("Unable to retrieve quote: {:?}", e);
+            return HttpResponse::InternalServerError().json(
+                JsonWrapper::error(
+                    500,
+                    "Unable to retrieve quote".to_string(),
+                ),
+            );
+        }
+    };
+
+    let mut quote = KeylimeQuote {
+        quote: tpm_quote,
+        hash_alg: data.hash_alg.to_string(),
+        enc_alg: data.enc_alg.to_string(),
+        sign_alg: data.sign_alg.to_string(),
+        ..Default::default()
+    };
 
     match crypto::pkey_pub_to_pem(&data.pub_key) {
         Ok(pubkey) => quote.pubkey = Some(pubkey),
@@ -139,6 +157,20 @@ pub async fn integrity(
             format!("mask should be strictly alphanumeric: {}", param.mask),
         ));
     }
+
+    let mask =
+        match u32::from_str_radix(param.mask.trim_start_matches("0x"), 16) {
+            Ok(mask) => mask,
+            Err(e) => {
+                return HttpResponse::BadRequest().json(JsonWrapper::error(
+                    400,
+                    format!(
+                        "mask should be a hex encoded 32-bit integer: {}",
+                        param.mask
+                    ),
+                ));
+            }
+        };
 
     if param.nonce.len() > tpm::MAX_NONCE_SIZE {
         warn!("Get quote returning 400 response. Nonce is too long (max size {}): {}",
@@ -195,13 +227,20 @@ pub async fn integrity(
         Some(idx) => idx.parse::<u64>().unwrap_or(0),
     };
 
+    // must unwrap here due to lock mechanism
+    // https://github.com/rust-lang-nursery/failure/issues/192
+    let mut context = data.tpmcontext.lock().unwrap(); //#[allow_ci]
+
     // Generate the ID quote.
-    let id_quote = match tpm::quote(
+    let tpm_quote = match context.quote(
         param.nonce.as_bytes(),
-        Some(&param.mask),
-        data.clone(),
+        mask,
+        &data.pub_key,
+        data.ak_handle,
+        data.hash_alg,
+        data.sign_alg,
     ) {
-        Ok(id_quote) => id_quote,
+        Ok(tpm_quote) => tpm_quote,
         Err(e) => {
             debug!("Unable to retrieve quote: {:?}", e);
             return HttpResponse::InternalServerError().json(
@@ -213,9 +252,17 @@ pub async fn integrity(
         }
     };
 
+    let id_quote = KeylimeQuote {
+        quote: tpm_quote,
+        hash_alg: data.hash_alg.to_string(),
+        enc_alg: data.enc_alg.to_string(),
+        sign_alg: data.sign_alg.to_string(),
+        ..Default::default()
+    };
+
     // If PCR 0 is included in the mask, obtain the measured boot
     let mut mb_measurement_list = None;
-    match tpm::check_mask(&param.mask, &PcrSlot::Slot0) {
+    match tpm::check_mask(mask, &PcrSlot::Slot0) {
         Ok(true) => {
             if let Some(measuredboot_ml_file) = &data.measuredboot_ml_file {
                 let mut ml = Vec::<u8>::new();
@@ -330,7 +377,7 @@ mod tests {
 
         let mut context = quotedata.tpmcontext.lock().unwrap(); //#[allow_ci]
         tpm::testing::check_quote(
-            &mut context,
+            context.as_mut(),
             quotedata.ak_handle,
             &result.results.quote,
             b"1234567890ABCDEFHIJ",
@@ -383,7 +430,7 @@ mod tests {
 
                     let mut context = quotedata.tpmcontext.lock().unwrap(); //#[allow_ci]
                     tpm::testing::check_quote(
-                        &mut context,
+                        context.as_mut(),
                         quotedata.ak_handle,
                         &result.results.quote,
                         b"1234567890ABCDEFHIJ",
@@ -443,7 +490,7 @@ mod tests {
 
         let mut context = quotedata.tpmcontext.lock().unwrap(); //#[allow_ci]
         tpm::testing::check_quote(
-            &mut context,
+            context.as_mut(),
             quotedata.ak_handle,
             &result.results.quote,
             b"1234567890ABCDEFHIJ",

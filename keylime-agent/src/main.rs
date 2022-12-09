@@ -46,7 +46,6 @@ mod registrar_agent;
 mod revocation;
 mod secure_mount;
 mod serialization;
-mod tpm;
 mod version_handler;
 
 use actix_web::{dev::Service, http, middleware, rt, web, App, HttpServer};
@@ -56,6 +55,7 @@ use compress_tools::*;
 use error::{Error, Result};
 use futures::{future::TryFutureExt, try_join};
 use keylime::ima::MeasurementList;
+use keylime::tpm;
 use log::*;
 use openssl::{
     pkey::{PKey, Private, Public},
@@ -91,7 +91,7 @@ static NOTFOUND: &[u8] = b"Not Found";
 // handle quotes.
 #[derive(Debug)]
 pub struct QuoteData {
-    tpmcontext: Mutex<Context>,
+    tpmcontext: Mutex<tpm::Context>,
     priv_key: PKey<Private>,
     pub_key: PKey<Public>,
     ak_handle: KeyHandle,
@@ -440,11 +440,11 @@ async fn main() -> Result<()> {
 
     info!("Starting server with API version {}...", API_VERSION);
 
-    let mut ctx = tpm::get_tpm2_ctx()?;
+    let mut ctx = tpm::Context::new()?;
 
     //  Retrieve the TPM Vendor, this allows us to warn if someone is using a
     // Software TPM ("SW")
-    if tss_esapi::utils::get_tpm_vendor(&mut ctx)?.contains("SW") {
+    if tss_esapi::utils::get_tpm_vendor(ctx.as_mut())?.contains("SW") {
         warn!("INSECURE: Keylime is using a software TPM emulator rather than a real hardware TPM.");
         warn!("INSECURE: The security of Keylime is NOT linked to a hardware root of trust.");
         warn!("INSECURE: Only use Keylime in this mode for testing or debugging purposes.");
@@ -477,7 +477,7 @@ async fn main() -> Result<()> {
     // ownership of TPM access, which will not be implemented here.
     if let Some(ref v) = config.agent.tpm_ownerpassword {
         let auth = Auth::try_from(v.as_bytes())?;
-        ctx.tr_set_auth(Hierarchy::Endorsement.into(), auth)
+        ctx.as_mut().tr_set_auth(Hierarchy::Endorsement.into(), auth)
             .map_err(|e| {
                 Error::Configuration(format!(
                     "Failed to set TPM context password for Endorsement Hierarchy: {}",
@@ -498,11 +498,8 @@ async fn main() -> Result<()> {
     )?;
 
     // Gather EK values and certs
-    let ek_result = tpm::create_ek(
-        &mut ctx,
-        tpm_encryption_alg.into(),
-        config.agent.ek_handle.as_deref(),
-    )?;
+    let ek_result =
+        ctx.create_ek(tpm_encryption_alg, config.agent.ek_handle.as_deref())?;
 
     // Calculate the SHA-256 hash of the public key in PEM format
     let ek_hash = hash_ek_pubkey(ek_result.public.clone())?;
@@ -529,11 +526,9 @@ async fn main() -> Result<()> {
                         ) {
                             true => {
                                 let ak_result = data.get_ak()?;
-                                match tpm::load_ak(
-                                    &mut ctx,
-                                    ek_result.key_handle,
-                                    &ak_result,
-                                ) {
+                                match ctx
+                                    .load_ak(ek_result.key_handle, &ak_result)
+                                {
                                     Ok(ak_handle) => {
                                         info!(
                                             "Loaded old AK key from {}",
@@ -580,14 +575,12 @@ async fn main() -> Result<()> {
     let (ak_handle, ak) = match old_ak {
         Some((ak_handle, ak)) => (ak_handle, ak),
         None => {
-            let new_ak = tpm::create_ak(
-                &mut ctx,
+            let new_ak = ctx.create_ak(
                 ek_result.key_handle,
-                tpm_hash_alg.into(),
-                tpm_signing_alg.into(),
+                tpm_hash_alg,
+                tpm_signing_alg,
             )?;
-            let ak_handle =
-                tpm::load_ak(&mut ctx, ek_result.key_handle, &new_ak)?;
+            let ak_handle = ctx.load_ak(ek_result.key_handle, &new_ak)?;
             (ak_handle, new_ak)
         }
     };
@@ -739,15 +732,14 @@ async fn main() -> Result<()> {
         .await?;
         info!("SUCCESS: Agent {} registered", &config.agent.uuid);
 
-        let key = tpm::activate_credential(
-            &mut ctx,
+        let key = ctx.activate_credential(
             keyblob,
             ak_handle,
             ek_result.key_handle,
         )?;
         // Flush EK if we created it
         if config.agent.ek_handle.is_none() {
-            ctx.flush_context(ek_result.key_handle.into())?;
+            ctx.as_mut().flush_context(ek_result.key_handle.into())?;
         }
         let mackey = base64::encode(key.value());
         let auth_tag = crypto::compute_hmac(
@@ -983,7 +975,7 @@ mod testing {
     impl QuoteData {
         pub(crate) fn fixture() -> Result<Self> {
             let test_config = KeylimeConfig::default();
-            let mut ctx = tpm::get_tpm2_ctx()?;
+            let mut ctx = tpm::Context::new()?;
 
             let tpm_encryption_alg =
                 keylime::algorithms::EncryptionAlgorithm::try_from(
@@ -991,8 +983,7 @@ mod testing {
                 )?;
 
             // Gather EK and AK key values and certs
-            let ek_result =
-                tpm::create_ek(&mut ctx, tpm_encryption_alg.into(), None)?;
+            let ek_result = ctx.create_ek(tpm_encryption_alg, None)?;
 
             let tpm_hash_alg = keylime::algorithms::HashAlgorithm::try_from(
                 test_config.agent.tpm_hash_alg.as_str(),
@@ -1003,14 +994,12 @@ mod testing {
                     test_config.agent.tpm_signing_alg.as_str(),
                 )?;
 
-            let ak_result = tpm::create_ak(
-                &mut ctx,
+            let ak_result = ctx.create_ak(
                 ek_result.key_handle,
-                tpm_hash_alg.into(),
-                tpm_signing_alg.into(),
+                tpm_hash_alg,
+                tpm_signing_alg,
             )?;
-            let ak_handle =
-                tpm::load_ak(&mut ctx, ek_result.key_handle, &ak_result)?;
+            let ak_handle = ctx.load_ak(ek_result.key_handle, &ak_result)?;
             let ak_tpm2b_pub =
                 PublicBuffer::try_from(ak_result.public)?.marshall()?;
 
