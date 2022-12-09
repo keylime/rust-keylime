@@ -14,7 +14,6 @@
   prepare:
     how: shell
     script:
-     - rm -f /etc/yum.repos.d/tag-repository.repo
      - ln -s $(pwd) /var/tmp/rust-keylime_sources
 
   discover:
