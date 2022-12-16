@@ -1,0 +1,53 @@
+#!/bin/sh
+
+set -e
+
+
+keylime_setup_group_user ()
+{
+    # creating tss group if he isn't already there
+    if ! getent group tss >/dev/null; then
+        addgroup --system tss
+    fi
+
+    # creating tss user if he isn't already there
+    if ! getent passwd tss >/dev/null; then
+        adduser --system --ingroup tss --shell /bin/false \
+                --home /var/lib/tpm --no-create-home \
+                --gecos "TPM software stack" \
+                tss
+    fi
+
+    # creating keylime user if he isn't already there
+    if ! getent passwd keylime >/dev/null; then
+        adduser --system --ingroup tss --shell /bin/false \
+                --home /var/lib/keylime --no-create-home \
+                --gecos "Keylime remote attestation" \
+                keylime
+    fi
+}
+
+case "$1" in
+    configure)
+    # Setup the keylime user and the tss group
+    keylime_setup_group_user
+
+    mkdir -p /var/lib/keylime
+
+    # Setting owner
+    if [ -d /var/lib/keylime ] && ! dpkg-statoverride --list /var/lib/keylime >/dev/null && getent passwd keylime >/dev/null; then
+        chown -R keylime:tss /var/lib/keylime
+    fi
+
+    ;;
+
+    abort-upgrade|abort-remove|abort-deconfigure)
+    ;;
+
+    *)
+        echo "postinst called with unknown argument \`$1'" >&2
+        exit 1
+    ;;
+esac
+
+#DEBHELPER#
