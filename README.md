@@ -76,3 +76,16 @@ Then you should be able to start the service with:
 ```console
 $ sudo systemctl start keylime_agent
 ```
+
+## Building Debian package with cargo-deb
+
+Cargo deb requires Rust 1.60, so on Debian you need to install it first from rustup.rs.
+
+```shell
+# Install cargo-deb
+rustup update
+cargo install cargo-deb
+
+# Build Debian package
+cargo deb -p keylime_agent
+```
