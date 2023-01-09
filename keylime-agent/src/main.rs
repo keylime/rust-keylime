@@ -52,7 +52,10 @@ use clap::{Arg, Command as ClapApp};
 use common::*;
 use compress_tools::*;
 use error::{Error, Result};
-use futures::{future::TryFutureExt, try_join};
+use futures::{
+    future::{ok, TryFutureExt},
+    try_join,
+};
 use keylime::ima::MeasurementList;
 use keylime::tpm;
 use log::*;
@@ -330,12 +333,6 @@ async fn worker(
         .await?;
     } else {
         warn!("agent mTLS is disabled, and unless 'enable_insecure_payload' is set to 'True', payloads cannot be deployed'");
-    }
-
-    // If with-zmq feature is enabled, run the service listening for ZeroMQ messages
-    #[cfg(feature = "with-zmq")]
-    if config.agent.enable_revocation_notifications {
-        return revocation::run_revocation_service(&config, &mount).await;
     }
 
     Ok(())
@@ -943,6 +940,22 @@ async fn main() -> Result<()> {
         PathBuf::from(&mount),
     ))
     .map_err(Error::from);
+
+    // If with-zmq feature is enabled, run the service listening for ZeroMQ messages
+    #[cfg(feature = "with-zmq")]
+    let zmq_task = if config.agent.enable_revocation_notifications {
+        rt::spawn(revocation::run_revocation_service(
+            config.clone(),
+            PathBuf::from(&mount),
+        ))
+        .map_err(Error::from)
+    } else {
+        rt::spawn(ok(())).map_err(Error::from)
+    };
+
+    // If with-zmq feature is enabled, wait for the service listening for ZeroMQ messages
+    #[cfg(feature = "with-zmq")]
+    try_join!(zmq_task)?;
 
     let result = try_join!(server_task, worker_task);
     server_handle.stop(true).await;

@@ -330,8 +330,8 @@ pub(crate) fn process_revocation(
 ///   Function: await_notifications
 #[cfg(feature = "with-zmq")]
 pub(crate) async fn run_revocation_service(
-    config: &KeylimeConfig,
-    mount: &Path,
+    config: KeylimeConfig,
+    mount: impl AsRef<Path>,
 ) -> Result<()> {
     let work_dir = Path::new(&config.agent.keylime_dir);
 
@@ -421,7 +421,7 @@ pub(crate) async fn run_revocation_service(
             actions_dir,
             config.agent.allow_payload_revocation_actions,
             work_dir,
-            mount,
+            mount.as_ref(),
         );
     }
     Ok(())
