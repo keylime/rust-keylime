@@ -16,13 +16,15 @@ use openssl::{
 use picky_asn1_x509::SubjectPublicKeyInfo;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::convert::{TryFrom, TryInto};
-use std::env;
-use std::ffi::CString;
-use std::fmt::Debug;
-use std::fs::File;
-use std::path::{Path, PathBuf};
-use std::str::FromStr;
+use std::{
+    convert::{Into, TryFrom, TryInto},
+    env,
+    ffi::CString,
+    fmt::{self, Debug, Display},
+    fs::File,
+    path::{Path, PathBuf},
+    str::FromStr,
+};
 use tss_esapi::structures::{Private, Public};
 use tss_esapi::traits::Marshall;
 use tss_esapi::utils::PublicKey;
@@ -45,7 +47,7 @@ pub static MEASUREDBOOT_ML: &str =
     "/sys/kernel/security/tpm0/binary_bios_measurements";
 pub static KEY: &str = "secret";
 pub const AGENT_UUID_LEN: usize = 36;
-pub const AUTH_TAG_LEN: usize = 96;
+pub const AUTH_TAG_LEN: usize = 48;
 pub const AES_128_KEY_LEN: usize = 16;
 pub const AES_256_KEY_LEN: usize = 32;
 pub const AES_BLOCK_SIZE: usize = 16;
@@ -76,7 +78,7 @@ pub(crate) struct APIVersion {
     minor: u32,
 }
 
-impl std::fmt::Display for APIVersion {
+impl Display for APIVersion {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "v{}.{}", self.major, self.minor)
     }
@@ -119,30 +121,33 @@ where
 pub type KeySet = Vec<SymmKey>;
 
 // a key of len AES_128_KEY_LEN or AES_256_KEY_LEN
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SymmKey {
     bytes: Vec<u8>,
 }
 
 impl SymmKey {
-    pub(crate) fn bytes(&self) -> &[u8] {
-        self.bytes.as_slice()
-    }
-
     pub(crate) fn xor(&self, other: &Self) -> Result<Self> {
-        if self.bytes().len() != other.bytes().len() {
+        let my_bytes = self.as_ref();
+        let other_bytes = other.as_ref();
+        if my_bytes.len() != other_bytes.len() {
             return Err(Error::Other(
                 "cannot xor differing length slices".to_string(),
             ));
         }
-        let mut outbuf = vec![0u8; self.bytes().len()];
-        for (out, (x, y)) in outbuf
-            .iter_mut()
-            .zip(self.bytes().iter().zip(other.bytes()))
+        let mut outbuf = vec![0u8; my_bytes.len()];
+        for (out, (x, y)) in
+            outbuf.iter_mut().zip(my_bytes.iter().zip(other_bytes))
         {
             *out = x ^ y;
         }
         Ok(Self { bytes: outbuf })
+    }
+}
+
+impl AsRef<[u8]> for SymmKey {
+    fn as_ref(&self) -> &[u8] {
+        self.bytes.as_slice()
     }
 }
 
@@ -155,9 +160,58 @@ impl TryFrom<&[u8]> for SymmKey {
                 Ok(SymmKey { bytes: v.to_vec() })
             }
             other => Err(format!(
-                "key length {other} does not correspond to valid GCM cipher"
+                "key length {other} does not correspond to valid GCM cipher",
             )),
         }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AuthTag {
+    bytes: Vec<u8>,
+}
+
+impl AsRef<[u8]> for AuthTag {
+    fn as_ref(&self) -> &[u8] {
+        self.bytes.as_slice()
+    }
+}
+
+impl TryFrom<&[u8]> for AuthTag {
+    type Error = String;
+
+    fn try_from(v: &[u8]) -> std::result::Result<Self, Self::Error> {
+        match v.len() {
+            AUTH_TAG_LEN => {
+                Ok(AuthTag { bytes: v.to_vec() })
+            }
+            other => Err(format!(
+                "auth tag length {other} does not correspond to valid SHA-384 HMAC",
+            )),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EncryptedData {
+    bytes: Vec<u8>,
+}
+
+impl AsRef<[u8]> for EncryptedData {
+    fn as_ref(&self) -> &[u8] {
+        self.bytes.as_slice()
+    }
+}
+
+impl From<&[u8]> for EncryptedData {
+    fn from(v: &[u8]) -> Self {
+        EncryptedData { bytes: v.to_vec() }
+    }
+}
+
+impl From<Vec<u8>> for EncryptedData {
+    fn from(v: Vec<u8>) -> Self {
+        EncryptedData { bytes: v }
     }
 }
 
@@ -235,6 +289,7 @@ pub(crate) fn hash_ek_pubkey(ek_pub: Public) -> Result<String> {
     let mut hash = hash(MessageDigest::sha256(), &pem)?;
     Ok(hex::encode(hash))
 }
+
 #[cfg(test)]
 mod tests {
     use super::*;

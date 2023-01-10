@@ -1,10 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2021 Keylime Authors
 
-use crate::{common::SymmKey, config, crypto, Error, Result};
+use crate::{
+    common::{EncryptedData, SymmKey},
+    config, crypto, Error, Result,
+};
 use compress_tools::*;
 use log::*;
+use serde::{Deserialize, Serialize};
+use serde_json::json;
 use std::{
+    fmt::Display,
     fs,
     io::{BufReader, Read, Write},
     os::unix::fs::PermissionsExt,
@@ -12,17 +18,38 @@ use std::{
     process::{Command, Stdio},
     sync::{Arc, Condvar, Mutex},
 };
+use tokio::sync::mpsc::{Receiver, Sender};
+
+#[derive(Debug, Deserialize, Serialize)]
+pub(crate) struct RunPayload {
+    pub symm_key: SymmKey,
+    pub encrypted_payload: EncryptedData,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub(crate) enum PayloadMessage {
+    RunPayload(RunPayload),
+    Shutdown,
+}
+
+impl Display for PayloadMessage {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            PayloadMessage::RunPayload(_) => write!(f, "RunPayload"),
+            PayloadMessage::Shutdown => write!(f, "Shutdown"),
+        }
+    }
+}
 
 // Parameters are based on Python codebase:
 // https://github.com/keylime/keylime/blob/1ed43ac8f75d5c3bc3a3bbbbb5037f20cf3c5a6a/ \
 // keylime/crypto.py#L189
 fn decrypt_payload(
-    encr: Arc<Mutex<Vec<u8>>>,
     symm_key: &SymmKey,
+    encrypted_payload: EncryptedData,
 ) -> Result<Vec<u8>> {
-    let payload = encr.lock().unwrap(); //#[allow_ci]
-
-    let decrypted = crypto::decrypt_aead(symm_key.bytes(), &payload)?;
+    let decrypted =
+        crypto::decrypt_aead(symm_key.as_ref(), encrypted_payload.as_ref())?;
 
     info!("Successfully decrypted payload");
     Ok(decrypted)
@@ -58,16 +85,16 @@ fn write_out_key_and_payload(
     key_path: &Path,
 ) -> Result<()> {
     let mut key_file = fs::File::create(key_path)?;
-    let bytes = key_file.write(key.bytes())?;
-    if bytes != key.bytes().len() {
-        return Err(Error::Other(format!("Error writing symm key to {:?}: key len is {}, but {} bytes were written", key_path, key.bytes().len(), bytes)));
+    let bytes = key_file.write(key.as_ref())?;
+    if bytes != key.as_ref().len() {
+        return Err(Error::Other(format!("Error writing symm key to {:?}: key len is {}, but {bytes} bytes were written", key_path, key.as_ref().len())));
     }
     info!("Wrote payload decryption key to {:?}", key_path);
 
     let mut dec_payload_file = fs::File::create(dec_payload_path)?;
     let bytes = dec_payload_file.write(dec_payload)?;
     if bytes != dec_payload.len() {
-        return Err(Error::Other(format!("Error writing decrypted payload to {:?}: payload len is {}, but {} bytes were written", dec_payload_path, dec_payload.len(), bytes)));
+        return Err(Error::Other(format!("Error writing decrypted payload to {:?}: payload len is {}, but {bytes} bytes were written", dec_payload_path, dec_payload.len())));
     }
     info!("Wrote decrypted payload to {:?}", dec_payload_path);
 
@@ -80,7 +107,7 @@ fn run(dir: &Path, script: &str, uuid: &str) -> Result<()> {
     info!("Running script: {:?}", script_path);
 
     if !script_path.exists() {
-        info!("No payload script {} found in {}", script, dir.display());
+        info!("No payload script {script} found in {}", dir.display());
         return Ok(());
     }
 
@@ -135,20 +162,12 @@ fn optional_unzip_payload(
 }
 
 async fn run_encrypted_payload(
-    symm_key: Arc<Mutex<Option<SymmKey>>>,
-    symm_key_cvar: Arc<Condvar>,
-    payload: Arc<Mutex<Vec<u8>>>,
+    symm_key: SymmKey,
+    payload: EncryptedData,
     config: &config::KeylimeConfig,
     mount: &Path,
 ) -> Result<()> {
-    // do nothing until actix server's handlers have updated the symmetric key
-    let mut key = symm_key.lock().unwrap(); //#[allow_ci]
-    while key.is_none() {
-        key = symm_key_cvar.wait(key).unwrap(); //#[allow_ci]
-    }
-
-    let key = key.as_ref().unwrap(); //#[allow_ci]
-    let dec_payload = decrypt_payload(payload, key)?;
+    let dec_payload = decrypt_payload(&symm_key, payload)?;
 
     let (unzipped, dec_payload_path, key_path) =
         setup_unzipped(config, mount)?;
@@ -156,7 +175,7 @@ async fn run_encrypted_payload(
     write_out_key_and_payload(
         &dec_payload,
         &dec_payload_path,
-        key,
+        &symm_key,
         &key_path,
     )?;
 
@@ -208,27 +227,36 @@ async fn run_encrypted_payload(
 }
 
 pub(crate) async fn worker(
-    symm_key: Arc<Mutex<Option<SymmKey>>>,
-    symm_key_cvar: Arc<Condvar>,
-    payload: Arc<Mutex<Vec<u8>>>,
     config: config::KeylimeConfig,
-    mount: impl AsRef<Path>,
+    mount: PathBuf,
+    mut payload_rx: Receiver<PayloadMessage>,
 ) -> Result<()> {
-    // Only run payload scripts if mTLS is enabled or 'enable_insecure_payload' option is set
-    if config.agent.enable_agent_mtls || config.agent.enable_insecure_payload
-    {
-        run_encrypted_payload(
-            symm_key,
-            symm_key_cvar,
-            payload,
-            &config,
-            mount.as_ref(),
-        )
-        .await?;
-    } else {
-        warn!("agent mTLS is disabled, and unless 'enable_insecure_payload' is set to 'True', payloads cannot be deployed'");
+    debug!("Starting payloads worker");
+
+    // Receive message
+    while let Some(message) = payload_rx.recv().await {
+        match message {
+            PayloadMessage::Shutdown => {
+                payload_rx.close();
+            }
+            PayloadMessage::RunPayload(run_payload) => {
+                // The keys worker will send this message only if mTLS is enabled or
+                // 'enable_insecure_payload' configuration option is set
+                if let Err(e) = run_encrypted_payload(
+                    run_payload.symm_key,
+                    run_payload.encrypted_payload,
+                    &config,
+                    &mount,
+                )
+                .await
+                {
+                    warn!("Failed to run encrypted payload: {}", e);
+                }
+            }
+        }
     }
 
+    debug!("Shutting down payloads worker");
     Ok(())
 }
 
@@ -236,9 +264,53 @@ pub(crate) async fn worker(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(feature = "testing")]
+    use crate::crypto::testing::{
+        encrypt_aead, pkey_pub_from_pem, rsa_oaep_encrypt,
+    };
+    use crate::{
+        common::{AES_128_KEY_LEN, AES_256_KEY_LEN, API_VERSION},
+        config::KeylimeConfig,
+        payloads,
+    };
+    use actix_rt::Arbiter;
+    use std::{
+        env, fs,
+        path::{Path, PathBuf},
+    };
+    use tokio::sync::mpsc;
 
-    #[test]
-    fn test_run() {
+    // Enough length for testing both AES-128 and AES-256
+    const U: &[u8; AES_256_KEY_LEN] = b"01234567890123456789012345678901";
+    const V: &[u8; AES_256_KEY_LEN] = b"ABCDEFGHIJABCDEFGHIJABCDEFGHIJAB";
+
+    fn setup_key(key_len: usize) -> SymmKey {
+        let u: SymmKey = U[..key_len][..].try_into().unwrap(); //#[allow_ci]
+        let v: SymmKey = V[..key_len][..].try_into().unwrap(); //#[allow_ci]
+        u.xor(&v).unwrap() //#[allow_ci]
+    }
+
+    #[cfg(feature = "testing")]
+    fn setup_key_and_payload(key_len: usize) -> (SymmKey, EncryptedData) {
+        let u: SymmKey = U[..key_len][..].try_into().unwrap(); //#[allow_ci]
+        let v: SymmKey = V[..key_len][..].try_into().unwrap(); //#[allow_ci]
+        let k = u.xor(&v).unwrap(); //#[allow_ci]
+
+        let payload_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("test-data")
+            .join("payload.zip");
+
+        let payload = fs::read(payload_path).expect("unable to read payload");
+
+        let payload = {
+            let iv = b"ABCDEFGHIJKLMNOP";
+            encrypt_aead(k.as_ref(), &iv[..], payload.as_slice()).unwrap() //#[allow_ci]
+        };
+        (k, payload.into())
+    }
+
+    #[tokio::test]
+    async fn test_run() {
         let dir = tempfile::tempdir().unwrap(); //#[allow_ci]
         let script_path = dir.path().join("test-script.sh");
         {
@@ -257,5 +329,139 @@ echo hello > test-output
         )
         .unwrap(); //#[allow_ci]
         assert!(dir.path().join("test-output").exists());
+    }
+
+    #[cfg(feature = "testing")]
+    #[test]
+    fn test_decrypt_payload() {
+        let (k, payload) = setup_key_and_payload(AES_128_KEY_LEN);
+        let result = decrypt_payload(&k, payload);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_setup_unzipped() {
+        let test_config = KeylimeConfig::default();
+        let temp_workdir = tempfile::tempdir().unwrap(); //#[allow_ci]
+        let secure_mount =
+            PathBuf::from(&temp_workdir.path().join("tmpfs-dev"));
+        fs::create_dir(&secure_mount).unwrap(); //#[allow_ci]
+        let result = setup_unzipped(&test_config, &secure_mount);
+        assert!(result.is_ok());
+        let (unzipped, dec_payload_path, key_path) = result.unwrap(); //#[allow_ci]
+        assert!(unzipped.exists());
+        assert!(
+            dec_payload_path
+                == unzipped.join(&test_config.agent.dec_payload_file)
+        );
+        assert!(key_path == unzipped.join(&test_config.agent.enc_keyname));
+    }
+
+    #[test]
+    fn test_write_out_key_and_payload() {
+        let temp_workdir = tempfile::tempdir().unwrap(); //#[allow_ci]
+        let k = setup_key(AES_128_KEY_LEN);
+        let payload = b"Testing";
+        let result = write_out_key_and_payload(
+            payload,
+            &temp_workdir.path().join("dec_payload"),
+            &k,
+            &temp_workdir.path().join("key"),
+        );
+
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_unzip_payload() {
+        let mut test_config = KeylimeConfig::default();
+        let temp_workdir = tempfile::tempdir().unwrap(); //#[allow_ci]
+        let payload_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("test-data")
+            .join("payload.zip");
+
+        let result = fs::copy(
+            payload_path,
+            temp_workdir
+                .path()
+                .join(&test_config.agent.dec_payload_file),
+        );
+        assert!(result.is_ok());
+
+        let dec_payload_path = temp_workdir
+            .path()
+            .join(&test_config.agent.dec_payload_file);
+        assert!(dec_payload_path.exists());
+
+        let result =
+            optional_unzip_payload(temp_workdir.path(), &test_config);
+        assert!(result.is_ok());
+        assert!(temp_workdir.path().join("autorun.sh").exists());
+    }
+
+    #[cfg(feature = "testing")]
+    #[tokio::test]
+    async fn test_run_encrypted_payload() {
+        let test_config = KeylimeConfig::default();
+        let temp_workdir = tempfile::tempdir().unwrap(); //#[allow_ci]
+        let secure_mount =
+            PathBuf::from(&temp_workdir.path().join("tmpfs-dev"));
+        fs::create_dir(&secure_mount).unwrap(); //#[allow_ci]
+        env::set_var("KEYLIME_TEST_DIR", temp_workdir.path());
+
+        let (k, payload) = setup_key_and_payload(AES_128_KEY_LEN);
+
+        run_encrypted_payload(k, payload, &test_config, &secure_mount).await;
+
+        let timestamp_path = temp_workdir.path().join("timestamp");
+        assert!(timestamp_path.exists());
+    }
+
+    #[cfg(feature = "testing")]
+    #[actix_rt::test]
+    async fn test_payload_worker() {
+        let test_config = KeylimeConfig::default();
+        let temp_workdir = tempfile::tempdir().unwrap(); //#[allow_ci]
+        let secure_mount =
+            PathBuf::from(&temp_workdir.path().join("tmpfs-dev"));
+        fs::create_dir(&secure_mount).unwrap(); //#[allow_ci]
+        env::set_var("KEYLIME_TEST_DIR", temp_workdir.path());
+
+        let (k, payload) = setup_key_and_payload(AES_128_KEY_LEN);
+
+        let (mut payload_tx, mut payload_rx) =
+            mpsc::channel::<PayloadMessage>(1);
+
+        let arbiter = Arbiter::new();
+        assert!(arbiter.spawn(Box::pin(async move {
+            let result = worker(test_config, secure_mount, payload_rx).await;
+
+            if result.is_err() {
+                debug!("payloads worker failed: {:?}", result);
+            }
+
+            let timestamp_path = temp_workdir.path().join("timestamp");
+            assert!(timestamp_path.exists());
+
+            if !Arbiter::current().stop() {
+                debug!("couldn't stop current arbiter");
+            }
+        })));
+
+        let run_payload = RunPayload {
+            symm_key: k,
+            encrypted_payload: payload,
+        };
+
+        let result = payload_tx
+            .send(PayloadMessage::RunPayload(run_payload))
+            .await;
+        assert!(result.is_ok());
+
+        payload_tx
+            .send(payloads::PayloadMessage::Shutdown)
+            .await
+            .unwrap(); //#[allow_ci]
+        arbiter.join();
     }
 }

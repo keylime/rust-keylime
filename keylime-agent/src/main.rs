@@ -69,9 +69,10 @@ use std::{
     io::{BufReader, Read, Write},
     path::{Path, PathBuf},
     str::FromStr,
-    sync::{Arc, Condvar, Mutex},
+    sync::Mutex,
     time::Duration,
 };
+use tokio::sync::{mpsc, oneshot};
 use tss_esapi::{
     handles::KeyHandle,
     interface_types::algorithm::AsymmetricAlgorithm,
@@ -95,12 +96,11 @@ pub struct QuoteData {
     priv_key: PKey<Private>,
     pub_key: PKey<Public>,
     ak_handle: KeyHandle,
-    ukeys: Mutex<KeySet>,
-    vkeys: Mutex<KeySet>,
-    payload_symm_key: Arc<Mutex<Option<SymmKey>>>,
-    payload_symm_key_cvar: Arc<Condvar>,
-    encr_payload: Arc<Mutex<Vec<u8>>>,
-    auth_tag: Mutex<[u8; AUTH_TAG_LEN]>,
+    payload_tx: mpsc::Sender<payloads::PayloadMessage>,
+    keys_tx: mpsc::Sender<(
+        keys_handler::KeyMessage,
+        Option<oneshot::Sender<keys_handler::SymmKeyMessage>>,
+    )>,
     hash_alg: keylime::algorithms::HashAlgorithm,
     enc_alg: keylime::algorithms::EncryptionAlgorithm,
     sign_alg: keylime::algorithms::SignAlgorithm,
@@ -533,16 +533,12 @@ async fn main() -> Result<()> {
         info!("SUCCESS: Agent {} activated", &config.agent.uuid);
     }
 
-    let mut encr_payload = Vec::new();
-
-    let symm_key_arc = Arc::new(Mutex::new(None));
-    let symm_key_cvar_arc = Arc::new(Condvar::new());
-    let encr_payload_arc = Arc::new(Mutex::new(encr_payload));
-
-    // these allow the arrays to be referenced later in this thread
-    let symm_key = Arc::clone(&symm_key_arc);
-    let symm_key_cvar = Arc::clone(&symm_key_cvar_arc);
-    let payload = Arc::clone(&encr_payload_arc);
+    let (mut payload_tx, mut payload_rx) =
+        mpsc::channel::<payloads::PayloadMessage>(1);
+    let (mut keys_tx, mut keys_rx) = mpsc::channel::<(
+        keys_handler::KeyMessage,
+        Option<oneshot::Sender<keys_handler::SymmKeyMessage>>,
+    )>(1);
 
     let revocation_cert =
         config.agent.revocation_cert.as_ref().map(PathBuf::from);
@@ -567,12 +563,8 @@ async fn main() -> Result<()> {
         priv_key: nk_priv,
         pub_key: nk_pub,
         ak_handle,
-        ukeys: Mutex::new(KeySet::default()),
-        vkeys: Mutex::new(KeySet::default()),
-        payload_symm_key: symm_key_arc,
-        payload_symm_key_cvar: symm_key_cvar_arc,
-        encr_payload: encr_payload_arc,
-        auth_tag: Mutex::new([0u8; AUTH_TAG_LEN]),
+        keys_tx: keys_tx.clone(),
+        payload_tx: payload_tx.clone(),
         hash_alg: tpm_hash_alg,
         enc_alg: tpm_encryption_alg,
         sign_alg: tpm_signing_alg,
@@ -711,12 +703,23 @@ async fn main() -> Result<()> {
 
     let server_handle = server.handle();
     let server_task = rt::spawn(server).map_err(Error::from);
-    let worker_task = rt::spawn(payloads::worker(
-        symm_key,
-        symm_key_cvar,
-        payload,
+
+    // Only run payload scripts if mTLS is enabled or 'enable_insecure_payload' option is set
+    let run_payload = config.agent.enable_agent_mtls
+        || config.agent.enable_insecure_payload;
+
+    let payload_task = rt::spawn(payloads::worker(
         config.clone(),
         PathBuf::from(&mount),
+        payload_rx,
+    ))
+    .map_err(Error::from);
+
+    let key_task = rt::spawn(keys_handler::worker(
+        run_payload,
+        config.agent.uuid.clone(),
+        keys_rx,
+        payload_tx,
     ))
     .map_err(Error::from);
 
@@ -736,7 +739,7 @@ async fn main() -> Result<()> {
     #[cfg(feature = "with-zmq")]
     try_join!(zmq_task)?;
 
-    let result = try_join!(server_task, worker_task);
+    let result = try_join!(server_task, payload_task, key_task);
     server_handle.stop(true).await;
     result.map(|_| ())
 }
@@ -801,16 +804,13 @@ mod testing {
             let (nk_pub, nk_priv) =
                 crypto::testing::rsa_import_pair(rsa_key_path)?;
 
-            let mut encr_payload = Vec::new();
+            let (mut payload_tx, mut payload_rx) =
+                mpsc::channel::<payloads::PayloadMessage>(1);
 
-            let symm_key_arc = Arc::new(Mutex::new(None));
-            let symm_key_cvar_arc = Arc::new(Condvar::new());
-            let encr_payload_arc = Arc::new(Mutex::new(encr_payload));
-
-            // these allow the arrays to be referenced later in this thread
-            let symm_key = Arc::clone(&symm_key_arc);
-            let symm_key_cvar = Arc::clone(&symm_key_cvar_arc);
-            let payload = Arc::clone(&encr_payload_arc);
+            let (mut keys_tx, mut keys_rx) = mpsc::channel::<(
+                keys_handler::KeyMessage,
+                Option<oneshot::Sender<keys_handler::SymmKeyMessage>>,
+            )>(1);
 
             let revocation_cert =
                 test_config.agent.revocation_cert.map(PathBuf::from);
@@ -845,12 +845,8 @@ mod testing {
                 priv_key: nk_priv,
                 pub_key: nk_pub,
                 ak_handle,
-                ukeys: Mutex::new(KeySet::default()),
-                vkeys: Mutex::new(KeySet::default()),
-                payload_symm_key: symm_key_arc,
-                payload_symm_key_cvar: symm_key_cvar_arc,
-                encr_payload: encr_payload_arc,
-                auth_tag: Mutex::new([0u8; AUTH_TAG_LEN]),
+                keys_tx,
+                payload_tx,
                 hash_alg: keylime::algorithms::HashAlgorithm::Sha256,
                 enc_alg: keylime::algorithms::EncryptionAlgorithm::Rsa,
                 sign_alg: keylime::algorithms::SignAlgorithm::RsaSsa,

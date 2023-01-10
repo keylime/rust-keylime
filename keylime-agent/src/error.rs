@@ -85,6 +85,10 @@ pub(crate) enum Error {
     Join(#[from] tokio::task::JoinError),
     #[error("Asn1DerError: {0}")]
     PickyAsn1(#[from] picky_asn1_der::Asn1DerError),
+    #[error("Error sending internal message: {0}")]
+    Sender(String),
+    #[error("Error receiving internal message: {0}")]
+    Receiver(String),
     #[error("{0}")]
     Other(String),
 }
