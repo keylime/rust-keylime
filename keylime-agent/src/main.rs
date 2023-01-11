@@ -719,7 +719,7 @@ async fn main() -> Result<()> {
         run_payload,
         config.agent.uuid.clone(),
         keys_rx,
-        payload_tx,
+        payload_tx.clone(),
     ))
     .map_err(Error::from);
 
@@ -735,12 +735,27 @@ async fn main() -> Result<()> {
         rt::spawn(ok(())).map_err(Error::from)
     };
 
+    let shutdown_task = rt::spawn(async move {
+        rt::signal::ctrl_c().await.unwrap(); //#[allow_ci]
+
+        info!("Shutting down keylime agent server");
+
+        // Shutdown tasks
+        let server_stop = server_handle.stop(true);
+        payload_tx.send(payloads::PayloadMessage::Shutdown);
+        keys_tx.send((keys_handler::KeyMessage::Shutdown, None));
+
+        // Await tasks shutdown
+        server_stop.await;
+    })
+    .map_err(Error::from);
+
     // If with-zmq feature is enabled, wait for the service listening for ZeroMQ messages
     #[cfg(feature = "with-zmq")]
     try_join!(zmq_task)?;
 
-    let result = try_join!(server_task, payload_task, key_task);
-    server_handle.stop(true).await;
+    let result =
+        try_join!(server_task, payload_task, key_task, shutdown_task);
     result.map(|_| ())
 }
 
