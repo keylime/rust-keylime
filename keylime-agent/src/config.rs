@@ -601,10 +601,6 @@ fn config_get_file_path(
 
 fn get_uuid(agent_uuid_config: &str) -> String {
     match agent_uuid_config {
-        "openstack" => {
-            info!("Openstack placeholder...");
-            "openstack".into()
-        }
         "hash_ek" => {
             info!("Using hashed EK as UUID");
             // DO NOT change this to something else. It is used later to set the correct value.
@@ -728,7 +724,6 @@ mod tests {
 
     #[test]
     fn test_get_uuid() {
-        assert_eq!(get_uuid("openstack"), "openstack");
         assert_eq!(get_uuid("hash_ek"), "hash_ek");
         let _ = Uuid::parse_str(&get_uuid("generate")).unwrap(); //#[allow_ci]
         assert_eq!(
