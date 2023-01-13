@@ -82,6 +82,9 @@ pub(crate) fn try_combine_keys(
         }
     }
 
+    // we have failed to decode the U/V keys. Clear keys to enable later attempts.
+    keyset1.clear();
+    keyset2.clear();
     Err(Error::Other(
         "HMAC check failed for all U and V key combinations".to_string(),
     ))
