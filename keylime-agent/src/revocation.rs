@@ -2,20 +2,48 @@
 // Copyright 2021 Keylime Authors
 
 #[macro_use]
-use log::*;
-
+use actix_web::rt;
 use crate::config::{AgentConfig, KeylimeConfig};
 use crate::crypto;
 use crate::error::*;
 use crate::secure_mount;
-
-use std::convert::TryInto;
-use std::fs;
-use std::io::{ErrorKind, Write};
-use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Output, Stdio};
-
+use log::*;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::{
+    convert::TryInto,
+    fs,
+    io::{ErrorKind, Write},
+    path::{Path, PathBuf},
+    process::{Child, Command, Output, Stdio},
+    time::Duration,
+};
+use tokio::{
+    sync::{
+        mpsc::{Receiver, Sender},
+        oneshot,
+    },
+    time::sleep,
+};
+
+#[derive(Debug, Deserialize, Serialize, PartialEq)]
+pub(crate) struct Revocation {
+    pub(crate) msg: String,
+    pub(crate) signature: String,
+}
+
+#[derive(Debug, Deserialize, Serialize, PartialEq)]
+pub(crate) enum ZmqMessage {
+    StartListening,
+    Shutdown,
+}
+
+#[derive(Debug, Deserialize, Serialize, PartialEq)]
+pub(crate) enum RevocationMessage {
+    PayloadDecrypted,
+    Revocation(Revocation),
+    Shutdown,
+}
 
 /// Lookup for the action to be executed and return the command string
 ///
@@ -155,13 +183,11 @@ pub(crate) fn run_action(
 /// # Arguments
 ///
 /// * `json` - The revocation message content
-/// * `secure_size` - The size of the secure mount
 /// * `config_actions` - Actions from the configuration file
 /// * `actions_dir` - Location of the pre-installed actions
-pub(crate) fn run_revocation_actions(
+fn run_revocation_actions(
     json: Value,
-    secure_size: &str,
-    config_actions: &str,
+    config_actions: Option<String>,
     actions_dir: &Path,
     allow_payload_actions: bool,
     work_dir: &Path,
@@ -169,12 +195,12 @@ pub(crate) fn run_revocation_actions(
 ) -> Result<Vec<Output>> {
     // The actions from the configuration file takes precedence over the actions from the
     // actions_list file
-    let mut action_list = config_actions
+    let actions = config_actions.unwrap_or_default();
+    let mut action_list = actions
         .split(',')
         .map(|script| script.trim())
         .filter(|script| !script.is_empty())
         .collect::<Vec<&str>>();
-
     let action_data;
     let unzipped = mount.join("unzipped");
     let action_file = unzipped.join("action_list");
@@ -229,136 +255,71 @@ pub(crate) fn run_revocation_actions(
 }
 
 /// Process revocation message received from REST API or 0mq
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn process_revocation(
-    body: Value,
-    cert_path: &Path,
-    secure_size: &str,
-    config_actions: &str,
-    actions_dir: &Path,
+fn process_revocation(
+    revocation: Revocation,
+    revocation_cert: &openssl::x509::X509,
+    revocation_actions_dir: &Path,
+    revocation_actions: Option<String>,
     allow_payload_revocation_actions: bool,
     work_dir: &Path,
     mount: &Path,
 ) -> Result<()> {
-    // Ensure we have a signature, otherwise continue the loop
-    let signature = match body["signature"].as_str() {
-        Some(v) => v,
-        _ => {
-            warn!("No signature on revocation message from server");
-            return Err(Error::InvalidRequest);
-        }
-    };
-
-    // Ensure we have a msg, otherwise continue the loop
-    let message = match body["msg"].as_str() {
-        Some(v) => v,
-        _ => {
-            warn!("No msg on revocation message from server");
-            return Err(Error::InvalidRequest);
-        }
-    };
-
-    // Canonicalize will fail it the file is not found
-    let cert_absolute_path = cert_path.canonicalize()?;
-    info!(
-        "Loading the revocation certificate from {}",
-        cert_absolute_path.display()
-    );
-
-    let cert_key = match crypto::load_x509(&cert_absolute_path) {
-        Ok(v) => v.public_key().map_err(Error::Crypto)?,
-        Err(e) => {
-            return Err(Error::Configuration(String::from(
-                "Cannot load pubkey from revocation certificate",
-            )))
-        }
-    };
+    let cert_key = revocation_cert.public_key()?;
 
     // Verify the message and signature with our key
-    let mut verified = crypto::asym_verify(&cert_key, message, signature);
+    let mut verified = crypto::asym_verify(
+        &cert_key,
+        &revocation.msg,
+        &revocation.signature,
+    )?;
 
-    match verified {
-        Ok(true) => {
-            let msg = body["msg"].as_str();
-            let msg_payload: Value = serde_json::from_str(match msg {
-                Some(v) => v,
-                _ => {
-                    warn!("Unable to decode json in msg");
-                    return Err(Error::InvalidRequest);
-                }
-            })?;
-            debug!(
-                "Revocation signature validated for revocation: {}",
-                msg_payload
-            );
-            let outputs = run_revocation_actions(
-                msg_payload,
-                secure_size,
-                config_actions,
-                actions_dir,
-                allow_payload_revocation_actions,
-                work_dir,
-                mount,
-            )?;
+    if verified {
+        let msg = revocation.msg.as_str();
+        let msg_payload: Value = serde_json::from_str(msg)?;
 
-            for output in outputs {
-                if !output.stdout.is_empty() {
-                    info!(
-                        "Action stdout: {}",
-                        String::from_utf8(output.stdout).unwrap() //#[allow_ci]
-                    );
-                }
-                if !output.stderr.is_empty() {
-                    warn!(
-                        "Action stderr: {}",
-                        String::from_utf8(output.stderr).unwrap() //#[allow_ci])
-                    );
-                }
+        debug!(
+            "Revocation signature validated for revocation: {}",
+            msg_payload
+        );
+
+        let outputs = run_revocation_actions(
+            msg_payload,
+            revocation_actions,
+            revocation_actions_dir,
+            allow_payload_revocation_actions,
+            work_dir,
+            mount,
+        )?;
+
+        for output in outputs {
+            if !output.stdout.is_empty() {
+                let out = String::from_utf8(output.stdout)?;
+                info!("Action stdout: {}", out);
             }
-            Ok(())
+            if !output.stderr.is_empty() {
+                let out = String::from_utf8(output.stderr)?;
+                warn!("Action stderr: {}", out);
+            }
         }
-        _ => {
-            error!("Invalid revocation message signature {}", body);
-            Err(Error::InvalidRequest)
-        }
+        Ok(())
+    } else {
+        error!("Invalid revocation message signature");
+        Err(Error::InvalidRequest)
     }
 }
 
-/// Handles revocation messages via 0mq
-/// See:
-/// - URL: https://github.com/keylime/keylime/blob/master/keylime/revocation_notifier.py
-///   Function: await_notifications
 #[cfg(feature = "with-zmq")]
-pub(crate) async fn run_revocation_service(
-    config: KeylimeConfig,
-    mount: impl AsRef<Path>,
-) -> Result<()> {
-    let work_dir = Path::new(&config.agent.keylime_dir);
-
+fn listen_zmq(
+    mut revocation_tx: Sender<RevocationMessage>,
+    ip: String,
+    port: u32,
+    mut shutdown_rx: oneshot::Receiver<String>,
+) -> Result<rt::task::JoinHandle<Result<()>>> {
     // Connect to the service via 0mq
     let context = zmq::Context::new();
     let mysock = context.socket(zmq::SUB)?;
 
     mysock.set_subscribe(b"")?;
-
-    let ip = if let Some(i) = &config.agent.revocation_notification_ip {
-        i
-    } else {
-        error!("No IP set in 'revocation_notification_ip' option");
-        return Err(Error::Configuration(
-            "No IP set in 'revocation_notification_ip' option".to_string(),
-        ));
-    };
-
-    let port = if let Some(p) = &config.agent.revocation_notification_port {
-        p
-    } else {
-        error!("No port set in 'revocation_notification_port' option");
-        return Err(Error::Configuration(
-            "No port set in 'revocation_notification_port' option"
-                .to_string(),
-        ));
-    };
 
     let endpoint = format!("tcp://{ip}:{port}");
 
@@ -369,61 +330,193 @@ pub(crate) async fn run_revocation_service(
 
     mysock.connect(endpoint.as_str())?;
 
-    let revocation_cert = if let Some(cert) = &config.agent.revocation_cert {
-        Path::new(cert)
-    } else {
-        error!("No revocation certificate set in 'revocation_cert' option");
-        return Err(Error::Configuration(
-            "No revocation certificate set in 'revocation_cert' option"
-                .to_string(),
-        ));
-    };
-
-    let actions_dir = if let Some(dir) = &config.agent.revocation_actions_dir
-    {
-        Path::new(dir)
-    } else {
-        error!("No revocation actions directory set in 'revocation_actions_dir' option");
-        return Err(Error::Configuration("No revocation actions directory set in 'revocation_actions_dir' option".to_string()));
-    };
-
-    let actions = if let Some(a) = &config.agent.revocation_actions {
-        a
-    } else {
-        ""
-    };
-
     info!("Waiting for revocation messages on 0mq {}", endpoint);
 
-    // Main revocation service loop. If a message is malformed or
-    // can not be verified the loop continues.
-    loop {
-        let mut rawbody = match mysock.recv_string(0) {
-            Ok(v) => match v {
-                Ok(v) => v,
-                _ => {
-                    warn!("Unable to read message from 0mq");
+    Ok(rt::spawn(async move {
+        // Main revocation service loop. If a message is malformed or
+        // can not be verified the loop continues.
+        loop {
+            if shutdown_rx.try_recv().is_ok() {
+                // Received shutdowm message
+                break;
+            };
+            match mysock.get_events() {
+                Ok(v) => {
+                    if v.contains(zmq::POLLIN) {
+                        match mysock.recv_string(0) {
+                            Ok(r) => {
+                                match r {
+                                    Ok(raw_body) => {
+                                        if let Ok(r) = serde_json::from_str(
+                                            raw_body.as_ref(),
+                                        ) {
+                                            match revocation_tx.send(RevocationMessage::Revocation(r)).await {
+                                            Ok(_) => {
+                                                debug!("Sent Revocation message to revocation worker");
+                                            }
+                                            Err(e) => {
+                                                warn!("Failed to send Revocation message to revocation worker");
+                                                continue;
+                                            }
+                                        }
+                                        } else {
+                                            warn!("JSON decode error on 0mq message");
+                                            continue;
+                                        };
+                                    }
+                                    Err(_) => {
+                                        warn!(
+                                            "Unable to read message from 0mq"
+                                        );
+                                        continue;
+                                    }
+                                }
+                            }
+                            Err(_) => {
+                                warn!("Unable to read message from 0mq");
+                                continue;
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    warn!("Unable to poll 0mq events");
                     continue;
                 }
-            },
-            Err(e) => {
-                warn!("Unable to read message from 0mq");
-                continue;
-            }
-        };
+            };
+            sleep(Duration::from_millis(100)).await;
+        }
+        info!("Stop waiting for revocation messages on 0mq {}", endpoint);
+        Ok(())
+    }))
+}
 
-        let body: Value = serde_json::from_str(rawbody.as_str())?;
-        let _ = process_revocation(
-            body,
-            revocation_cert,
-            &config.agent.secure_size,
-            actions,
-            actions_dir,
-            config.agent.allow_payload_revocation_actions,
-            work_dir,
-            mount.as_ref(),
-        );
+/// Handles revocation messages via 0mq
+/// See:
+/// - URL: https://github.com/keylime/keylime/blob/master/keylime/revocation_notifier.py
+///   Function: await_notifications
+#[cfg(feature = "with-zmq")]
+pub(crate) async fn zmq_worker(
+    mut zmq_rx: Receiver<ZmqMessage>,
+    mut revocation_tx: Sender<RevocationMessage>,
+    ip: String,
+    port: u32,
+) -> Result<()> {
+    debug!("Starting ZMQ revocation listener worker");
+
+    let mut task: Option<rt::task::JoinHandle<Result<()>>> = None;
+    let mut shutdown_tx: Option<oneshot::Sender<String>> = None;
+
+    // Receive message
+    while let Some(message) = zmq_rx.recv().await {
+        match message {
+            ZmqMessage::Shutdown => {
+                zmq_rx.close();
+            }
+            ZmqMessage::StartListening => {
+                if task.is_some() {
+                    warn!("Another ZeroMQ revocation listening service is running");
+                    continue;
+                }
+                let (tx, rx) = oneshot::channel::<String>();
+                shutdown_tx = Some(tx);
+                task = match listen_zmq(
+                    revocation_tx.clone(),
+                    ip.clone(),
+                    port,
+                    rx,
+                ) {
+                    Ok(t) => Some(t),
+                    Err(e) => {
+                        warn!("Failed to start ZeroMQ revocation listener worker");
+                        None
+                    }
+                }
+            }
+        }
     }
+
+    debug!("Shutting down ZMQ revocation listener worker");
+    if let Some(tx) = shutdown_tx {
+        tx.send("shutdown".to_string());
+    }
+
+    if let Some(t) = &task {}
+    Ok(())
+}
+
+pub(crate) async fn worker(
+    mut revocation_rx: Receiver<RevocationMessage>,
+    revocation_cert_path: impl AsRef<Path>,
+    revocation_actions_dir: impl AsRef<Path>,
+    revocation_actions: Option<String>,
+    allow_payload_revocation_actions: bool,
+    work_dir: impl AsRef<Path>,
+    mount: impl AsRef<Path>,
+) -> Result<()> {
+    debug!("Starting revocation worker");
+
+    let mut revocation_cert: Option<openssl::x509::X509> = None;
+
+    // Receive message
+    while let Some(message) = revocation_rx.recv().await {
+        match message {
+            RevocationMessage::Revocation(revocation) => {
+                match &revocation_cert {
+                    None => {
+                        warn!("Revocation certificate not yet available");
+                    }
+                    Some(cert) => {
+                        // Process revocation
+                        match process_revocation(
+                            revocation,
+                            cert,
+                            revocation_actions_dir.as_ref(),
+                            revocation_actions.clone(),
+                            allow_payload_revocation_actions,
+                            work_dir.as_ref(),
+                            mount.as_ref(),
+                        ) {
+                            Ok(_) => {
+                                info!("Revocation processed successfully");
+                            }
+                            Err(e) => {
+                                error!("Failed to process revocation: {}", e);
+                            }
+                        }
+                    }
+                }
+            }
+            RevocationMessage::PayloadDecrypted => {
+                // The payload worker will send this message after decrypting and optionally
+                // unzipping the payload
+                let cert_absolute_path =
+                    match revocation_cert_path.as_ref().canonicalize() {
+                        Ok(path) => path,
+                        Err(e) => {
+                            error!("Certicate not available");
+                            continue;
+                        }
+                    };
+
+                info!(
+                    "Loading the revocation certificate from {}",
+                    cert_absolute_path.display()
+                );
+
+                revocation_cert = match crypto::load_x509(&cert_absolute_path)
+                {
+                    Ok(cert) => Some(cert),
+                    Err(e) => None,
+                };
+            }
+            RevocationMessage::Shutdown => {
+                revocation_rx.close();
+            }
+        }
+    }
+
+    debug!("Shutting down revocation worker");
     Ok(())
 }
 
@@ -454,8 +547,7 @@ mod tests {
         symlink(unzipped_dir, tmpfs_dir.join("unzipped")).unwrap(); //#[allow_ci]
         let outputs = run_revocation_actions(
             json,
-            &test_config.agent.secure_size,
-            "",
+            Some("".to_string()),
             actions_dir,
             true,
             work_dir.path(),
@@ -494,8 +586,7 @@ mod tests {
         symlink(unzipped_dir, tmpfs_dir.join("unzipped")).unwrap(); //#[allow_ci]
         let outputs = run_revocation_actions(
             json,
-            &test_config.agent.secure_size,
-            "",
+            Some("".to_string()),
             actions_dir,
             true,
             work_dir.path(),
@@ -530,8 +621,7 @@ mod tests {
         symlink(unzipped_dir, tmpfs_dir.join("unzipped")).unwrap(); //#[allow_ci]
         let outputs = run_revocation_actions(
             json,
-            &test_config.agent.secure_size,
-            revocation_actions,
+            Some(revocation_actions.to_string()),
             actions_dir,
             true,
             work_dir.path(),
@@ -681,15 +771,14 @@ mod tests {
 
         let message_path = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("test-data/test_ok.json");
-        let message = fs::read_to_string(message_path).unwrap(); //#[allow_ci]
+        let msg = fs::read_to_string(message_path).unwrap(); //#[allow_ci]
 
-        let body = json!({
-            "msg": message,
-            "signature": signature,
-        });
+        let revocation = Revocation { msg, signature };
 
         let cert_path = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("test-data/test-cert.pem");
+
+        let cert = crypto::load_x509(&cert_path).unwrap(); //#[allow_ci]
 
         let actions_dir =
             Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/actions");
@@ -698,11 +787,10 @@ mod tests {
         let tmpfs_dir = work_dir.join("tmpfs-dev");
 
         let result = process_revocation(
-            body,
-            &cert_path,
-            &test_config.agent.secure_size,
-            "",
+            revocation,
+            &cert,
             &actions_dir,
+            None,
             test_config.agent.allow_payload_revocation_actions,
             &work_dir,
             &tmpfs_dir,
