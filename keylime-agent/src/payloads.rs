@@ -3,8 +3,14 @@
 
 use crate::{
     common::{EncryptedData, SymmKey},
-    config, crypto, Error, Result,
+    config, crypto,
+    revocation::{Revocation, RevocationMessage},
+    Error, Result,
 };
+
+#[cfg(feature = "with-zmq")]
+use crate::revocation::ZmqMessage;
+
 use compress_tools::*;
 use log::*;
 use serde::{Deserialize, Serialize};
@@ -166,6 +172,8 @@ async fn run_encrypted_payload(
     payload: EncryptedData,
     config: &config::KeylimeConfig,
     mount: &Path,
+    revocation_tx: Sender<RevocationMessage>,
+    #[cfg(feature = "with-zmq")] zmq_tx: Sender<ZmqMessage>,
 ) -> Result<()> {
     let dec_payload = decrypt_payload(&symm_key, payload)?;
 
@@ -223,13 +231,31 @@ async fn run_encrypted_payload(
             })?
     }
 
+    debug!("Sending PayloadDecrypted message to revocation worker");
+    if let Err(e) = revocation_tx
+        .send(RevocationMessage::PayloadDecrypted)
+        .await
+    {
+        warn!("Failed to send PayloadDecrypted mesage to revocation worker");
+    };
+
+    #[cfg(feature = "with-zmq")]
+    {
+        debug!("Sending StartListening message to ZMQ worker");
+        if let Err(e) = zmq_tx.send(ZmqMessage::StartListening).await {
+            warn!("Failed to send StartListening mesage to ZMQ worker");
+        };
+    }
+
     Ok(())
 }
 
 pub(crate) async fn worker(
     config: config::KeylimeConfig,
-    mount: PathBuf,
+    mount: impl AsRef<Path>,
     mut payload_rx: Receiver<PayloadMessage>,
+    mut revocation_tx: Sender<RevocationMessage>,
+    #[cfg(feature = "with-zmq")] mut zmq_tx: Sender<ZmqMessage>,
 ) -> Result<()> {
     debug!("Starting payloads worker");
 
@@ -242,15 +268,23 @@ pub(crate) async fn worker(
             PayloadMessage::RunPayload(run_payload) => {
                 // The keys worker will send this message only if mTLS is enabled or
                 // 'enable_insecure_payload' configuration option is set
-                if let Err(e) = run_encrypted_payload(
+                match run_encrypted_payload(
                     run_payload.symm_key,
                     run_payload.encrypted_payload,
                     &config,
-                    &mount,
+                    mount.as_ref(),
+                    revocation_tx.clone(),
+                    #[cfg(feature = "with-zmq")]
+                    zmq_tx.clone(),
                 )
                 .await
                 {
-                    warn!("Failed to run encrypted payload: {}", e);
+                    Ok(_) => {
+                        info!("Successfully executed encrypted payload");
+                    }
+                    Err(e) => {
+                        warn!("Failed to run encrypted payload: {}", e);
+                    }
                 }
             }
         }
@@ -409,9 +443,35 @@ echo hello > test-output
         fs::create_dir(&secure_mount).unwrap(); //#[allow_ci]
         env::set_var("KEYLIME_TEST_DIR", temp_workdir.path());
 
+        let (mut revocation_tx, mut revocation_rx) =
+            mpsc::channel::<RevocationMessage>(1);
+
+        #[cfg(feature = "with-zmq")]
+        let (mut zmq_tx, mut zmq_rx) = mpsc::channel::<ZmqMessage>(1);
+
         let (k, payload) = setup_key_and_payload(AES_128_KEY_LEN);
 
-        run_encrypted_payload(k, payload, &test_config, &secure_mount).await;
+        run_encrypted_payload(
+            k,
+            payload,
+            &test_config,
+            &secure_mount,
+            revocation_tx,
+            #[cfg(feature = "with-zmq")]
+            zmq_tx,
+        )
+        .await;
+
+        let msg = revocation_rx.recv().await;
+        assert!(msg == Some(RevocationMessage::PayloadDecrypted));
+        revocation_rx.close();
+
+        #[cfg(feature = "with-zmq")]
+        {
+            let msg = zmq_rx.recv().await;
+            assert!(msg == Some(ZmqMessage::StartListening));
+            zmq_rx.close();
+        }
 
         let timestamp_path = temp_workdir.path().join("timestamp");
         assert!(timestamp_path.exists());
@@ -420,6 +480,8 @@ echo hello > test-output
     #[cfg(feature = "testing")]
     #[actix_rt::test]
     async fn test_payload_worker() {
+        use crate::{config::DEFAULT_PAYLOAD_SCRIPT, secure_mount};
+
         let test_config = KeylimeConfig::default();
         let temp_workdir = tempfile::tempdir().unwrap(); //#[allow_ci]
         let secure_mount =
@@ -432,9 +494,27 @@ echo hello > test-output
         let (mut payload_tx, mut payload_rx) =
             mpsc::channel::<PayloadMessage>(1);
 
+        let (mut revocation_tx, mut revocation_rx) =
+            mpsc::channel::<RevocationMessage>(1);
+
+        #[cfg(feature = "with-zmq")]
+        let (mut zmq_tx, mut zmq_rx) = mpsc::channel::<ZmqMessage>(1);
+
+        let script = PathBuf::from(
+            &secure_mount.join(format!("unzipped/{DEFAULT_PAYLOAD_SCRIPT}")),
+        );
+
         let arbiter = Arbiter::new();
         assert!(arbiter.spawn(Box::pin(async move {
-            let result = worker(test_config, secure_mount, payload_rx).await;
+            let result = worker(
+                test_config,
+                secure_mount,
+                payload_rx,
+                revocation_tx,
+                #[cfg(feature = "with-zmq")]
+                zmq_tx,
+            )
+            .await;
 
             if result.is_err() {
                 debug!("payloads worker failed: {:?}", result);
@@ -448,7 +528,7 @@ echo hello > test-output
             }
         })));
 
-        let run_payload = RunPayload {
+        let run_payload = Payload {
             symm_key: k,
             encrypted_payload: payload,
         };
@@ -458,10 +538,21 @@ echo hello > test-output
             .await;
         assert!(result.is_ok());
 
-        payload_tx
-            .send(payloads::PayloadMessage::Shutdown)
-            .await
-            .unwrap(); //#[allow_ci]
+        let msg = revocation_rx.recv().await;
+        assert!(msg == Some(RevocationMessage::PayloadDecrypted));
+        revocation_rx.close();
+
+        #[cfg(feature = "with-zmq")]
+        {
+            let msg = zmq_rx.recv().await;
+            assert!(msg == Some(ZmqMessage::StartListening));
+            zmq_rx.close();
+        }
+
+        let result = payload_tx.send(PayloadMessage::Shutdown).await;
+        assert!(result.is_ok());
+        drop(payload_tx);
+
         arbiter.join();
     }
 }

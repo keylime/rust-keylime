@@ -97,6 +97,7 @@ pub struct QuoteData {
     pub_key: PKey<Public>,
     ak_handle: KeyHandle,
     payload_tx: mpsc::Sender<payloads::PayloadMessage>,
+    revocation_tx: mpsc::Sender<revocation::RevocationMessage>,
     keys_tx: mpsc::Sender<(
         keys_handler::KeyMessage,
         Option<oneshot::Sender<keys_handler::SymmKeyMessage>>,
@@ -105,9 +106,6 @@ pub struct QuoteData {
     enc_alg: keylime::algorithms::EncryptionAlgorithm,
     sign_alg: keylime::algorithms::SignAlgorithm,
     agent_uuid: String,
-    revocation_cert: Option<PathBuf>,
-    revocation_actions: Option<String>,
-    revocation_actions_dir: Option<PathBuf>,
     allow_payload_revocation_actions: bool,
     secure_size: String,
     work_dir: PathBuf,
@@ -533,22 +531,6 @@ async fn main() -> Result<()> {
         info!("SUCCESS: Agent {} activated", &config.agent.uuid);
     }
 
-    let (mut payload_tx, mut payload_rx) =
-        mpsc::channel::<payloads::PayloadMessage>(1);
-    let (mut keys_tx, mut keys_rx) = mpsc::channel::<(
-        keys_handler::KeyMessage,
-        Option<oneshot::Sender<keys_handler::SymmKeyMessage>>,
-    )>(1);
-
-    let revocation_cert =
-        config.agent.revocation_cert.as_ref().map(PathBuf::from);
-
-    let actions_dir = config
-        .agent
-        .revocation_actions_dir
-        .as_ref()
-        .map(PathBuf::from);
-
     let work_dir = Path::new(&config.agent.keylime_dir)
         .canonicalize()
         .map_err(|e| {
@@ -558,6 +540,60 @@ async fn main() -> Result<()> {
             ))
         })?;
 
+    let (mut payload_tx, mut payload_rx) =
+        mpsc::channel::<payloads::PayloadMessage>(1);
+    let (mut keys_tx, mut keys_rx) = mpsc::channel::<(
+        keys_handler::KeyMessage,
+        Option<oneshot::Sender<keys_handler::SymmKeyMessage>>,
+    )>(1);
+    let (mut revocation_tx, mut revocation_rx) =
+        mpsc::channel::<revocation::RevocationMessage>(1);
+
+    #[cfg(feature = "with-zmq")]
+    let (mut zmq_tx, mut zmq_rx) = mpsc::channel::<revocation::ZmqMessage>(1);
+
+    let revocation_cert = match config.agent.revocation_cert {
+        Some(ref s) => PathBuf::from(s),
+        None => {
+            error!(
+                "No revocation certificate set in 'revocation_cert' option"
+            );
+            return Err(Error::Configuration(
+                "No revocation certificate set in 'revocation_cert' option"
+                    .to_string(),
+            ));
+        }
+    };
+
+    let revocation_actions_dir = match config
+        .agent
+        .revocation_actions_dir
+        .as_ref()
+        .map(PathBuf::from)
+    {
+        Some(dir) => dir,
+        None => {
+            error!("No revocation actions directory set in 'revocation_actions_dir' option");
+            return Err(Error::Configuration(
+                        "No revocation actions directory set in 'revocation_actions_dir' option"
+                        .to_string(),
+                        ));
+        }
+    };
+
+    let revocation_actions = config.agent.revocation_actions.clone();
+
+    let revocation_task = rt::spawn(revocation::worker(
+        revocation_rx,
+        revocation_cert,
+        revocation_actions_dir,
+        revocation_actions,
+        config.agent.allow_payload_revocation_actions,
+        work_dir.clone(),
+        mount.clone(),
+    ))
+    .map_err(Error::from);
+
     let quotedata = web::Data::new(QuoteData {
         tpmcontext: Mutex::new(ctx),
         priv_key: nk_priv,
@@ -565,13 +601,11 @@ async fn main() -> Result<()> {
         ak_handle,
         keys_tx: keys_tx.clone(),
         payload_tx: payload_tx.clone(),
+        revocation_tx: revocation_tx.clone(),
         hash_alg: tpm_hash_alg,
         enc_alg: tpm_encryption_alg,
         sign_alg: tpm_signing_alg,
         agent_uuid: config.agent.uuid.clone(),
-        revocation_cert,
-        revocation_actions: config.agent.revocation_actions.clone(),
-        revocation_actions_dir: actions_dir,
         allow_payload_revocation_actions: config
             .agent
             .allow_payload_revocation_actions,
@@ -712,6 +746,9 @@ async fn main() -> Result<()> {
         config.clone(),
         PathBuf::from(&mount),
         payload_rx,
+        revocation_tx.clone(),
+        #[cfg(feature = "with-zmq")]
+        zmq_tx.clone(),
     ))
     .map_err(Error::from);
 
@@ -726,9 +763,32 @@ async fn main() -> Result<()> {
     // If with-zmq feature is enabled, run the service listening for ZeroMQ messages
     #[cfg(feature = "with-zmq")]
     let zmq_task = if config.agent.enable_revocation_notifications {
-        rt::spawn(revocation::run_revocation_service(
-            config.clone(),
-            PathBuf::from(&mount),
+        let ip = if let Some(i) = config.agent.revocation_notification_ip {
+            i
+        } else {
+            error!("No IP set in 'revocation_notification_ip' option");
+            return Err(Error::Configuration(
+                "No IP set in 'revocation_notification_ip' option"
+                    .to_string(),
+            ));
+        };
+
+        let port = if let Some(p) = config.agent.revocation_notification_port
+        {
+            p
+        } else {
+            error!("No port set in 'revocation_notification_port' option");
+            return Err(Error::Configuration(
+                "No port set in 'revocation_notification_port' option"
+                    .to_string(),
+            ));
+        };
+
+        rt::spawn(revocation::zmq_worker(
+            zmq_rx,
+            revocation_tx.clone(),
+            ip,
+            port,
         ))
         .map_err(Error::from)
     } else {
@@ -745,6 +805,11 @@ async fn main() -> Result<()> {
         payload_tx.send(payloads::PayloadMessage::Shutdown);
         keys_tx.send((keys_handler::KeyMessage::Shutdown, None));
 
+        #[cfg(feature = "with-zmq")]
+        zmq_tx.send(revocation::ZmqMessage::Shutdown);
+
+        revocation_tx.send(revocation::RevocationMessage::Shutdown);
+
         // Await tasks shutdown
         server_stop.await;
     })
@@ -754,8 +819,13 @@ async fn main() -> Result<()> {
     #[cfg(feature = "with-zmq")]
     try_join!(zmq_task)?;
 
-    let result =
-        try_join!(server_task, payload_task, key_task, shutdown_task);
+    let result = try_join!(
+        server_task,
+        payload_task,
+        key_task,
+        revocation_task,
+        shutdown_task
+    );
     result.map(|_| ())
 }
 
@@ -827,6 +897,9 @@ mod testing {
                 Option<oneshot::Sender<keys_handler::SymmKeyMessage>>,
             )>(1);
 
+            let (mut revocation_tx, mut revocation_rx) =
+                mpsc::channel::<revocation::RevocationMessage>(1);
+
             let revocation_cert =
                 test_config.agent.revocation_cert.map(PathBuf::from);
 
@@ -862,13 +935,11 @@ mod testing {
                 ak_handle,
                 keys_tx,
                 payload_tx,
+                revocation_tx,
                 hash_alg: keylime::algorithms::HashAlgorithm::Sha256,
                 enc_alg: keylime::algorithms::EncryptionAlgorithm::Rsa,
                 sign_alg: keylime::algorithms::SignAlgorithm::RsaSsa,
                 agent_uuid: test_config.agent.uuid,
-                revocation_cert,
-                revocation_actions: None,
-                revocation_actions_dir: actions_dir,
                 allow_payload_revocation_actions: test_config
                     .agent
                     .allow_payload_revocation_actions,

@@ -1,81 +1,37 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2021 Keylime Authors
 
-use crate::{common::JsonWrapper, revocation, Error, QuoteData, Result};
+use crate::{
+    common::JsonWrapper,
+    revocation::{Revocation, RevocationMessage},
+    Error, QuoteData, Result,
+};
 use actix_web::{web, HttpRequest, HttpResponse, Responder};
 use log::*;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
-#[derive(Serialize, Deserialize, Debug)]
-struct KeylimeRevocation {
-    msg: String,
-    signature: String,
-}
-
 // This is Revocation request from the cloud verifier via REST API
-pub async fn revocation(
-    body: web::Bytes,
+pub(crate) async fn revocation(
+    body: web::Json<Revocation>,
     req: HttpRequest,
     data: web::Data<QuoteData>,
 ) -> impl Responder {
     info!("Received revocation");
 
-    let json_body = match serde_json::from_slice(&body) {
-        Ok(body) => body,
+    match data
+        .revocation_tx
+        .send(RevocationMessage::Revocation(body.into_inner()))
+        .await
+    {
         Err(e) => {
-            return HttpResponse::BadRequest().json(JsonWrapper::error(
-                400,
-                format!("JSON parsing error: {e}"),
-            ));
+            HttpResponse::InternalServerError().json(JsonWrapper::error(
+                500,
+                "Fail to send Revocation message to revocation worker"
+                    .to_string(),
+            ))
         }
-    };
-
-    let revocation_cert = match &data.revocation_cert {
-        Some(cert) => cert,
-        None => {
-            return HttpResponse::InternalServerError().json(
-                JsonWrapper::error(501, "Revocation certificate not set."),
-            );
-        }
-    };
-
-    let secure_size = &data.secure_size;
-    let revocation_actions = match &data.revocation_actions {
-        Some(actions) => actions,
-        None => "",
-    };
-
-    let actions_dir = match &data.revocation_actions_dir {
-        Some(dir) => dir,
-        None => {
-            return HttpResponse::InternalServerError().json(
-                JsonWrapper::error(
-                    501,
-                    "Revocation actions directory not set",
-                ),
-            );
-        }
-    };
-
-    let payload_actions_allowed = data.allow_payload_revocation_actions;
-    let work_dir = &data.work_dir;
-    let mount = &data.secure_mount;
-
-    match revocation::process_revocation(
-        json_body,
-        revocation_cert,
-        secure_size,
-        revocation_actions,
-        actions_dir,
-        payload_actions_allowed,
-        work_dir,
-        mount,
-    ) {
         Ok(_) => HttpResponse::Ok().json(JsonWrapper::success(())),
-        Err(e) => HttpResponse::InternalServerError().json(
-            JsonWrapper::error(501, "Revocation actions directory not set"),
-        ),
     }
 }
 
@@ -83,9 +39,11 @@ pub async fn revocation(
 mod tests {
     use super::*;
     use crate::common::API_VERSION;
+    use actix_rt::Arbiter;
     use actix_web::{test, web, App};
     use serde_json::json;
     use std::{fs, path::Path};
+    use tokio::sync::mpsc;
 
     #[cfg(feature = "testing")]
     #[actix_rt::test]
@@ -99,11 +57,14 @@ mod tests {
             PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/actions"),
         );
 
-        let quotedata = web::Data::new(QuoteData {
-            revocation_cert,
-            revocation_actions_dir,
-            ..QuoteData::fixture().unwrap() //#[allow_ci]
-        });
+        let mut fixture = QuoteData::fixture().unwrap(); //#[allow_ci]
+
+        // Replace the channels on the fixture with some local ones
+        let (mut revocation_tx, mut revocation_rx) =
+            mpsc::channel::<RevocationMessage>(1);
+        fixture.revocation_tx = revocation_tx;
+
+        let quotedata = web::Data::new(fixture);
 
         let mut app =
             test::init_service(App::new().app_data(quotedata.clone()).route(
@@ -120,11 +81,24 @@ mod tests {
             .join("test-data/test_ok.json");
         let message = fs::read_to_string(message_path).unwrap(); //#[allow_ci]
 
+        let arbiter = Arbiter::new();
+
         // Create the message body with the payload and signature
-        let revocation = KeylimeRevocation {
-            msg: message,
-            signature,
+        let revocation = Revocation {
+            msg: message.clone(),
+            signature: signature.clone(),
         };
+
+        // Run fake revocation worker
+        assert!(arbiter.spawn(Box::pin(async move {
+            let m = revocation_rx.recv().await;
+            assert!(
+                m == Some(RevocationMessage::Revocation(Revocation {
+                    msg: message,
+                    signature,
+                }))
+            )
+        })));
 
         let req = test::TestRequest::post()
             .uri(&format!("/{API_VERSION}/notifications/revocation",))
