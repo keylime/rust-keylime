@@ -121,7 +121,7 @@ where
 pub type KeySet = Vec<SymmKey>;
 
 // a key of len AES_128_KEY_LEN or AES_256_KEY_LEN
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SymmKey {
     bytes: Vec<u8>,
 }
@@ -192,7 +192,7 @@ impl TryFrom<&[u8]> for AuthTag {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct EncryptedData {
     bytes: Vec<u8>,
 }

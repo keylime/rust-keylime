@@ -26,15 +26,15 @@ use std::{
 };
 use tokio::sync::mpsc::{Receiver, Sender};
 
-#[derive(Debug, Deserialize, Serialize)]
-pub(crate) struct RunPayload {
+#[derive(Debug, Deserialize, Serialize, PartialEq)]
+pub(crate) struct Payload {
     pub symm_key: SymmKey,
     pub encrypted_payload: EncryptedData,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, PartialEq)]
 pub(crate) enum PayloadMessage {
-    RunPayload(RunPayload),
+    RunPayload(Payload),
     Shutdown,
 }
 

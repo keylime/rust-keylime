@@ -8,7 +8,7 @@ use crate::{
         AGENT_UUID_LEN, AUTH_TAG_LEN,
     },
     config::KeylimeConfig,
-    payloads::{PayloadMessage, RunPayload},
+    payloads::{Payload, PayloadMessage},
     Error, QuoteData, Result,
 };
 use actix_web::{web, HttpRequest, HttpResponse, Responder};
@@ -79,43 +79,48 @@ pub(crate) enum SymmKeyMessage {
 // tag. Returning None is okay here in case we are still waiting on another handler to
 // process data.
 fn try_combine_keys(
-    keyset1: &mut KeySet,
-    keyset2: &mut KeySet,
+    ukeys: &mut Vec<UKey>,
+    vkeys: &mut Vec<VKey>,
     uuid: &[u8],
-    auth_tag: &Option<AuthTag>,
-) -> Option<SymmKey> {
+) -> Option<(SymmKey, Option<Payload>)> {
     // U, V keys and auth_tag must be present for this to succeed
-    if keyset1.is_empty() || keyset2.is_empty() || auth_tag.is_none() {
-        debug!("Still waiting on u or v key or auth_tag");
+    if ukeys.is_empty() || vkeys.is_empty() {
+        debug!("Still waiting on u or v key");
         return None;
     }
 
-    for key1 in keyset1.iter() {
-        for key2 in keyset2.iter() {
-            let symm_key_out = match key1.xor(key2) {
+    for ukey in ukeys.iter() {
+        for vkey in vkeys.iter() {
+            let symm_key = match ukey.decrypted_key.xor(&vkey.decrypted_key) {
                 Ok(k) => k,
                 Err(e) => {
                     continue;
                 }
             };
-            if let Some(tag) = auth_tag {
-                // Computes HMAC over agent UUID with provided key (payload decryption key) and
-                // checks that this matches the provided auth_tag.
-                if crypto::verify_hmac(
-                    symm_key_out.as_ref(),
-                    uuid,
-                    tag.as_ref(),
-                )
-                .is_ok()
-                {
-                    info!(
-                        "Successfully derived symmetric payload decryption key"
-                    );
 
-                    keyset1.clear();
-                    keyset2.clear();
-                    return Some(symm_key_out);
-                }
+            // Computes HMAC over agent UUID with provided key (payload decryption key) and
+            // checks that this matches the provided auth_tag.
+            if crypto::verify_hmac(
+                symm_key.as_ref(),
+                uuid,
+                ukey.auth_tag.as_ref(),
+            )
+            .is_ok()
+            {
+                info!(
+                    "Successfully derived symmetric payload decryption key"
+                );
+
+                let payload =
+                    ukey.payload.as_ref().map(|encrypted_payload| Payload {
+                        symm_key: symm_key.clone(),
+                        encrypted_payload: encrypted_payload.clone(),
+                    });
+
+                ukeys.clear();
+                vkeys.clear();
+
+                return Some((symm_key, payload));
             }
         }
     }
@@ -416,24 +421,52 @@ pub(crate) async fn verify(
 
 async fn request_run_payload(
     payloads_tx: Sender<PayloadMessage>,
-    symm_key: SymmKey,
-    encrypted_payload: Option<EncryptedData>,
+    payload: Payload,
 ) -> Result<()> {
-    if let Some(p) = &encrypted_payload {
-        let m = PayloadMessage::RunPayload(RunPayload {
-            symm_key,
-            encrypted_payload: p.clone(),
-        });
-        debug!("Sending RunPayload message to payloads worker");
-        if let Err(e) = payloads_tx.send(m).await {
-            warn!("Failed to send RunPayload message to payloads worker");
-            return Err(Error::Sender(
-                "Failed to send RunPayload message to payloads worker"
-                    .to_string(),
-            ));
-        }
+    let m = PayloadMessage::RunPayload(payload);
+    if let Err(e) = payloads_tx.send(m).await {
+        warn!("Failed to send RunPayload message to payloads worker");
+        return Err(Error::Sender(
+            "Failed to send RunPayload message to payloads worker"
+                .to_string(),
+        ));
     }
+    debug!("Sent RunPayload message to payloads worker");
     Ok(())
+}
+
+async fn process_keys(
+    mut ukeys: &mut Vec<UKey>,
+    mut vkeys: &mut Vec<VKey>,
+    uuid: String,
+    payloads_tx: Sender<PayloadMessage>,
+    run_payload: bool,
+) -> Option<SymmKey> {
+    match try_combine_keys(ukeys, vkeys, uuid.as_bytes()) {
+        Some((key, p)) => {
+            if run_payload {
+                if let Some(payload) = p {
+                    match request_run_payload(payloads_tx.clone(), payload)
+                        .await
+                    {
+                        Ok(_) => {
+                            debug!(
+                                "Sent RunPayload message to payloads worker"
+                            );
+                        }
+                        Err(e) => {
+                            warn!("{e}");
+                        }
+                    }
+                }
+            } else {
+                warn!("agent mTLS is disabled, and unless 'enable_insecure_payload' is set to 'True', payloads cannot be deployed'");
+            }
+
+            Some(key)
+        }
+        None => None,
+    }
 }
 
 pub(crate) async fn worker(
@@ -445,10 +478,8 @@ pub(crate) async fn worker(
     )>,
     mut payloads_tx: Sender<PayloadMessage>,
 ) -> Result<()> {
-    let mut ukeys: KeySet = Vec::new();
-    let mut vkeys: KeySet = Vec::new();
-    let mut auth_tag: Option<AuthTag> = None;
-    let mut encrypted_payload: Option<EncryptedData> = None;
+    let mut ukeys: Vec<UKey> = Vec::new();
+    let mut vkeys: Vec<VKey> = Vec::new();
     let mut symm_key: Option<SymmKey> = None;
 
     debug!("Starting keys worker");
@@ -472,79 +503,32 @@ pub(crate) async fn worker(
             }
             KeyMessage::UKey(ukey) => {
                 // Store received data
-                encrypted_payload = ukey.payload;
-                auth_tag = Some(ukey.auth_tag);
-                ukeys.push(ukey.decrypted_key);
-
-                match try_combine_keys(
+                ukeys.push(ukey);
+                if let Some(key) = process_keys(
                     &mut ukeys,
                     &mut vkeys,
-                    uuid.as_bytes(),
-                    &auth_tag,
-                ) {
-                    Some(k) => {
-                        if run_payload {
-                            match request_run_payload(
-                                payloads_tx.clone(),
-                                k.clone(),
-                                encrypted_payload.clone(),
-                            )
-                            .await
-                            {
-                                Ok(_) => {
-                                    debug!("Sent RunPayload message to payloads worker");
-                                }
-                                Err(e) => {
-                                    warn!("Failed to send RunPayload message to payloads worker");
-                                }
-                            }
-                        } else {
-                            warn!("agent mTLS is disabled, and unless 'enable_insecure_payload' is set to 'True', payloads cannot be deployed'");
-                        }
-                        // Store combined key
-                        symm_key = Some(k);
-                    }
-                    None => {
-                        continue;
-                    }
+                    uuid.clone(),
+                    payloads_tx.clone(),
+                    run_payload,
+                )
+                .await
+                {
+                    symm_key = Some(key);
                 }
             }
             KeyMessage::VKey(vkey) => {
                 // Store received data
-                vkeys.push(vkey.decrypted_key);
-
-                match try_combine_keys(
+                vkeys.push(vkey);
+                if let Some(key) = process_keys(
                     &mut ukeys,
                     &mut vkeys,
-                    uuid.as_bytes(),
-                    &auth_tag,
-                ) {
-                    Some(k) => {
-                        // Only run payload scripts if mTLS is enabled or 'enable_insecure_payload' option is set
-                        if run_payload {
-                            match request_run_payload(
-                                payloads_tx.clone(),
-                                k.clone(),
-                                encrypted_payload.clone(),
-                            )
-                            .await
-                            {
-                                Ok(_) => {
-                                    debug!("Sent RunPayload message to payloads worker");
-                                }
-                                Err(e) => {
-                                    warn!("Failed to send RunPayload message to payloads worker");
-                                }
-                            }
-                        } else {
-                            warn!("agent mTLS is disabled, and unless 'enable_insecure_payload' is set to 'True', payloads cannot be deployed'");
-                        }
-                        // Store combined key
-                        symm_key = Some(k);
-                    }
-                    None => {
-                        continue;
-                    }
+                    uuid.clone(),
+                    payloads_tx.clone(),
+                    run_payload,
+                )
+                .await
+                {
+                    symm_key = Some(key);
                 }
             }
         }
@@ -570,7 +554,11 @@ mod tests {
     use actix_rt::Arbiter;
     use actix_web::{test, web, App};
     use openssl::{
-        encrypt::Encrypter, hash::MessageDigest, pkey::PKey, rsa::Padding,
+        encrypt::Encrypter,
+        hash::MessageDigest,
+        pkey::{PKey, Public},
+        rand::rand_bytes,
+        rsa::Padding,
         sign::Signer,
     };
     use std::{
@@ -583,51 +571,121 @@ mod tests {
     const U: &[u8; AES_256_KEY_LEN] = b"01234567890123456789012345678901";
     const V: &[u8; AES_256_KEY_LEN] = b"ABCDEFGHIJABCDEFGHIJABCDEFGHIJAB";
 
-    fn test_combine_keys(key_len: usize) {
-        let u: SymmKey = U[..key_len][..].try_into().unwrap(); //#[allow_ci]
-        let v: SymmKey = V[..key_len][..].try_into().unwrap(); //#[allow_ci]
-        let mut ukeys = vec![u.clone()];
-        let mut vkeys = vec![v.clone()];
+    fn prepare_keys(
+        key_len: usize,
+        payload: Option<EncryptedData>,
+        uuid: String,
+    ) -> (UKey, VKey, SymmKey) {
+        let mut u_buf = [0; AES_256_KEY_LEN];
+        let mut v_buf = [0; AES_256_KEY_LEN];
+
+        rand_bytes(&mut u_buf).unwrap(); //#[allow_ci]
+        rand_bytes(&mut v_buf).unwrap(); //#[allow_ci]
+
+        let u: SymmKey = u_buf[..key_len][..].try_into().unwrap(); //#[allow_ci]
+        let v: SymmKey = v_buf[..key_len][..].try_into().unwrap(); //#[allow_ci]
         let k = u.xor(&v).unwrap(); //#[allow_ci]
-        let uuid = "test-uuid";
+
         let hmac = compute_hmac(k.as_ref(), uuid.as_bytes()).unwrap(); //#[allow_ci]
         let auth_tag: AuthTag = hmac.as_slice().try_into().unwrap(); //#[allow_ci]
-        let result = try_combine_keys(
-            &mut ukeys,
-            &mut vkeys,
-            uuid.as_bytes(),
-            &Some(auth_tag),
-        );
+
+        let ukey = UKey {
+            decrypted_key: u,
+            auth_tag,
+            payload,
+        };
+        let vkey = VKey { decrypted_key: v };
+
+        (ukey, vkey, k)
+    }
+
+    #[cfg(feature = "testing")]
+    fn prepare_encrypted_keys(
+        key_len: usize,
+        payload: Option<EncryptedData>,
+        uuid: String,
+        pubkey: &PKey<Public>,
+    ) -> (KeylimeUKey, KeylimeVKey, SymmKey) {
+        let (ukey, vkey, k) = prepare_keys(key_len, payload, uuid);
+
+        let encrypted_u =
+            rsa_oaep_encrypt(pubkey, ukey.decrypted_key.as_ref()).unwrap(); //#[allow_ci]
+        let encrypted_v =
+            rsa_oaep_encrypt(pubkey, vkey.decrypted_key.as_ref()).unwrap(); //#[allow_ci]
+        let encoded_auth_tag = hex::encode(ukey.auth_tag.as_ref());
+
+        let enc_u = KeylimeUKey {
+            auth_tag: encoded_auth_tag,
+            encrypted_key: base64::encode(encrypted_u),
+            payload: ukey.payload.map(|p| base64::encode(p.as_ref())),
+        };
+
+        let enc_v = KeylimeVKey {
+            encrypted_key: base64::encode(encrypted_v),
+        };
+
+        (enc_u, enc_v, k)
+    }
+
+    fn test_combine_keys(key_len: usize) {
+        let mut ukeys = Vec::new();
+        let mut vkeys = Vec::new();
+        let uuid = "test-uuid";
+
+        let (u, v, k) = prepare_keys(key_len, None, uuid.to_string());
+
+        ukeys.push(u);
+        vkeys.push(v);
+
+        let result =
+            try_combine_keys(&mut ukeys, &mut vkeys, uuid.as_bytes());
         assert!(result.is_some());
 
         // Check the keys list are emptied after a successful combination
         assert!(ukeys.is_empty());
         assert!(vkeys.is_empty());
 
+        let (u, _, _) = prepare_keys(key_len, None, uuid.to_string());
+        let (u2, v2, k2) = prepare_keys(key_len, None, uuid.to_string());
+        let (u3, _, _) = prepare_keys(key_len, None, uuid.to_string());
+
         // Check that missing ukeys, vkeys, or auth_tag makes it to return None
         ukeys.push(u);
-        let auth_tag: AuthTag = vec![0u8; 48].as_slice().try_into().unwrap(); //#[allow_ci]
-        let result = try_combine_keys(
-            &mut ukeys,
-            &mut vkeys,
-            uuid.as_bytes(),
-            &Some(auth_tag.clone()),
-        );
-        assert!(result.is_none()); //#[allow_ci]
+        let result =
+            try_combine_keys(&mut ukeys, &mut vkeys, uuid.as_bytes());
+        assert!(result.is_none());
 
-        // Check that invalid auth_tag makes the combination to fail
-        vkeys.push(v);
-        let result = try_combine_keys(
-            &mut ukeys,
-            &mut vkeys,
-            uuid.as_bytes(),
-            &Some(auth_tag),
-        );
+        // Check that failed auth_tag_verification returns None
+        vkeys.push(v2);
+        let result =
+            try_combine_keys(&mut ukeys, &mut vkeys, uuid.as_bytes());
         assert!(result.is_none());
 
         // Check that the keys vecs are untouched
         assert!(ukeys.len() == 1);
         assert!(vkeys.len() == 1);
+
+        ukeys.push(u3);
+        let result =
+            try_combine_keys(&mut ukeys, &mut vkeys, uuid.as_bytes());
+        assert!(result.is_none());
+
+        // Check that the keys vecs are untouched
+        assert!(ukeys.len() == 2);
+        assert!(vkeys.len() == 1);
+
+        // Check finally matching the keys
+        ukeys.push(u2);
+        let result =
+            try_combine_keys(&mut ukeys, &mut vkeys, uuid.as_bytes());
+        assert!(result.is_some());
+        // Check the keys list are emptied after a successful combination
+        assert!(ukeys.is_empty());
+        assert!(vkeys.is_empty());
+
+        if let Some((k, p)) = result {
+            assert!(k == k2);
+        }
     }
 
     #[test]
@@ -638,6 +696,71 @@ mod tests {
     #[test]
     async fn test_combine_keys_long() {
         test_combine_keys(AES_256_KEY_LEN);
+    }
+
+    #[actix_rt::test]
+    async fn test_process_keys() {
+        let mut ukeys = Vec::new();
+        let mut vkeys = Vec::new();
+        let uuid = "test-uuid";
+        let data = "some_encrypted_data";
+        let (u, v, k) = prepare_keys(
+            AES_128_KEY_LEN,
+            Some(data.as_bytes().into()),
+            uuid.to_string(),
+        );
+        let (u256, _, _) = prepare_keys(
+            AES_256_KEY_LEN,
+            Some(data.as_bytes().into()),
+            uuid.to_string(),
+        );
+        let (mut payload_tx, mut payload_rx) =
+            mpsc::channel::<PayloadMessage>(1);
+        let arbiter = Arbiter::new();
+
+        let k_clone = k.clone();
+        assert!(arbiter.spawn(Box::pin(async move {
+            let msg = payload_rx.recv().await;
+            assert!(msg.is_some());
+            if let Some(m) = msg {
+                assert!(
+                    m == PayloadMessage::RunPayload(Payload {
+                        symm_key: k_clone,
+                        encrypted_payload: data.as_bytes().into(),
+                    })
+                );
+            };
+        })));
+
+        // Push bogus key with different length
+        ukeys.push(u256);
+        ukeys.push(u);
+        let result = process_keys(
+            &mut ukeys,
+            &mut vkeys,
+            uuid.to_string(),
+            payload_tx.clone(),
+            true,
+        )
+        .await;
+        assert!(result.is_none());
+
+        // Check that the keys vecs are untouched
+        assert!(ukeys.len() == 2);
+
+        vkeys.push(v);
+        let result = process_keys(
+            &mut ukeys,
+            &mut vkeys,
+            uuid.to_string(),
+            payload_tx,
+            true,
+        )
+        .await;
+        assert!(result.is_some());
+        if let Some(key) = result {
+            assert!(key == k);
+        }
     }
 
     #[cfg(feature = "testing")]
@@ -664,6 +787,7 @@ mod tests {
         fixture.keys_tx = keys_tx.clone();
 
         let quotedata = web::Data::new(fixture);
+        let pubkey = quotedata.pub_key.clone();
 
         // Run server
         let mut app = test::init_service(
@@ -700,6 +824,7 @@ mod tests {
         let arbiter = Arbiter::new();
 
         let p_tx = payload_tx.clone();
+        let uuid = test_config.agent.uuid.clone();
         // Run keys worker
         assert!(arbiter.spawn(Box::pin(async move {
             let result =
@@ -802,6 +927,42 @@ mod tests {
         let response_hmac = hex::decode(&result.results.hmac).unwrap(); //#[allow_ci]
 
         assert_eq!(&response_hmac, &expected);
+
+        // Test that sending part of a new key will not affect the current key until both parts are
+        // received
+        let (new_u, new_v, new_k) =
+            prepare_encrypted_keys(key_len, None, uuid, &pubkey);
+        let req = test::TestRequest::post()
+            .uri(&format!("/{API_VERSION}/keys/ukey"))
+            .set_json(&new_u)
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert!(resp.status().is_success());
+
+        // We expect the key to be the old one
+        let result = get_symm_key(keys_tx.clone()).await;
+        assert!(result.is_ok());
+        let key = result.unwrap(); //#[allow_ci]
+        assert!(key.is_some());
+        if let Some(received) = key {
+            assert!(received.as_ref() == k.as_ref());
+        };
+
+        let req = test::TestRequest::post()
+            .uri(&format!("/{API_VERSION}/keys/vkey"))
+            .set_json(&new_v)
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert!(resp.status().is_success());
+
+        // Now that both parts were sent, we expect the key to be the new one
+        let result = get_symm_key(keys_tx.clone()).await;
+        assert!(result.is_ok());
+        let key = result.unwrap(); //#[allow_ci]
+        assert!(key.is_some());
+        if let Some(received) = key {
+            assert!(received.as_ref() == new_k.as_ref());
+        };
 
         // Send Shutdown message to the workers for a graceful shutdown
         keys_tx.send((KeyMessage::Shutdown, None)).await.unwrap(); //#[allow_ci]
