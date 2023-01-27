@@ -361,7 +361,7 @@ mod tests {
         (k, payload.into())
     }
 
-    #[tokio::test]
+    #[actix_rt::test]
     async fn test_run() {
         let dir = tempfile::tempdir().unwrap(); //#[allow_ci]
         let script_path = dir.path().join("test-script.sh");
@@ -453,7 +453,7 @@ echo hello > test-output
     }
 
     #[cfg(feature = "testing")]
-    #[tokio::test]
+    #[actix_rt::test]
     async fn test_run_encrypted_payload() {
         let test_config = KeylimeConfig::default();
         let temp_workdir = tempfile::tempdir().unwrap(); //#[allow_ci]
