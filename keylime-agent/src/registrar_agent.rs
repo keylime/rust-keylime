@@ -161,7 +161,7 @@ mod tests {
     use wiremock::matchers::{any, method};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
-    #[tokio::test]
+    #[actix_rt::test]
     async fn mock_register_agent_ok() {
         let response: Response<RegisterResponseResults> = Response {
             code: 200.into(),
@@ -203,7 +203,7 @@ mod tests {
         assert!(response.is_ok());
     }
 
-    #[tokio::test]
+    #[actix_rt::test]
     async fn mock_register_agent_ok_without_ekcert() {
         let response: Response<RegisterResponseResults> = Response {
             code: 200.into(),
@@ -245,7 +245,7 @@ mod tests {
         assert!(response.is_ok());
     }
 
-    #[tokio::test]
+    #[actix_rt::test]
     async fn mock_register_agent_err() {
         let response: Response<RegisterResponseResults> = Response {
             code: 200.into(),
@@ -284,7 +284,7 @@ mod tests {
         assert_eq!(response.err().unwrap().http_code().unwrap(), 404); //#[allow_ci]
     }
 
-    #[tokio::test]
+    #[actix_rt::test]
     async fn mock_activate_agent_ok() {
         let response: Response<ActivateResponseResults> = Response {
             code: 200.into(),
@@ -312,7 +312,7 @@ mod tests {
         assert!(response.is_ok());
     }
 
-    #[tokio::test]
+    #[actix_rt::test]
     async fn mock_activate_agent_err() {
         let response: Response<ActivateResponseResults> = Response {
             code: 200.into(),
