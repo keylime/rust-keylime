@@ -691,23 +691,24 @@ async fn main() -> Result<()> {
             )));
         }
 
-        let keylime_ca_cert = match crypto::load_x509(&ca_cert_path) {
-            Ok(t) => Ok(t),
-            Err(e) => {
-                error!(
-                    "Failed to load trusted CA certificate {}: {}",
-                    ca_cert_path.display(),
-                    e
-                );
-                Err(e)
-            }
-        }?;
+        let keylime_ca_certs =
+            match crypto::load_x509_cert_chain(&ca_cert_path) {
+                Ok(t) => Ok(t),
+                Err(e) => {
+                    error!(
+                        "Failed to load trusted CA certificate {}: {}",
+                        ca_cert_path.display(),
+                        e
+                    );
+                    Err(e)
+                }
+            }?;
 
         mtls_cert = Some(&cert);
         ssl_context = Some(crypto::generate_mtls_context(
             &cert,
             &nk_priv,
-            keylime_ca_cert,
+            keylime_ca_certs,
         )?);
     } else {
         mtls_cert = None;
