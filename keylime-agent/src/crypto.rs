@@ -30,8 +30,7 @@ use crate::{
 
 // Read a X509 cert or cert chain and outputs the first certificate
 pub(crate) fn load_x509(input_cert_path: &Path) -> Result<X509> {
-    let contents = read_to_string(input_cert_path)?;
-    let mut cert_chain = X509::stack_from_pem(contents.as_bytes())?;
+    let mut cert_chain = load_x509_cert_chain(input_cert_path)?;
 
     if cert_chain.len() != 1 {
         return Err(Error::Other(
@@ -42,6 +41,14 @@ pub(crate) fn load_x509(input_cert_path: &Path) -> Result<X509> {
     let cert = cert_chain.pop().unwrap(); //#[allow_ci]
 
     Ok(cert)
+}
+
+pub(crate) fn load_x509_cert_chain(
+    input_cert_path: &Path,
+) -> Result<Vec<X509>> {
+    let contents = read_to_string(input_cert_path)?;
+
+    X509::stack_from_pem(contents.as_bytes()).map_err(Error::Crypto)
 }
 
 /// Write a X509 certificate to a file in PEM format
@@ -161,7 +168,7 @@ pub(crate) fn generate_x509(key: &PKey<Private>, uuid: &str) -> Result<X509> {
 pub(crate) fn generate_mtls_context(
     mtls_cert: &X509,
     key: &PKey<Private>,
-    keylime_ca_cert: X509,
+    keylime_ca_certs: Vec<X509>,
 ) -> Result<SslAcceptorBuilder> {
     let mut ssl_context_builder =
         SslAcceptor::mozilla_intermediate(SslMethod::tls())?;
@@ -170,7 +177,10 @@ pub(crate) fn generate_mtls_context(
 
     // Build verification cert store.
     let mut mtls_store_builder = X509StoreBuilder::new()?;
-    mtls_store_builder.add_cert(keylime_ca_cert)?;
+    for cert in keylime_ca_certs {
+        mtls_store_builder.add_cert(cert)?;
+    }
+
     let mtls_store = mtls_store_builder.build();
     ssl_context_builder.set_verify_cert_store(mtls_store);
 
