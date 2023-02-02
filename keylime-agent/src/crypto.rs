@@ -61,11 +61,11 @@ pub(crate) fn write_x509(cert: &X509, file_path: &Path) -> Result<()> {
 /// Read a PEM file and returns the public and private keys
 pub(crate) fn load_key_pair(
     key_path: &Path,
-    key_password: &Option<String>,
+    key_password: Option<&str>,
 ) -> Result<(PKey<Public>, PKey<Private>)> {
     let pem = std::fs::read(key_path)?;
     let private = match key_password {
-        Some(ref pw) => {
+        Some(pw) => {
             if pw.is_empty() {
                 PKey::private_key_from_pem(&pem)?
             } else {
@@ -84,12 +84,12 @@ pub(crate) fn load_key_pair(
 pub(crate) fn write_key_pair(
     key: &PKey<Private>,
     file_path: &Path,
-    passphrase: &Option<String>,
+    passphrase: Option<&str>,
 ) -> Result<()> {
     // Write the generated key to the file
     let mut file = std::fs::File::create(file_path)?;
     match passphrase {
-        Some(ref pw) => {
+        Some(pw) => {
             if pw.is_empty() {
                 _ = file.write(&key.private_key_to_pem_pkcs8()?)?;
             } else {
@@ -625,28 +625,17 @@ mod tests {
         let message = b"Hello World!";
 
         // Write keys to files
-        assert!(write_key_pair(
-            &private,
-            &encrypted_path,
-            &Some("password".to_string())
-        )
-        .is_ok());
-        assert!(write_key_pair(
-            &private,
-            &empty_pw_path,
-            &Some("".to_string())
-        )
-        .is_ok());
-        assert!(write_key_pair(&private, &none_pw_path, &None).is_ok());
+        assert!(write_key_pair(&private, &encrypted_path, Some("password"))
+            .is_ok());
+        assert!(write_key_pair(&private, &empty_pw_path, Some("")).is_ok());
+        assert!(write_key_pair(&private, &none_pw_path, None).is_ok());
 
         // Read keys from files
         let (_, priv_from_encrypted) =
-            load_key_pair(&encrypted_path, &Some("password".to_string()))
-                .unwrap(); //#[allow_ci]
+            load_key_pair(&encrypted_path, Some("password")).unwrap(); //#[allow_ci]
         let (_, priv_from_empty) =
-            load_key_pair(&empty_pw_path, &Some("".to_string())).unwrap(); //#[allow_ci]
-        let (_, priv_from_none) =
-            load_key_pair(&none_pw_path, &None).unwrap(); //#[allow_ci]
+            load_key_pair(&empty_pw_path, Some("")).unwrap(); //#[allow_ci]
+        let (_, priv_from_none) = load_key_pair(&none_pw_path, None).unwrap(); //#[allow_ci]
 
         for keypair in [
             priv_from_encrypted.as_ref(),

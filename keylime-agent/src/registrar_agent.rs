@@ -53,7 +53,7 @@ pub struct Response<T> {
 
 pub(crate) async fn do_activate_agent(
     registrar_ip: &str,
-    registrar_port: &str,
+    registrar_port: u32,
     agent_uuid: &str,
     auth_tag: &str,
 ) -> crate::error::Result<()> {
@@ -89,18 +89,24 @@ pub(crate) async fn do_activate_agent(
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn do_register_agent(
     registrar_ip: &str,
-    registrar_port: &str,
+    registrar_port: u32,
     agent_uuid: &str,
     ek_tpm: &[u8],
     ekcert: Option<Vec<u8>>,
     aik_tpm: &[u8],
     mtls_cert_x509: Option<&X509>,
-    ip: Option<String>,
-    port: Option<u32>,
+    ip: &str,
+    port: u32,
 ) -> crate::error::Result<Vec<u8>> {
     let mtls_cert = match mtls_cert_x509 {
         Some(cert) => Some(String::from_utf8(cert.to_pem()?)?),
         None => Some("disabled".to_string()),
+    };
+
+    let ip = if ip.is_empty() {
+        None
+    } else {
+        Some(ip.to_string())
     };
 
     let data = Register {
@@ -109,7 +115,7 @@ pub(crate) async fn do_register_agent(
         aik_tpm,
         mtls_cert,
         ip,
-        port,
+        port: Some(port),
     };
 
     #[cfg(test)]
@@ -176,19 +182,22 @@ mod tests {
 
         let addr = format!("http://{}:{}", uri[0], uri[1]);
 
+        let ip = uri[0];
+        let port = uri[1].parse().unwrap(); //#[allow_ci]
+
         let mock_data = [0u8; 1];
         let priv_key = crypto::rsa_generate(2048).unwrap(); //#[allow_ci]
         let cert = crypto::generate_x509(&priv_key, "uuid").unwrap(); //#[allow_ci]
         let response = do_register_agent(
-            uri[0],
-            uri[1],
+            ip,
+            port,
             "uuid",
             &mock_data,
             Some(mock_data.to_vec()),
             &mock_data,
             Some(&cert),
-            None,
-            None,
+            "",
+            0,
         )
         .await;
         assert!(response.is_ok());
@@ -215,19 +224,22 @@ mod tests {
 
         let addr = format!("http://{}:{}", uri[0], uri[1]);
 
+        let ip = uri[0];
+        let port = uri[1].parse().unwrap(); //#[allow_ci]
+
         let mock_data = [0u8; 1];
         let priv_key = crypto::rsa_generate(2048).unwrap(); //#[allow_ci]
         let cert = crypto::generate_x509(&priv_key, "uuid").unwrap(); //#[allow_ci]
         let response = do_register_agent(
-            uri[0],
-            uri[1],
+            ip,
+            port,
             "uuid",
             &mock_data,
             None,
             &mock_data,
             Some(&cert),
-            None,
-            None,
+            "",
+            0,
         )
         .await;
         assert!(response.is_ok());
@@ -250,19 +262,22 @@ mod tests {
 
         let addr = format!("http://{}:{}", uri[0], uri[1]);
 
+        let ip = uri[0];
+        let port = uri[1].parse().unwrap(); //#[allow_ci]
+
         let mock_data = [0u8; 1];
         let priv_key = crypto::rsa_generate(2048).unwrap(); //#[allow_ci]
         let cert = crypto::generate_x509(&priv_key, "uuid").unwrap(); //#[allow_ci]
         let response = do_register_agent(
-            uri[0],
-            uri[1],
+            ip,
+            port,
             "uuid",
             &mock_data,
             Some(mock_data.to_vec()),
             &mock_data,
             Some(&cert),
-            None,
-            None,
+            "",
+            0,
         )
         .await;
         assert!(response.is_err());
@@ -290,7 +305,10 @@ mod tests {
 
         let addr = format!("http://{}:{}", uri[0], uri[1]);
 
-        let response = do_activate_agent(uri[0], uri[1], "uuid", "tag").await;
+        let ip = uri[0];
+        let port = uri[1].parse().unwrap(); //#[allow_ci]
+
+        let response = do_activate_agent(ip, port, "uuid", "tag").await;
         assert!(response.is_ok());
     }
 
@@ -311,7 +329,10 @@ mod tests {
 
         let addr = format!("http://{}:{}", uri[0], uri[1]);
 
-        let response = do_activate_agent(uri[0], uri[1], "uuid", "tag").await;
+        let ip = uri[0];
+        let port = uri[1].parse().unwrap(); //#[allow_ci]
+
+        let response = do_activate_agent(ip, port, "uuid", "tag").await;
         assert!(response.is_err());
         assert_eq!(response.err().unwrap().http_code().unwrap(), 404); //#[allow_ci]
     }
