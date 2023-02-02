@@ -307,6 +307,7 @@ mod tests {
         Context,
     };
 
+    #[cfg(feature = "testing")]
     #[test]
     fn test_agent_data() -> Result<()> {
         let mut config = KeylimeConfig::default();
@@ -318,17 +319,19 @@ mod tests {
         )?;
 
         let tpm_hash_alg =
-            HashAlgorithm::try_from(config.agent.tpm_hash_alg.as_str())?;
+            HashAlgorithm::try_from(config.agent.tpm_hash_alg.as_str())
+                .expect("Failed to get hash algorithm");
 
         let tpm_signing_alg =
-            SignAlgorithm::try_from(config.agent.tpm_signing_alg.as_str())?;
+            SignAlgorithm::try_from(config.agent.tpm_signing_alg.as_str())
+                .expect("Failed to get signing algorithm");
 
-        let ek_result = ctx.create_ek(
-            tpm_encryption_alg,
-            config.agent.ek_handle.as_deref(),
-        )?;
+        let ek_result = ctx
+            .create_ek(tpm_encryption_alg, None)
+            .expect("Failed to create EK");
 
-        let ek_hash = hash_ek_pubkey(ek_result.public)?;
+        let ek_hash =
+            hash_ek_pubkey(ek_result.public).expect("Failed to get pubkey");
 
         let ak = ctx.create_ak(
             ek_result.key_handle,
@@ -352,6 +355,8 @@ mod tests {
         assert!(valid);
         Ok(())
     }
+
+    #[cfg(feature = "testing")]
     #[test]
     fn test_hash() -> Result<()> {
         let mut config = KeylimeConfig::default();
@@ -360,12 +365,12 @@ mod tests {
 
         let tpm_encryption_alg = EncryptionAlgorithm::try_from(
             config.agent.tpm_encryption_alg.as_str(),
-        )?;
+        )
+        .expect("Failed to get encryption algorithm");
 
-        let ek_result = ctx.create_ek(
-            tpm_encryption_alg,
-            config.agent.ek_handle.as_deref(),
-        )?;
+        let ek_result = ctx
+            .create_ek(tpm_encryption_alg, None)
+            .expect("Failed to create EK");
 
         let result = hash_ek_pubkey(ek_result.public);
 

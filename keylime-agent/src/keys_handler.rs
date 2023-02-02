@@ -817,19 +817,15 @@ mod tests {
             encrypt_aead(k.as_ref(), &iv[..], payload).unwrap() //#[allow_ci]
         });
 
-        let auth_tag =
-            compute_hmac(k.as_ref(), test_config.agent.uuid.as_bytes())
-                .unwrap(); //#[allow_ci]
+        let uuid = test_config.agent.uuid;
+        let auth_tag = compute_hmac(k.as_ref(), uuid.as_bytes()).unwrap(); //#[allow_ci]
 
         let arbiter = Arbiter::new();
-
         let p_tx = payload_tx.clone();
-        let uuid = test_config.agent.uuid.clone();
+        let uuid_clone = uuid.clone();
         // Run keys worker
         assert!(arbiter.spawn(Box::pin(async move {
-            let result =
-                worker(true, test_config.agent.uuid.clone(), keys_rx, p_tx)
-                    .await;
+            let result = worker(true, uuid_clone, keys_rx, p_tx).await;
 
             if result.is_err() {
                 debug!("keys worker failed: {:?}", result);
