@@ -490,7 +490,7 @@ mod tests {
 
         let result: JsonWrapper<KeylimeHMAC> =
             test::read_body_json(resp).await;
-        let response_hmac = hex::decode(&result.results.hmac).unwrap(); //#[allow_ci]
+        let response_hmac = hex::decode(result.results.hmac).unwrap(); //#[allow_ci]
 
         // The expected result is an HMAC-SHA384 using:
         // key (hexadecimal): 000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f

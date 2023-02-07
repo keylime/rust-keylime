@@ -26,7 +26,7 @@ where
     D: serde::Deserializer<'de>,
 {
     String::deserialize(deserializer).and_then(|string| {
-        base64::decode(&string).map_err(serde::de::Error::custom)
+        base64::decode(string).map_err(serde::de::Error::custom)
     })
 }
 

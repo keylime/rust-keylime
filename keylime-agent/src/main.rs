@@ -230,7 +230,7 @@ pub(crate) fn optional_unzip_payload(
 
         info!("Unzipping payload {} to {:?}", &zipped_payload, unzipped);
 
-        let mut source = fs::File::open(&zipped_payload_path)?;
+        let mut source = fs::File::open(zipped_payload_path)?;
         uncompress_archive(&mut source, unzipped, Ownership::Ignore)?;
     }
 
@@ -1008,7 +1008,7 @@ mod testing {
                 .join("test-rsa.pem");
 
             let (nk_pub, nk_priv) =
-                crypto::testing::rsa_import_pair(&rsa_key_path)?;
+                crypto::testing::rsa_import_pair(rsa_key_path)?;
 
             let mut encr_payload = Vec::new();
 

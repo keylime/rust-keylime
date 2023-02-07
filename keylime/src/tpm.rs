@@ -924,7 +924,7 @@ fn quote_encode_decode() {
         .join("test-data")
         .join("test-quote.txt");
 
-    let f = File::open(&quote_path).expect("unable to open test-quote.txt");
+    let f = File::open(quote_path).expect("unable to open test-quote.txt");
     let mut f = BufReader::new(f);
     let mut buf = String::new();
     let _ = f.read_line(&mut buf).expect("unable to read quote");
