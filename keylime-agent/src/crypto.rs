@@ -494,7 +494,7 @@ mod tests {
             .join("test-data")
             .join("test-rsa.pem");
 
-        let (pub_key, priv_key) = rsa_import_pair(&rsa_key_path)
+        let (pub_key, priv_key) = rsa_import_pair(rsa_key_path)
             .expect("unable to import RSA key pair");
         let plaintext = b"0123456789012345";
         let ciphertext = rsa_oaep_encrypt(&pub_key, &plaintext[..])
