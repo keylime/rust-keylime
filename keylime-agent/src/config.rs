@@ -480,7 +480,7 @@ fn config_translate_keywords(
     let mut revocation_cert = config_get_file_path(
         &config.agent.revocation_cert,
         &keylime_dir,
-        &format!("secure/unzipped/{}", DEFAULT_REVOCATION_CERT),
+        &format!("secure/unzipped/{DEFAULT_REVOCATION_CERT}"),
     );
 
     let tpm_ownerpassword = match config.agent.tpm_ownerpassword {

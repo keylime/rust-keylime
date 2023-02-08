@@ -132,8 +132,7 @@ pub(crate) fn pkey_pub_from_priv(
             PKey::from_rsa(rsa).map_err(Error::Crypto)
         }
         id => Err(Error::Other(format!(
-            "pkey_pub_from_priv not yet implemented for key type {:?}",
-            id
+            "pkey_pub_from_priv not yet implemented for key type {id:?}"
         ))),
     }
 }
@@ -323,8 +322,7 @@ pub(crate) fn decrypt_aead(key: &[u8], data: &[u8]) -> Result<Vec<u8>> {
         AES_256_KEY_LEN => Cipher::aes_256_gcm(),
         other => {
             return Err(Error::Other(format!(
-                "key length {} does not correspond to valid GCM cipher",
-                other
+                "key length {other} does not correspond to valid GCM cipher"
             )))
         }
     };
@@ -395,9 +393,8 @@ pub mod testing {
             AES_256_KEY_LEN => Cipher::aes_256_gcm(),
             other => {
                 return Err(Error::Other(format!(
-                    "key length {} does not correspond to valid GCM cipher",
-                    other
-                )))
+                "key length {other} does not correspond to valid GCM cipher"
+            )))
             }
         };
         if iv.len() != AES_BLOCK_SIZE {

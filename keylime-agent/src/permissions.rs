@@ -37,7 +37,7 @@ impl TryFrom<&str> for UserIds {
         let parts = value.split(':').collect::<Vec<&str>>();
 
         if parts.len() != 2 {
-            let e = format!("Invalid parameter format: {} cannot be parsed as 'user:group'", value);
+            let e = format!("Invalid parameter format: {value} cannot be parsed as 'user:group'");
             error!("{}", e);
             return Err(Error::Conversion(e));
         }
@@ -56,8 +56,7 @@ impl TryFrom<&str> for UserIds {
             unsafe { (*p) }
         } else {
             return Err(Error::Conversion(format!(
-                "Failed to convert {} to CString",
-                group
+                "Failed to convert {group} to CString"
             )));
         };
 
@@ -72,8 +71,7 @@ impl TryFrom<&str> for UserIds {
             unsafe { (*p) }
         } else {
             return Err(Error::Conversion(format!(
-                "Failed to convert {} to CString",
-                user
+                "Failed to convert {user} to CString"
             )));
         };
 

@@ -20,8 +20,7 @@ pub(crate) async fn app_default(req: HttpRequest) -> impl Responder {
         http::Method::GET => {
             error = 400;
             message = format!(
-                "Not Implemented: Use /version or /{}/ interfaces",
-                API_VERSION
+                "Not Implemented: Use /version or /{API_VERSION}/ interfaces"
             );
             response = HttpResponse::BadRequest()
                 .json(JsonWrapper::error(error, &message));
@@ -29,7 +28,7 @@ pub(crate) async fn app_default(req: HttpRequest) -> impl Responder {
         http::Method::POST => {
             error = 400;
             message =
-                format!("Not Implemented: Use /{}/ interface", API_VERSION);
+                format!("Not Implemented: Use /{API_VERSION}/ interface");
             response = HttpResponse::BadRequest()
                 .json(JsonWrapper::error(error, &message));
         }
@@ -204,7 +203,7 @@ pub(crate) async fn version_not_supported(
     req: HttpRequest,
     version: web::Path<APIVersion>,
 ) -> impl Responder {
-    let message = format!("API version not supported: {}", version);
+    let message = format!("API version not supported: {version}");
 
     warn!("{} returning 400 response. {}", req.head().method, message);
 

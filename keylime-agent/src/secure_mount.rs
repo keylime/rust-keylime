@@ -89,8 +89,7 @@ pub(crate) fn mount(work_dir: &Path, secure_size: &str) -> Result<PathBuf> {
         if !secure_dir_path.exists() {
             fs::create_dir(&secure_dir_path).map_err(|e| {
                 Error::SecureMount(format!(
-                    "unable to create secure dir path: {:?}",
-                    e
+                    "unable to create secure dir path: {e:?}"
                 ))
             })?;
             info!("Directory {:?} created.", &secure_dir_path);
@@ -110,16 +109,14 @@ pub(crate) fn mount(work_dir: &Path, secure_size: &str) -> Result<PathBuf> {
         if !secure_dir_path.exists() {
             fs::create_dir(&secure_dir_path).map_err(|e| {
                 Error::SecureMount(format!(
-                    "unable to create secure dir path: {:?}",
-                    e
+                    "unable to create secure dir path: {e:?}"
                 ))
             })?;
 
             info!("Directory {:?} created.", secure_dir_path);
             let metadata = fs::metadata(&secure_dir_path).map_err(|e| {
                 Error::SecureMount(format!(
-                    "unable to get metadata for secure dir path: {:?}",
-                    e
+                    "unable to get metadata for secure dir path: {e:?}"
                 ))
             })?;
             metadata.permissions().set_mode(0o750); // decimal 488
@@ -136,7 +133,7 @@ pub(crate) fn mount(work_dir: &Path, secure_size: &str) -> Result<PathBuf> {
                 "-t",
                 "tmpfs",
                 "-o",
-                format!("size={},mode=0700", secure_size).as_str(),
+                format!("size={secure_size},mode=0700").as_str(),
                 "tmpfs",
                 secure_dir_path.to_str().unwrap(), //#[allow_ci]
             ])
@@ -152,8 +149,7 @@ pub(crate) fn mount(work_dir: &Path, secure_size: &str) -> Result<PathBuf> {
             }
             Err(e) => {
                 return Err(Error::SecureMount(format!(
-                    "unable to mount tmpfs with secure dir: {}",
-                    e
+                    "unable to mount tmpfs with secure dir: {e}"
                 )));
             }
         }

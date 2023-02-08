@@ -61,7 +61,7 @@ fn lookup_action(
     {
         None => Err(Error::Io(std::io::Error::new(
             ErrorKind::NotFound,
-            format!("Could not find action {}", action),
+            format!("Could not find action {action}"),
         ))),
         Some((script, is_python, is_payload)) => {
             // If the script is python, add the shim to the command.  It is expected to be
@@ -210,8 +210,7 @@ pub(crate) fn run_revocation_actions(
                 }
                 Err(e) => {
                     let msg = format!(
-                        "error executing revocation script {}: {:?}",
-                        action, e
+                        "error executing revocation script {action}: {e:?}"
                     );
                     error!("{}", msg);
                     return Err(Error::Script(
@@ -361,7 +360,7 @@ pub(crate) async fn run_revocation_service(
         ));
     };
 
-    let endpoint = format!("tcp://{}:{}", ip, port);
+    let endpoint = format!("tcp://{ip}:{port}");
 
     info!(
         "Connecting to revocation notification endpoint at {}...",
