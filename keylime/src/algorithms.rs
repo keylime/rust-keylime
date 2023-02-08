@@ -108,7 +108,7 @@ impl TryFrom<&str> for EncryptionAlgorithm {
             "rsa" => Ok(EncryptionAlgorithm::Rsa),
             "ecc" => Ok(EncryptionAlgorithm::Ecc),
             _ => Err(AlgorithmError::Encrypt(format!(
-                "Encryption alogorithm {value} not supported by Keylime"
+                "Encryption algorithm {value} not supported by Keylime"
             ))),
         }
     }
