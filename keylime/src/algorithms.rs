@@ -43,8 +43,7 @@ impl TryFrom<&str> for HashAlgorithm {
             "sha512" => Ok(HashAlgorithm::Sha512),
             "sm3_256" => Ok(HashAlgorithm::Sm3_256),
             _ => Err(AlgorithmError::Hash(format!(
-                "Hash algorithm {} is not supported by Keylime",
-                value
+                "Hash algorithm {value} is not supported by Keylime"
             ))),
         }
     }
@@ -58,7 +57,7 @@ impl fmt::Display for HashAlgorithm {
             HashAlgorithm::Sha512 => "sha512",
             HashAlgorithm::Sm3_256 => "sm3_256",
         };
-        write!(f, "{}", value)
+        write!(f, "{value}")
     }
 }
 
@@ -109,8 +108,7 @@ impl TryFrom<&str> for EncryptionAlgorithm {
             "rsa" => Ok(EncryptionAlgorithm::Rsa),
             "ecc" => Ok(EncryptionAlgorithm::Ecc),
             _ => Err(AlgorithmError::Encrypt(format!(
-                "Encryption alogorithm {} not supported by Keylime",
-                value
+                "Encryption alogorithm {value} not supported by Keylime"
             ))),
         }
     }
@@ -122,7 +120,7 @@ impl fmt::Display for EncryptionAlgorithm {
             EncryptionAlgorithm::Rsa => "rsa",
             EncryptionAlgorithm::Ecc => "ecc",
         };
-        write!(f, "{}", value)
+        write!(f, "{value}")
     }
 }
 
@@ -176,8 +174,7 @@ impl TryFrom<&str> for SignAlgorithm {
             //            "ecdaa" => Ok(SignAlgorithm::EcDaa),
             "ecschnorr" => Ok(SignAlgorithm::EcSchnorr),
             _ => Err(AlgorithmError::Sign(format!(
-                "Signing algorithm {} not supported by Keylime",
-                value
+                "Signing algorithm {value} not supported by Keylime"
             ))),
         }
     }
@@ -192,7 +189,7 @@ impl fmt::Display for SignAlgorithm {
             //           SignAlgorithm::ECDAA => "ecdaa",
             SignAlgorithm::EcSchnorr => "ecschnorr",
         };
-        write!(f, "{}", value)
+        write!(f, "{value}")
     }
 }
 #[cfg(test)]

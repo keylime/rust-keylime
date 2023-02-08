@@ -60,12 +60,11 @@ pub(crate) async fn do_activate_agent(
     let data = Activate { auth_tag };
 
     #[cfg(test)]
-    let addr = format!("http://{}:{}", registrar_ip, registrar_port);
+    let addr = format!("http://{registrar_ip}:{registrar_port}");
 
     #[cfg(not(test))]
     let addr = format!(
-        "http://{}:{}/{}/agents/{}",
-        registrar_ip, registrar_port, API_VERSION, agent_uuid
+        "http://{registrar_ip}:{registrar_port}/{API_VERSION}/agents/{agent_uuid}"
     );
 
     info!(
@@ -114,12 +113,11 @@ pub(crate) async fn do_register_agent(
     };
 
     #[cfg(test)]
-    let addr = format!("http://{}:{}", registrar_ip, registrar_port);
+    let addr = format!("http://{registrar_ip}:{registrar_port}");
 
     #[cfg(not(test))]
     let addr = format!(
-        "http://{}:{}/{}/agents/{}",
-        registrar_ip, registrar_port, API_VERSION, agent_uuid
+        "http://{registrar_ip}:{registrar_port}/{API_VERSION}/agents/{agent_uuid}"
     );
 
     info!(

@@ -96,8 +96,7 @@ impl Error {
         match self {
             Error::Registrar { addr, code } => Ok(*code),
             other => Err(Error::Other(format!(
-                "cannot get http code for Error type {}",
-                other
+                "cannot get http code for Error type {other}"
             ))),
         }
     }
@@ -106,8 +105,7 @@ impl Error {
         match self {
             Error::Execution(code, _) => Ok(code.to_owned()),
             other => Err(Error::Other(format!(
-                "cannot get execution status code for Error type {}",
-                other
+                "cannot get execution status code for Error type {other}"
             ))),
         }
     }
@@ -116,8 +114,7 @@ impl Error {
         match self {
             Error::Execution(_, stderr) => Ok(stderr.to_owned()),
             other => Err(Error::Other(format!(
-                "cannot get stderr for Error type {}",
-                other
+                "cannot get stderr for Error type {other}"
             ))),
         }
     }
@@ -139,7 +136,7 @@ impl From<tss_esapi::Error> for Error {
         } else {
             None
         };
-        let message = format!("{}", err);
+        let message = format!("{err}");
 
         Error::Tss2 { err, kind, message }
     }

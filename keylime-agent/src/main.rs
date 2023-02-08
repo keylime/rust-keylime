@@ -479,8 +479,7 @@ async fn main() -> Result<()> {
         ctx.as_mut().tr_set_auth(Hierarchy::Endorsement.into(), auth)
             .map_err(|e| {
                 Error::Configuration(format!(
-                    "Failed to set TPM context password for Endorsement Hierarchy: {}",
-                    e
+                    "Failed to set TPM context password for Endorsement Hierarchy: {e}"
                 ))
             })?;
     };
@@ -849,7 +848,7 @@ async fn main() -> Result<()> {
                         .error_handler(errors_handler::path_parser_error),
                 )
                 .service(
-                    web::scope(&format!("/{}", API_VERSION))
+                    web::scope(&format!("/{API_VERSION}"))
                         .service(
                             web::scope("/keys")
                                 .service(web::resource("/pubkey").route(

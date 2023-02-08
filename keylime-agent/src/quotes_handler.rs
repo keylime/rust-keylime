@@ -348,15 +348,14 @@ mod tests {
         let quotedata = web::Data::new(QuoteData::fixture().unwrap()); //#[allow_ci]
         let mut app =
             test::init_service(App::new().app_data(quotedata.clone()).route(
-                &format!("/{}/quotes/identity", API_VERSION),
+                &format!("/{API_VERSION}/quotes/identity"),
                 web::get().to(identity),
             ))
             .await;
 
         let req = test::TestRequest::get()
             .uri(&format!(
-                "/{}/quotes/identity?nonce=1234567890ABCDEFHIJ",
-                API_VERSION,
+                "/{API_VERSION}/quotes/identity?nonce=1234567890ABCDEFHIJ",
             ))
             .to_request();
 
@@ -390,15 +389,14 @@ mod tests {
         let quotedata = web::Data::new(QuoteData::fixture().unwrap()); //#[allow_ci]
         let mut app =
             test::init_service(App::new().app_data(quotedata.clone()).route(
-                &format!("/{}/quotes/integrity", API_VERSION),
+                &format!("/{API_VERSION}/quotes/integrity"),
                 web::get().to(integrity),
             ))
             .await;
 
         let req = test::TestRequest::get()
             .uri(&format!(
-                "/{}/quotes/integrity?nonce=1234567890ABCDEFHIJ&mask=0x408000&vmask=0x808000&partial=0",
-                API_VERSION,
+                "/{API_VERSION}/quotes/integrity?nonce=1234567890ABCDEFHIJ&mask=0x408000&vmask=0x808000&partial=0",
             ))
             .to_request();
 
@@ -437,7 +435,7 @@ mod tests {
                     )
                     .expect("unable to verify quote");
                 }
-                Err(e) => panic!("Could not read IMA file: {}", e), //#[allow_ci]
+                Err(e) => panic!("Could not read IMA file: {e}"), //#[allow_ci]
             }
         } else {
             panic!("IMA file was None"); //#[allow_ci]
@@ -449,15 +447,14 @@ mod tests {
         let quotedata = web::Data::new(QuoteData::fixture().unwrap()); //#[allow_ci]
         let mut app =
             test::init_service(App::new().app_data(quotedata.clone()).route(
-                &format!("/{}/quotes/integrity", API_VERSION),
+                &format!("/{API_VERSION}/quotes/integrity"),
                 web::get().to(integrity),
             ))
             .await;
 
         let req = test::TestRequest::get()
             .uri(&format!(
-                "/{}/quotes/integrity?nonce=1234567890ABCDEFHIJ&mask=0x408000&vmask=0x808000&partial=1",
-                API_VERSION,
+                "/{API_VERSION}/quotes/integrity?nonce=1234567890ABCDEFHIJ&mask=0x408000&vmask=0x808000&partial=1",
             ))
             .to_request();
 
@@ -482,7 +479,7 @@ mod tests {
                     );
                     assert!(result.results.quote.starts_with('r'));
                 }
-                Err(e) => panic!("Could not read IMA file: {}", e), //#[allow_ci]
+                Err(e) => panic!("Could not read IMA file: {e}"), //#[allow_ci]
             }
         } else {
             panic!("IMA file was None"); //#[allow_ci]
@@ -506,15 +503,14 @@ mod tests {
         let data = web::Data::new(quotedata);
         let mut app =
             test::init_service(App::new().app_data(data.clone()).route(
-                &format!("/{}/quotes/integrity", API_VERSION),
+                &format!("/{API_VERSION}/quotes/integrity"),
                 web::get().to(integrity),
             ))
             .await;
 
         let req = test::TestRequest::get()
             .uri(&format!(
-                "/{}/quotes/integrity?nonce=1234567890ABCDEFHIJ&mask=0x408000&vmask=0x808000&partial=0",
-                API_VERSION,
+                "/{API_VERSION}/quotes/integrity?nonce=1234567890ABCDEFHIJ&mask=0x408000&vmask=0x808000&partial=0",
             ))
             .to_request();
 

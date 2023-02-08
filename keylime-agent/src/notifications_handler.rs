@@ -26,7 +26,7 @@ pub async fn revocation(
         Err(e) => {
             return HttpResponse::BadRequest().json(JsonWrapper::error(
                 400,
-                format!("JSON parsing error: {}", e),
+                format!("JSON parsing error: {e}"),
             ));
         }
     };
@@ -107,7 +107,7 @@ mod tests {
 
         let mut app =
             test::init_service(App::new().app_data(quotedata.clone()).route(
-                &format!("/{}/notifications/revocation", API_VERSION),
+                &format!("/{API_VERSION}/notifications/revocation"),
                 web::post().to(revocation),
             ))
             .await;
@@ -127,7 +127,7 @@ mod tests {
         };
 
         let req = test::TestRequest::post()
-            .uri(&format!("/{}/notifications/revocation", API_VERSION,))
+            .uri(&format!("/{API_VERSION}/notifications/revocation",))
             .set_json(&revocation)
             .to_request();
 

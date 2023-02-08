@@ -155,8 +155,7 @@ impl TryFrom<&[u8]> for SymmKey {
                 Ok(SymmKey { bytes: v.to_vec() })
             }
             other => Err(format!(
-                "key length {} does not correspond to valid GCM cipher",
-                other
+                "key length {other} does not correspond to valid GCM cipher"
             )),
         }
     }

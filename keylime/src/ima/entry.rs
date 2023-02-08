@@ -433,7 +433,7 @@ impl TryFrom<&str> for Entry {
             }),
             template => Err(Error::new(
                 ErrorKind::Other,
-                format!("unrecognized template \"{}\"", template,),
+                format!("unrecognized template \"{template}\"",),
             )),
         }
     }

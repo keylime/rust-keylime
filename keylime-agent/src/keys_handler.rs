@@ -310,11 +310,11 @@ mod tests {
             App::new()
                 .app_data(quotedata.clone())
                 .route(
-                    &format!("/{}/keys/ukey", API_VERSION),
+                    &format!("/{API_VERSION}/keys/ukey"),
                     web::post().to(u_key),
                 )
                 .route(
-                    &format!("/{}/keys/vkey", API_VERSION),
+                    &format!("/{API_VERSION}/keys/vkey"),
                     web::post().to(v_key),
                 ),
         )
@@ -374,7 +374,7 @@ mod tests {
         };
 
         let req = test::TestRequest::post()
-            .uri(&format!("/{}/keys/ukey", API_VERSION,))
+            .uri(&format!("/{API_VERSION}/keys/ukey"))
             .set_json(&ukey)
             .to_request();
 
@@ -389,7 +389,7 @@ mod tests {
         };
 
         let req = test::TestRequest::post()
-            .uri(&format!("/{}/keys/vkey", API_VERSION,))
+            .uri(&format!("/{API_VERSION}/keys/vkey"))
             .set_json(&vkey)
             .to_request();
 
@@ -438,13 +438,13 @@ mod tests {
         let quotedata = web::Data::new(QuoteData::fixture().unwrap()); //#[allow_ci]
         let mut app =
             test::init_service(App::new().app_data(quotedata.clone()).route(
-                &format!("/{}/keys/pubkey", API_VERSION),
+                &format!("/{API_VERSION}/keys/pubkey"),
                 web::get().to(pubkey),
             ))
             .await;
 
         let req = test::TestRequest::get()
-            .uri(&format!("/{}/keys/pubkey", API_VERSION,))
+            .uri(&format!("/{API_VERSION}/keys/pubkey"))
             .to_request();
 
         let resp = test::call_service(&app, req).await;
@@ -471,7 +471,7 @@ mod tests {
 
         let mut app =
             test::init_service(App::new().app_data(quotedata.clone()).route(
-                &format!("/{}/keys/verify", API_VERSION),
+                &format!("/{API_VERSION}/keys/verify"),
                 web::get().to(verify),
             ))
             .await;
@@ -479,10 +479,7 @@ mod tests {
         let challenge = "1234567890ABCDEFGHIJ";
 
         let req = test::TestRequest::get()
-            .uri(&format!(
-                "/{}/keys/verify?challenge={}",
-                API_VERSION, challenge
-            ))
+            .uri(&format!("/{API_VERSION}/keys/verify?challenge={challenge}"))
             .to_request();
 
         let resp = test::call_service(&app, req).await;

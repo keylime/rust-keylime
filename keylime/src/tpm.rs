@@ -81,7 +81,7 @@ impl From<tss_esapi::Error> for TpmError {
         } else {
             None
         };
-        let message = format!("{}", err);
+        let message = format!("{err}");
 
         TpmError::Tss2 { err, kind, message }
     }
@@ -418,12 +418,11 @@ fn parse_cred_and_secret(
     let version = u32::from_be_bytes(keyblob[4..8].try_into().unwrap()); //#[allow_ci]
 
     if magic != TSS_MAGIC {
-        return Err(TpmError::Other(format!("Error parsing cred and secret; TSS_MAGIC number {} does not match expected value {}", magic, TSS_MAGIC)));
+        return Err(TpmError::Other(format!("Error parsing cred and secret; TSS_MAGIC number {magic} does not match expected value {TSS_MAGIC}")));
     }
     if version != 1 {
         return Err(TpmError::Other(format!(
-            "Error parsing cred and secret; version {} is not 1",
-            version
+            "Error parsing cred and secret; version {version} is not 1"
         )));
     }
 
@@ -455,8 +454,7 @@ fn pubkey_to_tpm_digest<T: HasPublic>(
         Id::RSA => pubkey.rsa()?.public_key_to_pem()?,
         other_id => {
             return Err(TpmError::Other(format!(
-            "Converting to digest value for key type {:?} is not yet implemented",
-            other_id
+            "Converting to digest value for key type {other_id:?} is not yet implemented"
             )));
         }
     };
@@ -519,7 +517,7 @@ fn read_mask(mask: u32) -> Result<Vec<PcrSlot>> {
                     21 => PcrSlot::Slot21,
                     22 => PcrSlot::Slot22,
                     23 => PcrSlot::Slot23,
-                    bit => return Err(TpmError::Other(format!("malformed mask in integrity quote: only pcrs 0-23 can be included, but mask included pcr {:?}", bit))),
+                    bit => return Err(TpmError::Other(format!("malformed mask in integrity quote: only pcrs 0-23 can be included, but mask included pcr {bit:?}"))),
                 },
             )
         }
@@ -601,8 +599,7 @@ fn hash_alg_to_message_digest(
         HashingAlgorithm::Sha256 => Ok(MessageDigest::sha256()),
         HashingAlgorithm::Sha1 => Ok(MessageDigest::sha1()),
         other => Err(TpmError::Other(format!(
-            "Unsupported hashing algorithm: {:?}",
-            other
+            "Unsupported hashing algorithm: {other:?}"
         ))),
     }
 }
