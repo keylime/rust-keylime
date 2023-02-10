@@ -44,7 +44,7 @@
        - /functional/db-postgresql-sanity-on-localhost
        - /functional/db-mariadb-sanity-on-localhost
        - /functional/db-mysql-sanity-on-localhost
-       - /functional/tenant-allowlist-sanity
+       - /functional/tenant-runtime-policy-sanity
        - /functional/measured-boot-swtpm-sanity
        - /functional/tpm-issuer-cert-using-ecc
        - /functional/tpm_policy-sanity-on-localhost
