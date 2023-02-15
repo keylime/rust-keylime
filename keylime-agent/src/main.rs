@@ -172,9 +172,9 @@ async fn main() -> Result<()> {
 
     // The agent cannot run when a payload script is defined, but mTLS is disabled and insecure
     // payloads are not explicitly enabled
-    if !&config.agent.enable_agent_mtls
-        && !&config.agent.enable_insecure_payload
-        && !&config.agent.payload_script.is_empty()
+    if !config.agent.enable_agent_mtls
+        && !config.agent.enable_insecure_payload
+        && !config.agent.payload_script.is_empty()
     {
         let message = "The agent mTLS is disabled and 'payload_script' is not empty. To allow the agent to run, 'enable_insecure_payload' has to be set to 'True'".to_string();
 
@@ -182,15 +182,16 @@ async fn main() -> Result<()> {
         return Err(Error::Configuration(message));
     }
 
-    let work_dir = Path::new(&config.agent.keylime_dir);
-    let mount = secure_mount::mount(work_dir, &config.agent.secure_size)?;
+    let secure_size = config.agent.secure_size.clone();
+    let work_dir = PathBuf::from(&config.agent.keylime_dir);
+    let mount = secure_mount::mount(&work_dir, &config.agent.secure_size)?;
 
     let run_as = if permissions::get_euid() == 0 {
-        if let Some(ref run_as) = config.agent.run_as {
-            Some(run_as.to_string())
-        } else {
+        if (config.agent.run_as).is_empty() {
             warn!("Cannot drop privileges since 'run_as' is empty in 'agent' section of 'keylime-agent.conf'.");
             None
+        } else {
+            Some(&config.agent.run_as)
         }
     } else {
         error!("Cannot drop privileges: not enough permission");
@@ -200,7 +201,7 @@ async fn main() -> Result<()> {
     };
 
     // Drop privileges
-    if let Some(user_group) = &run_as {
+    if let Some(user_group) = run_as {
         permissions::chown(user_group, &mount)?;
         if let Err(e) = permissions::run_as(user_group) {
             let message = "The user running the Keylime agent should be set in keylime-agent.conf, using the parameter `run_as`, with the format `user:group`".to_string();
@@ -225,22 +226,15 @@ async fn main() -> Result<()> {
 
     cfg_if::cfg_if! {
         if #[cfg(feature = "legacy-python-actions")] {
-            match config.agent.revocation_actions_dir {
-                Some(ref actions_dir) => {
-                    // Verify if the python shim is installed in the expected location
-                    let python_shim = Path::new(&actions_dir).join("shim.py");
-                    if !python_shim.exists() {
-                        error!("Could not find python shim at {}", python_shim.display());
-                        return Err(Error::Configuration(format!(
-                            "Could not find python shim at {}",
-                            python_shim.display()
-                        )));
-                    }
-                },
-                None => {
-                    error!("The revocation actions directory was not set in 'revocation_actions_dir'");
-                    return Err(Error::Configuration("The revocation actions directory was not set in 'revocation_actions_dir'".to_string()));
-                }
+            let actions_dir = &config.agent.revocation_actions_dir;
+            // Verify if the python shim is installed in the expected location
+            let python_shim = Path::new(&actions_dir).join("shim.py");
+            if !python_shim.exists() {
+                error!("Could not find python shim at {}", python_shim.display());
+                return Err(Error::Configuration(format!(
+                    "Could not find python shim at {}",
+                    python_shim.display()
+                )));
             }
         }
     }
@@ -248,8 +242,9 @@ async fn main() -> Result<()> {
     // When the tpm_ownerpassword is given, set auth for the Endorsement hierarchy.
     // Note in the Python implementation, tpm_ownerpassword option is also used for claiming
     // ownership of TPM access, which will not be implemented here.
-    if let Some(ref v) = config.agent.tpm_ownerpassword {
-        let auth = Auth::try_from(v.as_bytes())?;
+    let tpm_ownerpassword = &config.agent.tpm_ownerpassword;
+    if !tpm_ownerpassword.is_empty() {
+        let auth = Auth::try_from(tpm_ownerpassword.as_bytes())?;
         ctx.as_mut().tr_set_auth(Hierarchy::Endorsement.into(), auth)
             .map_err(|e| {
                 Error::Configuration(format!(
@@ -260,18 +255,20 @@ async fn main() -> Result<()> {
 
     let tpm_encryption_alg =
         keylime::algorithms::EncryptionAlgorithm::try_from(
-            config.agent.tpm_encryption_alg.as_str(),
+            config.agent.tpm_encryption_alg.as_ref(),
         )?;
     let tpm_hash_alg = keylime::algorithms::HashAlgorithm::try_from(
-        config.agent.tpm_hash_alg.as_str(),
+        config.agent.tpm_hash_alg.as_ref(),
     )?;
     let tpm_signing_alg = keylime::algorithms::SignAlgorithm::try_from(
-        config.agent.tpm_signing_alg.as_str(),
+        config.agent.tpm_signing_alg.as_ref(),
     )?;
 
     // Gather EK values and certs
-    let ek_result =
-        ctx.create_ek(tpm_encryption_alg, config.agent.ek_handle.as_deref())?;
+    let ek_result = match config.agent.ek_handle.as_ref() {
+        "" => ctx.create_ek(tpm_encryption_alg, None)?,
+        s => ctx.create_ek(tpm_encryption_alg, Some(s))?,
+    };
 
     // Calculate the SHA-256 hash of the public key in PEM format
     let ek_hash = hash_ek_pubkey(ek_result.public.clone())?;
@@ -279,14 +276,20 @@ async fn main() -> Result<()> {
     // Replace the uuid with the actual EK hash if the option was set.
     // We cannot do that when the configuration is loaded initially,
     // because only have later access to the the TPM.
-    config.agent.uuid = match config.agent.uuid.as_str() {
+    config.agent.uuid = match config.agent.uuid.as_ref() {
         "hash_ek" => ek_hash.clone(),
         s => s.to_string(),
     };
 
+    let agent_uuid = config.agent.uuid.clone();
+
     // Try to load persistent Agent data
-    let old_ak = match &config.agent.agent_data_path {
-        Some(path) => {
+    let old_ak = match config.agent.agent_data_path.as_ref() {
+        "" => {
+            info!("Agent Data path not set in the configuration file");
+            None
+        }
+        path => {
             let path = Path::new(&path);
             if path.exists() {
                 match AgentData::load(path) {
@@ -337,10 +340,6 @@ async fn main() -> Result<()> {
                 None
             }
         }
-        None => {
-            info!("Agent Data path not set in the configuration file");
-            None
-        }
     };
 
     // Use old AK or generate a new one and update the AgentData
@@ -365,16 +364,12 @@ async fn main() -> Result<()> {
         ek_hash.as_bytes(),
     )?;
 
-    match &config.agent.agent_data_path {
-        Some(path) => {
-            agent_data_new.store(Path::new(&path))?;
-        }
-        None => {
-            info!("Agent Data not stored");
-        }
+    match config.agent.agent_data_path.as_ref() {
+        "" => info!("Agent Data not stored"),
+        path => agent_data_new.store(Path::new(&path))?,
     }
 
-    info!("Agent UUID: {}", config.agent.uuid);
+    info!("Agent UUID: {}", agent_uuid);
 
     // Generate key pair for secure transmission of u, v keys. The u, v
     // keys are two halves of the key used to decrypt the workload after
@@ -384,8 +379,15 @@ async fn main() -> Result<()> {
     // Since we store the u key in memory, discarding this key, which
     // safeguards u and v keys in transit, is not part of the threat model.
 
-    let (nk_pub, nk_priv) = match config.agent.server_key {
-        Some(ref path) => {
+    let (nk_pub, nk_priv) = match config.agent.server_key.as_ref() {
+        "" => {
+            debug!(
+                "The server_key option was not set in the configuration file"
+            );
+            debug!("Generating new key pair");
+            crypto::rsa_generate_pair(2048)?
+        }
+        path => {
             let key_path = Path::new(&path);
             if key_path.exists() {
                 debug!(
@@ -394,7 +396,7 @@ async fn main() -> Result<()> {
                 );
                 crypto::load_key_pair(
                     key_path,
-                    &config.agent.server_key_password,
+                    Some(config.agent.server_key_password.as_ref()),
                 )?
             } else {
                 debug!("Generating new key pair");
@@ -403,17 +405,10 @@ async fn main() -> Result<()> {
                 crypto::write_key_pair(
                     &private,
                     key_path,
-                    &config.agent.server_key_password,
+                    Some(config.agent.server_key_password.as_ref()),
                 );
                 (public, private)
             }
-        }
-        None => {
-            debug!(
-                "The server_key option was not set in the configuration file"
-            );
-            debug!("Generating new key pair");
-            crypto::rsa_generate_pair(2048)?
         }
     };
 
@@ -421,8 +416,12 @@ async fn main() -> Result<()> {
     let mtls_cert;
     let ssl_context;
     if config.agent.enable_agent_mtls {
-        cert = match config.agent.server_cert {
-            Some(ref path) => {
+        cert = match config.agent.server_cert.as_ref() {
+            "" => {
+                debug!("The server_cert option was not set in the configuration file");
+                crypto::generate_x509(&nk_priv, &agent_uuid)?
+            }
+            path => {
                 let cert_path = Path::new(&path);
                 if cert_path.exists() {
                     debug!(
@@ -432,25 +431,20 @@ async fn main() -> Result<()> {
                     crypto::load_x509(cert_path)?
                 } else {
                     debug!("Generating new mTLS certificate");
-                    let cert =
-                        crypto::generate_x509(&nk_priv, &config.agent.uuid)?;
+                    let cert = crypto::generate_x509(&nk_priv, &agent_uuid)?;
                     // Write the generated certificate
                     crypto::write_x509(&cert, cert_path)?;
                     cert
                 }
             }
-            None => {
-                debug!("The server_cert option was not set in the configuration file");
-                crypto::generate_x509(&nk_priv, &config.agent.uuid)?
-            }
         };
 
-        let ca_cert_path = match config.agent.trusted_client_ca {
-            None => {
+        let ca_cert_path = match config.agent.trusted_client_ca.as_ref() {
+            "" => {
                 error!("Agent mTLS is enabled, but trusted_client_ca option was not provided");
                 return Err(Error::Configuration("Agent mTLS is enabled, but trusted_client_ca option was not provided".to_string()));
             }
-            Some(ref path) => PathBuf::from(&path),
+            path => Path::new(path),
         };
 
         if !ca_cert_path.exists() {
@@ -465,7 +459,7 @@ async fn main() -> Result<()> {
         }
 
         let keylime_ca_certs =
-            match crypto::load_x509_cert_chain(&ca_cert_path) {
+            match crypto::load_x509_cert_chain(ca_cert_path) {
                 Ok(t) => Ok(t),
                 Err(e) => {
                     error!(
@@ -492,18 +486,19 @@ async fn main() -> Result<()> {
     {
         // Request keyblob material
         let keyblob = registrar_agent::do_register_agent(
-            &config.agent.registrar_ip,
-            &config.agent.registrar_port.to_string(),
-            &config.agent.uuid,
+            config.agent.registrar_ip.as_ref(),
+            config.agent.registrar_port,
+            &agent_uuid,
             &PublicBuffer::try_from(ek_result.public.clone())?.marshall()?,
             ek_result.ek_cert,
             &PublicBuffer::try_from(ak.public)?.marshall()?,
             mtls_cert,
-            config.agent.contact_ip.clone(),
+            config.agent.contact_ip.as_ref(),
             config.agent.contact_port,
         )
         .await?;
-        info!("SUCCESS: Agent {} registered", &config.agent.uuid);
+
+        info!("SUCCESS: Agent {} registered", &agent_uuid);
 
         let key = ctx.activate_credential(
             keyblob,
@@ -511,34 +506,23 @@ async fn main() -> Result<()> {
             ek_result.key_handle,
         )?;
         // Flush EK if we created it
-        if config.agent.ek_handle.is_none() {
+        if config.agent.ek_handle.is_empty() {
             ctx.as_mut().flush_context(ek_result.key_handle.into())?;
         }
         let mackey = base64::encode(key.value());
-        let auth_tag = crypto::compute_hmac(
-            mackey.as_bytes(),
-            config.agent.uuid.as_bytes(),
-        )?;
+        let auth_tag =
+            crypto::compute_hmac(mackey.as_bytes(), agent_uuid.as_bytes())?;
         let auth_tag = hex::encode(&auth_tag);
 
         registrar_agent::do_activate_agent(
-            &config.agent.registrar_ip,
-            &config.agent.registrar_port.to_string(),
-            &config.agent.uuid,
+            config.agent.registrar_ip.as_ref(),
+            config.agent.registrar_port,
+            &agent_uuid,
             &auth_tag,
         )
         .await?;
-        info!("SUCCESS: Agent {} activated", &config.agent.uuid);
+        info!("SUCCESS: Agent {} activated", &agent_uuid);
     }
-
-    let work_dir = Path::new(&config.agent.keylime_dir)
-        .canonicalize()
-        .map_err(|e| {
-            Error::Configuration(format!(
-                "Path {} set in keylime_dir not found: {}",
-                &config.agent.keylime_dir, e
-            ))
-        })?;
 
     let (mut payload_tx, mut payload_rx) =
         mpsc::channel::<payloads::PayloadMessage>(1);
@@ -552,9 +536,8 @@ async fn main() -> Result<()> {
     #[cfg(feature = "with-zmq")]
     let (mut zmq_tx, mut zmq_rx) = mpsc::channel::<revocation::ZmqMessage>(1);
 
-    let revocation_cert = match config.agent.revocation_cert {
-        Some(ref s) => PathBuf::from(s),
-        None => {
+    let revocation_cert = match config.agent.revocation_cert.as_ref() {
+        "" => {
             error!(
                 "No revocation certificate set in 'revocation_cert' option"
             );
@@ -563,32 +546,25 @@ async fn main() -> Result<()> {
                     .to_string(),
             ));
         }
+        s => PathBuf::from(s),
     };
 
-    let revocation_actions_dir = match config
-        .agent
-        .revocation_actions_dir
-        .as_ref()
-        .map(PathBuf::from)
-    {
-        Some(dir) => dir,
-        None => {
-            error!("No revocation actions directory set in 'revocation_actions_dir' option");
-            return Err(Error::Configuration(
-                        "No revocation actions directory set in 'revocation_actions_dir' option"
-                        .to_string(),
-                        ));
-        }
+    let revocation_actions_dir = config.agent.revocation_actions_dir.clone();
+
+    let revocation_actions = match config.agent.revocation_actions.as_ref() {
+        "" => None,
+        s => Some(s.to_string()),
     };
 
-    let revocation_actions = config.agent.revocation_actions.clone();
+    let allow_payload_revocation_actions =
+        config.agent.allow_payload_revocation_actions;
 
     let revocation_task = rt::spawn(revocation::worker(
         revocation_rx,
         revocation_cert,
         revocation_actions_dir,
         revocation_actions,
-        config.agent.allow_payload_revocation_actions,
+        allow_payload_revocation_actions,
         work_dir.clone(),
         mount.clone(),
     ))
@@ -605,11 +581,9 @@ async fn main() -> Result<()> {
         hash_alg: tpm_hash_alg,
         enc_alg: tpm_encryption_alg,
         sign_alg: tpm_signing_alg,
-        agent_uuid: config.agent.uuid.clone(),
-        allow_payload_revocation_actions: config
-            .agent
-            .allow_payload_revocation_actions,
-        secure_size: config.agent.secure_size.clone(),
+        agent_uuid: agent_uuid.clone(),
+        allow_payload_revocation_actions,
+        secure_size,
         work_dir,
         ima_ml_file,
         measuredboot_ml_file,
@@ -712,27 +686,19 @@ async fn main() -> Result<()> {
         .disable_signals();
 
     let server;
+    let ip = &config.agent.ip;
+    let port = config.agent.port;
     if config.agent.enable_agent_mtls && ssl_context.is_some() {
         server = actix_server
             .bind_openssl(
-                format!("{}:{}", config.agent.ip, config.agent.port),
+                format!("{ip}:{port}"),
                 ssl_context.unwrap(), //#[allow_ci]
             )?
             .run();
-
-        info!(
-            "Listening on https://{}:{}",
-            config.agent.ip, config.agent.port
-        );
+        info!("Listening on https://{ip}:{port}");
     } else {
-        server = actix_server
-            .bind(format!("{}:{}", config.agent.ip, config.agent.port))?
-            .run();
-
-        info!(
-            "Listening on http://{}:{}",
-            config.agent.ip, config.agent.port
-        );
+        server = actix_server.bind(format!("{ip}:{port}"))?.run();
+        info!("Listening on http://{ip}:{port}");
     };
 
     let server_handle = server.handle();
@@ -754,7 +720,7 @@ async fn main() -> Result<()> {
 
     let key_task = rt::spawn(keys_handler::worker(
         run_payload,
-        config.agent.uuid.clone(),
+        agent_uuid,
         keys_rx,
         payload_tx.clone(),
     ))
@@ -763,32 +729,14 @@ async fn main() -> Result<()> {
     // If with-zmq feature is enabled, run the service listening for ZeroMQ messages
     #[cfg(feature = "with-zmq")]
     let zmq_task = if config.agent.enable_revocation_notifications {
-        let ip = if let Some(i) = config.agent.revocation_notification_ip {
-            i
-        } else {
-            error!("No IP set in 'revocation_notification_ip' option");
-            return Err(Error::Configuration(
-                "No IP set in 'revocation_notification_ip' option"
-                    .to_string(),
-            ));
-        };
-
-        let port = if let Some(p) = config.agent.revocation_notification_port
-        {
-            p
-        } else {
-            error!("No port set in 'revocation_notification_port' option");
-            return Err(Error::Configuration(
-                "No port set in 'revocation_notification_port' option"
-                    .to_string(),
-            ));
-        };
+        let zmq_ip = config.agent.revocation_notification_ip;
+        let zmq_port = config.agent.revocation_notification_port;
 
         rt::spawn(revocation::zmq_worker(
             zmq_rx,
             revocation_tx.clone(),
-            ip,
-            port,
+            zmq_ip,
+            zmq_port,
         ))
         .map_err(Error::from)
     } else {
@@ -901,7 +849,7 @@ mod testing {
                 mpsc::channel::<revocation::RevocationMessage>(1);
 
             let revocation_cert =
-                test_config.agent.revocation_cert.map(PathBuf::from);
+                PathBuf::from(test_config.agent.revocation_cert);
 
             let actions_dir = Some(
                 Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/actions/"),

@@ -151,13 +151,21 @@ impl Context {
         // Retrieve EK handle, EK pub cert, and TPM pub object
         let key_handle = match handle {
             Some(v) => {
-                let handle =
-                    u32::from_str_radix(v.trim_start_matches("0x"), 16)?;
-                self.inner
-                    .tr_from_tpm_public(TpmHandle::Persistent(
-                        PersistentTpmHandle::new(handle)?,
-                    ))?
-                    .into()
+                if v.is_empty() {
+                    ek::create_ek_object(
+                        &mut self.inner,
+                        alg.into(),
+                        DefaultKey,
+                    )?
+                } else {
+                    let handle =
+                        u32::from_str_radix(v.trim_start_matches("0x"), 16)?;
+                    self.inner
+                        .tr_from_tpm_public(TpmHandle::Persistent(
+                            PersistentTpmHandle::new(handle)?,
+                        ))?
+                        .into()
+                }
             }
             None => {
                 ek::create_ek_object(&mut self.inner, alg.into(), DefaultKey)?

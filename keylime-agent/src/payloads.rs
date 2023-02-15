@@ -75,12 +75,24 @@ fn setup_unzipped(
         fs::remove_dir_all(&unzipped)?;
     }
 
-    let dec_payload_path = unzipped.join(&config.agent.dec_payload_file);
-    let key_path = unzipped.join(&config.agent.enc_keyname);
-
-    fs::create_dir(&unzipped)?;
-
-    Ok((unzipped, dec_payload_path, key_path))
+    match config.agent.dec_payload_file.as_ref() {
+        "" => Err(Error::Configuration(
+            "The dec_payload_path option was not set".to_string(),
+        )),
+        p => {
+            let dec_payload_path = unzipped.join(p);
+            match config.agent.enc_keyname.as_ref() {
+                "" => Err(Error::Configuration(
+                    "The enc_keyname option was not set".to_string(),
+                )),
+                k => {
+                    let key_path = unzipped.join(k);
+                    fs::create_dir(&unzipped)?;
+                    Ok((unzipped, dec_payload_path, key_path))
+                }
+            }
+        }
+    }
 }
 
 // write symm key data and decrypted payload data out to specified files
@@ -108,7 +120,7 @@ fn write_out_key_and_payload(
 }
 
 // run a script (such as the init script, if any) and check the status
-fn run(dir: &Path, script: &str, uuid: &str) -> Result<()> {
+fn run(dir: &Path, script: &str) -> Result<()> {
     let script_path = dir.join(script);
     info!("Running script: {:?}", script_path);
 
@@ -155,13 +167,19 @@ fn optional_unzip_payload(
     config: &config::KeylimeConfig,
 ) -> Result<()> {
     if config.agent.extract_payload_zip {
-        let zipped_payload = &config.agent.dec_payload_file;
-        let zipped_payload_path = unzipped.join(zipped_payload);
+        match config.agent.dec_payload_file.as_ref() {
+            "" => {
+                warn!("Configuration option dec_payload_file not set, not unzipping payload");
+            }
+            dec_file => {
+                let zipped_payload_path = unzipped.join(dec_file);
 
-        info!("Unzipping payload {} to {:?}", &zipped_payload, unzipped);
+                info!("Unzipping payload {} to {:?}", dec_file, unzipped);
 
-        let mut source = fs::File::open(zipped_payload_path)?;
-        uncompress_archive(&mut source, unzipped, Ownership::Ignore)?;
+                let mut source = fs::File::open(zipped_payload_path)?;
+                uncompress_archive(&mut source, unzipped, Ownership::Ignore)?;
+            }
+        }
     }
 
     Ok(())
@@ -189,13 +207,13 @@ async fn run_encrypted_payload(
 
     optional_unzip_payload(&unzipped, config)?;
     // there may also be also a separate init script
-    match config.agent.payload_script.as_str() {
+    match config.agent.payload_script.as_ref() {
         "" => {
             info!("No payload script specified, skipping");
         }
         script => {
             info!("Payload init script indicated: {}", script);
-            run(&unzipped, script, config.agent.uuid.as_str())?;
+            run(&unzipped, script)?;
         }
     }
 
@@ -359,7 +377,6 @@ echo hello > test-output
         run(
             dir.path(),
             script_path.file_name().unwrap().to_str().unwrap(), //#[allow_ci]
-            "D432FBB3-D2F1-4A97-9EF7-75BD81C0000X",
         )
         .unwrap(); //#[allow_ci]
         assert!(dir.path().join("test-output").exists());
@@ -386,9 +403,9 @@ echo hello > test-output
         assert!(unzipped.exists());
         assert!(
             dec_payload_path
-                == unzipped.join(&test_config.agent.dec_payload_file)
+                == unzipped.join(test_config.agent.dec_payload_file)
         );
-        assert!(key_path == unzipped.join(&test_config.agent.enc_keyname));
+        assert!(key_path == unzipped.join(test_config.agent.enc_keyname));
     }
 
     #[test]
@@ -414,17 +431,19 @@ echo hello > test-output
             .join("test-data")
             .join("payload.zip");
 
+        let dec_payload_file =
+            match test_config.agent.dec_payload_file.as_ref() {
+                "" => panic!("dec_payload_file not set by default"), //#[allow_ci]
+                f => f,
+            };
+
         let result = fs::copy(
             payload_path,
-            temp_workdir
-                .path()
-                .join(&test_config.agent.dec_payload_file),
+            temp_workdir.path().join(dec_payload_file),
         );
         assert!(result.is_ok());
 
-        let dec_payload_path = temp_workdir
-            .path()
-            .join(&test_config.agent.dec_payload_file);
+        let dec_payload_path = temp_workdir.path().join(dec_payload_file);
         assert!(dec_payload_path.exists());
 
         let result =
