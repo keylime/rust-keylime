@@ -38,7 +38,7 @@ pub static DEFAULT_DEC_PAYLOAD_FILE: &str = "decrypted_payload";
 pub static DEFAULT_SECURE_SIZE: &str = "1m";
 pub static DEFAULT_TPM_OWNERPASSWORD: &str = "";
 pub static DEFAULT_EXTRACT_PAYLOAD_ZIP: bool = true;
-pub static DEFAULT_ENABLE_REVOCATION_NOTIFICATIONS: bool = true;
+pub static DEFAULT_ENABLE_REVOCATION_NOTIFICATIONS: bool = false;
 pub static DEFAULT_REVOCATION_ACTIONS_DIR: &str = "/usr/libexec/keylime";
 pub static DEFAULT_REVOCATION_NOTIFICATION_IP: &str = "127.0.0.1";
 pub static DEFAULT_REVOCATION_NOTIFICATION_PORT: u32 = 8992;
@@ -828,6 +828,7 @@ mod tests {
     fn get_revocation_notification_ip_empty() {
         let mut test_config = KeylimeConfig {
             agent: AgentConfig {
+                enable_revocation_notifications: true,
                 revocation_notification_ip: "".to_string(),
                 ..Default::default()
             },
@@ -857,6 +858,7 @@ mod tests {
     fn get_revocation_cert_empty() {
         let mut test_config = KeylimeConfig {
             agent: AgentConfig {
+                enable_revocation_notifications: true,
                 revocation_cert: "".to_string(),
                 ..Default::default()
             },
@@ -881,6 +883,7 @@ mod tests {
     fn get_revocation_actions_dir_empty() {
         let mut test_config = KeylimeConfig {
             agent: AgentConfig {
+                enable_revocation_notifications: true,
                 revocation_actions_dir: "".to_string(),
                 ..Default::default()
             },
