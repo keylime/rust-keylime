@@ -226,6 +226,8 @@ async fn main() -> Result<()> {
 
     cfg_if::cfg_if! {
         if #[cfg(feature = "legacy-python-actions")] {
+            warn!("The support for legacy python revocation actions is deprecated and will be removed on next major release");
+
             let actions_dir = &config.agent.revocation_actions_dir;
             // Verify if the python shim is installed in the expected location
             let python_shim = Path::new(&actions_dir).join("shim.py");
@@ -729,6 +731,8 @@ async fn main() -> Result<()> {
     // If with-zmq feature is enabled, run the service listening for ZeroMQ messages
     #[cfg(feature = "with-zmq")]
     let zmq_task = if config.agent.enable_revocation_notifications {
+        warn!("The support for ZeroMQ revocation notifications is deprecated and will be removed on next major release");
+
         let zmq_ip = config.agent.revocation_notification_ip;
         let zmq_port = config.agent.revocation_notification_port;
 

@@ -45,16 +45,20 @@ actix-rt = "2"
 
 [features]
 # The features enabled by default
-default = ["with-zmq", "legacy-python-actions"]
+default = []
 # this should change to dev-dependencies when we have integration testing
 testing = ["wiremock"]
 # Whether the agent should be compiled with support to listen for notification
 # messages on ZeroMQ
+#
+# This feature is deprecated and will be removed on next major release
 with-zmq = ["zmq"]
 # Whether the agent should be compiled with support for python revocation
 # actions loaded as modules, which is the only kind supported by the python
 # agent (unless the enhancement-55 is implemented). See:
 # https://github.com/keylime/enhancements/blob/master/55_revocation_actions_without_python.md
+#
+# This feature is deprecated and will be removed on next major release
 legacy-python-actions = []
 
 [package.metadata.deb]
