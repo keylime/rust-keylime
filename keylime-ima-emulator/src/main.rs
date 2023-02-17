@@ -8,12 +8,17 @@ use openssl::hash::{hash, MessageDigest};
 use log::*;
 
 use clap::Parser;
+use signal_hook::consts::SIGINT;
 use std::collections::HashMap;
 use std::convert::{TryFrom, TryInto};
 use std::fs::File;
 use std::io::prelude::*;
 use std::io::BufReader;
 use std::path::{Path, PathBuf};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
 
 use thiserror::Error;
 
@@ -209,9 +214,10 @@ fn main() -> std::result::Result<(), ImaEmulatorError> {
         }
     }
 
+    let shutdown_marker = Arc::new(AtomicBool::new(false));
+    signal_hook::flag::register(SIGINT, Arc::clone(&shutdown_marker))?;
     println!("Monitoring {}", args.ima_log.display());
-
-    loop {
+    while !shutdown_marker.load(Ordering::SeqCst) {
         for (pcr_hash_alg, position) in positions.iter_mut() {
             *position = ml_extend(
                 &mut context,
@@ -220,7 +226,7 @@ fn main() -> std::result::Result<(), ImaEmulatorError> {
                 ima_hash_alg,
                 *pcr_hash_alg,
                 None,
-            )?;
+                ).expect("Error extending position {position} on PCR bank {pcr_hash_alg}");
         }
 
         // FIXME: We could poll IMA_ML as in the python implementation, though
@@ -230,4 +236,7 @@ fn main() -> std::result::Result<(), ImaEmulatorError> {
         let duration = std::time::Duration::from_millis(200);
         std::thread::sleep(duration);
     }
+    println!("Shutting down keylime IMA emulator");
+
+    Ok(())
 }
