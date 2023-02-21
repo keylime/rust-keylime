@@ -62,13 +62,5 @@
         script:
          - yum -y install https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm
 
-   # temporary hotfix until Fedora BZ#2158598 gets fixed
-   - when: "distro == fedora-36 or distro == fedora-37"
-     prepare+:
-      - how: shell
-        order: 99
-        script:
-         - yum -y downgrade tpm2-tss
-
   execute:
     how: tmt
