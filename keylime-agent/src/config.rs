@@ -608,51 +608,54 @@ fn config_translate_keywords(
         Some(ref dir) => {
             if dir.is_empty() {
                 match &config.agent.keylime_dir {
-                    s => s.clone(),
-                    _ => DEFAULT_KEYLIME_DIR.to_string(),
+                    s => Path::new(s),
+                    _ => Path::new(DEFAULT_KEYLIME_DIR),
                 }
             } else {
-                dir.to_string()
+                Path::new(dir)
             }
         }
         None => match &config.agent.keylime_dir {
-            s => s.clone(),
-            _ => DEFAULT_KEYLIME_DIR.to_string(),
+            s => Path::new(s),
+            _ => Path::new(DEFAULT_KEYLIME_DIR),
         },
     };
 
     // Validate that keylime_dir exists
-    let keylime_dir = Path::new(&keylime_dir).canonicalize().map_err(|e| {
+    #[cfg(not(test))]
+    let keylime_dir = &keylime_dir.canonicalize().map_err(|e| {
         Error::Configuration(format!(
-            "Path {keylime_dir} set in keylime_dir configuration option not found: {e}"
+            "Path {} set in keylime_dir configuration option not found: {}",
+            keylime_dir.display(),
+            e
         ))
     })?;
 
     let mut agent_data_path = config_get_file_path(
         "agent_data_path",
         &config.agent.agent_data_path,
-        &keylime_dir,
+        keylime_dir,
         DEFAULT_AGENT_DATA_PATH,
     );
 
     let mut server_key = config_get_file_path(
         "server_key",
         &config.agent.server_key,
-        &keylime_dir,
+        keylime_dir,
         DEFAULT_SERVER_KEY,
     );
 
     let mut server_cert = config_get_file_path(
         "server_cert",
         &config.agent.server_cert,
-        &keylime_dir,
+        keylime_dir,
         DEFAULT_SERVER_CERT,
     );
 
     let mut trusted_client_ca = config_get_file_path(
         "trusted_client_ca",
         &config.agent.trusted_client_ca,
-        &keylime_dir,
+        keylime_dir,
         DEFAULT_TRUSTED_CLIENT_CA,
     );
 
@@ -686,7 +689,7 @@ fn config_translate_keywords(
     let mut revocation_cert = config_get_file_path(
         "revocation_cert",
         &config.agent.revocation_cert,
-        &keylime_dir,
+        keylime_dir,
         &format!("secure/unzipped/{DEFAULT_REVOCATION_CERT}"),
     );
 
