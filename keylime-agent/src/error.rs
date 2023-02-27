@@ -25,8 +25,6 @@ pub(crate) enum Error {
     Config(#[from] config::ConfigError),
     #[error("Infallible: {0}")]
     Infallible(#[from] std::convert::Infallible),
-    #[error("Compress tools error: {0}")]
-    CompressTools(#[from] compress_tools::Error),
     #[error("Conversion error: {0}")]
     Conversion(String),
     #[error("Configuration error: {0}")]
@@ -65,6 +63,8 @@ pub(crate) enum Error {
     #[cfg(feature = "with-zmq")]
     #[error("ZMQ error: {0}")]
     Zmq(#[from] zmq::Error),
+    #[error("Zip error: {0}")]
+    Zip(#[from] zip::result::ZipError),
     #[error("base64 decode error: {0}")]
     Base64(#[from] base64::DecodeError),
     #[error("parse bool error: {0}")]
