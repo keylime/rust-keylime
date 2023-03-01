@@ -500,7 +500,7 @@ async fn main() -> Result<()> {
         )
         .await?;
 
-        info!("SUCCESS: Agent {} registered", &agent_uuid);
+    //    info!("SUCCESS: Agent {} registered", &agent_uuid);
 
         let key = ctx.activate_credential(
             keyblob,
@@ -523,7 +523,7 @@ async fn main() -> Result<()> {
             &auth_tag,
         )
         .await?;
-        info!("SUCCESS: Agent {} activated", &agent_uuid);
+     //   info!("SUCCESS: Agent {} activated", &agent_uuid);
     }
 
     let (mut payload_tx, mut payload_rx) =
