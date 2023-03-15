@@ -1,0 +1,55 @@
+# Notes about the IMA policy
+
+This IMA policy is provided as an example that can be later adapted to
+more specific usage.
+
+This was generated from a default tcb IMA policy from a 6.1.12 Linux
+kernel, and extended with SELinux file types to filter out the part of
+the system that we usually do not want to measure.
+
+To use this policy, we need to copy it in "/etc/ima/ima-policy" and
+systemd will load it after the SELinux policy has been loaded.
+
+For this example, we used the initial set of SELinux attributes, that
+group the file types under categories.  From that list we selected
+some of those attribute to deep more into the types that can be relevant for the IMA policy:
+
+  seinfo -a
+
+The current selection covers fully or partially the types under those
+attributes:
+
+  base_file_type
+  base_ro_file_type
+  configfile
+  file_type
+  files_unconfined_type
+  init_script_file_type
+  init_sock_file_type
+  lockfile
+  logfile
+  non_auth_file_type
+  non_security_file_type
+  openshift_file_type
+  pidfile
+  pulseaudio_tmpfsfile
+  security_file_type
+  setfiles_domain
+  spoolfile
+  svirt_file_type
+  systemd_unit_file_type
+  tmpfile
+  tmpfsfile
+
+Special mention to non_auth_file_type and non_security_file_type
+(among others like logfile or tmpfile), that should cover the most
+relevant types of the dynamic part of the system.
+
+The list should also include types from other attributes like
+virt_image_type and others (see the policy file comments from a
+complete list).
+
+Sometimes is important to see what files are labeled under a specific
+type, and for that we can use this:
+
+  semanage fcontext -l | grep $TYPE
