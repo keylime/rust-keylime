@@ -36,7 +36,7 @@ PROJECT="keylime/rust-keylime"
 # uploads coverage XML files to a web drive
 # currently we are doing that in a job running tests on Fedora-37
 TF_JOB_DESC="testing-farm:fedora-37-x86_64"
-TF_TEST_OUTPUT="/setup/generate_usptream_rust_keylime_code_coverage/output.txt"
+TF_TEST_OUTPUT="/setup/generate_upstream_rust_keylime_code_coverage/output.txt"
 TF_ARTIFACTS_URL_PREFIX="https://artifacts.dev.testing-farm.io"
 
 GITHUB_API_PREFIX_URL="https://api.github.com/repos/${PROJECT}"
