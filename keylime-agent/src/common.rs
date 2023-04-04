@@ -53,7 +53,7 @@ pub const AES_256_KEY_LEN: usize = 32;
 pub const AES_BLOCK_SIZE: usize = 16;
 
 cfg_if::cfg_if! {
-    if #[cfg(any(test, feature = "testing"))] {
+    if #[cfg(test)] {
         // Secure mount of tpmfs (False is generally used for development environments)
         pub static MOUNT_SECURE: bool = false;
 

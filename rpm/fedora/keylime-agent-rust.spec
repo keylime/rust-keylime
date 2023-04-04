@@ -15,7 +15,7 @@
 %global __brp_mangle_shebangs_exclude_from ^/usr/src/debug/.*$
 
 Name:           keylime-agent-rust
-Version:        v0.2.0
+Version:        0.2.0
 Release:        %{?autorelease}%{!?autorelease:1%{?dist}}
 Summary:        Rust agent for Keylime
 
@@ -38,7 +38,7 @@ Summary:        Rust agent for Keylime
 #
 License:        ASL 2.0 and BSD and MIT
 URL:            https://github.com/keylime/rust-keylime/
-Source0:        rust-keylime-v0.2.0.tar.gz
+Source0:        rust-keylime-v%{version}.tar.gz
 # The vendor tarball is created using cargo-vendor-filterer to remove Windows
 # related files (https://github.com/cgwalters/cargo-vendor-filterer)
 #   tar xf rust-keylime-%%{version}.tar.gz
@@ -102,7 +102,7 @@ EOF
 %endif
 
 %build
-%cargo_build
+%cargo_build -ftesting
 
 %install
 
