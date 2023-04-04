@@ -147,7 +147,16 @@ async fn main() -> Result<()> {
         None
     };
 
-    let measuredboot_ml_path = Path::new(MEASUREDBOOT_ML);
+    let mut measuredboot_ml_path = Path::new(MEASUREDBOOT_ML);
+
+    // Allow setting the binary bios measurements log path when testing
+    let env_mb_path: String;
+    #[cfg(feature = "testing")]
+    if let Ok(v) = std::env::var("TPM_BINARY_MEASUREMENTS") {
+        env_mb_path = v;
+        measuredboot_ml_path = Path::new(&env_mb_path);
+    }
+
     let measuredboot_ml_file = if measuredboot_ml_path.exists() {
         match fs::File::open(measuredboot_ml_path) {
             Ok(file) => Some(Mutex::new(file)),
@@ -871,9 +880,15 @@ mod testing {
                 Err(err) => None,
             };
 
-            let measuredboot_ml_path = Path::new(
-                "/sys/kernel/security/tpm0/binary_bios_measurements",
-            );
+            // Allow setting the binary bios measurements log path when testing
+            let mut measuredboot_ml_path = Path::new(MEASUREDBOOT_ML);
+            let env_mb_path;
+            #[cfg(feature = "testing")]
+            if let Ok(v) = std::env::var("TPM_BINARY_MEASUREMENTS") {
+                env_mb_path = v;
+                measuredboot_ml_path = Path::new(&env_mb_path);
+            }
+
             let measuredboot_ml_file =
                 match fs::File::open(measuredboot_ml_path) {
                     Ok(file) => Some(Mutex::new(file)),

@@ -1,5 +1,9 @@
 downstream_package_name: keylime-agent-rust
 upstream_project_url: https://github.com/keylime/rust-keylime
+specfile_path: rpm/fedora/keylime-agent-rust.spec
+actions:
+  get-current-version:
+  - bash -c "git describe --tags --abbrev=0 | sed 's/v\(.*\)/\1/g'"
 
 srpm_build_deps:
   - cargo
@@ -24,6 +28,8 @@ jobs:
   files_to_sync:
     - rpm/fedora/*
   actions:
+    get-current-version:
+      bash -c "git describe --tags --abbrev=0 | sed 's/v\(.*\)/\1/g'"
     post-upstream-clone:
       bash -c 'if [[ ! -d /var/tmp/cargo-vendor-filterer ]]; then git clone https://github.com/cgwalters/cargo-vendor-filterer.git /var/tmp/cargo-vendor-filterer; fi &&
         cd /var/tmp/cargo-vendor-filterer &&
@@ -48,6 +54,8 @@ jobs:
   files_to_sync:
     - rpm/centos/*
   actions:
+    get-current-version:
+      bash -c "git describe --tags --abbrev=0 | sed 's/v\(.*\)/\1/g'"
     post-upstream-clone:
       bash -c 'if [[ ! -d /var/tmp/cargo-vendor-filterer ]]; then git clone https://github.com/cgwalters/cargo-vendor-filterer.git /var/tmp/cargo-vendor-filterer; fi &&
         cd /var/tmp/cargo-vendor-filterer &&
