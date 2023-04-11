@@ -12,6 +12,7 @@ use crate::{
     Error, QuoteData, Result,
 };
 use actix_web::{web, HttpRequest, HttpResponse, Responder};
+use base64::{engine::general_purpose, Engine as _};
 use log::*;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -137,7 +138,8 @@ pub(crate) async fn u_key(
     debug!("Received ukey");
 
     // get key and decode it from web data
-    let encrypted_key = match base64::decode(&body.encrypted_key)
+    let encrypted_key = match general_purpose::STANDARD
+        .decode(&body.encrypted_key)
         .map_err(Error::from)
     {
         Ok(k) => k,
@@ -207,7 +209,10 @@ pub(crate) async fn u_key(
     };
 
     let payload = match &body.payload {
-        Some(data) => match base64::decode(data).map_err(Error::from) {
+        Some(data) => match general_purpose::STANDARD
+            .decode(data)
+            .map_err(Error::from)
+        {
             Ok(d) => Some(d.into()),
             Err(e) => {
                 warn!("POST u_key returning 400 response. Invalid base64 encoding in payload: {e}");
@@ -247,7 +252,8 @@ pub(crate) async fn v_key(
     debug!("Received vkey");
 
     // get key and decode it from web data
-    let encrypted_key = match base64::decode(&body.encrypted_key)
+    let encrypted_key = match general_purpose::STANDARD
+        .decode(&body.encrypted_key)
         .map_err(Error::from)
     {
         Ok(k) => k,
@@ -616,12 +622,14 @@ mod tests {
 
         let enc_u = KeylimeUKey {
             auth_tag: encoded_auth_tag,
-            encrypted_key: base64::encode(encrypted_u),
-            payload: ukey.payload.map(|p| base64::encode(p.as_ref())),
+            encrypted_key: general_purpose::STANDARD.encode(encrypted_u),
+            payload: ukey
+                .payload
+                .map(|p| general_purpose::STANDARD.encode(p.as_ref())),
         };
 
         let enc_v = KeylimeVKey {
-            encrypted_key: base64::encode(encrypted_v),
+            encrypted_key: general_purpose::STANDARD.encode(encrypted_v),
         };
 
         (enc_u, enc_v, k)
@@ -865,9 +873,9 @@ mod tests {
             rsa_oaep_encrypt(&quotedata.pub_key, u.as_ref()).unwrap(); //#[allow_ci]
 
         let ukey = KeylimeUKey {
-            encrypted_key: base64::encode(&encrypted_key),
+            encrypted_key: general_purpose::STANDARD.encode(&encrypted_key),
             auth_tag: hex::encode(auth_tag),
-            payload: payload.map(base64::encode),
+            payload: payload.map(|p| general_purpose::STANDARD.encode(p)),
         };
 
         let req = test::TestRequest::post()
@@ -882,7 +890,7 @@ mod tests {
             rsa_oaep_encrypt(&quotedata.pub_key, v.as_ref()).unwrap(); //#[allow_ci]
 
         let vkey = KeylimeVKey {
-            encrypted_key: base64::encode(&encrypted_key),
+            encrypted_key: general_purpose::STANDARD.encode(&encrypted_key),
         };
 
         let req = test::TestRequest::post()

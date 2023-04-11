@@ -2,6 +2,7 @@
 // Copyright 2021 Keylime Authors
 
 use crate::algorithms::{EncryptionAlgorithm, HashAlgorithm, SignAlgorithm};
+use base64::{engine::general_purpose, Engine as _};
 use log::*;
 use std::convert::{TryFrom, TryInto};
 use std::str::FromStr;
@@ -560,9 +561,9 @@ fn encode_quote_string(
     let pcr_vec = pcrdata_to_vec(pcrs_read, pcr_data);
 
     // base64 encoding
-    let att_str = base64::encode(att_vec);
-    let sig_str = base64::encode(sig_vec);
-    let pcr_str = base64::encode(pcr_vec);
+    let att_str = general_purpose::STANDARD.encode(att_vec);
+    let sig_str = general_purpose::STANDARD.encode(sig_vec);
+    let pcr_str = general_purpose::STANDARD.encode(pcr_vec);
 
     // create concatenated string
     let mut quote = String::new();
@@ -833,9 +834,9 @@ pub mod testing {
         let pcr_str = split.next().ok_or(TpmError::InvalidRequest)?;
 
         // base64 decoding
-        let att_comp_finished = base64::decode(att_str)?;
-        let sig_comp_finished = base64::decode(sig_str)?;
-        let pcr_comp_finished = base64::decode(pcr_str)?;
+        let att_comp_finished = general_purpose::STANDARD.decode(att_str)?;
+        let sig_comp_finished = general_purpose::STANDARD.decode(sig_str)?;
+        let pcr_comp_finished = general_purpose::STANDARD.decode(pcr_str)?;
 
         let sig: Signature = vec_to_sig(&sig_comp_finished)?.try_into()?;
         let (pcrsel, pcrdata) = vec_to_pcrdata(&pcr_comp_finished)?;

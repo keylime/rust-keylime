@@ -1027,7 +1027,7 @@ dependencies = [
 name = "keylime"
 version = "0.2.0"
 dependencies = [
- "base64 0.13.1",
+ "base64 0.21.0",
  "hex",
  "log",
  "openssl",
@@ -1045,7 +1045,7 @@ version = "0.2.0"
 dependencies = [
  "actix-rt",
  "actix-web",
- "base64 0.13.1",
+ "base64 0.21.0",
  "cfg-if",
  "clap",
  "compress-tools",
