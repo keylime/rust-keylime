@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2021 Keylime Authors
 
+use base64::{engine::general_purpose, Engine as _};
 use openssl::{
     asn1::Asn1Time,
     encrypt::Decrypter,
@@ -244,7 +245,8 @@ pub(crate) fn asym_verify(
     verifier
         .set_rsa_pss_saltlen(openssl::sign::RsaPssSaltlen::MAXIMUM_LENGTH)?;
     verifier.update(message.as_bytes())?;
-    Ok(verifier.verify(&base64::decode(signature.as_bytes())?)?)
+    Ok(verifier
+        .verify(&general_purpose::STANDARD.decode(signature.as_bytes())?)?)
 }
 
 /*

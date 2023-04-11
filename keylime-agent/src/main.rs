@@ -49,6 +49,7 @@ mod serialization;
 mod version_handler;
 
 use actix_web::{dev::Service, http, middleware, rt, web, App, HttpServer};
+use base64::{engine::general_purpose, Engine as _};
 use clap::{Arg, Command as ClapApp};
 use common::*;
 use error::{Error, Result};
@@ -520,7 +521,7 @@ async fn main() -> Result<()> {
         if config.agent.ek_handle.is_empty() {
             ctx.as_mut().flush_context(ek_result.key_handle.into())?;
         }
-        let mackey = base64::encode(key.value());
+        let mackey = general_purpose::STANDARD.encode(key.value());
         let auth_tag =
             crypto::compute_hmac(mackey.as_bytes(), agent_uuid.as_bytes())?;
         let auth_tag = hex::encode(&auth_tag);
