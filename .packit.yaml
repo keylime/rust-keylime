@@ -44,8 +44,7 @@ jobs:
             --exclude-crate-path "libloading#tests" &&
         tar jcf rpm/fedora/rust-keylime-vendor.tar.xz vendor'
   targets:
-    - fedora-stable
-#    - fedora-rawhide
+    - fedora-all
 
 - job: copr_build
   trigger: commit
