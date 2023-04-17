@@ -4,13 +4,12 @@
 
 %global crate keylime_agent
 
-%if 0%{?fedora} < 38
-# For older Fedora versions, use vendored dependencies due to broken packages
+# On Fedora-38 and current Rawhide, it is not possible to build due to missing
+# dependency base64 version 0.13 (required by rust-tss-esapi)
+# Also due to https://github.com/tpm2-software/tpm2-tools/issues/3210,
+# tpm2-tools is currently broken.
+# Use vendored dependencies for all Fedora versions.
 %global bundled_rust_deps 1
-%else
-# Otherwise, use only system Rust libraries
-%global bundled_rust_deps 0
-%endif
 
 %global __brp_mangle_shebangs_exclude_from ^/usr/src/debug/.*$
 
