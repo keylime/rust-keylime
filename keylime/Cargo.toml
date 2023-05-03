@@ -9,12 +9,12 @@ edition = "2021"
 base64 = "0.21"
 hex = "0.4"
 log = "0.4"
-openssl = "0.10.15"
-serde = "1.0.80"
-serde_derive = "1.0.80"
+openssl = "0.10.52"
+serde = "1.0.160"
+serde_derive = "1.0.160"
 static_assertions = "1"
 thiserror = "1.0"
 tss-esapi = {version = "7.2.0", features = ["generate-bindings"]}
 
 [dev-dependencies]
-tempfile = "3.0.4"
+tempfile = "3.5.0"
