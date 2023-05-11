@@ -10,7 +10,7 @@ LABEL version="2.0.1" description="Keylime - Bootstrapping and Maintaining Trust
 
 # environment variables
 ARG BRANCH=master
-ENV KEYLIME_HOME ${HOME}/keylime
+ENV RUST_KEYLIME_HOME ${HOME}/rust-keylime
 ENV container docker
 COPY dbus-policy.conf /etc/dbus-1/system.d/
 
@@ -35,6 +35,7 @@ glib2-static \
 gnulib \
 kmod \
 llvm llvm-devel \
+libarchive-devel \
 libselinux-python3 \
 libtool \
 libtpms \
@@ -57,8 +58,10 @@ RUN dnf makecache && \
   dnf clean all && \
   rm -rf /var/cache/dnf/*
 
-# Move keylime.conf to expected location in /etc/
-WORKDIR ${KEYLIME_HOME}
-RUN git clone https://github.com/keylime/keylime.git && \
-cd keylime && \
-cp keylime.conf /etc/keylime.conf
+# clone and build rust-keylime
+WORKDIR ${RUST_KEYLIME_HOME}
+RUN git clone https://github.com/keylime/rust-keylime.git && \
+cd rust-keylime && \
+make && \
+make install && \
+cargo clean
