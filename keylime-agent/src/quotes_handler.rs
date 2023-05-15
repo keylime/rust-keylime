@@ -141,7 +141,7 @@ pub async fn integrity(
     param: web::Query<Integ>,
     data: web::Data<QuoteData>,
 ) -> impl Responder {
-    // nonce, mask, vmask can only be in alphanumerical format
+    // nonce, mask can only be in alphanumerical format
     if !param.nonce.chars().all(char::is_alphanumeric) {
         warn!("Get quote returning 400 response. Parameters should be strictly alphanumeric: {}", param.nonce);
         return HttpResponse::BadRequest().json(JsonWrapper::error(
@@ -396,7 +396,7 @@ mod tests {
 
         let req = test::TestRequest::get()
             .uri(&format!(
-                "/{API_VERSION}/quotes/integrity?nonce=1234567890ABCDEFHIJ&mask=0x408000&vmask=0x808000&partial=0",
+                "/{API_VERSION}/quotes/integrity?nonce=1234567890ABCDEFHIJ&mask=0x408000&partial=0",
             ))
             .to_request();
 
@@ -454,7 +454,7 @@ mod tests {
 
         let req = test::TestRequest::get()
             .uri(&format!(
-                "/{API_VERSION}/quotes/integrity?nonce=1234567890ABCDEFHIJ&mask=0x408000&vmask=0x808000&partial=1",
+                "/{API_VERSION}/quotes/integrity?nonce=1234567890ABCDEFHIJ&mask=0x408000&partial=1",
             ))
             .to_request();
 
@@ -510,7 +510,7 @@ mod tests {
 
         let req = test::TestRequest::get()
             .uri(&format!(
-                "/{API_VERSION}/quotes/integrity?nonce=1234567890ABCDEFHIJ&mask=0x408000&vmask=0x808000&partial=0",
+                "/{API_VERSION}/quotes/integrity?nonce=1234567890ABCDEFHIJ&mask=0x408000&partial=0",
             ))
             .to_request();
 
