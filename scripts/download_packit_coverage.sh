@@ -41,8 +41,6 @@ TF_ARTIFACTS_URL_PREFIX="https://artifacts.dev.testing-farm.io"
 
 GITHUB_API_PREFIX_URL="https://api.github.com/repos/${PROJECT}"
 
-WEBDRIVE_URL="https://(transfer.sh|free.keep.sh)"
-
 ##################################
 # no need to change anything below
 ##################################
@@ -139,25 +137,25 @@ echo "TF_ARTIFACTS_URL=${TF_ARTIFACTS_URL}"
 TF_TESTLOG=$( curl --retry 5 ${TF_ARTIFACTS_URL}/results.xml | egrep -o "${TF_ARTIFACTS_URL}.*${TF_TEST_OUTPUT}" )
 echo "TF_TESTLOG=${TF_TESTLOG}"
 
-# parse the URL of coverage txt file on WEBDRIVE_URL and download it
+# parse the URL of coverage txt file and download it
 curl --retry 5 -s "${TF_TESTLOG}" &> ${TMPFILE}
 echo "TMPFILE=${TMPFILE}"
 # probabbly rewrite, different hardcoded files, need to figureout how to export
 
 #download test coverage 
-COVERAGE_URL=$( grep "e2e_coverage.txt report is available at" ${TMPFILE} | egrep -o "${WEBDRIVE_URL}.*\.txt" )
+COVERAGE_URL=$( grep "e2e_coverage.txt report is available at" ${TMPFILE} | egrep -o "https://.*\.txt" )
 echo "COVERAGE_URL=${COVERAGE_URL}"
 if [ -z "${COVERAGE_URL}" ]; then
-    echo "Could not parse e2e_coverage.txt URL at ${WEBDRIVE_URL} from test log ${TF_TESTLOG}"
+    echo "Could not parse e2e_coverage.txt URL at from test log ${TF_TESTLOG}"
     exit 5
 fi
 # download the file
 curl --retry 5 -L -O ${COVERAGE_URL}
 #download upstream test coverage 
-COVERAGE_URL=$( grep "upstream_coverage.xml report is available at" ${TMPFILE} | egrep -o "${WEBDRIVE_URL}.*\.xml" )
+COVERAGE_URL=$( grep "upstream_coverage.xml report is available at" ${TMPFILE} | egrep -o "https://.*\.xml" )
 echo "COVERAGE_URL=${COVERAGE_URL}"
 if [ -z "${COVERAGE_URL}" ]; then
-    echo "Could not parse upstream_coverage.xml at ${WEBDRIVE_URL} from test log ${TF_TESTLOG}"
+    echo "Could not parse upstream_coverage.xml from test log ${TF_TESTLOG}"
     exit 5
 fi
 # download the file
