@@ -36,7 +36,7 @@ PROJECT="keylime/rust-keylime"
 # uploads coverage XML files to a web drive
 # currently we are doing that in a job running tests on Fedora-37
 TF_JOB_DESC="testing-farm:fedora-37-x86_64"
-TF_TEST_OUTPUT="/setup/generate_upstream_rust_keylime_code_coverage/output.txt"
+TF_TEST_OUTPUT="/setup/generate_upstream_rust_keylime_code_coverage.*/output.txt"
 TF_ARTIFACTS_URL_PREFIX="https://artifacts.dev.testing-farm.io"
 
 GITHUB_API_PREFIX_URL="https://api.github.com/repos/${PROJECT}"
@@ -128,13 +128,13 @@ fi
 # we will parse artifacts from the log
 if [ -n "${TT_LOG}" ]; then
     cat ${TT_LOG}
-    TF_ARTIFACTS_URL=$( egrep -o "${TF_ARTIFACTS_URL_PREFIX}[^ ]*" ${TT_LOG} )
+    TF_ARTIFACTS_URL=$( grep -E -o "${TF_ARTIFACTS_URL_PREFIX}[^ ]*" ${TT_LOG} )
 fi
 
 # now we have TF_ARTIFACTS_URL so we can proceed with the download
 echo "TF_ARTIFACTS_URL=${TF_ARTIFACTS_URL}"
 
-TF_TESTLOG=$( curl --retry 5 ${TF_ARTIFACTS_URL}/results.xml | egrep -o "${TF_ARTIFACTS_URL}.*${TF_TEST_OUTPUT}" )
+TF_TESTLOG=$( curl --retry 5 ${TF_ARTIFACTS_URL}/results.xml | grep -E -o "${TF_ARTIFACTS_URL}.*${TF_TEST_OUTPUT}" )
 echo "TF_TESTLOG=${TF_TESTLOG}"
 
 # parse the URL of coverage txt file and download it
@@ -143,7 +143,7 @@ echo "TMPFILE=${TMPFILE}"
 # probabbly rewrite, different hardcoded files, need to figureout how to export
 
 #download test coverage 
-COVERAGE_URL=$( grep "e2e_coverage.txt report is available at" ${TMPFILE} | egrep -o "https://.*\.txt" )
+COVERAGE_URL=$( grep "e2e_coverage.txt report is available at" ${TMPFILE} | grep -E -o "https://.*\.txt" )
 echo "COVERAGE_URL=${COVERAGE_URL}"
 if [ -z "${COVERAGE_URL}" ]; then
     echo "Could not parse e2e_coverage.txt URL at from test log ${TF_TESTLOG}"
@@ -152,7 +152,7 @@ fi
 # download the file
 curl --retry 5 -L -O ${COVERAGE_URL}
 #download upstream test coverage 
-COVERAGE_URL=$( grep "upstream_coverage.xml report is available at" ${TMPFILE} | egrep -o "https://.*\.xml" )
+COVERAGE_URL=$( grep "upstream_coverage.xml report is available at" ${TMPFILE} | grep -E -o "https://.*\.xml" )
 echo "COVERAGE_URL=${COVERAGE_URL}"
 if [ -z "${COVERAGE_URL}" ]; then
     echo "Could not parse upstream_coverage.xml from test log ${TF_TESTLOG}"
