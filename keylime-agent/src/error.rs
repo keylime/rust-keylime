@@ -147,3 +147,13 @@ impl From<tss_esapi::Error> for Error {
 }
 
 pub(crate) type Result<T> = std::result::Result<T, Error>;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_error() {
+
+    }
+}
