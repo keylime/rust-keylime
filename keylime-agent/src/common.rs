@@ -53,7 +53,6 @@ pub const AES_BLOCK_SIZE: usize = 16;
 cfg_if::cfg_if! {
     if #[cfg(test)] {
         // Secure mount of tpmfs (False is generally used for development environments)
-        pub static MOUNT_SECURE: bool = false;
 
         pub(crate) fn ima_ml_path_get() -> PathBuf {
             Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -62,7 +61,6 @@ cfg_if::cfg_if! {
                 .join("ascii_runtime_measurements")
         }
     } else {
-        pub static MOUNT_SECURE: bool = true;
 
         pub(crate) fn ima_ml_path_get() -> PathBuf {
             Path::new(IMA_ML).to_path_buf()
