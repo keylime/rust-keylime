@@ -49,6 +49,7 @@ Source1:        rust-keylime-vendor.tar.xz
 ExclusiveArch:  %{rust_arches}
 
 Requires: tpm2-tss
+Requires: util-linux-core
 
 # The keylime-base package provides the keylime user creation. It is available
 # from Fedora 36
@@ -83,7 +84,6 @@ Rust agent for Keylime
 
 mkdir -p %{buildroot}/%{_sharedstatedir}/keylime
 mkdir -p --mode=0700 %{buildroot}/%{_rundir}/keylime
-mkdir -p --mode=0700 %{buildroot}/%{_localstatedir}/log/keylime
 mkdir -p --mode=0700 %{buildroot}/%{_libexecdir}/keylime
 mkdir -p --mode=0700  %{buildroot}/%{_sysconfdir}/keylime
 mkdir -p --mode=0700  %{buildroot}/%{_sysconfdir}/keylime/agent.conf.d
@@ -134,7 +134,6 @@ chown -R keylime:keylime %{_sysconfdir}/keylime
 %{_unitdir}/keylime_agent.service
 %{_unitdir}/var-lib-keylime-secure.mount
 %attr(700,keylime,keylime) %dir %{_rundir}/keylime
-%attr(700,keylime,keylime) %dir %{_localstatedir}/log/keylime
 %attr(700,keylime,keylime) %{_sharedstatedir}/keylime
 %attr(700,keylime,keylime) %{_libexecdir}/keylime
 %{_bindir}/keylime_agent
