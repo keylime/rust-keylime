@@ -55,6 +55,7 @@
        - /functional/tpm-issuer-cert-using-ecc
        - /functional/tpm_policy-sanity-on-localhost
        - /functional/use-multiple-ima-sign-verification-keys
+       - /sanity/keylime-secure_mount
        - /upstream/run_rust_keylime_tests
        - /setup/generate_upstream_rust_keylime_code_coverage
 
