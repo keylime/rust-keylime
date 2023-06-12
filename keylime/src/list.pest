@@ -1,0 +1,21 @@
+WHITESPACE = _{ " " | NEWLINE | "\t" }
+separator  = { "," | NEWLINE | " " | "\t" }
+
+list = { SOI ~ (bracketed | unbracketed) ~ EOI }
+
+bracketed   = { "[" ~ (bracketed_name)* ~ ("," ~ bracketed_name)* ~ ","? ~ "]" }
+unbracketed = { (name)* ~ ("," ~ name)* ~ ","? }
+
+single_content = @{ (!"'" ~ ANY)* }
+single         = ${ "'" ~ single_content ~ "'" }
+
+double_content = @{ (!"\"" ~ ANY)* }
+double         = ${ "\"" ~ double_content ~ "\"" }
+
+unquoted = @{ (!separator ~ ANY)+ }
+
+not_closer         = @{ !("]" | separator) ~ ANY }
+bracketed_unquoted = @{ (!separator ~ !"]" ~ ANY)+ }
+
+name           = { single | double | unquoted }
+bracketed_name = { single | double | bracketed_unquoted }
