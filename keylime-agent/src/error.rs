@@ -89,6 +89,8 @@ pub(crate) enum Error {
     Sender(String),
     #[error("Error receiving internal message: {0}")]
     Receiver(String),
+    #[error("List parser error: {0}")]
+    ListParser(#[from] keylime::list_parser::Error),
     #[error("{0}")]
     Other(String),
 }

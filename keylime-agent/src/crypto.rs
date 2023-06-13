@@ -2,6 +2,7 @@
 // Copyright 2021 Keylime Authors
 
 use base64::{engine::general_purpose, Engine as _};
+use log::*;
 use openssl::{
     asn1::Asn1Time,
     encrypt::Decrypter,
@@ -47,9 +48,26 @@ pub(crate) fn load_x509(input_cert_path: &Path) -> Result<X509> {
 pub(crate) fn load_x509_cert_chain(
     input_cert_path: &Path,
 ) -> Result<Vec<X509>> {
-    let contents = read_to_string(input_cert_path)?;
+    let contents = read_to_string(input_cert_path).map_err(Error::from)?;
 
     X509::stack_from_pem(contents.as_bytes()).map_err(Error::Crypto)
+}
+
+pub(crate) fn load_x509_cert_list(
+    input_cert_list: Vec<&Path>,
+) -> Result<Vec<X509>> {
+    let mut loaded = Vec::<X509>::new();
+    for cert in input_cert_list {
+        match load_x509_cert_chain(cert) {
+            Ok(mut s) => {
+                loaded.append(&mut s);
+            }
+            Err(e) => {
+                warn!("Could not load certs from {}: {}", cert.display(), e);
+            }
+        }
+    }
+    Ok(loaded)
 }
 
 /// Write a X509 certificate to a file in PEM format
