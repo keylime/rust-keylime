@@ -186,7 +186,7 @@ mod tests {
         let port = uri[1].parse().unwrap(); //#[allow_ci]
 
         let mock_data = [0u8; 1];
-        let priv_key = crypto::rsa_generate(2048).unwrap(); //#[allow_ci]
+        let priv_key = crypto::testing::rsa_generate(2048).unwrap(); //#[allow_ci]
         let cert = crypto::generate_x509(&priv_key, "uuid").unwrap(); //#[allow_ci]
         let response = do_register_agent(
             ip,
@@ -228,7 +228,7 @@ mod tests {
         let port = uri[1].parse().unwrap(); //#[allow_ci]
 
         let mock_data = [0u8; 1];
-        let priv_key = crypto::rsa_generate(2048).unwrap(); //#[allow_ci]
+        let priv_key = crypto::testing::rsa_generate(2048).unwrap(); //#[allow_ci]
         let cert = crypto::generate_x509(&priv_key, "uuid").unwrap(); //#[allow_ci]
         let response = do_register_agent(
             ip,
@@ -266,7 +266,7 @@ mod tests {
         let port = uri[1].parse().unwrap(); //#[allow_ci]
 
         let mock_data = [0u8; 1];
-        let priv_key = crypto::rsa_generate(2048).unwrap(); //#[allow_ci]
+        let priv_key = crypto::testing::rsa_generate(2048).unwrap(); //#[allow_ci]
         let cert = crypto::generate_x509(&priv_key, "uuid").unwrap(); //#[allow_ci]
         let response = do_register_agent(
             ip,

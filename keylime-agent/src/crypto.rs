@@ -45,9 +45,7 @@ pub(crate) fn load_x509(input_cert_path: &Path) -> Result<X509> {
     Ok(cert)
 }
 
-pub(crate) fn load_x509_cert_chain(
-    input_cert_path: &Path,
-) -> Result<Vec<X509>> {
+fn load_x509_cert_chain(input_cert_path: &Path) -> Result<Vec<X509>> {
     let contents = read_to_string(input_cert_path).map_err(Error::from)?;
 
     X509::stack_from_pem(contents.as_bytes()).map_err(Error::Crypto)
@@ -126,7 +124,7 @@ pub(crate) fn write_key_pair(
     Ok(())
 }
 
-pub(crate) fn rsa_generate(key_size: u32) -> Result<PKey<Private>> {
+fn rsa_generate(key_size: u32) -> Result<PKey<Private>> {
     PKey::from_rsa(Rsa::generate(key_size)?).map_err(Error::Crypto)
 }
 
@@ -138,9 +136,7 @@ pub(crate) fn rsa_generate_pair(
     Ok((public, private))
 }
 
-pub(crate) fn pkey_pub_from_priv(
-    privkey: PKey<Private>,
-) -> Result<PKey<Public>> {
+fn pkey_pub_from_priv(privkey: PKey<Private>) -> Result<PKey<Public>> {
     match privkey.id() {
         Id::RSA => {
             let rsa = Rsa::from_public_components(
@@ -440,6 +436,10 @@ pub mod testing {
         result.extend(ciphertext);
         result.extend(tag);
         Ok(result)
+    }
+
+    pub(crate) fn rsa_generate(key_size: u32) -> Result<PKey<Private>> {
+        super::rsa_generate(key_size)
     }
 }
 
