@@ -448,7 +448,7 @@ pub mod testing {
 mod tests {
     use super::*;
     use openssl::rsa::Rsa;
-    use std::path::Path;
+    use std::{fs, path::Path};
     use testing::{encrypt_aead, rsa_import_pair, rsa_oaep_encrypt};
 
     // compare with the result from python output
@@ -674,5 +674,61 @@ mod tests {
             verifier.update(message).unwrap(); //#[allow_ci]
             assert!(verifier.verify(&signature).unwrap()); //#[allow_ci]
         }
+    }
+
+    #[test]
+    fn test_x509() {
+        let tempdir = tempfile::tempdir().unwrap(); //#[allow_ci]
+
+        let (pubkey, privkey) = rsa_generate_pair(2048).unwrap(); //#[allow_ci]
+
+        let r = generate_x509(&privkey, "uuidA");
+        assert!(r.is_ok());
+        let cert_a = r.unwrap(); //#[allow_ci]
+        let cert_a_path = tempdir.path().join("cert_a.pem");
+        let r = write_x509(&cert_a, &cert_a_path);
+        assert!(r.is_ok());
+        assert!(cert_a_path.exists());
+
+        let r = generate_x509(&privkey, "uuidB");
+        assert!(r.is_ok());
+        let cert_b = r.unwrap(); //#[allow_ci]
+        let cert_b_path = tempdir.path().join("cert_b.pem");
+        let r = write_x509(&cert_b, &cert_b_path);
+        assert!(r.is_ok());
+        assert!(cert_b_path.exists());
+
+        let loaded_a = load_x509(&cert_a_path);
+        assert!(loaded_a.is_ok());
+        let loaded_a = loaded_a.unwrap(); //#[allow_ci]
+
+        let a_str = read_to_string(&cert_a_path).unwrap(); //#[allow_ci]
+        let b_str = read_to_string(&cert_b_path).unwrap(); //#[allow_ci]
+        let concat = a_str + &b_str;
+        let concat_path = tempdir.path().join("concat.pem");
+        fs::write(&concat_path, concat).unwrap(); //#[allow_ci]
+
+        // Expect error as there are more than one certificate
+        let r = load_x509(&concat_path);
+        assert!(r.is_err());
+
+        // Loading multiple certs should work when loading chain
+        let r = load_x509_cert_chain(&concat_path);
+        assert!(r.is_ok());
+        let chain = r.unwrap(); //#[allow_ci]
+        assert!(chain.len() == 2);
+
+        // Test adding loading certs from a list, including an non-existing file
+        let non_existing =
+            Path::new("/non_existing_path/non_existing_cert.pem");
+        let cert_list: Vec<&Path> =
+            vec![&cert_a_path, non_existing, &cert_b_path];
+        let r = load_x509_cert_list(cert_list);
+        assert!(r.is_ok());
+        let loaded_list = r.unwrap(); //#[allow_ci]
+        assert!(loaded_list.len() == 2);
+
+        let r = generate_mtls_context(&loaded_a, &privkey, loaded_list);
+        assert!(r.is_ok());
     }
 }
