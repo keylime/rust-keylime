@@ -7,8 +7,9 @@ use config::{
     File, FileFormat, Map, Source, Value,
 };
 use glob::glob;
-use keylime::algorithms::{
-    EncryptionAlgorithm, HashAlgorithm, SignAlgorithm,
+use keylime::{
+    algorithms::{EncryptionAlgorithm, HashAlgorithm, SignAlgorithm},
+    list_parser::parse_list,
 };
 use log::*;
 use serde::{Deserialize, Serialize};
@@ -652,12 +653,19 @@ fn config_translate_keywords(
         DEFAULT_SERVER_CERT,
     );
 
-    let mut trusted_client_ca = config_get_file_path(
-        "trusted_client_ca",
-        &config.agent.trusted_client_ca,
-        keylime_dir,
-        DEFAULT_TRUSTED_CLIENT_CA,
-    );
+    let trusted_client_ca: String =
+        parse_list(&config.agent.trusted_client_ca)?
+            .iter()
+            .map(|t| {
+                config_get_file_path(
+                    "trusted_client_ca",
+                    t,
+                    keylime_dir,
+                    DEFAULT_TRUSTED_CLIENT_CA,
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
 
     let ek_handle = match config.agent.ek_handle.as_ref() {
         "generate" => "".to_string(),

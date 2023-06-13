@@ -57,8 +57,7 @@ use futures::{
     future::{ok, TryFutureExt},
     try_join,
 };
-use keylime::ima::MeasurementList;
-use keylime::tpm;
+use keylime::{ima::MeasurementList, list_parser::parse_list, tpm};
 use log::*;
 use openssl::{
     pkey::{PKey, Private, Public},
@@ -451,37 +450,35 @@ async fn main() -> Result<()> {
             }
         };
 
-        let ca_cert_path = match config.agent.trusted_client_ca.as_ref() {
+        let trusted_client_ca = match config.agent.trusted_client_ca.as_ref()
+        {
             "" => {
                 error!("Agent mTLS is enabled, but trusted_client_ca option was not provided");
                 return Err(Error::Configuration("Agent mTLS is enabled, but trusted_client_ca option was not provided".to_string()));
             }
-            path => Path::new(path),
+            l => l,
         };
 
-        if !ca_cert_path.exists() {
+        // The trusted_client_ca config option is a list, parse to obtain a vector
+        let certs_list = parse_list(trusted_client_ca)?;
+        if certs_list.is_empty() {
             error!(
-                "Trusted client CA certificate not found: {} does not exist",
-                ca_cert_path.display()
+                "Trusted client CA certificate list is empty: could not load any certificate"
             );
-            return Err(Error::Configuration(format!(
-                "Trusted client CA certificate not found: {} does not exist",
-                ca_cert_path.display()
-            )));
+            return Err(Error::Configuration(
+                "Trusted client CA certificate list is empty: could not load any certificate".to_string()
+            ));
         }
 
-        let keylime_ca_certs =
-            match crypto::load_x509_cert_chain(ca_cert_path) {
-                Ok(t) => Ok(t),
-                Err(e) => {
-                    error!(
-                        "Failed to load trusted CA certificate {}: {}",
-                        ca_cert_path.display(),
-                        e
-                    );
-                    Err(e)
-                }
-            }?;
+        let keylime_ca_certs = match crypto::load_x509_cert_list(
+            certs_list.iter().map(Path::new).collect(),
+        ) {
+            Ok(t) => Ok(t),
+            Err(e) => {
+                error!("Failed to load trusted CA certificates: {}", e);
+                Err(e)
+            }
+        }?;
 
         mtls_cert = Some(&cert);
         ssl_context = Some(crypto::generate_mtls_context(
