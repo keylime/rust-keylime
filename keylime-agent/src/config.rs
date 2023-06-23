@@ -1017,4 +1017,45 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn test_config_get_file_path() {
+        let workdir = Path::new("/workdir");
+        let default = "default-file-name";
+
+        let list_str = "[\"\", default, '', /absolute/path, relative/path, \"with spaces\", \"with,commas\", \"double_quotes\", 'single_quotes']";
+
+        let list = parse_list(list_str).unwrap(); //#[allow_ci]
+
+        assert_eq!(
+            vec![
+                "default",
+                "/absolute/path",
+                "relative/path",
+                "\"with spaces\"",
+                "\"with,commas\"",
+                "\"double_quotes\"",
+                "'single_quotes'"
+            ],
+            list
+        );
+
+        let translated: Vec<String> = list
+            .iter()
+            .map(|e| config_get_file_path("test", e, workdir, default))
+            .collect();
+
+        assert_eq!(
+            vec![
+                "/workdir/default-file-name",
+                "/absolute/path",
+                "/workdir/relative/path",
+                "/workdir/\"with spaces\"",
+                "/workdir/\"with,commas\"",
+                "/workdir/\"double_quotes\"",
+                "/workdir/'single_quotes'"
+            ],
+            translated
+        );
+    }
 }
