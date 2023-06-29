@@ -78,9 +78,9 @@ use tokio::{
 };
 use tss_esapi::{
     handles::KeyHandle,
-    interface_types::algorithm::AsymmetricAlgorithm,
+    interface_types::algorithm::{AsymmetricAlgorithm, HashingAlgorithm},
     interface_types::resource_handles::Hierarchy,
-    structures::{Auth, PublicBuffer},
+    structures::{Auth, Data, Digest, MaxBuffer, PublicBuffer},
     traits::Marshall,
     Context,
 };
@@ -278,6 +278,24 @@ async fn main() -> Result<()> {
         config.agent.tpm_signing_alg.as_ref(),
     )?;
 
+    let (asym_alg, name_alg) = tpm::get_idevid_template(
+        config.agent.iak_idevid_template.as_str(),
+        config.agent.iak_idevid_asymmetric_alg.as_str(),
+        config.agent.iak_idevid_name_alg.as_str(),
+    )?;
+
+    let (iak, idevid) = if config.agent.enable_iak_idevid {
+        let idevid = ctx.create_idevid(asym_alg, name_alg)?;
+        info!("IDevID created.");
+        // Flush after creating to make room for AK and EK and IAK
+        ctx.as_mut().flush_context(idevid.handle.into())?;
+        let iak = ctx.create_iak(asym_alg, name_alg)?;
+        info!("IAK created.");
+        (Some(iak), Some(idevid))
+    } else {
+        (None, None)
+    };
+
     // Gather EK values and certs
     let ek_result = match config.agent.ek_handle.as_ref() {
         "" => ctx.create_ek(tpm_encryption_alg, None)?,
@@ -384,6 +402,26 @@ async fn main() -> Result<()> {
     }
 
     info!("Agent UUID: {}", agent_uuid);
+
+    let (attest, signature) = if config.agent.enable_iak_idevid {
+        let qualifying_data = config.agent.uuid.as_bytes();
+        let (attest, signature) = ctx.certify_credential_with_iak(
+            Data::try_from(qualifying_data).unwrap(), //#[allow_ci]
+            ak_handle,
+            iak.as_ref().unwrap().handle, //#[allow_ci]
+        )?;
+        info!("AK certified with IAK.");
+
+        // // For debugging certify(), the following checks the generated signature
+        // let max_b = MaxBuffer::try_from(attest.clone().marshall()?)?;
+        // let (hashed_attest, _) = ctx.inner.hash(max_b, HashingAlgorithm::Sha256, Hierarchy::Endorsement,)?;
+        // println!("{:?}", hashed_attest);
+        // println!("{:?}", signature);
+        // println!("{:?}", ctx.inner.verify_signature(iak.as_ref().unwrap().handle, hashed_attest, signature.clone())?); //#[allow_ci]
+        (Some(attest), Some(signature))
+    } else {
+        (None, None)
+    };
 
     // Generate key pair for secure transmission of u, v keys. The u, v
     // keys are two halves of the key used to decrypt the workload after
@@ -497,18 +535,60 @@ async fn main() -> Result<()> {
 
     {
         // Request keyblob material
-        let keyblob = registrar_agent::do_register_agent(
-            config.agent.registrar_ip.as_ref(),
-            config.agent.registrar_port,
-            &agent_uuid,
-            &PublicBuffer::try_from(ek_result.public.clone())?.marshall()?,
-            ek_result.ek_cert,
-            &PublicBuffer::try_from(ak.public)?.marshall()?,
-            mtls_cert,
-            config.agent.contact_ip.as_ref(),
-            config.agent.contact_port,
-        )
-        .await?;
+        let keyblob = if config.agent.enable_iak_idevid {
+            let (Some(iak), Some(idevid), Some(attest), Some(signature)) =
+                (iak, idevid, attest, signature)
+            else {
+                error!(
+                    "IDevID and IAK are enabled but could not be generated"
+                );
+                return Err(Error::Configuration(
+                    "IDevID and IAK are enabled but could not be generated"
+                        .to_string(),
+                ));
+            };
+            registrar_agent::do_register_agent(
+                config.agent.registrar_ip.as_ref(),
+                config.agent.registrar_port,
+                &agent_uuid,
+                &PublicBuffer::try_from(ek_result.public.clone())?
+                    .marshall()?,
+                ek_result.ek_cert,
+                &PublicBuffer::try_from(ak.public)?.marshall()?,
+                Some(
+                    &PublicBuffer::try_from(iak.public.clone())?
+                        .marshall()?,
+                ),
+                Some(
+                    &PublicBuffer::try_from(idevid.public.clone())?
+                        .marshall()?,
+                ),
+                Some(attest.marshall()?),
+                Some(signature.marshall()?),
+                mtls_cert,
+                config.agent.contact_ip.as_ref(),
+                config.agent.contact_port,
+            )
+            .await?
+        } else {
+            registrar_agent::do_register_agent(
+                config.agent.registrar_ip.as_ref(),
+                config.agent.registrar_port,
+                &agent_uuid,
+                &PublicBuffer::try_from(ek_result.public.clone())?
+                    .marshall()?,
+                ek_result.ek_cert,
+                &PublicBuffer::try_from(ak.public)?.marshall()?,
+                None,
+                None,
+                None,
+                None,
+                mtls_cert,
+                config.agent.contact_ip.as_ref(),
+                config.agent.contact_port,
+            )
+            .await?
+        };
 
         info!("SUCCESS: Agent {} registered", &agent_uuid);
 

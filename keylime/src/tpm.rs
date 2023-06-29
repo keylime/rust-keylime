@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2021 Keylime Authors
 
-use crate::algorithms::{EncryptionAlgorithm, HashAlgorithm, SignAlgorithm};
+use crate::algorithms::{
+    AlgorithmError, EncryptionAlgorithm, HashAlgorithm, SignAlgorithm,
+};
 use base64::{engine::general_purpose, Engine as _};
 use log::*;
 use std::convert::{TryFrom, TryInto};
@@ -22,7 +24,9 @@ use tss_esapi::{
         pcr::{read_all, PcrData},
         DefaultKey,
     },
-    attributes::session::SessionAttributesBuilder,
+    attributes::{
+        object::ObjectAttributesBuilder, session::SessionAttributesBuilder,
+    },
     constants::{
         response_code::Tss2ResponseCodeKind, session_type::SessionType,
     },
@@ -30,12 +34,20 @@ use tss_esapi::{
         AuthHandle, KeyHandle, PcrHandle, PersistentTpmHandle, TpmHandle,
     },
     interface_types::{
-        algorithm::HashingAlgorithm, session_handles::AuthSession,
+        algorithm::{AsymmetricAlgorithm, HashingAlgorithm, PublicAlgorithm},
+        ecc::EccCurve,
+        key_bits::RsaKeyBits,
+        resource_handles::Hierarchy,
+        session_handles::AuthSession,
     },
     structures::{
-        Attest, AttestInfo, Digest, DigestValues, EncryptedSecret, IdObject,
-        PcrSelectionList, PcrSelectionListBuilder, PcrSlot, Signature,
-        SignatureScheme,
+        Attest, AttestInfo, Data, Digest, DigestValues, EccParameter,
+        EccPoint, EccScheme, EncryptedSecret, HashScheme, IdObject,
+        KeyDerivationFunctionScheme, PcrSelectionList,
+        PcrSelectionListBuilder, PcrSlot, PublicBuilder,
+        PublicEccParametersBuilder, PublicKeyRsa, PublicRsaParametersBuilder,
+        RsaExponent, RsaScheme, Signature, SignatureScheme,
+        SymmetricDefinitionObject,
     },
     tcti_ldr::TctiNameConf,
     traits::Marshall,
@@ -48,6 +60,75 @@ pub const MAX_NONCE_SIZE: usize = 64;
 const TPML_DIGEST_SIZE: usize = std::mem::size_of::<TPML_DIGEST>();
 const TPML_PCR_SELECTION_SIZE: usize =
     std::mem::size_of::<TPML_PCR_SELECTION>();
+
+// IDevID policy and unique constants
+const IDEVID_AUTH_POLICY_SHA512: [u8; 64] = [
+    0x7d, 0xd7, 0x50, 0x0f, 0xd6, 0xc1, 0xb9, 0x4f, 0x97, 0xa6, 0xaf, 0x91,
+    0x0d, 0xa1, 0x47, 0x30, 0x1e, 0xf2, 0x8f, 0x66, 0x2f, 0xee, 0x06, 0xf2,
+    0x25, 0xa4, 0xcc, 0xad, 0xda, 0x3b, 0x4e, 0x6b, 0x38, 0xe6, 0x6b, 0x2f,
+    0x3a, 0xd5, 0xde, 0xe1, 0xa0, 0x50, 0x3c, 0xd2, 0xda, 0xed, 0xb1, 0xe6,
+    0x8c, 0xfe, 0x4f, 0x84, 0xb0, 0x3a, 0x8c, 0xd2, 0x2b, 0xb6, 0xa9, 0x76,
+    0xf0, 0x71, 0xa7, 0x2f,
+];
+const IDEVID_AUTH_POLICY_SHA384: [u8; 48] = [
+    0x4d, 0xb1, 0xaa, 0x83, 0x6d, 0x0b, 0x56, 0x15, 0xdf, 0x6e, 0xe5, 0x3a,
+    0x40, 0xef, 0x70, 0xc6, 0x1c, 0x21, 0x7f, 0x43, 0x03, 0xd4, 0x46, 0x95,
+    0x92, 0x59, 0x72, 0xbc, 0x92, 0x70, 0x06, 0xcf, 0xa5, 0xcb, 0xdf, 0x6d,
+    0xc1, 0x8c, 0x4d, 0xbe, 0x32, 0x9b, 0x2f, 0x15, 0x42, 0xc3, 0xdd, 0x33,
+];
+const IDEVID_AUTH_POLICY_SHA256: [u8; 32] = [
+    0xad, 0x6b, 0x3a, 0x22, 0x84, 0xfd, 0x69, 0x8a, 0x07, 0x10, 0xbf, 0x5c,
+    0xc1, 0xb9, 0xbd, 0xf1, 0x5e, 0x25, 0x32, 0xe3, 0xf6, 0x01, 0xfa, 0x4b,
+    0x93, 0xa6, 0xa8, 0xfa, 0x8d, 0xe5, 0x79, 0xea,
+];
+const UNIQUE_IDEVID: [u8; 6] = [0x49, 0x44, 0x45, 0x56, 0x49, 0x44];
+
+//  IAK policy and unique constants
+const IAK_AUTH_POLICY_SHA512: [u8; 64] = [
+    0x80, 0x60, 0xd1, 0xfb, 0x31, 0x71, 0x6a, 0x29, 0xe4, 0x8a, 0x6e, 0x5f,
+    0xec, 0xe0, 0x88, 0xbc, 0xfc, 0x1b, 0x27, 0x8f, 0xc1, 0x62, 0x25, 0x5e,
+    0x81, 0xc3, 0xec, 0xa3, 0x54, 0x4c, 0xd4, 0x4a, 0xf9, 0x44, 0x10, 0xc3,
+    0x71, 0x5d, 0x56, 0x1c, 0xcc, 0xd9, 0xe3, 0x9a, 0x6c, 0xb2, 0x64, 0x6d,
+    0x43, 0x53, 0x5b, 0xb5, 0x4e, 0xa8, 0x87, 0x10, 0xde, 0xb5, 0xf7, 0x83,
+    0x6b, 0xd9, 0xb5, 0x86,
+];
+const IAK_AUTH_POLICY_SHA384: [u8; 48] = [
+    0x12, 0x9d, 0x94, 0xeb, 0xf8, 0x45, 0x56, 0x65, 0x2c, 0x6e, 0xef, 0x43,
+    0xbb, 0xb7, 0x57, 0x51, 0x2a, 0xc8, 0x7e, 0x52, 0xbe, 0x7b, 0x34, 0x9c,
+    0xa6, 0xce, 0x4d, 0x82, 0x6f, 0x74, 0x9f, 0xcf, 0x67, 0x2f, 0x51, 0x71,
+    0x6c, 0x5c, 0xbb, 0x60, 0x5f, 0x31, 0x3b, 0xf3, 0x45, 0xaa, 0xb3, 0x12,
+];
+const IAK_AUTH_POLICY_SHA256: [u8; 32] = [
+    0x54, 0x37, 0x18, 0x23, 0x26, 0xe4, 0x14, 0xfc, 0xa7, 0x97, 0xd5, 0xf1,
+    0x74, 0x61, 0x5a, 0x16, 0x41, 0xf6, 0x12, 0x55, 0x79, 0x7c, 0x3a, 0x2b,
+    0x22, 0xc2, 0x1d, 0x12, 0x0b, 0x2d, 0x1e, 0x07,
+];
+const UNIQUE_IAK: [u8; 3] = [0x49, 0x41, 0x4b];
+
+/// Return the asymmetric and name algorithms, either by matching to a template or using the user specified algorithms if no template is set
+pub fn get_idevid_template(
+    template_str: &str,
+    asym_alg_str: &str,
+    name_alg_str: &str,
+) -> std::result::Result<
+    (AsymmetricAlgorithm, HashingAlgorithm),
+    AlgorithmError,
+> {
+    let (asym_alg, name_alg) = match template_str {
+        "H-1" => (AsymmetricAlgorithm::Rsa, HashingAlgorithm::Sha256),
+        "H-2" => (AsymmetricAlgorithm::Ecc, HashingAlgorithm::Sha256),
+        "H-3" => (AsymmetricAlgorithm::Ecc, HashingAlgorithm::Sha384),
+        "H-4" => (AsymmetricAlgorithm::Ecc, HashingAlgorithm::Sha512),
+        "H-5" => (AsymmetricAlgorithm::Ecc, HashingAlgorithm::Sm3_256),
+        _ => (
+            AsymmetricAlgorithm::from(EncryptionAlgorithm::try_from(
+                asym_alg_str,
+            )?),
+            HashingAlgorithm::from(HashAlgorithm::try_from(name_alg_str)?),
+        ),
+    };
+    Ok((asym_alg, name_alg))
+}
 
 #[derive(Error, Debug)]
 pub enum TpmError {
@@ -103,6 +184,32 @@ pub struct EKResult {
 pub struct AKResult {
     pub public: tss_esapi::structures::Public,
     pub private: tss_esapi::structures::Private,
+}
+
+/// Holds the output of create_iak.
+#[derive(Clone, Debug)]
+pub struct IAKResult {
+    pub public: tss_esapi::structures::Public,
+    pub handle: tss_esapi::handles::KeyHandle,
+}
+
+/// Holds the output of create_idevid.
+#[derive(Clone, Debug)]
+pub struct IDevIDResult {
+    pub public: tss_esapi::structures::Public,
+    pub handle: tss_esapi::handles::KeyHandle,
+}
+
+/// Holds the Public result from create_idevid_public_from_default_template
+#[derive(Clone, Debug)]
+pub struct IDevIDPublic {
+    pub public: tss_esapi::structures::Public,
+}
+
+/// Holds the Public result from create_iak_public_from_default_template
+#[derive(Clone, Debug)]
+pub struct IAKPublic {
+    pub public: tss_esapi::structures::Public,
 }
 
 /// Wrapper around tss_esapi::Context.
@@ -225,6 +332,345 @@ impl Context {
         Ok(ak_handle)
     }
 
+    // Creates IDevID
+    pub fn create_idevid(
+        &mut self,
+        asym_alg: AsymmetricAlgorithm,
+        name_alg: HashingAlgorithm,
+    ) -> Result<IDevIDResult> {
+        let key_pub = Self::create_idevid_public_from_default_template(
+            asym_alg, name_alg,
+        );
+
+        let pcr_selection_list = PcrSelectionListBuilder::new()
+            .with_selection(
+                HashingAlgorithm::Sha256,
+                &[
+                    PcrSlot::Slot0,
+                    PcrSlot::Slot1,
+                    PcrSlot::Slot2,
+                    PcrSlot::Slot3,
+                    PcrSlot::Slot4,
+                    PcrSlot::Slot5,
+                    PcrSlot::Slot6,
+                    PcrSlot::Slot7,
+                ],
+            )
+            .build()
+            .expect("Failed to build PcrSelectionList");
+
+        let primary_key = self
+            .inner
+            .execute_with_nullauth_session(|ctx| {
+                ctx.create_primary(
+                    Hierarchy::Endorsement,
+                    key_pub.unwrap().public, //#[allow_ci]
+                    None,
+                    None,
+                    None,
+                    Some(pcr_selection_list),
+                )
+            })
+            .unwrap(); //#[allow_ci]
+
+        Ok(IDevIDResult {
+            public: primary_key.out_public,
+            handle: primary_key.key_handle,
+        })
+    }
+
+    /// Mount the template for IDevID
+
+    pub(crate) fn create_idevid_public_from_default_template(
+        asym_alg: AsymmetricAlgorithm,
+        name_alg: HashingAlgorithm,
+    ) -> Result<IDevIDPublic> {
+        let obj_attrs_builder = ObjectAttributesBuilder::new()
+            .with_fixed_tpm(true)
+            .with_st_clear(false)
+            .with_fixed_parent(true)
+            .with_sensitive_data_origin(true)
+            .with_user_with_auth(true)
+            .with_admin_with_policy(true)
+            .with_no_da(false)
+            .with_encrypted_duplication(false)
+            .with_sign_encrypt(true)
+            .with_decrypt(false)
+            // restricted=0 for DevIDs
+            .with_restricted(false);
+
+        let obj_attrs = obj_attrs_builder.build()?;
+
+        let (auth_policy, key_bits, curve_id) = match name_alg {
+            HashingAlgorithm::Sha256 => (
+                IDEVID_AUTH_POLICY_SHA256[0..32].to_vec(),
+                RsaKeyBits::Rsa2048,
+                EccCurve::NistP256,
+            ),
+            HashingAlgorithm::Sm3_256 => (
+                IDEVID_AUTH_POLICY_SHA256[0..32].to_vec(),
+                RsaKeyBits::Rsa2048,
+                EccCurve::Sm2P256,
+            ),
+            HashingAlgorithm::Sha384 => (
+                IDEVID_AUTH_POLICY_SHA384[0..48].to_vec(),
+                RsaKeyBits::Rsa3072,
+                EccCurve::NistP384,
+            ),
+            HashingAlgorithm::Sha512 => (
+                IDEVID_AUTH_POLICY_SHA512[0..64].to_vec(),
+                RsaKeyBits::Rsa4096,
+                EccCurve::NistP521,
+            ),
+            _ => (
+                IDEVID_AUTH_POLICY_SHA256[0..32].to_vec(),
+                RsaKeyBits::Rsa2048,
+                EccCurve::NistP256,
+            ),
+        };
+
+        let key_builder = match asym_alg {
+            AsymmetricAlgorithm::Rsa => PublicBuilder::new()
+                .with_public_algorithm(PublicAlgorithm::Rsa)
+                .with_name_hashing_algorithm(name_alg)
+                .with_object_attributes(obj_attrs)
+                .with_auth_policy(Digest::try_from(auth_policy)?)
+                .with_rsa_parameters(
+                    PublicRsaParametersBuilder::new()
+                        .with_symmetric(SymmetricDefinitionObject::Null)
+                        .with_scheme(RsaScheme::Null)
+                        .with_key_bits(key_bits)
+                        .with_exponent(RsaExponent::default())
+                        .with_is_signing_key(obj_attrs.sign_encrypt())
+                        .with_is_decryption_key(obj_attrs.decrypt())
+                        .with_restricted(obj_attrs.restricted())
+                        .build()?,
+                )
+                .with_rsa_unique_identifier(PublicKeyRsa::try_from(
+                    &UNIQUE_IDEVID[0..6],
+                )?),
+            AsymmetricAlgorithm::Ecc => PublicBuilder::new()
+                .with_public_algorithm(PublicAlgorithm::Ecc)
+                .with_name_hashing_algorithm(name_alg)
+                .with_object_attributes(obj_attrs)
+                .with_auth_policy(Digest::try_from(auth_policy)?)
+                .with_ecc_parameters(
+                    PublicEccParametersBuilder::new()
+                        .with_symmetric(SymmetricDefinitionObject::Null)
+                        .with_ecc_scheme(EccScheme::EcDsa(HashScheme::new(
+                            name_alg,
+                        )))
+                        .with_curve(curve_id)
+                        .with_key_derivation_function_scheme(
+                            KeyDerivationFunctionScheme::Null,
+                        )
+                        .with_is_signing_key(obj_attrs.sign_encrypt())
+                        .with_is_decryption_key(obj_attrs.decrypt())
+                        .with_restricted(obj_attrs.restricted())
+                        .build()?,
+                )
+                .with_ecc_unique_identifier(EccPoint::new(
+                    EccParameter::try_from(&UNIQUE_IDEVID[0..6])?,
+                    EccParameter::try_from(&UNIQUE_IDEVID[0..6])?,
+                )),
+            // Defaulting to RSA on null
+            AsymmetricAlgorithm::Null => PublicBuilder::new()
+                .with_public_algorithm(PublicAlgorithm::Rsa)
+                .with_name_hashing_algorithm(HashingAlgorithm::Sha256)
+                .with_object_attributes(obj_attrs)
+                .with_auth_policy(Digest::try_from(
+                    IDEVID_AUTH_POLICY_SHA256[0..32].to_vec(),
+                )?)
+                .with_rsa_parameters(
+                    PublicRsaParametersBuilder::new()
+                        .with_symmetric(SymmetricDefinitionObject::Null)
+                        .with_scheme(RsaScheme::Null)
+                        .with_key_bits(RsaKeyBits::Rsa2048)
+                        .with_exponent(RsaExponent::default())
+                        .with_is_signing_key(obj_attrs.sign_encrypt())
+                        .with_is_decryption_key(obj_attrs.decrypt())
+                        .with_restricted(obj_attrs.decrypt())
+                        .build()?,
+                )
+                .with_rsa_unique_identifier(PublicKeyRsa::try_from(
+                    &UNIQUE_IDEVID[0..6],
+                )?),
+        };
+
+        Ok(IDevIDPublic {
+            public: key_builder.build().unwrap(), //#[allow_ci]
+        })
+    }
+
+    // Creates IAK
+    pub fn create_iak(
+        &mut self,
+        asym_alg: AsymmetricAlgorithm,
+        name_alg: HashingAlgorithm,
+    ) -> Result<IAKResult> {
+        let key_pub =
+            Self::create_iak_public_from_default_template(asym_alg, name_alg);
+
+        let pcr_selection_list = PcrSelectionListBuilder::new()
+            .with_selection(
+                HashingAlgorithm::Sha256,
+                &[
+                    PcrSlot::Slot0,
+                    PcrSlot::Slot1,
+                    PcrSlot::Slot2,
+                    PcrSlot::Slot3,
+                    PcrSlot::Slot4,
+                    PcrSlot::Slot5,
+                    PcrSlot::Slot6,
+                    PcrSlot::Slot7,
+                ],
+            )
+            .build()
+            .expect("Failed to build PcrSelectionList");
+
+        let primary_key = self
+            .inner
+            .execute_with_nullauth_session(|ctx| {
+                ctx.create_primary(
+                    Hierarchy::Endorsement,
+                    key_pub.unwrap().public, //#[allow_ci]
+                    None,
+                    None,
+                    None,
+                    Some(pcr_selection_list),
+                )
+            })
+            .unwrap(); //#[allow_ci]
+
+        Ok(IAKResult {
+            public: primary_key.out_public,
+            handle: primary_key.key_handle,
+        })
+    }
+
+    /// Mount the template for IAK
+    pub(crate) fn create_iak_public_from_default_template(
+        asym_alg: AsymmetricAlgorithm,
+        name_alg: HashingAlgorithm,
+    ) -> Result<IAKPublic> {
+        let obj_attrs_builder = ObjectAttributesBuilder::new()
+            .with_fixed_tpm(true)
+            .with_st_clear(false)
+            .with_fixed_parent(true)
+            .with_sensitive_data_origin(true)
+            .with_user_with_auth(true)
+            .with_admin_with_policy(true)
+            .with_no_da(false)
+            .with_encrypted_duplication(false)
+            .with_sign_encrypt(true)
+            .with_decrypt(false)
+            // restricted=1 for AKs
+            .with_restricted(true);
+
+        let obj_attrs = obj_attrs_builder.build()?;
+
+        let (auth_policy, key_bits, curve_id) = match name_alg {
+            HashingAlgorithm::Sha256 => (
+                IAK_AUTH_POLICY_SHA256[0..32].to_vec(),
+                RsaKeyBits::Rsa2048,
+                EccCurve::NistP256,
+            ),
+            HashingAlgorithm::Sm3_256 => (
+                IAK_AUTH_POLICY_SHA256[0..32].to_vec(),
+                RsaKeyBits::Rsa2048,
+                EccCurve::Sm2P256,
+            ),
+            HashingAlgorithm::Sha384 => (
+                IAK_AUTH_POLICY_SHA384[0..48].to_vec(),
+                RsaKeyBits::Rsa3072,
+                EccCurve::NistP384,
+            ),
+            HashingAlgorithm::Sha512 => (
+                IAK_AUTH_POLICY_SHA512[0..64].to_vec(),
+                RsaKeyBits::Rsa2048,
+                EccCurve::NistP521,
+            ),
+            _ => (
+                IAK_AUTH_POLICY_SHA256[0..32].to_vec(),
+                RsaKeyBits::Rsa2048,
+                EccCurve::NistP256,
+            ),
+        };
+
+        let key_builder = match asym_alg {
+            AsymmetricAlgorithm::Rsa => PublicBuilder::new()
+                .with_public_algorithm(PublicAlgorithm::Rsa)
+                .with_name_hashing_algorithm(name_alg)
+                .with_object_attributes(obj_attrs)
+                .with_auth_policy(Digest::try_from(auth_policy)?)
+                .with_rsa_parameters(
+                    PublicRsaParametersBuilder::new()
+                        .with_symmetric(SymmetricDefinitionObject::Null)
+                        .with_scheme(RsaScheme::RsaPss(HashScheme::new(
+                            name_alg,
+                        )))
+                        .with_key_bits(key_bits)
+                        .with_exponent(RsaExponent::default())
+                        .with_is_signing_key(obj_attrs.sign_encrypt())
+                        .with_is_decryption_key(obj_attrs.decrypt())
+                        .with_restricted(obj_attrs.restricted())
+                        .build()?,
+                )
+                .with_rsa_unique_identifier(PublicKeyRsa::try_from(
+                    &UNIQUE_IAK[0..3],
+                )?),
+            AsymmetricAlgorithm::Ecc => PublicBuilder::new()
+                .with_public_algorithm(PublicAlgorithm::Ecc)
+                .with_name_hashing_algorithm(name_alg)
+                .with_object_attributes(obj_attrs)
+                .with_auth_policy(Digest::try_from(auth_policy)?)
+                .with_ecc_parameters(
+                    PublicEccParametersBuilder::new()
+                        .with_symmetric(SymmetricDefinitionObject::Null)
+                        .with_ecc_scheme(EccScheme::EcDsa(HashScheme::new(
+                            name_alg,
+                        )))
+                        .with_curve(curve_id)
+                        .with_key_derivation_function_scheme(
+                            KeyDerivationFunctionScheme::Null,
+                        )
+                        .with_is_signing_key(obj_attrs.sign_encrypt())
+                        .with_is_decryption_key(obj_attrs.decrypt())
+                        .with_restricted(obj_attrs.restricted())
+                        .build()?,
+                )
+                .with_ecc_unique_identifier(EccPoint::new(
+                    EccParameter::try_from(&UNIQUE_IAK[0..3])?,
+                    EccParameter::try_from(&UNIQUE_IAK[0..3])?,
+                )),
+            AsymmetricAlgorithm::Null => PublicBuilder::new()
+                .with_public_algorithm(PublicAlgorithm::Rsa)
+                .with_name_hashing_algorithm(HashingAlgorithm::Sha256)
+                .with_object_attributes(obj_attrs)
+                .with_auth_policy(Digest::try_from(
+                    IAK_AUTH_POLICY_SHA256[0..32].to_vec(),
+                )?)
+                .with_rsa_parameters(
+                    PublicRsaParametersBuilder::new()
+                        .with_symmetric(SymmetricDefinitionObject::Null)
+                        .with_scheme(RsaScheme::Null)
+                        .with_key_bits(RsaKeyBits::Rsa2048)
+                        .with_exponent(RsaExponent::default())
+                        .with_is_signing_key(obj_attrs.sign_encrypt())
+                        .with_is_decryption_key(obj_attrs.decrypt())
+                        .with_restricted(obj_attrs.decrypt())
+                        .build()?,
+                )
+                .with_rsa_unique_identifier(PublicKeyRsa::try_from(
+                    &UNIQUE_IAK[0..3],
+                )?),
+        };
+
+        Ok(IAKPublic {
+            public: key_builder.build().unwrap(), //#[allow_ci]
+        })
+    }
+
     fn create_empty_session(
         &mut self,
         ses_type: SessionType,
@@ -277,6 +723,33 @@ impl Context {
                 (Some(AuthSession::Password), Some(ek_auth), None),
                 |context| {
                     context.activate_credential(ak, ek, credential, secret)
+                },
+            )
+            .map_err(TpmError::from)
+    }
+
+    //This function certifies an attestation key with the IAK, using any qualifying data provided,
+    //producing an attestation document and signature
+    pub fn certify_credential_with_iak(
+        &mut self,
+        qualifying_data: Data,
+        ak: KeyHandle,
+        iak: KeyHandle,
+    ) -> Result<(Attest, Signature)> {
+        self.inner
+            .execute_with_sessions(
+                (
+                    Some(AuthSession::Password),
+                    Some(AuthSession::Password),
+                    None,
+                ),
+                |context| {
+                    context.certify(
+                        ak.into(),
+                        iak,
+                        qualifying_data,
+                        SignatureScheme::Null,
+                    )
                 },
             )
             .map_err(TpmError::from)

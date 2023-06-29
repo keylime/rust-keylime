@@ -48,6 +48,21 @@ where
     }
 }
 
+pub(crate) fn serialize_option_base64<S>(
+    value: &Option<&[u8]>,
+    serializer: S,
+) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    match *value {
+        Some(value) => {
+            serializer.serialize_str(&general_purpose::STANDARD.encode(value))
+        }
+        None => serializer.serialize_none(),
+    }
+}
+
 pub(crate) fn deserialize_maybe_base64<'de, D>(
     deserializer: D,
 ) -> Result<Option<Vec<u8>>, D::Error>

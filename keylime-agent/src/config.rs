@@ -55,6 +55,10 @@ pub static DEFAULT_TPM_HASH_ALG: &str = "sha256";
 pub static DEFAULT_TPM_ENCRYPTION_ALG: &str = "rsa";
 pub static DEFAULT_TPM_SIGNING_ALG: &str = "rsassa";
 pub static DEFAULT_EK_HANDLE: &str = "generate";
+pub static DEFAULT_ENABLE_IAK_IDEVID: bool = true;
+pub static DEFAULT_IAK_IDEVID_ASYMMETRIC_ALG: &str = "rsa";
+pub static DEFAULT_IAK_IDEVID_NAME_ALG: &str = "sha256";
+pub static DEFAULT_IAK_IDEVID_TEMPLATE: &str = "";
 pub static DEFAULT_RUN_AS: &str = "keylime:tss";
 pub static DEFAULT_AGENT_DATA_PATH: &str = "agent_data.json";
 pub static DEFAULT_CONFIG: &str = "/etc/keylime/agent.conf";
@@ -94,6 +98,10 @@ pub(crate) struct EnvConfig {
     pub tpm_encryption_alg: Option<String>,
     pub tpm_signing_alg: Option<String>,
     pub ek_handle: Option<String>,
+    pub enable_iak_idevid: Option<bool>,
+    pub iak_idevid_asymmetric_alg: Option<String>,
+    pub iak_idevid_name_alg: Option<String>,
+    pub iak_idevid_template: Option<String>,
     pub run_as: Option<String>,
     pub agent_data_path: Option<String>,
 }
@@ -132,6 +140,10 @@ pub(crate) struct AgentConfig {
     pub tpm_encryption_alg: String,
     pub tpm_signing_alg: String,
     pub ek_handle: String,
+    pub enable_iak_idevid: bool,
+    pub iak_idevid_asymmetric_alg: String,
+    pub iak_idevid_name_alg: String,
+    pub iak_idevid_template: String,
     pub run_as: String,
     pub agent_data_path: String,
 }
@@ -273,6 +285,30 @@ impl EnvConfig {
         }
         if let Some(ref v) = self.ek_handle {
             _ = agent.insert("ek_handle".to_string(), v.to_string().into());
+        }
+        if let Some(ref v) = self.enable_iak_idevid {
+            _ = agent.insert(
+                "enable_iak_idevid".to_string(),
+                v.to_string().into(),
+            );
+        }
+        if let Some(ref v) = self.iak_idevid_asymmetric_alg {
+            _ = agent.insert(
+                "iak_idevid_asymmetric_alg".to_string(),
+                v.to_string().into(),
+            );
+        }
+        if let Some(ref v) = self.iak_idevid_name_alg {
+            _ = agent.insert(
+                "iak_idevid_name_alg".to_string(),
+                v.to_string().into(),
+            );
+        }
+        if let Some(ref v) = self.iak_idevid_template {
+            _ = agent.insert(
+                "iak_idevid_template".to_string(),
+                v.to_string().into(),
+            );
         }
         if let Some(ref v) = self.run_as {
             _ = agent.insert("run_as".to_string(), v.to_string().into());
@@ -439,6 +475,22 @@ impl Source for KeylimeConfig {
             self.agent.ek_handle.to_string().into(),
         );
         _ = m.insert(
+            "enable_iak_idevid".to_string(),
+            self.agent.enable_iak_idevid.into(),
+        );
+        _ = m.insert(
+            "iak_idevid_asymmetric_alg".to_string(),
+            self.agent.iak_idevid_asymmetric_alg.to_string().into(),
+        );
+        _ = m.insert(
+            "iak_idevid_name_alg".to_string(),
+            self.agent.iak_idevid_name_alg.to_string().into(),
+        );
+        _ = m.insert(
+            "iak_idevid_template".to_string(),
+            self.agent.iak_idevid_template.to_string().into(),
+        );
+        _ = m.insert(
             "run_as".to_string(),
             self.agent.run_as.to_string().into(),
         );
@@ -504,6 +556,11 @@ impl Default for AgentConfig {
             run_as,
             tpm_ownerpassword: DEFAULT_TPM_OWNERPASSWORD.to_string(),
             ek_handle: DEFAULT_EK_HANDLE.to_string(),
+            enable_iak_idevid: DEFAULT_ENABLE_IAK_IDEVID,
+            iak_idevid_asymmetric_alg: DEFAULT_IAK_IDEVID_ASYMMETRIC_ALG
+                .to_string(),
+            iak_idevid_name_alg: DEFAULT_IAK_IDEVID_NAME_ALG.to_string(),
+            iak_idevid_template: DEFAULT_IAK_IDEVID_TEMPLATE.to_string(),
         }
     }
 }
@@ -971,6 +1028,13 @@ mod tests {
             ("TPM_ENCRYPTION_ALG", "override_tpm_encryption_alg"),
             ("TPM_SIGNING_ALG", "override_tpm_signing_alg"),
             ("EK_HANDLE", "override_ek_handle"),
+            ("ENABLE_IAK_IDEVID", "true"),
+            (
+                "IAK_IDEVID_ASYMMETRIC_ALG",
+                "override_iak_idevid_asymmetric_alg",
+            ),
+            ("IAK_IDEVID_NAME_ALG", "override_iak_idevid_name_alg"),
+            ("IAK_IDEVID_TEMPLATE", "override_iak_idevid_template"),
             ("RUN_AS", "override_run_as"),
             ("AGENT_DATA_PATH", "override_agent_data_path"),
         ]);
