@@ -22,6 +22,26 @@ struct Register<'a> {
     ek_tpm: &'a [u8],
     #[serde(serialize_with = "serialize_as_base64")]
     aik_tpm: &'a [u8],
+    #[serde(
+        serialize_with = "serialize_option_base64",
+        skip_serializing_if = "Option::is_none"
+    )]
+    iak_tpm: Option<&'a [u8]>,
+    #[serde(
+        serialize_with = "serialize_option_base64",
+        skip_serializing_if = "Option::is_none"
+    )]
+    idevid_tpm: Option<&'a [u8]>,
+    #[serde(
+        serialize_with = "serialize_maybe_base64",
+        skip_serializing_if = "Option::is_none"
+    )]
+    iak_attest: Option<Vec<u8>>,
+    #[serde(
+        serialize_with = "serialize_maybe_base64",
+        skip_serializing_if = "Option::is_none"
+    )]
+    iak_sign: Option<Vec<u8>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     mtls_cert: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -94,6 +114,10 @@ pub(crate) async fn do_register_agent(
     ek_tpm: &[u8],
     ekcert: Option<Vec<u8>>,
     aik_tpm: &[u8],
+    iak_tpm: Option<&[u8]>,
+    idevid_tpm: Option<&[u8]>,
+    iak_attest: Option<Vec<u8>>,
+    iak_sign: Option<Vec<u8>>,
     mtls_cert_x509: Option<&X509>,
     ip: &str,
     port: u32,
@@ -113,6 +137,10 @@ pub(crate) async fn do_register_agent(
         ekcert,
         ek_tpm,
         aik_tpm,
+        iak_tpm,
+        idevid_tpm,
+        iak_attest,
+        iak_sign,
         mtls_cert,
         ip,
         port: Some(port),
@@ -195,6 +223,10 @@ mod tests {
             &mock_data,
             Some(mock_data.to_vec()),
             &mock_data,
+            None,
+            None,
+            None,
+            None,
             Some(&cert),
             "",
             0,
@@ -237,6 +269,10 @@ mod tests {
             &mock_data,
             None,
             &mock_data,
+            None,
+            None,
+            None,
+            None,
             Some(&cert),
             "",
             0,
@@ -275,6 +311,10 @@ mod tests {
             &mock_data,
             Some(mock_data.to_vec()),
             &mock_data,
+            None,
+            None,
+            None,
+            None,
             Some(&cert),
             "",
             0,
