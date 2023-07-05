@@ -284,8 +284,6 @@ impl Context {
 
     // This function extends Pcr16 with the digest, then creates a PcrList
     // from the given mask and pcr16.
-    // Note: Currently, this will build the list for both SHA256 and SHA1 as
-    // necessary for the Python components of Keylime.
     fn build_pcr_list(
         &mut self,
         digest: DigestValues,
@@ -329,7 +327,7 @@ impl Context {
         hash_alg: HashAlgorithm,
         sign_alg: SignAlgorithm,
     ) -> Result<String> {
-        let nk_digest = pubkey_to_tpm_digest(pubkey)?;
+        let nk_digest = pubkey_to_tpm_digest(pubkey, hash_alg)?;
 
         let pcrlist =
             self.build_pcr_list(nk_digest, mask, hash_alg.into())?;
@@ -452,10 +450,9 @@ fn parse_cred_and_secret(
 }
 
 // Takes a public PKey and returns a DigestValue of it.
-// Note: Currently, this creates a DigestValue including both SHA256 and
-// SHA1 because these banks are checked by Keylime on the Python side.
 fn pubkey_to_tpm_digest<T: HasPublic>(
     pubkey: &PKeyRef<T>,
+    hash_algo: HashAlgorithm,
 ) -> Result<DigestValues> {
     let mut keydigest = DigestValues::new();
 
@@ -468,16 +465,11 @@ fn pubkey_to_tpm_digest<T: HasPublic>(
         }
     };
 
-    // SHA256
-    let mut hasher = openssl::sha::Sha256::new();
-    hasher.update(&keybytes);
-    let hashvec: Vec<u8> = hasher.finish().into();
-    keydigest.set(HashingAlgorithm::Sha256, Digest::try_from(hashvec)?);
-    // SHA1
-    let mut hasher = openssl::sha::Sha1::new();
-    hasher.update(&keybytes);
-    let hashvec: Vec<u8> = hasher.finish().into();
-    keydigest.set(HashingAlgorithm::Sha1, Digest::try_from(hashvec)?);
+    let hashing_algo = HashingAlgorithm::from(hash_algo);
+    let mut hasher = Hasher::new(hash_alg_to_message_digest(hashing_algo)?)?;
+    hasher.update(&keybytes)?;
+    let hashvec = hasher.finish()?;
+    keydigest.set(hashing_algo, Digest::try_from(hashvec.as_ref())?);
 
     Ok(keydigest)
 }
@@ -607,6 +599,9 @@ fn hash_alg_to_message_digest(
     match hash_alg {
         HashingAlgorithm::Sha256 => Ok(MessageDigest::sha256()),
         HashingAlgorithm::Sha1 => Ok(MessageDigest::sha1()),
+        HashingAlgorithm::Sha384 => Ok(MessageDigest::sha384()),
+        HashingAlgorithm::Sha512 => Ok(MessageDigest::sha512()),
+        HashingAlgorithm::Sm3_256 => Ok(MessageDigest::sm3()),
         other => Err(TpmError::Other(format!(
             "Unsupported hashing algorithm: {other:?}"
         ))),
@@ -956,7 +951,9 @@ fn pubkey_to_digest() {
     let rsa = Rsa::generate(2048).unwrap(); //#[allow_ci]
     let pkey = PKey::from_rsa(rsa).unwrap(); //#[allow_ci]
 
-    assert!(pubkey_to_tpm_digest(pkey.as_ref()).is_ok());
+    assert!(
+        pubkey_to_tpm_digest(pkey.as_ref(), HashAlgorithm::Sha256).is_ok()
+    );
 }
 
 #[test]
