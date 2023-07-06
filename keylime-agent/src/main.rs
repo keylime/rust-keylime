@@ -72,7 +72,10 @@ use std::{
     sync::Mutex,
     time::Duration,
 };
-use tokio::sync::{mpsc, oneshot};
+use tokio::{
+    signal::unix::{signal, SignalKind},
+    sync::{mpsc, oneshot},
+};
 use tss_esapi::{
     handles::KeyHandle,
     interface_types::algorithm::AsymmetricAlgorithm,
@@ -755,9 +758,19 @@ async fn main() -> Result<()> {
     };
 
     let shutdown_task = rt::spawn(async move {
-        rt::signal::ctrl_c().await.unwrap(); //#[allow_ci]
+        let mut sigint = signal(SignalKind::interrupt()).unwrap(); //#[allow_ci]
+        let mut sigterm = signal(SignalKind::terminate()).unwrap(); //#[allow_ci]
 
-        info!("Shutting down keylime agent server");
+        tokio::select! {
+            _ = sigint.recv() => {
+                debug!("Received SIGINT signal");
+            },
+            _ = sigterm.recv() => {
+                debug!("Received SIGTERM signal");
+            },
+        }
+
+        info!("Shutting down keylime agent");
 
         // Shutdown tasks
         let server_stop = server_handle.stop(true);
@@ -783,7 +796,7 @@ async fn main() -> Result<()> {
         payload_task,
         key_task,
         revocation_task,
-        shutdown_task
+        shutdown_task,
     );
     result.map(|_| ())
 }
