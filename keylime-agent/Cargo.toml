@@ -11,7 +11,7 @@ repository = "https://github.com/keylime/rust-keylime"
 actix-web =  { version = "4", default-features = false, features = ["macros", "openssl"] }
 base64 = "0.21"
 cfg-if = "1"
-clap = { version = "3.2", features = ["derive"] }
+clap = { version = "4.3", features = ["derive"] }
 compress-tools = "0.12"
 config = { version = "0.13", default-features = false, features = ["toml"] }
 futures = "0.3.6"
