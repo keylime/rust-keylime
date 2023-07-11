@@ -1,0 +1,102 @@
+# SPDX-License-Identifier: Apache-2.0
+# the builder stage which uses the official rust base image (based on Debian 11) to build the keylime agent
+FROM rust:1.70-bullseye AS builder
+
+# we are using the "generate-bindings" feature for the tss-esapi crate which requires clang/llvm
+RUN apt-get update && apt-get install -y --no-install-recommends clang llvm
+
+# Install tpm2-tss (dependency for the tss-esapi crate)
+WORKDIR /src
+RUN wget https://github.com/tpm2-software/tpm2-tss/releases/download/4.0.1/tpm2-tss-4.0.1.tar.gz
+RUN tar xf tpm2-tss-4.0.1.tar.gz
+WORKDIR /src/tpm2-tss-4.0.1
+RUN ./configure \
+    --prefix=/usr \
+    --disable-static \
+    --disable-fapi \
+    --disable-policy \
+    --disable-doxygen-doc \
+    --disable-defaultflags
+RUN make
+RUN make install
+
+# Install libarchive (dependency for the compress-tools crate) - we need only a minimum feature set here
+WORKDIR /src
+RUN wget https://github.com/libarchive/libarchive/releases/download/v3.6.2/libarchive-3.6.2.tar.gz
+RUN tar xf libarchive-3.6.2.tar.gz
+WORKDIR /src/libarchive-3.6.2
+RUN ./configure \
+    --prefix=/usr \
+    --with-openssl \
+    --without-mbedtls \
+    --without-nettle \
+    --without-xml2 \
+    --without-expat \
+    --disable-static
+RUN make
+RUN make install
+# there is a bug in the libarchive.pc file which wrongly adds iconv
+RUN sed -i "s/iconv //" /usr/lib/pkgconfig/libarchive.pc
+
+# build rust-keylime
+COPY . /src/rust-keylime/
+WORKDIR /src/rust-keylime
+RUN make RELEASE=1 TARGETDIR=target target/release/keylime_agent
+
+# truly just for debugging purposes for the assembly stage
+RUN readelf -W \
+    --file-header --program-headers --sections --dynamic --notes --version-info --arch-specific --unwind --section-groups --histogram \
+    /src/rust-keylime/target/release/keylime_agent
+RUN ldd /src/rust-keylime/target/release/keylime_agent
+
+# now assemble a release docker image using a minimal docker image
+FROM gcr.io/distroless/cc-debian11:latest
+ARG VERSION=latest
+LABEL org.opencontainers.image.authors="Keylime Team <main@keylime.groups.io>"
+LABEL org.opencontainers.image.version="$VERSION"
+LABEL org.opencontainers.image.title="Keylime Agent"
+LABEL org.opencontainers.image.description="Keylime Agent - Bootstrapping and Maintaining Trust in the Cloud"
+LABEL org.opencontainers.image.url="https://keylime.dev/"
+LABEL org.opencontainers.image.source="https://github.com/keylime/rust-keylime/"
+LABEL org.opencontainers.image.licenses="Apache-2.0"
+LABEL org.opencontainers.image.vendor="The Keylime Authors"
+
+# Copy all agent dependencies from the builder image
+# NOTE: the cc base image comes with all C runtime dependencies (libc, libm, libgcc, etc.), so no need to copy those
+# TODO: Unfortunately the COPY directive is following links and not preserving the link file. This slightly bloats the image.
+
+# libarchive is a direct dependency for the compress-tools crate, so we must copy itself and all its dependencies
+COPY --from=builder \
+    /usr/lib/libarchive.so* \
+    /lib/x86_64-linux-gnu/liblzma.so* \
+    /lib/x86_64-linux-gnu/libbz2.so* \
+    /lib/x86_64-linux-gnu/libz.so* \
+    /usr/lib/x86_64-linux-gnu/
+# tpm2-tss libraries are a dependency (probably not all of them, but we just copy all)
+# because we are using the tss-esapi crate which is essentially just a wrapper around those (unfortunately)
+COPY --from=builder \
+    /usr/lib/libtss2*.so* \
+    /usr/lib/x86_64-linux-gnu/
+
+# now copy the agent from the builder
+COPY --from=builder /src/rust-keylime/target/release/keylime_agent /bin/keylime_agent
+COPY --from=builder /src/rust-keylime/keylime-agent.conf /etc/keylime/keylime-agent.conf
+ENTRYPOINT ["/bin/keylime_agent"]
+
+# we default the log level to info if not overwritten
+ENV RUST_LOG=keylime_agent=info
+
+# the agent currently listens on this port by default
+# it's good practice to declare this in the Dockerfile
+EXPOSE 9002/tcp
+
+# define the stopsignal to be SIGINT like the systemd service file does
+STOPSIGNAL SIGINT
+
+# these are all podman labels that work with the 'podman container runlabel' command, and are standardized at least in RHEL (install, uninstall, run)
+LABEL install="podman volume create keylime-agent"
+LABEL uninstall="podman volume rm keylime-agent"
+LABEL run="podman run --read-only --name keylime-agent --rm --device /dev/tpm0 --device /dev/tpmrm0 -v keylime-agent:/var/lib/keylime -v /etc/keylime:/etc/keylime:ro --tmpfs /var/lib/keylime/secure:rw,size=1m,mode=0700 -dt IMAGE"
+
+# run as root by default
+USER 0:0
