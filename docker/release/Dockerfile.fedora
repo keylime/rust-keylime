@@ -59,9 +59,6 @@ ENV RUST_LOG=keylime_agent=info
 # it's good practice to declare this in the Dockerfile
 EXPOSE 9002
 
-# define the stopsignal to be SIGINT like the systemd service file does
-STOPSIGNAL SIGINT
-
 # these are all podman labels that work with the 'podman container runlabel' command, and are standardized at least in RHEL (install, uninstall, run)
 LABEL install="podman volume create keylime-agent"
 LABEL uninstall="podman volume rm keylime-agent"
