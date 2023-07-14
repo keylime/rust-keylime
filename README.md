@@ -27,17 +27,55 @@ replaces the Python implementation.
 ## Prerequisites
 
 ### Required Packages
-The rust-keylime agent requires the following packages for both compile and run time.
 
-For Fedora, use the following command
+#### Fedora
+
+The following packages are required for building:
+
+* `clang`
+* `libarchive-devel`
+* `openssl-devel`
+* `tpm2-tss-devel`
+* (optional for the `with-zmq` feature): `zeromq-devel`
+
+To install, use the following command:
 ```
-$ dnf install openssl-devel gcc tpm2-tss-devel zeromq-devel libarchive-devel
+$ dnf install clang libarchive-devel openssl-devel tpm2-tss-devel zeromq-devel
 ```
 
-For Ubuntu OS, use the following command
+For runtime, the following packages are required:
+
+* `libarchive`
+* `openssl`
+* `tpm2-tss`
+* `systemd` (to run as systemd service)
+* `util-linux-core` (for the `mount` command)
+* (optional for the `with-zmq` feature): `zeromq`
+
+#### Ubuntu
+
+For Ubuntu, use the following packages are required:
+
+* `clang`
+* `libarchive-dev`
+* `libssl-dev`
+* `libtss-dev`
+* (optional for the `with-zmq` feature): `libzmq3-dev`
+
+To install, use the following command:
+
 ```
-$ apt-get install libssl-dev gcc libtss-dev libzmq3-dev libarchive-dev
+$ apt-get install clang libarchive-dev libssl-dev libtss-dev libzmq3-dev
 ```
+
+For runtime, the following packages are required:
+
+* `coreutils` (for the `mount` command)
+* `libarchive`
+* `libssl`
+* `libtss`
+* (optional for the `with-zmq` feature): `libzmq3`
+* `systemd` (to run as systemd service)
 
 ### Rust
 
