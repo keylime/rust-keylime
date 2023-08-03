@@ -231,7 +231,7 @@ async fn main() -> Result<()> {
     //  Retrieve the TPM Vendor, this allows us to warn if someone is using a
     // Software TPM ("SW")
     if tss_esapi::utils::get_tpm_vendor(ctx.as_mut())?.contains("SW") {
-        warn!("INSECURE: Keylime is using a software TPM emulator rather than a real hardware TPM.");
+        warn!("INSECURE: Keylime is using currently a software TPM emulator rather than a real hardware TPM.");
         warn!("INSECURE: The security of Keylime is NOT linked to a hardware root of trust.");
         warn!("INSECURE: Only use Keylime in this mode for testing or debugging purposes.");
     }
