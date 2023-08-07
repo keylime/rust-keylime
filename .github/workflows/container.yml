@@ -19,10 +19,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
 
       - name: Log in to the Container registry
-        uses: docker/login-action@v1
+        uses: docker/login-action@v2
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ secrets.QUAY_USER }}
@@ -30,7 +30,7 @@ jobs:
 
       - name: Generate docker metadata for keylime_agent
         id: meta_agent
-        uses: docker/metadata-action@v3
+        uses: docker/metadata-action@v4
         with:
           images: |
             ${{ env.IMAGE_BASE }}/keylime_agent
@@ -41,7 +41,7 @@ jobs:
 
       - name: Build and push agent image
         id: build_agent
-        uses: docker/build-push-action@v2
+        uses: docker/build-push-action@v4
         env:
           VERSION: "${{ steps.meta_base.outputs.version }}"
         with:
