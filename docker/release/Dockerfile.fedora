@@ -64,5 +64,8 @@ LABEL install="podman volume create keylime-agent"
 LABEL uninstall="podman volume rm keylime-agent"
 LABEL run="podman run --read-only --name keylime-agent --rm --device /dev/tpm0 --device /dev/tpmrm0 -v keylime-agent:/var/lib/keylime -v /etc/keylime:/etc/keylime:ro --tmpfs /var/lib/keylime/secure:rw,size=1m,mode=0700 -dt IMAGE"
 
+# Create a system user 'keylime' to allow dropping privileges
+RUN useradd -s /sbin/nologin -r -G tss keylime
+
 # run as root by default
 USER 0:0
