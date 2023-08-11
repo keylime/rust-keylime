@@ -2,6 +2,7 @@
 // Copyright 2021 Keylime Authors
 
 use crate::algorithms::{EncryptionAlgorithm, HashAlgorithm, SignAlgorithm};
+use crate::endian;
 use log::*;
 use std::convert::{TryFrom, TryInto};
 use std::str::FromStr;
@@ -358,10 +359,10 @@ assert_eq_size!(TPML_DIGEST, [u8; 532]);
 // memory aligment.
 fn serialize_pcrsel(pcr_selection: &TPML_PCR_SELECTION) -> Vec<u8> {
     let mut output = Vec::with_capacity(TPML_PCR_SELECTION_SIZE);
-    output.extend(u32::to_le_bytes(pcr_selection.count));
+    output.extend(endian::local_endianness_32(pcr_selection.count));
     for selection in pcr_selection.pcrSelections.iter() {
-        output.extend(selection.hash.to_le_bytes());
-        output.extend(selection.sizeofSelect.to_le_bytes());
+        output.extend(endian::local_endianness_16(selection.hash));
+        output.extend(endian::local_endianness_8(selection.sizeofSelect));
         output.extend(selection.pcrSelect);
         output.extend([0u8; 1]); // padding to keep the memory alignment
     }
@@ -372,9 +373,9 @@ fn serialize_pcrsel(pcr_selection: &TPML_PCR_SELECTION) -> Vec<u8> {
 // The serialization will adjust the data endianness as necessary.
 fn serialize_digest(digest_list: &TPML_DIGEST) -> Vec<u8> {
     let mut output = Vec::with_capacity(TPML_DIGEST_SIZE);
-    output.extend(u32::to_le_bytes(digest_list.count));
+    output.extend(endian::local_endianness_32(digest_list.count));
     for digest in digest_list.digests.iter() {
-        output.extend(digest.size.to_le_bytes());
+        output.extend(endian::local_endianness_16(digest.size));
         output.extend(digest.buffer);
     }
     output
@@ -411,7 +412,7 @@ fn pcrdata_to_vec(
         Vec::with_capacity(pcrsel_vec.len() + 4 + digest_vec.len());
 
     data_vec.extend(&pcrsel_vec);
-    data_vec.extend(num_tpml_digests.to_le_bytes());
+    data_vec.extend(endian::local_endianness_32(num_tpml_digests));
     data_vec.extend(&digest_vec);
 
     data_vec

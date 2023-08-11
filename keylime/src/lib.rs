@@ -1,4 +1,5 @@
 pub mod algorithms;
+pub mod endian;
 pub mod ima;
 pub mod tpm;
 
