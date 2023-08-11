@@ -7,8 +7,9 @@ use config::{
     File, FileFormat, Map, Source, Value,
 };
 use glob::glob;
-use keylime::algorithms::{
-    EncryptionAlgorithm, HashAlgorithm, SignAlgorithm,
+use keylime::{
+    algorithms::{EncryptionAlgorithm, HashAlgorithm, SignAlgorithm},
+    list_parser::parse_list,
 };
 use log::*;
 use serde::{Deserialize, Serialize};
@@ -652,12 +653,19 @@ fn config_translate_keywords(
         DEFAULT_SERVER_CERT,
     );
 
-    let mut trusted_client_ca = config_get_file_path(
-        "trusted_client_ca",
-        &config.agent.trusted_client_ca,
-        keylime_dir,
-        DEFAULT_TRUSTED_CLIENT_CA,
-    );
+    let trusted_client_ca: String =
+        parse_list(&config.agent.trusted_client_ca)?
+            .iter()
+            .map(|t| {
+                config_get_file_path(
+                    "trusted_client_ca",
+                    t,
+                    keylime_dir,
+                    DEFAULT_TRUSTED_CLIENT_CA,
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
 
     let ek_handle = match config.agent.ek_handle.as_ref() {
         "generate" => "".to_string(),
@@ -1008,5 +1016,46 @@ mod tests {
                 assert!(e.to_string() == j.to_string());
             }
         }
+    }
+
+    #[test]
+    fn test_config_get_file_path() {
+        let workdir = Path::new("/workdir");
+        let default = "default-file-name";
+
+        let list_str = "[\"\", default, '', /absolute/path, relative/path, \"with spaces\", \"with,commas\", \"double_quotes\", 'single_quotes']";
+
+        let list = parse_list(list_str).unwrap(); //#[allow_ci]
+
+        assert_eq!(
+            vec![
+                "default",
+                "/absolute/path",
+                "relative/path",
+                "\"with spaces\"",
+                "\"with,commas\"",
+                "\"double_quotes\"",
+                "'single_quotes'"
+            ],
+            list
+        );
+
+        let translated: Vec<String> = list
+            .iter()
+            .map(|e| config_get_file_path("test", e, workdir, default))
+            .collect();
+
+        assert_eq!(
+            vec![
+                "/workdir/default-file-name",
+                "/absolute/path",
+                "/workdir/relative/path",
+                "/workdir/\"with spaces\"",
+                "/workdir/\"with,commas\"",
+                "/workdir/\"double_quotes\"",
+                "/workdir/'single_quotes'"
+            ],
+            translated
+        );
     }
 }

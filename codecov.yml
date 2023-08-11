@@ -1,0 +1,25 @@
+codecov:
+  notify:
+    after_n_builds: 2
+
+coverage:
+  status:
+    project:
+      default:
+        informational: true
+
+ignore:
+  - '**/lib.rs'
+
+comment:
+  layout: "flags,files"
+  behavior: default
+  require_changes: false
+  require_base: no
+  after_n_builds: 2
+
+flags:
+  e2e-testsuite:
+    carryforward: false
+  upstream-unit-tests:
+    carryforward: false

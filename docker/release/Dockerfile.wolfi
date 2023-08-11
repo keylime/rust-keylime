@@ -1,0 +1,110 @@
+# SPDX-License-Identifier: Apache-2.0
+# the builder stage which uses the wolfi-base image to build the keylime agent
+# NOTE: even though there is a rust wolfi base image, it does not ship apk which we need to add some dependencies
+FROM cgr.dev/chainguard/wolfi-base AS builder
+
+# update apk
+RUN apk update
+
+# we are installing build dependencies, describe them per line as they are added:
+# - install rust
+# - install gcc and others to compile tpm2-tss
+# - we are using the "generate-bindings" feature for the tss-esapi crate which requires clang/llvm
+# - Install libarchive (dependency for the compress-tools crate)
+RUN apk add --no-cache --update-cache \
+    rust \
+    make pkgconf gcc glibc glibc-dev openssl openssl-dev posix-libc-utils \
+    clang-15 llvm15 \
+    libarchive libarchive-dev
+
+# there is a bug in the libarchive.pc file which wrongly adds iconv
+RUN sed -i "s/iconv //" /usr/lib/pkgconfig/libarchive.pc
+
+# Install tpm2-tss (dependency for the tss-esapi crate)
+WORKDIR /src
+RUN wget https://github.com/tpm2-software/tpm2-tss/releases/download/4.0.1/tpm2-tss-4.0.1.tar.gz
+RUN tar xf tpm2-tss-4.0.1.tar.gz
+WORKDIR /src/tpm2-tss-4.0.1
+RUN ./configure \
+    --prefix=/usr \
+    --disable-static \
+    --disable-fapi \
+    --disable-policy \
+    --disable-doxygen-doc \
+    --disable-defaultflags \
+    --disable-dependency-tracking
+RUN make
+RUN make install
+
+# build rust-keylime
+COPY . /src/rust-keylime/
+WORKDIR /src/rust-keylime
+RUN make RELEASE=1 TARGETDIR=target target/release/keylime_agent
+
+# truly just for debugging purposes for the assembly stage
+RUN readelf -W \
+    --file-header --program-headers --sections --dynamic --notes --version-info --arch-specific --unwind --section-groups --histogram \
+    /src/rust-keylime/target/release/keylime_agent
+RUN ldd /src/rust-keylime/target/release/keylime_agent
+
+# now assemble a release docker image using a minimal docker image
+FROM cgr.dev/chainguard/cc-dynamic:latest
+ARG VERSION=latest
+LABEL org.opencontainers.image.authors="Keylime Team <main@keylime.groups.io>"
+LABEL org.opencontainers.image.version="$VERSION"
+LABEL org.opencontainers.image.title="Keylime Agent"
+LABEL org.opencontainers.image.description="Keylime Agent - Bootstrapping and Maintaining Trust in the Cloud"
+LABEL org.opencontainers.image.url="https://keylime.dev/"
+LABEL org.opencontainers.image.source="https://github.com/keylime/rust-keylime/"
+LABEL org.opencontainers.image.licenses="Apache-2.0"
+LABEL org.opencontainers.image.vendor="The Keylime Authors"
+
+# Copy all agent dependencies from the builder image
+# NOTE: the cc base image comes with all C runtime dependencies (libc, libm, libgcc_s, etc.), so no need to copy those
+# TODO: Unfortunately the COPY directive is following links and not preserving the link file. This slightly bloats the image.
+
+# openssl (both crypto and ssl libraries) are direct dependencies
+COPY --from=builder \
+    /usr/lib/libcrypto.so* \
+    /usr/lib/libssl.so* \
+    /usr/lib/
+
+# libarchive is a direct dependency for the compress-tools crate, so we must copy itself and all its dependencies
+COPY --from=builder \
+    /lib/libacl.so* \
+    /lib/libattr.so* \
+    /lib/libz.so* \
+    /lib/
+COPY --from=builder \
+    /usr/lib/libarchive.so* \
+    /usr/lib/libexpat.so* \
+    /usr/lib/liblzma.so* \
+    /usr/lib/libzstd.so* \
+    /usr/lib/libbz2.so* \
+    /usr/lib/
+
+# tpm2-tss libraries are a dependency (probably not all of them, but we just copy all)
+# because we are using the tss-esapi crate which is essentially just a wrapper around those (unfortunately)
+COPY --from=builder \
+    /usr/lib/libtss2*.so* \
+    /usr/lib/
+
+# now copy the agent from the builder
+COPY --from=builder /src/rust-keylime/target/release/keylime_agent /bin/keylime_agent
+COPY --from=builder /src/rust-keylime/keylime-agent.conf /etc/keylime/keylime-agent.conf
+ENTRYPOINT ["/bin/keylime_agent"]
+
+# we default the log level to info if not overwritten
+ENV RUST_LOG=keylime_agent=info
+
+# the agent currently listens on this port by default
+# it's good practice to declare this in the Dockerfile
+EXPOSE 9002/tcp
+
+# these are all podman labels that work with the 'podman container runlabel' command, and are standardized at least in RHEL (install, uninstall, run)
+LABEL install="podman volume create keylime-agent"
+LABEL uninstall="podman volume rm keylime-agent"
+LABEL run="podman run --read-only --name keylime-agent --rm --device /dev/tpm0 --device /dev/tpmrm0 -v keylime-agent:/var/lib/keylime -v /etc/keylime:/etc/keylime:ro --tmpfs /var/lib/keylime/secure:rw,size=1m,mode=0700 -dt IMAGE"
+
+# run as root by default
+USER 0:0

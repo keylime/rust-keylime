@@ -5,11 +5,12 @@
   environment:
     TPM_BINARY_MEASUREMENTS: /var/tmp/binary_bios_measurements
     RUST_IMA_EMULATOR: 1
+    KEYLIME_RUST_CODE_COVERAGE: 1
 
   context:
     swtpm: yes
     agent: rust
-    faked_measured_boot_log: true
+    faked_measured_boot_log: yes
 
   prepare:
    - how: shell
@@ -41,6 +42,7 @@
        - /functional/db-postgresql-sanity-on-localhost
        - /functional/db-mariadb-sanity-on-localhost
        - /functional/db-mysql-sanity-on-localhost
+       - /functional/durable-attestion-sanity-on-localhost
        - /functional/ek-cert-use-ek_check_script
        - /functional/ek-cert-use-ek_handle-custom-ca_certs
        - /functional/install-rpm-with-ima-signature
@@ -53,6 +55,9 @@
        - /functional/tpm-issuer-cert-using-ecc
        - /functional/tpm_policy-sanity-on-localhost
        - /functional/use-multiple-ima-sign-verification-keys
+       - /sanity/keylime-secure_mount
+       - /upstream/run_rust_keylime_tests
+       - /setup/generate_upstream_rust_keylime_code_coverage
 
   adjust:
    # prepare step adjustments
@@ -61,6 +66,13 @@
       - how: shell
         script:
          - yum -y install https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm
+     # disable code coverage measurement everywhere except F37 and CS9
+   - when: distro != fedora-37
+     environment+:
+        KEYLIME_RUST_CODE_COVERAGE: 0
+     discover+:
+        test-:
+         - /setup/generate_upstream_rust_keylime_code_coverage
 
   execute:
     how: tmt

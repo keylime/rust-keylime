@@ -35,9 +35,7 @@ use tss_esapi::{
 /*
  * Constants and static variables
  */
-pub const API_VERSION: &str = "v2.0";
-pub const STUB_VTPM: bool = false;
-pub const STUB_IMA: bool = true;
+pub const API_VERSION: &str = "v2.1";
 pub const TPM_DATA_PCR: usize = 16;
 pub const IMA_PCR: usize = 10;
 pub static RSA_PUBLICKEY_EXPORTABLE: &str = "rsa placeholder";
@@ -53,9 +51,8 @@ pub const AES_256_KEY_LEN: usize = 32;
 pub const AES_BLOCK_SIZE: usize = 16;
 
 cfg_if::cfg_if! {
-    if #[cfg(any(test, feature = "testing"))] {
+    if #[cfg(test)] {
         // Secure mount of tpmfs (False is generally used for development environments)
-        pub static MOUNT_SECURE: bool = false;
 
         pub(crate) fn ima_ml_path_get() -> PathBuf {
             Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -64,7 +61,6 @@ cfg_if::cfg_if! {
                 .join("ascii_runtime_measurements")
         }
     } else {
-        pub static MOUNT_SECURE: bool = true;
 
         pub(crate) fn ima_ml_path_get() -> PathBuf {
             Path::new(IMA_ML).to_path_buf()

@@ -49,6 +49,7 @@ mod serialization;
 mod version_handler;
 
 use actix_web::{dev::Service, http, middleware, rt, web, App, HttpServer};
+use base64::{engine::general_purpose, Engine as _};
 use clap::{Arg, Command as ClapApp};
 use common::*;
 use error::{Error, Result};
@@ -56,8 +57,7 @@ use futures::{
     future::{ok, TryFutureExt},
     try_join,
 };
-use keylime::ima::MeasurementList;
-use keylime::tpm;
+use keylime::{ima::MeasurementList, list_parser::parse_list, tpm};
 use log::*;
 use openssl::{
     pkey::{PKey, Private, Public},
@@ -72,7 +72,10 @@ use std::{
     sync::Mutex,
     time::Duration,
 };
-use tokio::sync::{mpsc, oneshot};
+use tokio::{
+    signal::unix::{signal, SignalKind},
+    sync::{mpsc, oneshot},
+};
 use tss_esapi::{
     handles::KeyHandle,
     interface_types::algorithm::AsymmetricAlgorithm,
@@ -147,7 +150,16 @@ async fn main() -> Result<()> {
         None
     };
 
-    let measuredboot_ml_path = Path::new(MEASUREDBOOT_ML);
+    let mut measuredboot_ml_path = Path::new(MEASUREDBOOT_ML);
+
+    // Allow setting the binary bios measurements log path when testing
+    let env_mb_path: String;
+    #[cfg(feature = "testing")]
+    if let Ok(v) = std::env::var("TPM_BINARY_MEASUREMENTS") {
+        env_mb_path = v;
+        measuredboot_ml_path = Path::new(&env_mb_path);
+    }
+
     let measuredboot_ml_file = if measuredboot_ml_path.exists() {
         match fs::File::open(measuredboot_ml_path) {
             Ok(file) => Some(Mutex::new(file)),
@@ -219,7 +231,7 @@ async fn main() -> Result<()> {
     //  Retrieve the TPM Vendor, this allows us to warn if someone is using a
     // Software TPM ("SW")
     if tss_esapi::utils::get_tpm_vendor(ctx.as_mut())?.contains("SW") {
-        warn!("INSECURE: Keylime is using a software TPM emulator rather than a real hardware TPM.");
+        warn!("INSECURE: Keylime is currently using a software TPM emulator rather than a real hardware TPM.");
         warn!("INSECURE: The security of Keylime is NOT linked to a hardware root of trust.");
         warn!("INSECURE: Only use Keylime in this mode for testing or debugging purposes.");
     }
@@ -441,37 +453,35 @@ async fn main() -> Result<()> {
             }
         };
 
-        let ca_cert_path = match config.agent.trusted_client_ca.as_ref() {
+        let trusted_client_ca = match config.agent.trusted_client_ca.as_ref()
+        {
             "" => {
                 error!("Agent mTLS is enabled, but trusted_client_ca option was not provided");
                 return Err(Error::Configuration("Agent mTLS is enabled, but trusted_client_ca option was not provided".to_string()));
             }
-            path => Path::new(path),
+            l => l,
         };
 
-        if !ca_cert_path.exists() {
+        // The trusted_client_ca config option is a list, parse to obtain a vector
+        let certs_list = parse_list(trusted_client_ca)?;
+        if certs_list.is_empty() {
             error!(
-                "Trusted client CA certificate not found: {} does not exist",
-                ca_cert_path.display()
+                "Trusted client CA certificate list is empty: could not load any certificate"
             );
-            return Err(Error::Configuration(format!(
-                "Trusted client CA certificate not found: {} does not exist",
-                ca_cert_path.display()
-            )));
+            return Err(Error::Configuration(
+                "Trusted client CA certificate list is empty: could not load any certificate".to_string()
+            ));
         }
 
-        let keylime_ca_certs =
-            match crypto::load_x509_cert_chain(ca_cert_path) {
-                Ok(t) => Ok(t),
-                Err(e) => {
-                    error!(
-                        "Failed to load trusted CA certificate {}: {}",
-                        ca_cert_path.display(),
-                        e
-                    );
-                    Err(e)
-                }
-            }?;
+        let keylime_ca_certs = match crypto::load_x509_cert_list(
+            certs_list.iter().map(Path::new).collect(),
+        ) {
+            Ok(t) => Ok(t),
+            Err(e) => {
+                error!("Failed to load trusted CA certificates: {}", e);
+                Err(e)
+            }
+        }?;
 
         mtls_cert = Some(&cert);
         ssl_context = Some(crypto::generate_mtls_context(
@@ -511,7 +521,7 @@ async fn main() -> Result<()> {
         if config.agent.ek_handle.is_empty() {
             ctx.as_mut().flush_context(ek_result.key_handle.into())?;
         }
-        let mackey = base64::encode(key.value());
+        let mackey = general_purpose::STANDARD.encode(key.value());
         let auth_tag =
             crypto::compute_hmac(mackey.as_bytes(), agent_uuid.as_bytes())?;
         let auth_tag = hex::encode(&auth_tag);
@@ -748,9 +758,19 @@ async fn main() -> Result<()> {
     };
 
     let shutdown_task = rt::spawn(async move {
-        rt::signal::ctrl_c().await.unwrap(); //#[allow_ci]
+        let mut sigint = signal(SignalKind::interrupt()).unwrap(); //#[allow_ci]
+        let mut sigterm = signal(SignalKind::terminate()).unwrap(); //#[allow_ci]
 
-        info!("Shutting down keylime agent server");
+        tokio::select! {
+            _ = sigint.recv() => {
+                debug!("Received SIGINT signal");
+            },
+            _ = sigterm.recv() => {
+                debug!("Received SIGTERM signal");
+            },
+        }
+
+        info!("Shutting down keylime agent");
 
         // Shutdown tasks
         let server_stop = server_handle.stop(true);
@@ -776,7 +796,7 @@ async fn main() -> Result<()> {
         payload_task,
         key_task,
         revocation_task,
-        shutdown_task
+        shutdown_task,
     );
     result.map(|_| ())
 }
@@ -871,9 +891,15 @@ mod testing {
                 Err(err) => None,
             };
 
-            let measuredboot_ml_path = Path::new(
-                "/sys/kernel/security/tpm0/binary_bios_measurements",
-            );
+            // Allow setting the binary bios measurements log path when testing
+            let mut measuredboot_ml_path = Path::new(MEASUREDBOOT_ML);
+            let env_mb_path;
+            #[cfg(feature = "testing")]
+            if let Ok(v) = std::env::var("TPM_BINARY_MEASUREMENTS") {
+                env_mb_path = v;
+                measuredboot_ml_path = Path::new(&env_mb_path);
+            }
+
             let measuredboot_ml_file =
                 match fs::File::open(measuredboot_ml_path) {
                     Ok(file) => Some(Mutex::new(file)),

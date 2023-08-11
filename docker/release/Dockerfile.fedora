@@ -1,0 +1,68 @@
+# SPDX-License-Identifier: Apache-2.0
+# the builder stage which uses the latest Fedora minimal image to build the keylime agent - we know this works well
+FROM registry.fedoraproject.org/fedora-minimal AS builder
+
+# Packaged dependencies
+RUN microdnf install -y \
+    cargo \
+    clang \
+    clang-devel \
+    dnf-plugins-core \
+    git \
+    libarchive-devel \
+    make \
+    openssl-devel \
+    rust \
+    systemd \
+    tpm2-tss \
+    tpm2-tss-devel
+
+# build rust-keylime
+COPY . /src/rust-keylime/
+WORKDIR /src/rust-keylime
+RUN make RELEASE=1 TARGETDIR=target target/release/keylime_agent
+
+# now assemble a release docker image using a fedora minimal base image
+FROM registry.fedoraproject.org/fedora-minimal
+ARG VERSION=latest
+LABEL org.opencontainers.image.authors="Keylime Team <main@keylime.groups.io>"
+LABEL org.opencontainers.image.version="$VERSION"
+LABEL org.opencontainers.image.title="Keylime Agent"
+LABEL org.opencontainers.image.description="Keylime Agent - Bootstrapping and Maintaining Trust in the Cloud"
+LABEL org.opencontainers.image.url="https://keylime.dev/"
+LABEL org.opencontainers.image.source="https://github.com/keylime/rust-keylime/"
+LABEL org.opencontainers.image.licenses="Apache-2.0"
+LABEL org.opencontainers.image.vendor="The Keylime Authors"
+
+# these labels are set in the fedora base image and should be overwritten
+LABEL name="Keylime Agent"
+LABEL version="$VERSION"
+LABEL license="Apache-2.0"
+LABEL vendor="The Keylime Authors"
+
+# Install all agent runtime dependencies from the builder image
+# NOTE: the fedora base image is "fat" and comes with basically all dependencies that we need out of the box with a few exceptions
+RUN microdnf makecache && \
+    microdnf -y install tpm2-tss libarchive openssl util-linux-core && \
+    microdnf clean all && \
+    rm -rf /var/cache/dnf/*
+
+# now copy the agent from the builder
+COPY --from=builder /src/rust-keylime/target/release/keylime_agent /bin/keylime_agent
+COPY --from=builder /src/rust-keylime/keylime-agent.conf /etc/keylime/keylime-agent.conf
+ENTRYPOINT ["/bin/keylime_agent"]
+
+# we default the log level to info if not overwritten
+ENV RUST_LOG=keylime_agent=info
+
+# the agent currently listens on this port by default
+# it's good practice to declare this in the Dockerfile
+EXPOSE 9002
+
+# these are all podman labels that work with the 'podman container runlabel' command, and are standardized at least in RHEL (install, uninstall, run)
+LABEL install="podman volume create keylime-agent"
+LABEL uninstall="podman volume rm keylime-agent"
+LABEL run="podman run --read-only --name keylime-agent --rm --device /dev/tpm0 --device /dev/tpmrm0 -v keylime-agent:/var/lib/keylime -v /etc/keylime:/etc/keylime:ro --tmpfs /var/lib/keylime/secure:rw,size=1m,mode=0700 -dt IMAGE"
+
+# run as root by default
+USER 0:0

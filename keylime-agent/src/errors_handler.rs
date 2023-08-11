@@ -395,10 +395,10 @@ mod tests {
                         .error_handler(path_parser_error),
                 )
                 .service(
-                    web::resource("/v2.0/ok").route(web::get().to(dummy)),
+                    web::resource("/v2.1/ok").route(web::get().to(dummy)),
                 )
                 .service(
-                    web::resource("/v2.0/ok/{number}/{string}")
+                    web::resource("/v2.1/ok/{number}/{string}")
                         .route(web::get().to(dummy_with_path)),
                 )
                 .service(
@@ -410,7 +410,7 @@ mod tests {
 
         // Sanity well formed request
         let req = test::TestRequest::get()
-            .uri("/v2.0/ok?param=Test")
+            .uri("/v2.1/ok?param=Test")
             .set_json(&DummyPayload { field: 42 })
             .to_request();
 
@@ -432,7 +432,7 @@ mod tests {
 
         // Test JSON parsing error
         let req = test::TestRequest::get()
-            .uri("/v2.0/ok?param=Test")
+            .uri("/v2.1/ok?param=Test")
             .insert_header(http::header::ContentType::json())
             .set_payload("Not JSON")
             .to_request();
@@ -445,7 +445,7 @@ mod tests {
 
         // Test Query parsing error
         let req = test::TestRequest::get()
-            .uri("/v2.0/ok?test=query")
+            .uri("/v2.1/ok?test=query")
             .set_json(&DummyPayload { field: 42 })
             .to_request();
         let resp = test::call_service(&app, req).await;
@@ -457,7 +457,7 @@ mod tests {
 
         // Test Path parsing error
         let req = test::TestRequest::get()
-            .uri("/v2.0/ok/something/42?test=query")
+            .uri("/v2.1/ok/something/42?test=query")
             .set_json(&DummyPayload { field: 42 })
             .to_request();
         let resp = test::call_service(&app, req).await;

@@ -7,6 +7,7 @@ use crate::config::{AgentConfig, KeylimeConfig};
 use crate::crypto;
 use crate::error::*;
 use crate::secure_mount;
+use keylime::list_parser::parse_list;
 use log::*;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -196,11 +197,7 @@ fn run_revocation_actions(
     // The actions from the configuration file takes precedence over the actions from the
     // actions_list file
     let actions = config_actions.unwrap_or_default();
-    let mut action_list = actions
-        .split(',')
-        .map(|script| script.trim())
-        .filter(|script| !script.is_empty())
-        .collect::<Vec<&str>>();
+    let mut action_list = parse_list(&actions)?;
     let action_data;
     let unzipped = mount.join("unzipped");
     let action_file = unzipped.join("action_list");
@@ -209,10 +206,7 @@ fn run_revocation_actions(
         action_data = std::fs::read_to_string(&action_file)
             .expect("unable to read action_list");
 
-        let file_actions = action_data
-            .split('\n')
-            .map(|script| script.trim())
-            .filter(|script| !script.is_empty());
+        let file_actions = parse_list(&action_data)?;
 
         action_list.extend(file_actions);
     } else {
@@ -240,7 +234,7 @@ fn run_revocation_actions(
                     );
                     error!("{}", msg);
                     return Err(Error::Script(
-                        String::from(action),
+                        action.to_string(),
                         e.exe_code()?,
                         e.stderr()?,
                     ));

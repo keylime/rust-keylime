@@ -81,23 +81,6 @@ fn check_mount(secure_dir: &Path) -> Result<bool> {
  * functions are unsafe function in Rust to use.
  */
 pub(crate) fn mount(work_dir: &Path, secure_size: &str) -> Result<PathBuf> {
-    // Use /tmpfs-dev directory if MOUNT_SECURE flag is not set. This
-    // is for development environment and does not mount to the system.
-    if !MOUNT_SECURE {
-        warn!("Using /tmpfs-dev (dev environment)");
-        let secure_dir_path = work_dir.join("tmpfs-dev");
-        if !secure_dir_path.exists() {
-            fs::create_dir(&secure_dir_path).map_err(|e| {
-                Error::SecureMount(format!(
-                    "unable to create secure dir path: {e:?}"
-                ))
-            })?;
-            info!("Directory {:?} created.", &secure_dir_path);
-        }
-
-        return Ok(secure_dir_path);
-    }
-
     // Mount the directory to file system
     let secure_dir_path = Path::new(work_dir).join("secure");
 
@@ -163,11 +146,9 @@ mod tests {
 
     #[test]
     fn test_secure_mount() {
-        let path = "/var/lib/keylime";
-        let work_dir = Path::new(&path);
-        let secure_dir_path = Path::new(work_dir).join("secure");
+        let temp_workdir = tempfile::tempdir().unwrap(); //#[allow_ci]
         let secure_size = "1m";
-        let test_mount = mount(&secure_dir_path, secure_size);
-        assert!(check_mount(&secure_dir_path).is_ok());
+        let test_mount = mount(temp_workdir.path(), secure_size);
+        assert!(check_mount(temp_workdir.path()).is_ok());
     }
 }

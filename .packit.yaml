@@ -1,9 +1,74 @@
+downstream_package_name: keylime-agent-rust
+upstream_project_url: https://github.com/keylime/rust-keylime
+specfile_path: rpm/fedora/keylime-agent-rust.spec
+actions:
+  get-current-version:
+  - bash -c "git describe --tags --abbrev=0 | sed 's/v\(.*\)/\1/g'"
+
+srpm_build_deps:
+  - cargo
+  - rust
+  - git
+  - openssl-devel
+
 jobs:
 - job: tests
   trigger: pull_request
   metadata:
     targets:
     - fedora-stable
-    - fedora-rawhide
+#    - fedora-rawhide
     - centos-stream-9-x86_64
     skip_build: true
+
+- job: copr_build
+  trigger: commit
+  branch: master
+  specfile_path: rpm/fedora/keylime-agent-rust.spec
+  files_to_sync:
+    - rpm/fedora/*
+  actions:
+    get-current-version:
+      bash -c "git describe --tags --abbrev=0 | sed 's/v\(.*\)/\1/g'"
+    post-upstream-clone:
+      bash -c 'if [[ ! -d /var/tmp/cargo-vendor-filterer ]]; then git clone https://github.com/cgwalters/cargo-vendor-filterer.git /var/tmp/cargo-vendor-filterer; fi &&
+        cd /var/tmp/cargo-vendor-filterer &&
+        cargo build &&
+        cd - &&
+        cp /var/tmp/cargo-vendor-filterer/target/debug/cargo-vendor-filterer . &&
+        ./cargo-vendor-filterer --platform x86_64-unknown-linux-gnu
+            --platform powerpc64le-unknown-linux-gnu
+            --platform aarch64-unknown-linux-gnu
+            --platform i686-unknown-linux-gnu
+            --platform s390x-unknown-linux-gnu
+            --exclude-crate-path "libloading#tests" &&
+        tar jcf rpm/fedora/rust-keylime-vendor.tar.xz vendor'
+  targets:
+    - fedora-all
+  preserve_project: True
+
+- job: copr_build
+  trigger: commit
+  branch: master
+  specfile_path: rpm/centos/keylime-agent-rust.spec
+  files_to_sync:
+    - rpm/centos/*
+  actions:
+    get-current-version:
+      bash -c "git describe --tags --abbrev=0 | sed 's/v\(.*\)/\1/g'"
+    post-upstream-clone:
+      bash -c 'if [[ ! -d /var/tmp/cargo-vendor-filterer ]]; then git clone https://github.com/cgwalters/cargo-vendor-filterer.git /var/tmp/cargo-vendor-filterer; fi &&
+        cd /var/tmp/cargo-vendor-filterer &&
+        cargo build &&
+        cd - &&
+        cp /var/tmp/cargo-vendor-filterer/target/debug/cargo-vendor-filterer . &&
+        ./cargo-vendor-filterer --platform x86_64-unknown-linux-gnu
+            --platform powerpc64le-unknown-linux-gnu
+            --platform aarch64-unknown-linux-gnu
+            --platform i686-unknown-linux-gnu
+            --platform s390x-unknown-linux-gnu
+            --exclude-crate-path "libloading#tests" &&
+        tar jcf rpm/centos/rust-keylime-vendor.tar.xz vendor'
+  targets:
+    - centos-stream-9-x86_64
+  preserve_project: True

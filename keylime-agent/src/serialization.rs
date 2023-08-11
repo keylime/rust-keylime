@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2021 Keylime Authors
 
+use base64::{engine::general_purpose, Engine as _};
 use serde::{Deserialize, Serialize};
 use serde_json::Number;
 
@@ -16,7 +17,7 @@ pub(crate) fn serialize_as_base64<S>(
 where
     S: serde::Serializer,
 {
-    serializer.serialize_str(&base64::encode(bytes))
+    serializer.serialize_str(&general_purpose::STANDARD.encode(bytes))
 }
 
 pub(crate) fn deserialize_as_base64<'de, D>(
@@ -26,7 +27,9 @@ where
     D: serde::Deserializer<'de>,
 {
     String::deserialize(deserializer).and_then(|string| {
-        base64::decode(string).map_err(serde::de::Error::custom)
+        general_purpose::STANDARD
+            .decode(string)
+            .map_err(serde::de::Error::custom)
     })
 }
 
@@ -38,7 +41,9 @@ where
     S: serde::Serializer,
 {
     match *value {
-        Some(ref value) => serializer.serialize_str(&base64::encode(value)),
+        Some(ref value) => {
+            serializer.serialize_str(&general_purpose::STANDARD.encode(value))
+        }
         None => serializer.serialize_none(),
     }
 }

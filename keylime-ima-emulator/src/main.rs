@@ -9,6 +9,7 @@ use log::*;
 
 use clap::Parser;
 use signal_hook::consts::SIGINT;
+use signal_hook::consts::SIGTERM;
 use std::collections::HashMap;
 use std::convert::{TryFrom, TryInto};
 use std::fs::File;
@@ -216,6 +217,7 @@ fn main() -> std::result::Result<(), ImaEmulatorError> {
 
     let shutdown_marker = Arc::new(AtomicBool::new(false));
     signal_hook::flag::register(SIGINT, Arc::clone(&shutdown_marker))?;
+    signal_hook::flag::register(SIGTERM, Arc::clone(&shutdown_marker))?;
     println!("Monitoring {}", args.ima_log.display());
     while !shutdown_marker.load(Ordering::SeqCst) {
         for (pcr_hash_alg, position) in positions.iter_mut() {
