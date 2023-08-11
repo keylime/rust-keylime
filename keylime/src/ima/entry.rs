@@ -8,6 +8,7 @@
 // https://www.kernel.org/doc/html/v5.12/security/IMA-templates.html
 
 use crate::algorithms::HashAlgorithm;
+use crate::endian;
 use openssl::hash::MessageDigest;
 use std::convert::{TryFrom, TryInto};
 use std::io::{Error, ErrorKind, Result, Write};
@@ -107,12 +108,15 @@ impl TryFrom<&str> for Digest {
 impl Encode for Digest {
     fn encode(&self, writer: &mut dyn Write) -> Result<()> {
         if self.algorithm == HashAlgorithm::Sha1 {
-            writer.write_all(&(self.value.len() as u32).to_le_bytes())?;
+            writer.write_all(&endian::local_endianness_32(
+                self.value.len() as u32,
+            ))?;
             writer.write_all(&self.value)?;
         } else {
             let algorithm = format!("{}", self.algorithm);
             let total_len = algorithm.len() + 2 + self.value.len();
-            writer.write_all(&(total_len as u32).to_le_bytes())?;
+            writer
+                .write_all(&endian::local_endianness_32(total_len as u32))?;
             writer.write_all(algorithm.as_bytes())?;
             writer.write_all(&[58u8, 0u8])?;
             writer.write_all(&self.value)?;
@@ -147,7 +151,9 @@ const TCG_EVENT_NAME_LEN_MAX: usize = 255;
 impl Encode for Name {
     fn encode(&self, writer: &mut dyn Write) -> Result<()> {
         let bytes = self.name.as_bytes();
-        writer.write_all(&((bytes.len() + 1) as u32).to_le_bytes())?;
+        writer.write_all(&endian::local_endianness_32(
+            (bytes.len() + 1) as u32,
+        ))?;
         writer.write_all(bytes)?;
         writer.write_all(&[0u8])?; // NUL
         Ok(())
@@ -194,7 +200,9 @@ impl TryFrom<&str> for Signature {
 
 impl Encode for Signature {
     fn encode(&self, writer: &mut dyn Write) -> Result<()> {
-        writer.write_all(&(self.value.len() as u32).to_le_bytes())?;
+        writer.write_all(&endian::local_endianness_32(
+            self.value.len() as u32
+        ))?;
         writer.write_all(&self.value)?;
         Ok(())
     }
@@ -218,7 +226,9 @@ impl TryFrom<&str> for Buffer {
 
 impl Encode for Buffer {
     fn encode(&self, writer: &mut dyn Write) -> Result<()> {
-        writer.write_all(&(self.value.len() as u32).to_le_bytes())?;
+        writer.write_all(&endian::local_endianness_32(
+            self.value.len() as u32
+        ))?;
         writer.write_all(&self.value)?;
         Ok(())
     }
@@ -347,7 +357,7 @@ impl Encode for ImaSig {
         if let Some(signature) = &self.signature {
             signature.encode(writer)?;
         } else {
-            writer.write_all(&0u32.to_le_bytes())?;
+            writer.write_all(&endian::local_endianness_32(0u32))?;
         }
         Ok(())
     }

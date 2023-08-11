@@ -539,6 +539,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6245d59a3e82a7fc217c5828a6692dbc6dfb63a0c8c90495621f7b9d79704a0e"
 
 [[package]]
+name = "cpu-endian"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "512746971686a86c7b8aee38244eaa7e04696e612790d593f1d73059536beee8"
+dependencies = [
+ "cc",
+]
+
+[[package]]
 name = "cpufeatures"
 version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1097,6 +1106,7 @@ name = "keylime"
 version = "0.2.2"
 dependencies = [
  "base64 0.21.0",
+ "cpu-endian",
  "hex",
  "log",
  "openssl",

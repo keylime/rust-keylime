@@ -7,6 +7,7 @@ edition = "2021"
 
 [dependencies]
 base64 = "0.21"
+cpu-endian = "0.1.1"
 hex = "0.4"
 log = "0.4"
 openssl = "0.10.15"
