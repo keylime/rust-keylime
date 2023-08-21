@@ -15,7 +15,7 @@ jobs:
     name: Static code checks
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v3
     - name: Check formatting
       run: cargo fmt --all -- --check
     - name: Check for panics
@@ -27,10 +27,10 @@ jobs:
     name: Fedora tests
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v3
     - name: Run tests
       run: docker run --security-opt seccomp=tests/seccomp-profile.json -v $(pwd):/tmp/code_under_test -w /tmp/code_under_test quay.io/keylime/keylime-ci:latest dbus-run-session -- /tmp/code_under_test/tests/run.sh
-    - uses: actions/upload-artifact@v2
+    - uses: actions/upload-artifact@v3
       with:
         name: tarpaulin-report
         path: |
