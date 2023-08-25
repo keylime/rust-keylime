@@ -52,20 +52,21 @@ For runtime, the following packages are required:
 * `util-linux-core` (for the `mount` command)
 * (optional for the `with-zmq` feature): `zeromq`
 
-#### Ubuntu
+#### Debian and Ubuntu
 
-For Ubuntu, use the following packages are required:
+For Debian and Ubuntu, use the following packages are required:
 
-* `clang`
 * `libarchive-dev`
+* `libclang-dev`
 * `libssl-dev`
-* `libtss-dev`
+* `libtss2-dev`
+* `pkg-config`
 * (optional for the `with-zmq` feature): `libzmq3-dev`
 
 To install, use the following command:
 
 ```
-$ apt-get install clang libarchive-dev libssl-dev libtss-dev libzmq3-dev
+$ apt-get install libarchive-dev libclang-dev libssl-dev libtss2-dev libzmq3-dev pkg-config
 ```
 
 For runtime, the following packages are required:
@@ -73,7 +74,7 @@ For runtime, the following packages are required:
 * `coreutils` (for the `mount` command)
 * `libarchive`
 * `libssl`
-* `libtss`
+* `libtss2-esys-3.0.2-0`
 * (optional for the `with-zmq` feature): `libzmq3`
 * `systemd` (to run as systemd service)
 
