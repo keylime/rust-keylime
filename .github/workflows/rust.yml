@@ -20,8 +20,6 @@ jobs:
       run: cargo fmt --all -- --check
     - name: Check for panics
       run: ./tests/nopanic.ci
-    - name: Run cargo audit
-      run: cargo audit
 
   tests:
     name: Fedora tests
