@@ -710,9 +710,6 @@ async fn main() -> Result<()> {
     let (mut revocation_tx, mut revocation_rx) =
         mpsc::channel::<revocation::RevocationMessage>(1);
 
-    #[cfg(feature = "with-zmq")]
-    let (mut zmq_tx, mut zmq_rx) = mpsc::channel::<revocation::ZmqMessage>(1);
-
     let revocation_cert = match config.agent.revocation_cert.as_ref() {
         "" => {
             error!(
@@ -890,8 +887,6 @@ async fn main() -> Result<()> {
         PathBuf::from(&mount),
         payload_rx,
         revocation_tx.clone(),
-        #[cfg(feature = "with-zmq")]
-        zmq_tx.clone(),
     ))
     .map_err(Error::from);
 
@@ -902,25 +897,6 @@ async fn main() -> Result<()> {
         payload_tx.clone(),
     ))
     .map_err(Error::from);
-
-    // If with-zmq feature is enabled, run the service listening for ZeroMQ messages
-    #[cfg(feature = "with-zmq")]
-    let zmq_task = if config.agent.enable_revocation_notifications {
-        warn!("The support for ZeroMQ revocation notifications is deprecated and will be removed on next major release");
-
-        let zmq_ip = config.agent.revocation_notification_ip;
-        let zmq_port = config.agent.revocation_notification_port;
-
-        rt::spawn(revocation::zmq_worker(
-            zmq_rx,
-            revocation_tx.clone(),
-            zmq_ip,
-            zmq_port,
-        ))
-        .map_err(Error::from)
-    } else {
-        rt::spawn(ok(())).map_err(Error::from)
-    };
 
     let shutdown_task = rt::spawn(async move {
         let mut sigint = signal(SignalKind::interrupt()).unwrap(); //#[allow_ci]
@@ -942,19 +918,12 @@ async fn main() -> Result<()> {
         payload_tx.send(payloads::PayloadMessage::Shutdown);
         keys_tx.send((keys_handler::KeyMessage::Shutdown, None));
 
-        #[cfg(feature = "with-zmq")]
-        zmq_tx.send(revocation::ZmqMessage::Shutdown);
-
         revocation_tx.send(revocation::RevocationMessage::Shutdown);
 
         // Await tasks shutdown
         server_stop.await;
     })
     .map_err(Error::from);
-
-    // If with-zmq feature is enabled, wait for the service listening for ZeroMQ messages
-    #[cfg(feature = "with-zmq")]
-    try_join!(zmq_task)?;
 
     let result = try_join!(
         server_task,

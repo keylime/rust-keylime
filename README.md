@@ -36,11 +36,10 @@ The following packages are required for building:
 * `libarchive-devel`
 * `openssl-devel`
 * `tpm2-tss-devel`
-* (optional for the `with-zmq` feature): `zeromq-devel`
 
 To install, use the following command:
 ```
-$ dnf install clang libarchive-devel openssl-devel tpm2-tss-devel zeromq-devel
+$ dnf install clang libarchive-devel openssl-devel tpm2-tss-devel
 ```
 
 For runtime, the following packages are required:
@@ -50,7 +49,6 @@ For runtime, the following packages are required:
 * `tpm2-tss`
 * `systemd` (to run as systemd service)
 * `util-linux-core` (for the `mount` command)
-* (optional for the `with-zmq` feature): `zeromq`
 
 #### Debian and Ubuntu
 
@@ -61,12 +59,11 @@ For Debian and Ubuntu, use the following packages are required:
 * `libssl-dev`
 * `libtss2-dev`
 * `pkg-config`
-* (optional for the `with-zmq` feature): `libzmq3-dev`
 
 To install, use the following command:
 
 ```
-$ apt-get install libarchive-dev libclang-dev libssl-dev libtss2-dev libzmq3-dev pkg-config
+$ apt-get install libarchive-dev libclang-dev libssl-dev libtss2-dev pkg-config
 ```
 
 For runtime, the following packages are required:
@@ -75,7 +72,6 @@ For runtime, the following packages are required:
 * `libarchive`
 * `libssl`
 * `libtss2-esys-3.0.2-0`
-* (optional for the `with-zmq` feature): `libzmq3`
 * `systemd` (to run as systemd service)
 
 ### Rust
