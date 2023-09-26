@@ -18,6 +18,7 @@ use openssl::{
     x509::store::X509StoreBuilder,
     x509::{X509Name, X509},
 };
+use picky_asn1_x509::SubjectPublicKeyInfo;
 use std::{
     fs::{read_to_string, set_permissions, File, Permissions},
     io::{Read, Write},
@@ -29,6 +30,13 @@ use std::{
 use crate::{
     Error, Result, AES_128_KEY_LEN, AES_256_KEY_LEN, AES_BLOCK_SIZE,
 };
+
+// Read a X509 cert in DER format from path
+pub(crate) fn load_x509_der(input_cert_path: &Path) -> Result<X509> {
+    let contents = std::fs::read(input_cert_path).map_err(Error::from)?;
+
+    X509::from_der(&contents).map_err(Error::Crypto)
+}
 
 // Read a X509 cert or cert chain and outputs the first certificate
 pub(crate) fn load_x509(input_cert_path: &Path) -> Result<X509> {
@@ -73,6 +81,51 @@ pub(crate) fn write_x509(cert: &X509, file_path: &Path) -> Result<()> {
     let mut file = std::fs::File::create(file_path)?;
     _ = file.write(&cert.to_pem()?)?;
     Ok(())
+}
+
+/// Check an x509 certificate contains a specific public key
+pub(crate) fn check_x509_key(
+    cert: &X509,
+    tpm_key: tss_esapi::structures::Public,
+) -> Result<bool> {
+    match cert
+        .public_key()
+        .unwrap() //#[allow_ci]
+        .id()
+    {
+        Id::RSA => {
+            let cert_n =
+                cert.public_key().unwrap().rsa().unwrap().n().to_vec(); //#[allow_ci]
+            let mut cert_n_str = format!("{:?}", cert_n);
+            _ = cert_n_str.pop();
+            _ = cert_n_str.remove(0);
+            let key = SubjectPublicKeyInfo::try_from(tpm_key)?;
+            let key_der = picky_asn1_der::to_vec(&key)?;
+            let key_der_str = format!("{:?}", key_der);
+
+            Ok(key_der_str.contains(&cert_n_str))
+        }
+        Id::EC => {
+            let cert_n = cert
+                .public_key()
+                .unwrap() //#[allow_ci]
+                .ec_key()
+                .unwrap() //#[allow_ci]
+                .public_key_to_der()
+                .unwrap(); //#[allow_ci]
+            let mut cert_n_str = format!("{:?}", cert_n);
+            _ = cert_n_str.pop();
+            _ = cert_n_str.remove(0);
+            let key = SubjectPublicKeyInfo::try_from(tpm_key)?;
+            let key_der = picky_asn1_der::to_vec(&key)?;
+            let key_der_str = format!("{:?}", key_der);
+
+            Ok(key_der_str.contains(&cert_n_str))
+        }
+        _ => Err(Error::Other(
+            "Certificate does not seem to have an RSA or EC key".to_string(),
+        )),
+    }
 }
 
 /// Read a PEM file and returns the public and private keys

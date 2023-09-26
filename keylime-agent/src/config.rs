@@ -31,6 +31,8 @@ pub static DEFAULT_ENABLE_AGENT_MTLS: bool = true;
 pub static DEFAULT_KEYLIME_DIR: &str = "/var/lib/keylime";
 pub static DEFAULT_SERVER_KEY: &str = "server-private.pem";
 pub static DEFAULT_SERVER_CERT: &str = "server-cert.crt";
+pub static DEFAULT_IAK_CERT: &str = "iak-cert.crt";
+pub static DEFAULT_IDEVID_CERT: &str = "idevid-cert.crt";
 pub static DEFAULT_SERVER_KEY_PASSWORD: &str = "";
 // The DEFAULT_TRUSTED_CLIENT_CA is relative from KEYLIME_DIR
 pub static DEFAULT_TRUSTED_CLIENT_CA: &str = "cv_ca/cacert.crt";
@@ -58,7 +60,7 @@ pub static DEFAULT_EK_HANDLE: &str = "generate";
 pub static DEFAULT_ENABLE_IAK_IDEVID: bool = true;
 pub static DEFAULT_IAK_IDEVID_ASYMMETRIC_ALG: &str = "rsa";
 pub static DEFAULT_IAK_IDEVID_NAME_ALG: &str = "sha256";
-pub static DEFAULT_IAK_IDEVID_TEMPLATE: &str = "";
+pub static DEFAULT_IAK_IDEVID_TEMPLATE: &str = "H-1";
 pub static DEFAULT_RUN_AS: &str = "keylime:tss";
 pub static DEFAULT_AGENT_DATA_PATH: &str = "agent_data.json";
 pub static DEFAULT_CONFIG: &str = "/etc/keylime/agent.conf";
@@ -78,6 +80,8 @@ pub(crate) struct EnvConfig {
     pub keylime_dir: Option<String>,
     pub server_key: Option<String>,
     pub server_cert: Option<String>,
+    pub iak_cert: Option<String>,
+    pub idevid_cert: Option<String>,
     pub server_key_password: Option<String>,
     pub trusted_client_ca: Option<String>,
     pub enc_keyname: Option<String>,
@@ -120,6 +124,8 @@ pub(crate) struct AgentConfig {
     pub keylime_dir: String,
     pub server_key: String,
     pub server_cert: String,
+    pub iak_cert: String,
+    pub idevid_cert: String,
     pub server_key_password: String,
     pub trusted_client_ca: String,
     pub enc_keyname: String,
@@ -198,6 +204,12 @@ impl EnvConfig {
         }
         if let Some(ref v) = self.server_cert {
             _ = agent.insert("server_cert".to_string(), v.to_string().into());
+        }
+        if let Some(ref v) = self.iak_cert {
+            _ = agent.insert("iak_cert".to_string(), v.to_string().into());
+        }
+        if let Some(ref v) = self.idevid_cert {
+            _ = agent.insert("idevid_cert".to_string(), v.to_string().into());
         }
         if let Some(ref v) = self.trusted_client_ca {
             _ = agent.insert(
@@ -396,6 +408,14 @@ impl Source for KeylimeConfig {
             self.agent.server_cert.to_string().into(),
         );
         _ = m.insert(
+            "iak_cert".to_string(),
+            self.agent.iak_cert.to_string().into(),
+        );
+        _ = m.insert(
+            "idevid_cert".to_string(),
+            self.agent.idevid_cert.to_string().into(),
+        );
+        _ = m.insert(
             "trusted_client_ca".to_string(),
             self.agent.trusted_client_ca.to_string().into(),
         );
@@ -544,6 +564,8 @@ impl Default for AgentConfig {
             server_key: "default".to_string(),
             server_key_password: DEFAULT_SERVER_KEY_PASSWORD.to_string(),
             server_cert: "default".to_string(),
+            iak_cert: "default".to_string(),
+            idevid_cert: "default".to_string(),
             trusted_client_ca: "default".to_string(),
             revocation_actions: DEFAULT_REVOCATION_ACTIONS.to_string(),
             revocation_actions_dir: DEFAULT_REVOCATION_ACTIONS_DIR
@@ -724,6 +746,20 @@ fn config_translate_keywords(
             .collect::<Vec<_>>()
             .join(", ");
 
+    let mut iak_cert = config_get_file_path(
+        "iak_cert",
+        &config.agent.iak_cert,
+        keylime_dir,
+        DEFAULT_IAK_CERT,
+    );
+
+    let mut idevid_cert = config_get_file_path(
+        "idevid_cert",
+        &config.agent.idevid_cert,
+        keylime_dir,
+        DEFAULT_IDEVID_CERT,
+    );
+
     let ek_handle = match config.agent.ek_handle.as_ref() {
         "generate" => "".to_string(),
         "" => "".to_string(),
@@ -764,6 +800,8 @@ fn config_translate_keywords(
             uuid,
             server_key,
             server_cert,
+            iak_cert,
+            idevid_cert,
             trusted_client_ca,
             ek_handle,
             agent_data_path,

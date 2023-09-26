@@ -32,6 +32,10 @@ struct Register<'a> {
         skip_serializing_if = "Option::is_none"
     )]
     idevid_tpm: Option<&'a [u8]>,
+    #[serde(serialize_with = "serialize_maybe_base64")]
+    idevid_cert: Option<Vec<u8>>,
+    #[serde(serialize_with = "serialize_maybe_base64")]
+    iak_cert: Option<Vec<u8>>,
     #[serde(
         serialize_with = "serialize_maybe_base64",
         skip_serializing_if = "Option::is_none"
@@ -116,6 +120,8 @@ pub(crate) async fn do_register_agent(
     aik_tpm: &[u8],
     iak_tpm: Option<&[u8]>,
     idevid_tpm: Option<&[u8]>,
+    idevid_cert_x509: Option<X509>,
+    iak_cert_x509: Option<X509>,
     iak_attest: Option<Vec<u8>>,
     iak_sign: Option<Vec<u8>>,
     mtls_cert_x509: Option<&X509>,
@@ -125,6 +131,16 @@ pub(crate) async fn do_register_agent(
     let mtls_cert = match mtls_cert_x509 {
         Some(cert) => Some(String::from_utf8(cert.to_pem()?)?),
         None => Some("disabled".to_string()),
+    };
+
+    let idevid_cert = match idevid_cert_x509 {
+        Some(cert) => Some(cert.to_der()?),
+        None => None,
+    };
+
+    let iak_cert = match iak_cert_x509 {
+        Some(cert) => Some(cert.to_der()?),
+        None => None,
     };
 
     let ip = if ip.is_empty() {
@@ -139,6 +155,8 @@ pub(crate) async fn do_register_agent(
         aik_tpm,
         iak_tpm,
         idevid_tpm,
+        idevid_cert,
+        iak_cert,
         iak_attest,
         iak_sign,
         mtls_cert,
@@ -227,6 +245,8 @@ mod tests {
             None,
             None,
             None,
+            None,
+            None,
             Some(&cert),
             "",
             0,
@@ -273,6 +293,8 @@ mod tests {
             None,
             None,
             None,
+            None,
+            None,
             Some(&cert),
             "",
             0,
@@ -311,6 +333,8 @@ mod tests {
             &mock_data,
             Some(mock_data.to_vec()),
             &mock_data,
+            None,
+            None,
             None,
             None,
             None,
