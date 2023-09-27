@@ -40,10 +40,11 @@ cargo test --features testing -- --nocapture
 echo "-------- Testing with coverage"
 TCTI=tabrmd:bus_type=session RUST_BACKTRACE=1 RUST_LOG=info \
 KEYLIME_CONFIG=$PWD/keylime-agent.conf \
-cargo tarpaulin -v \
+cargo tarpaulin --verbose \
       --target-dir target/tarpaulin \
       --workspace \
       --exclude-files 'target/*' \
       --ignore-panics --ignore-tests \
       --out Html --out Json \
-      --all-features
+      --all-features \
+      --engine llvm
