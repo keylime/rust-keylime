@@ -63,6 +63,10 @@ pub static DEFAULT_IAK_IDEVID_NAME_ALG: &str = "sha256";
 pub static DEFAULT_IAK_IDEVID_TEMPLATE: &str = "H-1";
 pub static DEFAULT_RUN_AS: &str = "keylime:tss";
 pub static DEFAULT_AGENT_DATA_PATH: &str = "agent_data.json";
+pub static DEFAULT_IMA_ML_PATH: &str =
+    "/sys/kernel/security/ima/ascii_runtime_measurements";
+pub static DEFAULT_MEASUREDBOOT_ML_PATH: &str =
+    "/sys/kernel/security/tpm0/binary_boot_measurements";
 pub static DEFAULT_CONFIG: &str = "/etc/keylime/agent.conf";
 pub static DEFAULT_CONFIG_SYS: &str = "/usr/etc/keylime/agent.conf";
 
@@ -108,6 +112,8 @@ pub(crate) struct EnvConfig {
     pub iak_idevid_template: Option<String>,
     pub run_as: Option<String>,
     pub agent_data_path: Option<String>,
+    pub ima_ml_path: Option<String>,
+    pub measuredboot_ml_path: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
@@ -152,6 +158,8 @@ pub(crate) struct AgentConfig {
     pub iak_idevid_template: String,
     pub run_as: String,
     pub agent_data_path: String,
+    pub ima_ml_path: String,
+    pub measuredboot_ml_path: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
@@ -325,6 +333,15 @@ impl EnvConfig {
         if let Some(ref v) = self.agent_data_path {
             _ = agent
                 .insert("agent_data_path".to_string(), v.to_string().into());
+        }
+        if let Some(ref v) = self.ima_ml_path {
+            _ = agent.insert("ima_ml_path".to_string(), v.to_string().into());
+        }
+        if let Some(ref v) = self.measuredboot_ml_path {
+            _ = agent.insert(
+                "measuredboot_ml_path".to_string(),
+                v.to_string().into(),
+            );
         }
         agent
     }
@@ -515,6 +532,14 @@ impl Source for KeylimeConfig {
             "agent_data_path".to_string(),
             self.agent.agent_data_path.to_string().into(),
         );
+        _ = m.insert(
+            "ima_ml_path".to_string(),
+            self.agent.ima_ml_path.to_string().into(),
+        );
+        _ = m.insert(
+            "measuredboot_ml_path".to_string(),
+            self.agent.measuredboot_ml_path.to_string().into(),
+        );
 
         Ok(Map::from([("agent".to_string(), m.into())]))
     }
@@ -580,6 +605,8 @@ impl Default for AgentConfig {
                 .to_string(),
             iak_idevid_name_alg: DEFAULT_IAK_IDEVID_NAME_ALG.to_string(),
             iak_idevid_template: DEFAULT_IAK_IDEVID_TEMPLATE.to_string(),
+            ima_ml_path: "default".to_string(),
+            measuredboot_ml_path: "default".to_string(),
         }
     }
 }
@@ -708,11 +735,27 @@ fn config_translate_keywords(
         ))
     })?;
 
+    let root_path = Path::new("/");
+
     let mut agent_data_path = config_get_file_path(
         "agent_data_path",
         &config.agent.agent_data_path,
         keylime_dir,
         DEFAULT_AGENT_DATA_PATH,
+    );
+
+    let mut ima_ml_path = config_get_file_path(
+        "ima_ml_path",
+        &config.agent.ima_ml_path,
+        root_path,
+        DEFAULT_IMA_ML_PATH,
+    );
+
+    let mut measuredboot_ml_path = config_get_file_path(
+        "measuredboot_ml_path",
+        &config.agent.measuredboot_ml_path,
+        root_path,
+        DEFAULT_MEASUREDBOOT_ML_PATH,
     );
 
     let mut server_key = config_get_file_path(
@@ -802,6 +845,8 @@ fn config_translate_keywords(
             trusted_client_ca,
             ek_handle,
             agent_data_path,
+            ima_ml_path,
+            measuredboot_ml_path,
             revocation_cert,
             ..config.agent.clone()
         },
@@ -1072,6 +1117,8 @@ mod tests {
             ("IAK_IDEVID_TEMPLATE", "override_iak_idevid_template"),
             ("RUN_AS", "override_run_as"),
             ("AGENT_DATA_PATH", "override_agent_data_path"),
+            ("IMA_ML_PATH", "override_ima_ml_path"),
+            ("MEASUREDBOOT_ML_PATH", "override_measuredboot_ml_path"),
         ]);
 
         for (c, v) in override_map.into_iter() {

@@ -39,34 +39,12 @@ pub const API_VERSION: &str = "v2.1";
 pub const TPM_DATA_PCR: usize = 16;
 pub const IMA_PCR: usize = 10;
 pub static RSA_PUBLICKEY_EXPORTABLE: &str = "rsa placeholder";
-pub static IMA_ML: &str =
-    "/sys/kernel/security/ima/ascii_runtime_measurements";
-pub static MEASUREDBOOT_ML: &str =
-    "/sys/kernel/security/tpm0/binary_bios_measurements";
 pub static KEY: &str = "secret";
 pub const AGENT_UUID_LEN: usize = 36;
 pub const AUTH_TAG_LEN: usize = 48;
 pub const AES_128_KEY_LEN: usize = 16;
 pub const AES_256_KEY_LEN: usize = 32;
 pub const AES_BLOCK_SIZE: usize = 16;
-
-cfg_if::cfg_if! {
-    if #[cfg(test)] {
-        // Secure mount of tpmfs (False is generally used for development environments)
-
-        pub(crate) fn ima_ml_path_get() -> PathBuf {
-            Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("test-data")
-                .join("ima")
-                .join("ascii_runtime_measurements")
-        }
-    } else {
-
-        pub(crate) fn ima_ml_path_get() -> PathBuf {
-            Path::new(IMA_ML).to_path_buf()
-        }
-    }
-}
 
 #[derive(Serialize, Deserialize, Debug)]
 pub(crate) struct APIVersion {
