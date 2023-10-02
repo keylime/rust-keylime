@@ -25,6 +25,10 @@ all: $(programs)
 $(programs):
 	cargo build --target-dir="${TARGETDIR}" ${CARGO_ARGS}
 
+.PHONY: clean
+clean::
+	${RM} -rf target
+
 .PHONY: install
 install: all
 	mkdir -p /etc/keylime/

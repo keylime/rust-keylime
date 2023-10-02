@@ -129,7 +129,34 @@ async fn main() -> Result<()> {
 
     pretty_env_logger::init();
 
-    let ima_ml_path = ima_ml_path_get();
+    // Load config
+    let mut config = config::KeylimeConfig::new()?;
+
+    // load path for IMA logfile
+    #[cfg(test)]
+    fn ima_ml_path_get(_: &String) -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("test-data")
+            .join("ima")
+            .join("ascii_runtime_measurements")
+    }
+
+    #[cfg(not(test))]
+    fn ima_ml_path_get(s: &String) -> PathBuf {
+        Path::new(&s).to_path_buf()
+    }
+
+    let ima_ml_path = ima_ml_path_get(&config.agent.ima_ml_path);
+
+    // check whether anyone has overridden the default
+    if ima_ml_path.as_os_str() != config::DEFAULT_IMA_ML_PATH {
+        warn!(
+            "IMA measurement list location override: {}",
+            ima_ml_path.display()
+        );
+    }
+
+    // check IMA logfile exists & accessible
     let ima_ml_file = if ima_ml_path.exists() {
         match fs::File::open(&ima_ml_path) {
             Ok(file) => Some(Mutex::new(file)),
@@ -149,9 +176,9 @@ async fn main() -> Result<()> {
         None
     };
 
-    let mut measuredboot_ml_path = Path::new(MEASUREDBOOT_ML);
-
-    // Allow setting the binary bios measurements log path when testing
+    // load path for MBA logfile
+    let mut measuredboot_ml_path =
+        Path::new(&config.agent.measuredboot_ml_path);
     let env_mb_path: String;
     #[cfg(feature = "testing")]
     if let Ok(v) = std::env::var("TPM_BINARY_MEASUREMENTS") {
@@ -159,6 +186,17 @@ async fn main() -> Result<()> {
         measuredboot_ml_path = Path::new(&env_mb_path);
     }
 
+    // check whether anyone has overridden the default MBA logfile
+    if measuredboot_ml_path.as_os_str()
+        != config::DEFAULT_MEASUREDBOOT_ML_PATH
+    {
+        warn!(
+            "Measured boot measurement list location override: {}",
+            measuredboot_ml_path.display()
+        );
+    }
+
+    // check MBA logfile exists & accessible
     let measuredboot_ml_file = if measuredboot_ml_path.exists() {
         match fs::File::open(measuredboot_ml_path) {
             Ok(file) => Some(Mutex::new(file)),
@@ -177,9 +215,6 @@ async fn main() -> Result<()> {
         );
         None
     };
-
-    // Load config
-    let mut config = config::KeylimeConfig::new()?;
 
     // The agent cannot run when a payload script is defined, but mTLS is disabled and insecure
     // payloads are not explicitly enabled
@@ -1060,7 +1095,8 @@ mod testing {
             };
 
             // Allow setting the binary bios measurements log path when testing
-            let mut measuredboot_ml_path = Path::new(MEASUREDBOOT_ML);
+            let mut measuredboot_ml_path =
+                Path::new(&test_config.agent.measuredboot_ml_path);
             let env_mb_path;
             #[cfg(feature = "testing")]
             if let Ok(v) = std::env::var("TPM_BINARY_MEASUREMENTS") {

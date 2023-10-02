@@ -664,7 +664,7 @@ mod tests {
         let iv = b"ABCDEFGHIJKLMNOP";
         let plaintext = b"test string, longer than the block size";
         let result = encrypt_aead(&key[..], &iv[..], &plaintext[..]);
-        assert!(matches!(result, Err(_)));
+        assert!(result.is_err())
     }
 
     #[test]
@@ -673,7 +673,7 @@ mod tests {
         let iv = b"ABCDEFGHIJKLMN";
         let plaintext = b"test string, longer than the block size";
         let result = encrypt_aead(&key[..], &iv[..], &plaintext[..]);
-        assert!(matches!(result, Err(_)));
+        assert!(result.is_err())
     }
 
     #[test]
@@ -681,7 +681,7 @@ mod tests {
         let key = b"0123456789012345012345678901234";
         let ciphertext = hex::decode("4142434445464748494A4B4C4D4E4F50FCE7CA78C08FB1D5E04DB3C4AA6B6ED2F09C4AD7985BD1DB9FF15F9FDA869D0C01B27FF4618737BB53C84D256455AAB53B9AC7EAF88C4B").unwrap(); //#[allow_ci]
         let result = decrypt_aead(&key[..], &ciphertext[..]);
-        assert!(matches!(result, Err(_)));
+        assert!(result.is_err())
     }
 
     #[test]
