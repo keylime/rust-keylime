@@ -88,12 +88,27 @@ pub(crate) fn check_x509_key(
     cert: &X509,
     tpm_key: tss_esapi::structures::Public,
 ) -> Result<bool> {
+    // Id:RSA_PSS only added in rust-openssl from v0.10.59
+    // Id taken from https://boringssl.googlesource.com/boringssl/+/refs/heads/master/include/openssl/nid.h#4039
+    let id_rsa_pss: Id = Id::from_raw(912);
     match cert
         .public_key()
         .unwrap() //#[allow_ci]
         .id()
     {
         Id::RSA => {
+            let cert_n =
+                cert.public_key().unwrap().rsa().unwrap().n().to_vec(); //#[allow_ci]
+            let mut cert_n_str = format!("{:?}", cert_n);
+            _ = cert_n_str.pop();
+            _ = cert_n_str.remove(0);
+            let key = SubjectPublicKeyInfo::try_from(tpm_key)?;
+            let key_der = picky_asn1_der::to_vec(&key)?;
+            let key_der_str = format!("{:?}", key_der);
+
+            Ok(key_der_str.contains(&cert_n_str))
+        }
+        id_rsa_pss => {
             let cert_n =
                 cert.public_key().unwrap().rsa().unwrap().n().to_vec(); //#[allow_ci]
             let mut cert_n_str = format!("{:?}", cert_n);
