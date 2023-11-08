@@ -313,7 +313,10 @@ async fn main() -> Result<()> {
                         "Loading IAK certificate from {}",
                         iak_path.display()
                     );
-                    let iakcert = crypto::load_x509_der(iak_path)?;
+                    let iakcert = match crypto::load_x509_der(iak_path) {
+                        Ok(cert) => cert,
+                        Err(error) => crypto::load_x509_pem(iak_path)?,
+                    };
                     if crypto::check_x509_key(
                         &iakcert,
                         iak.clone().unwrap().public, //#[allow_ci]
@@ -343,7 +346,10 @@ async fn main() -> Result<()> {
                         "Loading IDevID certificate from {}",
                         idevid_path.display()
                     );
-                    let idevcert = crypto::load_x509_der(idevid_path)?;
+                    let idevcert = match crypto::load_x509_der(idevid_path) {
+                        Ok(cert) => cert,
+                        Err(error) => crypto::load_x509_pem(idevid_path)?,
+                    };
                     if crypto::check_x509_key(
                         &idevcert,
                         idevid.clone().unwrap().public, //#[allow_ci]

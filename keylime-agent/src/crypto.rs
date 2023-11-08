@@ -38,6 +38,12 @@ pub(crate) fn load_x509_der(input_cert_path: &Path) -> Result<X509> {
     X509::from_der(&contents).map_err(Error::Crypto)
 }
 
+pub(crate) fn load_x509_pem(input_cert_path: &Path) -> Result<X509> {
+    let contents = std::fs::read(input_cert_path).map_err(Error::from)?;
+
+    X509::from_pem(&contents).map_err(Error::Crypto)
+}
+
 // Read a X509 cert or cert chain and outputs the first certificate
 pub(crate) fn load_x509(input_cert_path: &Path) -> Result<X509> {
     let mut cert_chain = load_x509_cert_chain(input_cert_path)?;
