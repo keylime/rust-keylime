@@ -97,14 +97,9 @@ pub(crate) fn check_x509_key(
     // Id:RSA_PSS only added in rust-openssl from v0.10.59; remove this let and use Id::RSA_PSS after update
     // Id taken from https://boringssl.googlesource.com/boringssl/+/refs/heads/master/include/openssl/nid.h#4039
     let id_rsa_pss: Id = Id::from_raw(912);
-    match cert
-        .public_key()
-        .unwrap() //#[allow_ci]
-        .id()
-    {
+    match cert.public_key()?.id() {
         Id::RSA => {
-            let cert_n =
-                cert.public_key().unwrap().rsa().unwrap().n().to_vec(); //#[allow_ci]
+            let cert_n = cert.public_key()?.rsa()?.n().to_vec();
             let mut cert_n_str = format!("{:?}", cert_n);
             _ = cert_n_str.pop();
             _ = cert_n_str.remove(0);
@@ -115,8 +110,7 @@ pub(crate) fn check_x509_key(
             Ok(key_der_str.contains(&cert_n_str))
         }
         cert_id if cert_id == id_rsa_pss => {
-            let cert_n =
-                cert.public_key().unwrap().rsa().unwrap().n().to_vec(); //#[allow_ci]
+            let cert_n = cert.public_key()?.rsa()?.n().to_vec();
             let mut cert_n_str = format!("{:?}", cert_n);
             _ = cert_n_str.pop();
             _ = cert_n_str.remove(0);
@@ -127,13 +121,7 @@ pub(crate) fn check_x509_key(
             Ok(key_der_str.contains(&cert_n_str))
         }
         Id::EC => {
-            let cert_n = cert
-                .public_key()
-                .unwrap() //#[allow_ci]
-                .ec_key()
-                .unwrap() //#[allow_ci]
-                .public_key_to_der()
-                .unwrap(); //#[allow_ci]
+            let cert_n = cert.public_key()?.ec_key()?.public_key_to_der()?;
             let mut cert_n_str = format!("{:?}", cert_n);
             _ = cert_n_str.pop();
             _ = cert_n_str.remove(0);

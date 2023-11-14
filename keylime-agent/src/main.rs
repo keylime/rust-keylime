@@ -319,10 +319,12 @@ async fn main() -> Result<()> {
                     };
                     if crypto::check_x509_key(
                         &iakcert,
-                        iak.clone().unwrap().public, //#[allow_ci]
-                    )
-                    .unwrap(/*//#[allow_ci]*/)
-                    {
+                        iak.clone()
+                            .expect(
+                                "IAK could not be used in cert key check.",
+                            )
+                            .public,
+                    )? {
                         Some(iakcert)
                     } else {
                         error!("IAK template does not match certificate. Check template in configuration.");
@@ -352,10 +354,13 @@ async fn main() -> Result<()> {
                     };
                     if crypto::check_x509_key(
                         &idevcert,
-                        idevid.clone().unwrap().public, //#[allow_ci]
-                    )
-                    .unwrap(/*//#[allow_ci]*/)
-                    {
+                        idevid
+                            .clone()
+                            .expect(
+                                "IDevID could not be used in cert key check.",
+                            )
+                            .public,
+                    )? {
                         Some(idevcert)
                     } else {
                         error!("IDevID template does not match certificate. Check template in configuration.");
