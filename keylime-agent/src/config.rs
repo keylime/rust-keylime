@@ -298,11 +298,8 @@ impl EnvConfig {
         if let Some(ref v) = self.ek_handle {
             _ = agent.insert("ek_handle".to_string(), v.to_string().into());
         }
-        if let Some(ref v) = self.enable_iak_idevid {
-            _ = agent.insert(
-                "enable_iak_idevid".to_string(),
-                v.to_string().into(),
-            );
+        if let Some(v) = self.enable_iak_idevid {
+            _ = agent.insert("enable_iak_idevid".to_string(), v.into());
         }
         if let Some(ref v) = self.iak_idevid_asymmetric_alg {
             _ = agent.insert(
