@@ -2,7 +2,7 @@
 authors = ["Keylime Authors"]
 edition = "2021"
 name = "keylime_agent"
-version = "0.2.2"
+version = "0.2.3"
 license = "Apache-2.0"
 description = "Rust agent for Keylime"
 repository = "https://github.com/keylime/rust-keylime"
