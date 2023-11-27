@@ -34,12 +34,6 @@ pub(crate) struct Revocation {
 }
 
 #[derive(Debug, Deserialize, Serialize, PartialEq)]
-pub(crate) enum ZmqMessage {
-    StartListening,
-    Shutdown,
-}
-
-#[derive(Debug, Deserialize, Serialize, PartialEq)]
 pub(crate) enum RevocationMessage {
     PayloadDecrypted,
     Revocation(Revocation),
@@ -248,7 +242,7 @@ fn run_revocation_actions(
     Ok(outputs)
 }
 
-/// Process revocation message received from REST API or 0mq
+/// Process revocation message received from REST API
 fn process_revocation(
     revocation: Revocation,
     revocation_cert: &openssl::x509::X509,
@@ -300,143 +294,6 @@ fn process_revocation(
         error!("Invalid revocation message signature");
         Err(Error::InvalidRequest)
     }
-}
-
-#[cfg(feature = "with-zmq")]
-fn listen_zmq(
-    mut revocation_tx: Sender<RevocationMessage>,
-    ip: String,
-    port: u32,
-    mut shutdown_rx: oneshot::Receiver<String>,
-) -> Result<rt::task::JoinHandle<Result<()>>> {
-    // Connect to the service via 0mq
-    let context = zmq::Context::new();
-    let mysock = context.socket(zmq::SUB)?;
-
-    mysock.set_subscribe(b"")?;
-
-    let endpoint = format!("tcp://{ip}:{port}");
-
-    info!(
-        "Connecting to revocation notification endpoint at {}...",
-        endpoint
-    );
-
-    mysock.connect(endpoint.as_str())?;
-
-    info!("Waiting for revocation messages on 0mq {}", endpoint);
-
-    Ok(rt::spawn(async move {
-        // Main revocation service loop. If a message is malformed or
-        // can not be verified the loop continues.
-        loop {
-            if shutdown_rx.try_recv().is_ok() {
-                // Received shutdowm message
-                break;
-            };
-            match mysock.get_events() {
-                Ok(v) => {
-                    if v.contains(zmq::POLLIN) {
-                        match mysock.recv_string(0) {
-                            Ok(r) => {
-                                match r {
-                                    Ok(raw_body) => {
-                                        if let Ok(r) = serde_json::from_str(
-                                            raw_body.as_ref(),
-                                        ) {
-                                            match revocation_tx.send(RevocationMessage::Revocation(r)).await {
-                                            Ok(_) => {
-                                                debug!("Sent Revocation message to revocation worker");
-                                            }
-                                            Err(e) => {
-                                                warn!("Failed to send Revocation message to revocation worker");
-                                                continue;
-                                            }
-                                        }
-                                        } else {
-                                            warn!("JSON decode error on 0mq message");
-                                            continue;
-                                        };
-                                    }
-                                    Err(_) => {
-                                        warn!(
-                                            "Unable to read message from 0mq"
-                                        );
-                                        continue;
-                                    }
-                                }
-                            }
-                            Err(_) => {
-                                warn!("Unable to read message from 0mq");
-                                continue;
-                            }
-                        }
-                    }
-                }
-                Err(e) => {
-                    warn!("Unable to poll 0mq events");
-                    continue;
-                }
-            };
-            sleep(Duration::from_millis(100)).await;
-        }
-        info!("Stop waiting for revocation messages on 0mq {}", endpoint);
-        Ok(())
-    }))
-}
-
-/// Handles revocation messages via 0mq
-/// See:
-/// - URL: https://github.com/keylime/keylime/blob/master/keylime/revocation_notifier.py
-///   Function: await_notifications
-#[cfg(feature = "with-zmq")]
-pub(crate) async fn zmq_worker(
-    mut zmq_rx: Receiver<ZmqMessage>,
-    mut revocation_tx: Sender<RevocationMessage>,
-    ip: String,
-    port: u32,
-) -> Result<()> {
-    debug!("Starting ZMQ revocation listener worker");
-
-    let mut task: Option<rt::task::JoinHandle<Result<()>>> = None;
-    let mut shutdown_tx: Option<oneshot::Sender<String>> = None;
-
-    // Receive message
-    while let Some(message) = zmq_rx.recv().await {
-        match message {
-            ZmqMessage::Shutdown => {
-                zmq_rx.close();
-            }
-            ZmqMessage::StartListening => {
-                if task.is_some() {
-                    warn!("Another ZeroMQ revocation listening service is running");
-                    continue;
-                }
-                let (tx, rx) = oneshot::channel::<String>();
-                shutdown_tx = Some(tx);
-                task = match listen_zmq(
-                    revocation_tx.clone(),
-                    ip.clone(),
-                    port,
-                    rx,
-                ) {
-                    Ok(t) => Some(t),
-                    Err(e) => {
-                        warn!("Failed to start ZeroMQ revocation listener worker");
-                        None
-                    }
-                }
-            }
-        }
-    }
-
-    debug!("Shutting down ZMQ revocation listener worker");
-    if let Some(tx) = shutdown_tx {
-        tx.send("shutdown".to_string());
-    }
-
-    if let Some(t) = &task {}
-    Ok(())
 }
 
 pub(crate) async fn worker(

@@ -50,8 +50,7 @@ tpm2-abrmd \
 tpm2-tools \
 tpm2-tss \
 tpm2-tss-devel \
-uthash-devel \
-czmq-devel"
+uthash-devel"
 
 RUN dnf makecache && \
   dnf -y install $PKGS_DEPS && \
