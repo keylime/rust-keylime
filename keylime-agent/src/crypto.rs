@@ -137,6 +137,36 @@ pub(crate) fn check_x509_key(
     }
 }
 
+/// Detect a template from a certificate
+/// Templates defined in: TPM 2.0 Keys for Device Identity and Attestation at https://trustedcomputinggroup.org/wp-content/uploads/TPM-2p0-Keys-for-Device-Identity-and-Attestation_v1_r12_pub10082021.pdf
+pub(crate) fn match_cert_to_template(cert: &X509) -> Result<String> {
+    // Id:RSA_PSS only added in rust-openssl from v0.10.59; remove this let and use Id::RSA_PSS after update
+    // Id taken from https://boringssl.googlesource.com/boringssl/+/refs/heads/master/include/openssl/nid.h#4039
+    let id_rsa_pss: Id = Id::from_raw(912);
+    match cert.public_key()?.id() {
+        Id::RSA => match cert.public_key()?.bits() {
+            2048 => Ok("H-1".to_string()),
+            _ => Ok("".to_string()),
+        },
+        cert_id if cert_id == id_rsa_pss => match cert.public_key()?.bits() {
+            2048 => Ok("H-1".to_string()),
+            _ => Ok("".to_string()),
+        },
+        Id::EC => match cert.public_key()?.bits() {
+            256 => match cert.public_key()?.ec_key()?.group().curve_name() {
+                Some(Nid::SECP256K1) => Ok("H-2".to_string()),
+                _ => Ok("H-5".to_string()),
+            },
+            384 => Ok("H-3".to_string()),
+            521 => Ok("H-4".to_string()),
+            _ => Ok("".to_string()),
+        },
+        _ => Err(Error::Other(
+            "Certificate does not seem to have an RSA or EC key".to_string(),
+        )),
+    }
+}
+
 /// Read a PEM file and returns the public and private keys
 pub(crate) fn load_key_pair(
     key_path: &Path,
