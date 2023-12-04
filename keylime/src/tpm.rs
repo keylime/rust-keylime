@@ -105,8 +105,12 @@ const IAK_AUTH_POLICY_SHA256: [u8; 32] = [
 ];
 const UNIQUE_IAK: [u8; 3] = [0x49, 0x41, 0x4b];
 
-/// Return the asymmetric and name algorithms, either by matching to a template or using the user specified algorithms if no template is set
+/// Return the asymmetric and name algorithms, either by matching to a template or using the user specified algorithms
+/// If the template config option is set to "", "detect" or "default", the template will be matched to the certs
+/// If a template has been specified, that will be used
+/// If the option has been set to "manual", or some other not-empty string, the user specified algorithms will be used
 pub fn get_idevid_template(
+    detect_str: &str,
     template_str: &str,
     asym_alg_str: &str,
     name_alg_str: &str,
@@ -114,6 +118,11 @@ pub fn get_idevid_template(
     (AsymmetricAlgorithm, HashingAlgorithm),
     AlgorithmError,
 > {
+    let template_str = if ["", "detect", "default"].contains(&template_str) {
+        detect_str
+    } else {
+        template_str
+    };
     let (asym_alg, name_alg) = match template_str {
         "H-1" => (AsymmetricAlgorithm::Rsa, HashingAlgorithm::Sha256),
         "H-2" => (AsymmetricAlgorithm::Ecc, HashingAlgorithm::Sha256),
