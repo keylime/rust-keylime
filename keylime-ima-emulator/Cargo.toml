@@ -1,16 +1,18 @@
 [package]
 name = "keylime_ima_emulator"
-version = "0.2.3"
-edition = "2021"
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+description = "IMA emulator for Keylime"
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+version.workspace = true
 
 [dependencies]
-clap = { version = "4.3", features = ["derive"] }
-hex = "0.4"
-keylime = { path = "../keylime" }
-log = "0.4"
-openssl = "0.10.15"
-signal-hook = "0.3"
-thiserror = "1.0"
-tss-esapi = {version = "7.2.0", features = ["generate-bindings"]}
+clap.workspace = true
+hex.workspace = true
+keylime.workspace = true
+log.workspace = true
+openssl.workspace = true
+signal-hook.workspace = true
+thiserror.workspace = true
+tss-esapi.workspace = true
