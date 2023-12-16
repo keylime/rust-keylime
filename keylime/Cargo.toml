@@ -1,22 +1,24 @@
 [package]
 name = "keylime"
-version = "0.2.3"
-edition = "2021"
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+description = "Shared utilities for Keylime crates"
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+version.workspace = true
 
 [dependencies]
-base64 = "0.21"
-hex = "0.4"
-log = "0.4"
-openssl = "0.10.15"
-pest = "2.6"
-pest_derive = "2.6"
-serde = "1.0.80"
-serde_derive = "1.0.80"
-static_assertions = "1"
-thiserror = "1.0"
-tss-esapi = {version = "7.2.0", features = ["generate-bindings"]}
+base64.workspace = true
+hex.workspace = true
+log.workspace = true
+openssl.workspace = true
+pest.workspace = true
+pest_derive.workspace = true
+serde.workspace = true
+serde_derive.workspace = true
+static_assertions.workspace = true
+thiserror.workspace = true
+tss-esapi.workspace = true
 
 [dev-dependencies]
-tempfile = "3.0.4"
+tempfile.workspace = true
