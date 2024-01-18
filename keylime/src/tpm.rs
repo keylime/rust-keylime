@@ -114,10 +114,7 @@ pub fn get_idevid_template(
     template_str: &str,
     asym_alg_str: &str,
     name_alg_str: &str,
-) -> std::result::Result<
-    (AsymmetricAlgorithm, HashingAlgorithm),
-    AlgorithmError,
-> {
+) -> Result<(AsymmetricAlgorithm, HashingAlgorithm)> {
     let template_str = if ["", "detect", "default"].contains(&template_str) {
         detect_str
     } else {
@@ -147,6 +144,8 @@ pub enum TpmError {
         kind: Option<Tss2ResponseCodeKind>,
         message: String,
     },
+    #[error("AlgorithmError: {0}")]
+    AlgorithmError(#[from] AlgorithmError),
     #[error("Infallible: {0}")]
     Infallible(#[from] std::convert::Infallible),
     #[error("IO error: {0}")]
