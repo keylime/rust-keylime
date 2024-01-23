@@ -46,13 +46,11 @@ on:
 jobs:
   pull-request-responsibility:
     runs-on: ubuntu-latest
-    env:
-      BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
     name: pull-request-responsibility
     steps:
       - uses: actions-automation/pull-request-responsibility@main
         with:
-          LABEL: "keylime-bot for rust-keylime"
+          token: ${{ secrets.BOT_TOKEN }}
           actions: "request,assign,copy-labels-linked"
           reviewers: "rust-team"
           num_to_request: 3
