@@ -31,7 +31,7 @@ dependencies = [
  "actix-tls",
  "actix-utils",
  "ahash",
- "base64 0.21.4",
+ "base64 0.21.7",
  "bitflags 2.4.0",
  "bytes",
  "bytestring",
@@ -335,9 +335,9 @@ checksum = "9e1b586273c5702936fe7b7d6896644d8be71e6314cfe09d3167c95f712589e8"
 
 [[package]]
 name = "base64"
-version = "0.21.4"
+version = "0.21.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9ba43ea6f343b788c8764558649e08df62f86c6ef251fdaeb1ffd010a9ae50a2"
+checksum = "9d297deb1925b89f2ccc13d7635fa0714f12c87adce1c75356b39ca9b7178567"
 
 [[package]]
 name = "bindgen"
@@ -1117,7 +1117,7 @@ dependencies = [
 name = "keylime"
 version = "0.2.3"
 dependencies = [
- "base64 0.21.4",
+ "base64 0.21.7",
  "hex",
  "log",
  "openssl",
@@ -1137,7 +1137,7 @@ version = "0.2.3"
 dependencies = [
  "actix-rt",
  "actix-web",
- "base64 0.21.4",
+ "base64 0.21.7",
  "cfg-if",
  "clap",
  "compress-tools",
@@ -1540,7 +1540,7 @@ version = "0.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2c5f20f71a68499ff32310f418a6fad8816eac1a2859ed3f0c5c741389dd6208"
 dependencies = [
- "base64 0.21.4",
+ "base64 0.21.7",
  "oid",
  "picky-asn1",
  "picky-asn1-der",
@@ -1727,7 +1727,7 @@ version = "0.11.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "37b1ae8d9ac08420c66222fb9096fc5de435c3c48542bc5336c51892cffafb41"
 dependencies = [
- "base64 0.21.4",
+ "base64 0.21.7",
  "bytes",
  "encoding_rs",
  "futures-core",
@@ -2753,7 +2753,7 @@ checksum = "13a3a53eaf34f390dd30d7b1b078287dd05df2aa2e21a589ccb80f5c7253c2e9"
 dependencies = [
  "assert-json-diff",
  "async-trait",
- "base64 0.21.4",
+ "base64 0.21.7",
  "deadpool",
  "futures",
  "futures-timer",
