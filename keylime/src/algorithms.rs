@@ -15,12 +15,14 @@ use tss_esapi::{
 // This error needs to be public because we implement TryFrom for public types
 #[derive(Error, Debug)]
 pub enum AlgorithmError {
-    #[error("{0}")]
-    Hash(String),
-    #[error("{0}")]
-    Encrypt(String),
-    #[error("{0}")]
-    Sign(String),
+    #[error("Hashing Algorithm {0} not supported")]
+    UnsupportedHashingAlgorithm(String),
+
+    #[error("Encryption Algorithm {0} not supported")]
+    UnsupportedEncryptionAlgorithm(String),
+
+    #[error("Signing algorithm {0} not supported")]
+    UnsupportedSigningAlgorithm(String),
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -42,9 +44,9 @@ impl TryFrom<&str> for HashAlgorithm {
             "sha384" => Ok(HashAlgorithm::Sha384),
             "sha512" => Ok(HashAlgorithm::Sha512),
             "sm3_256" => Ok(HashAlgorithm::Sm3_256),
-            _ => Err(AlgorithmError::Hash(format!(
-                "Hash algorithm {value} is not supported by Keylime"
-            ))),
+            _ => {
+                Err(AlgorithmError::UnsupportedHashingAlgorithm(value.into()))
+            }
         }
     }
 }
@@ -107,9 +109,9 @@ impl TryFrom<&str> for EncryptionAlgorithm {
         match value {
             "rsa" => Ok(EncryptionAlgorithm::Rsa),
             "ecc" => Ok(EncryptionAlgorithm::Ecc),
-            _ => Err(AlgorithmError::Encrypt(format!(
-                "Encryption algorithm {value} not supported by Keylime"
-            ))),
+            _ => Err(AlgorithmError::UnsupportedEncryptionAlgorithm(
+                value.into(),
+            )),
         }
     }
 }
@@ -173,9 +175,9 @@ impl TryFrom<&str> for SignAlgorithm {
             "ecdsa" => Ok(SignAlgorithm::EcDsa),
             //            "ecdaa" => Ok(SignAlgorithm::EcDaa),
             "ecschnorr" => Ok(SignAlgorithm::EcSchnorr),
-            _ => Err(AlgorithmError::Sign(format!(
-                "Signing algorithm {value} not supported by Keylime"
-            ))),
+            _ => {
+                Err(AlgorithmError::UnsupportedSigningAlgorithm(value.into()))
+            }
         }
     }
 }
@@ -200,15 +202,46 @@ mod tests {
     fn test_hash_tryfrom() {
         let result = HashAlgorithm::try_from("sha1");
         assert!(result.is_ok());
+        let result = HashAlgorithm::try_from("sha256");
+        assert!(result.is_ok());
+        let result = HashAlgorithm::try_from("sha384");
+        assert!(result.is_ok());
+        let result = HashAlgorithm::try_from("sha512");
+        assert!(result.is_ok());
+        let result = HashAlgorithm::try_from("sm3_256");
+        assert!(result.is_ok());
+    }
+    #[test]
+    fn test_unsupported_hash_tryfrom() {
+        let result = HashAlgorithm::try_from("unsupported");
+        assert!(result.is_err());
     }
     #[test]
     fn test_encrypt_try_from() {
         let result = EncryptionAlgorithm::try_from("rsa");
         assert!(result.is_ok());
+        let result = EncryptionAlgorithm::try_from("ecc");
+        assert!(result.is_ok());
+    }
+    #[test]
+    fn test_unsupported_encrypt_try_from() {
+        let result = EncryptionAlgorithm::try_from("unsupported");
+        assert!(result.is_err());
     }
     #[test]
     fn test_sign_tryfrom() {
         let result = SignAlgorithm::try_from("rsassa");
         assert!(result.is_ok());
+        let result = SignAlgorithm::try_from("rsapss");
+        assert!(result.is_ok());
+        let result = SignAlgorithm::try_from("ecdsa");
+        assert!(result.is_ok());
+        let result = SignAlgorithm::try_from("ecschnorr");
+        assert!(result.is_ok());
+    }
+    #[test]
+    fn test_unsupported_sign_tryfrom() {
+        let result = SignAlgorithm::try_from("unsupported");
+        assert!(result.is_err());
     }
 }
