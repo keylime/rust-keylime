@@ -80,7 +80,7 @@ COPY --from=builder \
 
 # now copy the agent from the builder
 COPY --from=builder /src/rust-keylime/target/release/keylime_agent /bin/keylime_agent
-COPY --from=builder /src/rust-keylime/keylime-agent.conf /etc/keylime/keylime-agent.conf
+COPY --from=builder /src/rust-keylime/keylime-agent.conf /etc/keylime/agent.conf
 ENTRYPOINT ["/bin/keylime_agent"]
 
 # we default the log level to info if not overwritten
