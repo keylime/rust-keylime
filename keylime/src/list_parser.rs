@@ -10,9 +10,9 @@ use thiserror::Error;
 pub struct ListParser;
 
 #[derive(Error, Debug)]
-pub enum Error {
-    #[error("Parsing error: {0}")]
-    ParseError(Box<pest::error::Error<Rule>>),
+pub enum ListParsingError {
+    #[error("failed to parse list")]
+    ParseError(#[source] Box<pest::error::Error<Rule>>),
 }
 
 fn get_inner_str(pair: Pair<Rule>) -> Vec<&str> {
@@ -81,9 +81,9 @@ fn get_inner_str(pair: Pair<Rule>) -> Vec<&str> {
 /// * `[a b c]` => `["a", "b", "c"]`
 /// * `['a', "b", c]` => `["'a'", "\"b\"", "c"]`
 ///
-pub fn parse_list(list: &str) -> Result<Vec<&str>, Error> {
+pub fn parse_list(list: &str) -> Result<Vec<&str>, ListParsingError> {
     if let Some(pair) = ListParser::parse(Rule::list, list)
-        .map_err(|e| Error::ParseError(Box::new(e)))?
+        .map_err(|e| ListParsingError::ParseError(Box::new(e)))?
         .next()
     {
         return Ok(get_inner_str(pair));
