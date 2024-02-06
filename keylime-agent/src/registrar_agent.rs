@@ -129,17 +129,17 @@ pub(crate) async fn do_register_agent(
     port: u32,
 ) -> crate::error::Result<Vec<u8>> {
     let mtls_cert = match mtls_cert_x509 {
-        Some(cert) => Some(String::from_utf8(cert.to_pem()?)?),
+        Some(cert) => Some(crate::crypto::x509_to_pem(cert)?),
         None => Some("disabled".to_string()),
     };
 
     let idevid_cert = match idevid_cert_x509 {
-        Some(cert) => Some(cert.to_der()?),
+        Some(cert) => Some(crate::crypto::x509_to_der(&cert)?),
         None => None,
     };
 
     let iak_cert = match iak_cert_x509 {
-        Some(cert) => Some(cert.to_der()?),
+        Some(cert) => Some(crate::crypto::x509_to_der(&cert)?),
         None => None,
     };
 

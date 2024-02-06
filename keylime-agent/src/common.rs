@@ -1,8 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2021 Keylime Authors
 
-use crate::error::{Error, Result};
-use crate::permissions;
+use crate::{
+    crypto::{AES_128_KEY_LEN, AES_256_KEY_LEN},
+    error::{Error, Result},
+    permissions,
+};
+
 use keylime::algorithms::{
     EncryptionAlgorithm, HashAlgorithm, SignAlgorithm,
 };
@@ -42,9 +46,6 @@ pub static RSA_PUBLICKEY_EXPORTABLE: &str = "rsa placeholder";
 pub static KEY: &str = "secret";
 pub const AGENT_UUID_LEN: usize = 36;
 pub const AUTH_TAG_LEN: usize = 48;
-pub const AES_128_KEY_LEN: usize = 16;
-pub const AES_256_KEY_LEN: usize = 32;
-pub const AES_BLOCK_SIZE: usize = 16;
 
 #[derive(Serialize, Deserialize, Debug)]
 pub(crate) struct APIVersion {
@@ -253,14 +254,9 @@ impl AgentData {
 ///
 /// This is used as the agent UUID when the configuration option 'uuid' is set as 'hash_ek'
 pub(crate) fn hash_ek_pubkey(ek_pub: Public) -> Result<String> {
-    // Converting Public TPM key to PEM
-    let key = SubjectPublicKeyInfo::try_from(ek_pub)?;
-    let key_der = picky_asn1_der::to_vec(&key)?;
-    let openssl_key = PKey::public_key_from_der(&key_der)?;
-    let pem = openssl_key.public_key_to_pem()?;
-
     // Calculate the SHA-256 hash of the public key in PEM format
-    let mut hash = hash(MessageDigest::sha256(), &pem)?;
+    let pem = crate::crypto::tss_pubkey_to_pem(ek_pub)?;
+    let hash = crate::crypto::hash(&pem, MessageDigest::sha256())?;
     Ok(hex::encode(hash))
 }
 

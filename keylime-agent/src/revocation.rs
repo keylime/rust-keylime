@@ -258,7 +258,7 @@ fn process_revocation(
     work_dir: &Path,
     mount: &Path,
 ) -> Result<()> {
-    let cert_key = revocation_cert.public_key()?;
+    let cert_key = crypto::x509_get_pubkey(revocation_cert)?;
 
     // Verify the message and signature with our key
     let mut verified = crypto::asym_verify(
@@ -498,11 +498,10 @@ pub(crate) async fn worker(
                     cert_absolute_path.display()
                 );
 
-                revocation_cert = match crypto::load_x509(&cert_absolute_path)
-                {
-                    Ok(cert) => Some(cert),
-                    Err(e) => None,
-                };
+                // If successful, use the certificate, otherwise ignore the error and continue
+                // without the certificate
+                revocation_cert =
+                    crypto::load_x509_pem(&cert_absolute_path).ok();
             }
             RevocationMessage::Shutdown => {
                 revocation_rx.close();
@@ -772,7 +771,7 @@ mod tests {
         let cert_path = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("test-data/test-cert.pem");
 
-        let cert = crypto::load_x509(&cert_path).unwrap(); //#[allow_ci]
+        let cert = crypto::load_x509_pem(&cert_path).unwrap(); //#[allow_ci]
 
         let actions_dir =
             Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/actions");
