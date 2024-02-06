@@ -114,118 +114,118 @@ pub enum TpmError {
     UnsupportedHashingAlgorithm { alg: HashingAlgorithm },
 
     /// Error creating EK object
-    #[error("Error creating EK object: {e}")]
-    TSSCreateEKError { e: tss_esapi::Error },
+    #[error("Error creating EK object")]
+    TSSCreateEKError { source: tss_esapi::Error },
 
     /// Error creating AK object
-    #[error("Error creating AK object: {e}")]
-    TSSCreateAKError { e: tss_esapi::Error },
+    #[error("Error creating AK object")]
+    TSSCreateAKError { source: tss_esapi::Error },
 
     /// Error loading AK object
-    #[error("Error loading AK object: {e}")]
-    TSSLoadAKError { e: tss_esapi::Error },
+    #[error("Error loading AK object")]
+    TSSLoadAKError { source: tss_esapi::Error },
 
     /// Error creating new persistent TPM handle
-    #[error(
-        "Error creating handle for persistent TPM object in {handle}: {e}"
-    )]
-    TSSNewPersistentHandleError { handle: String, e: tss_esapi::Error },
+    #[error("Error creating handle for persistent TPM object in {handle}")]
+    TSSNewPersistentHandleError {
+        handle: String,
+        source: tss_esapi::Error,
+    },
 
     /// Error creating handle from persistent TPM handle
-    #[error(
-        "Error creating handle from persistent TPM handle {handle}: {e}"
-    )]
-    TSSHandleFromPersistentHandleError { handle: String, e: tss_esapi::Error },
+    #[error("Error creating handle from persistent TPM handle {handle}")]
+    TSSHandleFromPersistentHandleError {
+        handle: String,
+        source: tss_esapi::Error,
+    },
 
     /// Error returned in case of error creating new Primary Key
-    #[error("Error creating primary key: {e}")]
-    TSSCreatePrimaryError { e: tss_esapi::Error },
+    #[error("Error creating primary key")]
+    TSSCreatePrimaryError { source: tss_esapi::Error },
 
     /// Error building PCR Selection list
-    #[error("Error building PCR Selection list: {e}")]
-    TSSPCRSelectionBuildError { e: tss_esapi::Error },
+    #[error("Error building PCR Selection list")]
+    TSSPCRSelectionBuildError { source: tss_esapi::Error },
 
     /// Error obtaining digest value from an authorization policy
-    #[error(
-        "Error obtaining digest value from an authorization policy: {e}"
-    )]
-    TSSDigestFromAuthPolicyError { e: tss_esapi::Error },
+    #[error("Error obtaining digest value from an authorization policy")]
+    TSSDigestFromAuthPolicyError { source: tss_esapi::Error },
 
     /// Error obtaining RSA public key from IDevID
-    #[error("Error obtaining RSA public key from IDevID: {e}")]
-    TSSPublicKeyFromIDevID { e: tss_esapi::Error },
+    #[error("Error obtaining RSA public key from IDevID")]
+    TSSPublicKeyFromIDevID { source: tss_esapi::Error },
 
     /// Error obtaining RSA public key from IAK
-    #[error("Error obtaining RSA public key from IAK: {e}")]
-    TSSPublicKeyFromIAK { e: tss_esapi::Error },
+    #[error("Error obtaining RSA public key from IAK")]
+    TSSPublicKeyFromIAK { source: tss_esapi::Error },
 
     /// Error building Object Attributes
-    #[error("Error building Object Attributes: {e}")]
-    TSSObjectAttributesBuildError { e: tss_esapi::Error },
+    #[error("Error building Object Attributes: {source}")]
+    TSSObjectAttributesBuildError { source: tss_esapi::Error },
 
     /// Error building public RSA parameters
-    #[error("Error building public RSA parameters: {e}")]
-    TSSPublicRSAParametersBuildError { e: tss_esapi::Error },
+    #[error("Error building public RSA parameters")]
+    TSSPublicRSAParametersBuildError { source: tss_esapi::Error },
 
     /// Error building public ECC parameters
-    #[error("Error building public ECC parameters: {e}")]
-    TSSPublicECCParametersBuildError { e: tss_esapi::Error },
+    #[error("Error building public ECC parameters")]
+    TSSPublicECCParametersBuildError { source: tss_esapi::Error },
 
     /// Error building IDevID key
-    #[error("Error building IDevID key: {e}")]
-    TSSIDevIDKeyBuildError { e: tss_esapi::Error },
+    #[error("Error building IDevID key")]
+    TSSIDevIDKeyBuildError { source: tss_esapi::Error },
 
     /// Error building IAK key
-    #[error("Error building IAK key: {e}")]
-    TSSIAKKeyBuildError { e: tss_esapi::Error },
+    #[error("Error building IAK key")]
+    TSSIAKKeyBuildError { source: tss_esapi::Error },
 
     /// Error obtaining ECC parameter from IDevID
-    #[error("Error obtaining ECC parameter from IDevID: {e}")]
-    TSSECCParameterFromIDevIDError { e: tss_esapi::Error },
+    #[error("Error obtaining ECC parameter from IDevID")]
+    TSSECCParameterFromIDevIDError { source: tss_esapi::Error },
 
     /// Error obtaining ECC parameter from IAK
-    #[error("Error obtaining ECC parameter from IAK: {e}")]
-    TSSECCParameterFromIAKError { e: tss_esapi::Error },
+    #[error("Error obtaining ECC parameter from IAK")]
+    TSSECCParameterFromIAKError { source: tss_esapi::Error },
 
     /// Error returned in case of failure reading EK public information
-    #[error("Error reading EK public info: {e}")]
-    TSSReadPublicError { e: tss_esapi::Error },
+    #[error("Error reading EK public info")]
+    TSSReadPublicError { source: tss_esapi::Error },
 
     /// Error returned in case of failure obtaining SymmetricDefinition from Cipher
-    #[error("Error converting Cipher to SymmetricDefinition: {e}")]
-    TSSSymmetricDefinitionFromCipher { e: tss_esapi::Error },
+    #[error("Error converting Cipher to SymmetricDefinition")]
+    TSSSymmetricDefinitionFromCipher { source: tss_esapi::Error },
 
     /// Error returned in case of failure starting authentication session
-    #[error("Error starting authentication session: {e}")]
-    TSSStartAuthenticationSessionError { e: tss_esapi::Error },
+    #[error("Error starting authentication session")]
+    TSSStartAuthenticationSessionError { source: tss_esapi::Error },
 
     /// Error setting authentication session attributes
-    #[error("Error setting authentication session attributes: {e}")]
-    TSSSessionSetAttributesError { e: tss_esapi::Error },
+    #[error("Error setting authentication session attributes")]
+    TSSSessionSetAttributesError { source: tss_esapi::Error },
 
     /// Error converting to TSS Digest from digest value
-    #[error("Error converting to TSS Digest from digest value: {e}")]
-    TSSDigestFromValue { e: tss_esapi::Error },
+    #[error("Error converting to TSS Digest from digest value")]
+    TSSDigestFromValue { source: tss_esapi::Error },
 
     /// Error creating a TCTI context
-    #[error("Error creating TCTI context: {error:?}")]
-    TSSTctiContextError { error: tss_esapi::Error },
+    #[error("Error creating TCTI context")]
+    TSSTctiContextError { source: tss_esapi::Error },
 
     /// Error marshalling TPMS_ATTEST structure
-    #[error("Error marshalling TPMS_ATTEST structure: {e:?}")]
-    TSSMarshallAttestError { e: tss_esapi::Error },
+    #[error("Error marshalling TPMS_ATTEST structure")]
+    TSSMarshallAttestError { source: tss_esapi::Error },
 
     /// Error marshalling TPMT_SIGNATURE structure
-    #[error("Error marshalling TPMT_SIGNATURE structure: {e:?}")]
-    TSSMarshallSignatureError { e: tss_esapi::Error },
+    #[error("Error marshalling TPMT_SIGNATURE structure")]
+    TSSMarshallSignatureError { source: tss_esapi::Error },
 
     /// Error getting PCR data
-    #[error("Error getting PCR data from TPM: {e:?}")]
-    TSSPCRListError { e: tss_esapi::Error },
+    #[error("Error getting PCR data from TPM")]
+    TSSPCRListError { source: tss_esapi::Error },
 
     /// Error generating quote
-    #[error("Error generating quote: {e:?}")]
-    TSSQuoteError { e: tss_esapi::Error },
+    #[error("Error generating quote")]
+    TSSQuoteError { source: tss_esapi::Error },
 
     /// Unexpected attested type in quote
     #[error("Unexpected attested type in quote: expected {expected:?} got {got:?}")]
@@ -249,10 +249,10 @@ pub enum TpmError {
     EmptyAuthenticationSessionError,
 
     /// Error parsing number from string
-    #[error("Number parsing error from string {origin}: {e}")]
+    #[error("Number parsing error from string {origin}")]
     NumParse {
         origin: String,
-        e: std::num::ParseIntError,
+        source: std::num::ParseIntError,
     },
 
     /// Error converting TSS_MAGIC number from MakeCredential keyblob header to u32
@@ -296,38 +296,38 @@ pub enum TpmError {
     InvalidKeyblobVersion { expected: u32, got: u32 },
 
     /// Error parsing the value in TCTI env var
-    #[error("Error parsing TCTI configuration from env var 'TCTI' {path}: {error:?}")]
+    #[error("Error parsing TCTI configuration from env var 'TCTI' {path}")]
     TctiNameError {
         path: String,
-        error: tss_esapi::Error,
+        source: tss_esapi::Error,
     },
 
     /// Error getting RSA public key from PKey
-    #[error("Error getting RSA public key from PKey: {e}")]
-    OpenSSLRSAFromPKey { e: openssl::error::ErrorStack },
+    #[error("Error getting RSA public key from PKey")]
+    OpenSSLRSAFromPKey { source: openssl::error::ErrorStack },
 
     /// Error PEM encoding public key
-    #[error("Error encoding public key in PEM format: {e}")]
-    OpenSSLPublicKeyToPEM { e: openssl::error::ErrorStack },
+    #[error("Error encoding public key in PEM format")]
+    OpenSSLPublicKeyToPEM { source: openssl::error::ErrorStack },
 
     /// Error creating Hasher
-    #[error("Error creating Hasher : {e}")]
-    OpenSSLHasherNew { e: openssl::error::ErrorStack },
+    #[error("Error creating Hasher")]
+    OpenSSLHasherNew { source: openssl::error::ErrorStack },
 
     /// Error updating Hasher
-    #[error("Error updating Hasher : {e}")]
-    OpenSSLHasherUpdate { e: openssl::error::ErrorStack },
+    #[error("Error updating Hasher")]
+    OpenSSLHasherUpdate { source: openssl::error::ErrorStack },
 
     /// Error finishing Hasher
-    #[error("Error finishing Hasher : {e}")]
-    OpenSSLHasherFinish { e: openssl::error::ErrorStack },
+    #[error("Error finishing Hasher")]
+    OpenSSLHasherFinish { source: openssl::error::ErrorStack },
 
     /// Number conversion error
-    #[error("Error converting number: {0}")]
+    #[error("Error converting number")]
     TryFromInt(#[from] std::num::TryFromIntError),
 
     /// Base64 decoding error
-    #[error("base64 decode error: {0}")]
+    #[error("base64 decode error")]
     Base64Decode(#[from] base64::DecodeError),
 
     /// Malformed PCR selection mask
@@ -339,15 +339,18 @@ pub enum TpmError {
     NotImplemented(String),
 
     /// Read IO error
-    #[error("Error reading {what}: {e}")]
-    IoReadError { what: String, e: std::io::Error },
+    #[error("Error reading {what}")]
+    IoReadError {
+        what: String,
+        source: std::io::Error,
+    },
 
     /// Invalid request
     #[error("Invalid request: {0}")]
     InvalidRequest(String),
 
     /// Infallible error
-    #[error("Infallible: {0}")]
+    #[error("Infallible")]
     Infallible(#[from] std::convert::Infallible),
 
     /// Generic catch-all TPM device error
@@ -359,7 +362,7 @@ pub enum TpmError {
     },
 
     /// Generic catch-all Algorithm error
-    #[error("AlgorithmError: {0}")]
+    #[error("AlgorithmError")]
     AlgorithmError(#[from] AlgorithmError),
 
     /// Generic catch-all error
@@ -457,17 +460,28 @@ impl Context {
         let tcti = TctiNameConf::from_str(&tcti_path).map_err(|error| {
             TpmError::TctiNameError {
                 path: tcti_path.to_string(),
-                error,
+                source: error,
             }
         })?;
         Ok(Self {
-            inner: tss_esapi::Context::new(tcti)
-                .map_err(|error| TpmError::TSSTctiContextError { error })?,
+            inner: tss_esapi::Context::new(tcti).map_err(|error| {
+                TpmError::TSSTctiContextError { source: error }
+            })?,
         })
     }
 
     /// Creates an EK, returns the key handle and public certificate
     /// in `EKResult`.
+    ///
+    /// # Arguments
+    ///
+    /// `alg`: The EK algorithm
+    /// `handle`: Optional; if provided, the EK in the provided handle is used instead of creating
+    /// a new EK.
+    ///
+    /// # Returns
+    ///
+    /// An `EKResult` structure if successful, a TPMError otherwise
     pub fn create_ek(
         &mut self,
         alg: EncryptionAlgorithm,
@@ -482,27 +496,29 @@ impl Context {
                         alg.into(),
                         DefaultKey,
                     )
-                    .map_err(|e| TpmError::TSSCreateEKError { e })?
+                    .map_err(|source| TpmError::TSSCreateEKError { source })?
                 } else {
                     let handle =
                         u32::from_str_radix(v.trim_start_matches("0x"), 16)
-                            .map_err(|e| TpmError::NumParse {
+                            .map_err(|source| TpmError::NumParse {
                             origin: v.to_string(),
-                            e,
+                            source,
                         })?;
                     self.inner
                         .tr_from_tpm_public(TpmHandle::Persistent(
                             PersistentTpmHandle::new(handle).map_err(
-                                |e| TpmError::TSSNewPersistentHandleError {
-                                    handle: v.to_string(),
-                                    e,
+                                |source| {
+                                    TpmError::TSSNewPersistentHandleError {
+                                        handle: v.to_string(),
+                                        source,
+                                    }
                                 },
                             )?,
                         ))
-                        .map_err(|e| {
+                        .map_err(|source| {
                             TpmError::TSSHandleFromPersistentHandleError {
                                 handle: v.to_string(),
-                                e,
+                                source,
                             }
                         })?
                         .into()
@@ -510,7 +526,7 @@ impl Context {
             }
             None => {
                 ek::create_ek_object(&mut self.inner, alg.into(), DefaultKey)
-                    .map_err(|e| TpmError::TSSCreateEKError { e })?
+                    .map_err(|source| TpmError::TSSCreateEKError { source })?
             }
         };
         let cert = match ek::retrieve_ek_pubcert(&mut self.inner, alg.into())
@@ -524,7 +540,7 @@ impl Context {
         let (tpm_pub, _, _) = self
             .inner
             .read_public(key_handle)
-            .map_err(|e| TpmError::TSSReadPublicError { e })?;
+            .map_err(|source| TpmError::TSSReadPublicError { source })?;
         Ok(EKResult {
             key_handle,
             ek_cert: cert,
@@ -532,7 +548,15 @@ impl Context {
         })
     }
 
-    /// Creates an AK.
+    /// Creates an AK
+    ///
+    /// # Arguments
+    ///
+    /// * `handle`: The associated EK handle
+    /// * `hash_alg`: The digest algorithm used for signing with the created AK
+    /// * `sign_alg`: The created AK signing algorithm
+    ///
+    /// Returns an `AKResult` structure if successful and a `TPMError` otherwise
     pub fn create_ak(
         &mut self,
         handle: KeyHandle,
@@ -547,7 +571,7 @@ impl Context {
             None,
             DefaultKey,
         )
-        .map_err(|e| TpmError::TSSCreateAKError { e })?;
+        .map_err(|source| TpmError::TSSCreateAKError { source })?;
         Ok(AKResult {
             public: ak.out_public,
             private: ak.out_private,
@@ -555,6 +579,15 @@ impl Context {
     }
 
     /// Loads an existing AK associated with `handle` and `ak`.
+    ///
+    /// # Arguments
+    ///
+    /// `handle`: The associated EK handle
+    /// `ak`: The `AKResult` structure containing the private and public keys to load
+    ///
+    /// # Return
+    ///
+    /// The loaded AK KeyHandle if successful, a TPMError otherwise
     pub fn load_ak(
         &mut self,
         handle: KeyHandle,
@@ -567,7 +600,7 @@ impl Context {
             ak.private.clone(),
             ak.public.clone(),
         )
-        .map_err(|e| TpmError::TSSLoadAKError { e })?;
+        .map_err(|source| TpmError::TSSLoadAKError { source })?;
         Ok(ak_handle)
     }
 
@@ -596,7 +629,9 @@ impl Context {
                 ],
             )
             .build()
-            .map_err(|e| TpmError::TSSPCRSelectionBuildError { e })?;
+            .map_err(|source| TpmError::TSSPCRSelectionBuildError {
+                source,
+            })?;
 
         let primary_key = self
             .inner
@@ -610,7 +645,7 @@ impl Context {
                     Some(pcr_selection_list),
                 )
             })
-            .map_err(|e| TpmError::TSSCreatePrimaryError { e })?;
+            .map_err(|source| TpmError::TSSCreatePrimaryError { source })?;
 
         Ok(IDevIDResult {
             public: primary_key.out_public,
@@ -637,9 +672,9 @@ impl Context {
             // restricted=0 for DevIDs
             .with_restricted(false);
 
-        let obj_attrs = obj_attrs_builder
-            .build()
-            .map_err(|e| TpmError::TSSObjectAttributesBuildError { e })?;
+        let obj_attrs = obj_attrs_builder.build().map_err(|source| {
+            TpmError::TSSObjectAttributesBuildError { source }
+        })?;
 
         let (auth_policy, key_bits, curve_id) = match name_alg {
             HashingAlgorithm::Sha256 => (
@@ -675,7 +710,9 @@ impl Context {
                 .with_name_hashing_algorithm(name_alg)
                 .with_object_attributes(obj_attrs)
                 .with_auth_policy(Digest::try_from(auth_policy).map_err(
-                    |e| TpmError::TSSDigestFromAuthPolicyError { e },
+                    |source| TpmError::TSSDigestFromAuthPolicyError {
+                        source,
+                    },
                 )?)
                 .with_rsa_parameters(
                     PublicRsaParametersBuilder::new()
@@ -687,13 +724,15 @@ impl Context {
                         .with_is_decryption_key(obj_attrs.decrypt())
                         .with_restricted(obj_attrs.restricted())
                         .build()
-                        .map_err(|e| {
-                            TpmError::TSSPublicRSAParametersBuildError { e }
+                        .map_err(|source| {
+                            TpmError::TSSPublicRSAParametersBuildError {
+                                source,
+                            }
                         })?,
                 )
                 .with_rsa_unique_identifier(
                     PublicKeyRsa::try_from(&UNIQUE_IDEVID[0..6]).map_err(
-                        |e| TpmError::TSSPublicKeyFromIDevID { e },
+                        |source| TpmError::TSSPublicKeyFromIDevID { source },
                     )?,
                 ),
             AsymmetricAlgorithm::Ecc => PublicBuilder::new()
@@ -701,7 +740,9 @@ impl Context {
                 .with_name_hashing_algorithm(name_alg)
                 .with_object_attributes(obj_attrs)
                 .with_auth_policy(Digest::try_from(auth_policy).map_err(
-                    |e| TpmError::TSSDigestFromAuthPolicyError { e },
+                    |source| TpmError::TSSDigestFromAuthPolicyError {
+                        source,
+                    },
                 )?)
                 .with_ecc_parameters(
                     PublicEccParametersBuilder::new()
@@ -717,16 +758,22 @@ impl Context {
                         .with_is_decryption_key(obj_attrs.decrypt())
                         .with_restricted(obj_attrs.restricted())
                         .build()
-                        .map_err(|e| {
-                            TpmError::TSSPublicECCParametersBuildError { e }
+                        .map_err(|source| {
+                            TpmError::TSSPublicECCParametersBuildError {
+                                source,
+                            }
                         })?,
                 )
                 .with_ecc_unique_identifier(EccPoint::new(
                     EccParameter::try_from(&UNIQUE_IDEVID[0..6]).map_err(
-                        |e| TpmError::TSSECCParameterFromIDevIDError { e },
+                        |source| TpmError::TSSECCParameterFromIDevIDError {
+                            source,
+                        },
                     )?,
                     EccParameter::try_from(&UNIQUE_IDEVID[0..6]).map_err(
-                        |e| TpmError::TSSECCParameterFromIDevIDError { e },
+                        |source| TpmError::TSSECCParameterFromIDevIDError {
+                            source,
+                        },
                     )?,
                 )),
             // Defaulting to RSA on null
@@ -738,8 +785,8 @@ impl Context {
                     Digest::try_from(
                         IDEVID_AUTH_POLICY_SHA256[0..32].to_vec(),
                     )
-                    .map_err(|e| {
-                        TpmError::TSSDigestFromAuthPolicyError { e }
+                    .map_err(|source| {
+                        TpmError::TSSDigestFromAuthPolicyError { source }
                     })?,
                 )
                 .with_rsa_parameters(
@@ -752,21 +799,23 @@ impl Context {
                         .with_is_decryption_key(obj_attrs.decrypt())
                         .with_restricted(obj_attrs.decrypt())
                         .build()
-                        .map_err(|e| {
-                            TpmError::TSSPublicRSAParametersBuildError { e }
+                        .map_err(|source| {
+                            TpmError::TSSPublicRSAParametersBuildError {
+                                source,
+                            }
                         })?,
                 )
                 .with_rsa_unique_identifier(
                     PublicKeyRsa::try_from(&UNIQUE_IDEVID[0..6]).map_err(
-                        |e| TpmError::TSSPublicKeyFromIDevID { e },
+                        |source| TpmError::TSSPublicKeyFromIDevID { source },
                     )?,
                 ),
         };
 
         Ok(IDevIDPublic {
-            public: key_builder
-                .build()
-                .map_err(|e| TpmError::TSSIDevIDKeyBuildError { e })?,
+            public: key_builder.build().map_err(|source| {
+                TpmError::TSSIDevIDKeyBuildError { source }
+            })?,
         })
     }
 
@@ -795,7 +844,9 @@ impl Context {
                 ],
             )
             .build()
-            .map_err(|e| TpmError::TSSPCRSelectionBuildError { e })?;
+            .map_err(|source| TpmError::TSSPCRSelectionBuildError {
+                source,
+            })?;
 
         let primary_key = self
             .inner
@@ -809,7 +860,7 @@ impl Context {
                     Some(pcr_selection_list),
                 )
             })
-            .map_err(|e| TpmError::TSSCreatePrimaryError { e })?;
+            .map_err(|source| TpmError::TSSCreatePrimaryError { source })?;
 
         Ok(IAKResult {
             public: primary_key.out_public,
@@ -836,9 +887,9 @@ impl Context {
             // restricted=1 for AKs
             .with_restricted(true);
 
-        let obj_attrs = obj_attrs_builder
-            .build()
-            .map_err(|e| TpmError::TSSObjectAttributesBuildError { e })?;
+        let obj_attrs = obj_attrs_builder.build().map_err(|source| {
+            TpmError::TSSObjectAttributesBuildError { source }
+        })?;
 
         let (auth_policy, key_bits, curve_id) = match name_alg {
             HashingAlgorithm::Sha256 => (
@@ -874,7 +925,9 @@ impl Context {
                 .with_name_hashing_algorithm(name_alg)
                 .with_object_attributes(obj_attrs)
                 .with_auth_policy(Digest::try_from(auth_policy).map_err(
-                    |e| TpmError::TSSDigestFromAuthPolicyError { e },
+                    |source| TpmError::TSSDigestFromAuthPolicyError {
+                        source,
+                    },
                 )?)
                 .with_rsa_parameters(
                     PublicRsaParametersBuilder::new()
@@ -888,20 +941,25 @@ impl Context {
                         .with_is_decryption_key(obj_attrs.decrypt())
                         .with_restricted(obj_attrs.restricted())
                         .build()
-                        .map_err(|e| {
-                            TpmError::TSSPublicRSAParametersBuildError { e }
+                        .map_err(|source| {
+                            TpmError::TSSPublicRSAParametersBuildError {
+                                source,
+                            }
                         })?,
                 )
                 .with_rsa_unique_identifier(
-                    PublicKeyRsa::try_from(&UNIQUE_IAK[0..3])
-                        .map_err(|e| TpmError::TSSPublicKeyFromIAK { e })?,
+                    PublicKeyRsa::try_from(&UNIQUE_IAK[0..3]).map_err(
+                        |source| TpmError::TSSPublicKeyFromIAK { source },
+                    )?,
                 ),
             AsymmetricAlgorithm::Ecc => PublicBuilder::new()
                 .with_public_algorithm(PublicAlgorithm::Ecc)
                 .with_name_hashing_algorithm(name_alg)
                 .with_object_attributes(obj_attrs)
                 .with_auth_policy(Digest::try_from(auth_policy).map_err(
-                    |e| TpmError::TSSDigestFromAuthPolicyError { e },
+                    |source| TpmError::TSSDigestFromAuthPolicyError {
+                        source,
+                    },
                 )?)
                 .with_ecc_parameters(
                     PublicEccParametersBuilder::new()
@@ -917,16 +975,22 @@ impl Context {
                         .with_is_decryption_key(obj_attrs.decrypt())
                         .with_restricted(obj_attrs.restricted())
                         .build()
-                        .map_err(|e| {
-                            TpmError::TSSPublicECCParametersBuildError { e }
+                        .map_err(|source| {
+                            TpmError::TSSPublicECCParametersBuildError {
+                                source,
+                            }
                         })?,
                 )
                 .with_ecc_unique_identifier(EccPoint::new(
                     EccParameter::try_from(&UNIQUE_IAK[0..3]).map_err(
-                        |e| TpmError::TSSECCParameterFromIAKError { e },
+                        |source| TpmError::TSSECCParameterFromIAKError {
+                            source,
+                        },
                     )?,
                     EccParameter::try_from(&UNIQUE_IAK[0..3]).map_err(
-                        |e| TpmError::TSSECCParameterFromIAKError { e },
+                        |source| TpmError::TSSECCParameterFromIAKError {
+                            source,
+                        },
                     )?,
                 )),
             AsymmetricAlgorithm::Null => PublicBuilder::new()
@@ -935,8 +999,8 @@ impl Context {
                 .with_object_attributes(obj_attrs)
                 .with_auth_policy(
                     Digest::try_from(IAK_AUTH_POLICY_SHA256[0..32].to_vec())
-                        .map_err(|e| {
-                            TpmError::TSSDigestFromAuthPolicyError { e }
+                        .map_err(|source| {
+                            TpmError::TSSDigestFromAuthPolicyError { source }
                         })?,
                 )
                 .with_rsa_parameters(
@@ -949,20 +1013,23 @@ impl Context {
                         .with_is_decryption_key(obj_attrs.decrypt())
                         .with_restricted(obj_attrs.decrypt())
                         .build()
-                        .map_err(|e| {
-                            TpmError::TSSPublicRSAParametersBuildError { e }
+                        .map_err(|source| {
+                            TpmError::TSSPublicRSAParametersBuildError {
+                                source,
+                            }
                         })?,
                 )
                 .with_rsa_unique_identifier(
-                    PublicKeyRsa::try_from(&UNIQUE_IAK[0..3])
-                        .map_err(|e| TpmError::TSSPublicKeyFromIAK { e })?,
+                    PublicKeyRsa::try_from(&UNIQUE_IAK[0..3]).map_err(
+                        |source| TpmError::TSSPublicKeyFromIAK { source },
+                    )?,
                 ),
         };
 
         Ok(IAKPublic {
             public: key_builder
                 .build()
-                .map_err(|e| TpmError::TSSIAKKeyBuildError { e })?,
+                .map_err(|source| TpmError::TSSIAKKeyBuildError { source })?,
         })
     }
 
@@ -978,13 +1045,13 @@ impl Context {
                 None,
                 None,
                 ses_type,
-                Cipher::aes_128_cfb().try_into().map_err(|e| {
-                    TpmError::TSSSymmetricDefinitionFromCipher { e }
+                Cipher::aes_128_cfb().try_into().map_err(|source| {
+                    TpmError::TSSSymmetricDefinitionFromCipher { source }
                 })?,
                 HashingAlgorithm::Sha256,
             )
-            .map_err(|e| TpmError::TSSStartAuthenticationSessionError {
-                e,
+            .map_err(|source| {
+                TpmError::TSSStartAuthenticationSessionError { source }
             })?
         else {
             return Err(TpmError::EmptyAuthenticationSessionError);
@@ -997,7 +1064,9 @@ impl Context {
 
         self.inner
             .tr_sess_set_attributes(session, ses_attrs, ses_attrs_mask)
-            .map_err(|e| TpmError::TSSSessionSetAttributesError { e })?;
+            .map_err(|source| TpmError::TSSSessionSetAttributesError {
+                source,
+            })?;
         Ok(session)
     }
 
@@ -1266,9 +1335,9 @@ fn pubkey_to_tpm_digest<T: HasPublic>(
     let keybytes = match pubkey.id() {
         Id::RSA => pubkey
             .rsa()
-            .map_err(|e| TpmError::OpenSSLRSAFromPKey { e })?
+            .map_err(|source| TpmError::OpenSSLRSAFromPKey { source })?
             .public_key_to_pem()
-            .map_err(|e| TpmError::OpenSSLPublicKeyToPEM { e })?,
+            .map_err(|source| TpmError::OpenSSLPublicKeyToPEM { source })?,
         other_id => {
             return Err(TpmError::NotImplemented(format!(
                 "Converting to digest value for key type {other_id:?}"
@@ -1277,18 +1346,19 @@ fn pubkey_to_tpm_digest<T: HasPublic>(
     };
 
     let hashing_algo = HashingAlgorithm::from(hash_algo);
-    let mut hasher = Hasher::new(hash_alg_to_message_digest(hashing_algo)?)
-        .map_err(|e| TpmError::OpenSSLHasherNew { e })?;
+    let mut hasher =
+        Hasher::new(hash_alg_to_message_digest(hashing_algo)?)
+            .map_err(|source| TpmError::OpenSSLHasherNew { source })?;
     hasher
         .update(&keybytes)
-        .map_err(|e| TpmError::OpenSSLHasherUpdate { e })?;
+        .map_err(|source| TpmError::OpenSSLHasherUpdate { source })?;
     let hashvec = hasher
         .finish()
-        .map_err(|e| TpmError::OpenSSLHasherFinish { e })?;
+        .map_err(|source| TpmError::OpenSSLHasherFinish { source })?;
     keydigest.set(
         hashing_algo,
         Digest::try_from(hashvec.as_ref())
-            .map_err(|e| TpmError::TSSDigestFromValue { e })?,
+            .map_err(|source| TpmError::TSSDigestFromValue { source })?,
     );
 
     Ok(keydigest)
@@ -1369,10 +1439,10 @@ fn encode_quote_string(
     // dictated by tpm2_tools.
     let att_vec = att
         .marshall()
-        .map_err(|e| TpmError::TSSMarshallAttestError { e })?;
+        .map_err(|source| TpmError::TSSMarshallAttestError { source })?;
     let sig_vec = sig
         .marshall()
-        .map_err(|e| TpmError::TSSMarshallSignatureError { e })?;
+        .map_err(|source| TpmError::TSSMarshallSignatureError { source })?;
     let pcr_vec = pcrdata_to_vec(pcrs_read, pcr_data);
 
     // base64 encoding
@@ -1411,7 +1481,7 @@ fn make_pcr_blob(
 ) -> Result<(PcrSelectionList, PcrData)> {
     let pcr_data = context
         .execute_without_session(|ctx| read_all(ctx, pcrlist.clone()))
-        .map_err(|e| TpmError::TSSPCRListError { e })?;
+        .map_err(|source| TpmError::TSSPCRListError { source })?;
     Ok((pcrlist, pcr_data))
 }
 
@@ -1451,18 +1521,18 @@ fn check_if_pcr_data_and_attestation_match(
     let attested_pcr = quote_info.pcr_digest().value();
 
     let mut hasher = Hasher::new(hash_alg_to_message_digest(hash_algo)?)
-        .map_err(|e| TpmError::OpenSSLHasherNew { e })?;
+        .map_err(|source| TpmError::OpenSSLHasherNew { source })?;
     for tpml_digest in pcr_data {
         for i in 0..tpml_digest.count {
             let pcr = tpml_digest.digests[i as usize];
             hasher
                 .update(&pcr.buffer[..pcr.size as usize])
-                .map_err(|e| TpmError::OpenSSLHasherUpdate { e })?;
+                .map_err(|source| TpmError::OpenSSLHasherUpdate { source })?;
         }
     }
     let pcr_digest = hasher
         .finish()
-        .map_err(|e| TpmError::OpenSSLHasherFinish { e })?;
+        .map_err(|source| TpmError::OpenSSLHasherFinish { source })?;
 
     log::trace!(
         "Attested to PCR digest: {:?}, read PCR digest: {:?}",
@@ -1499,7 +1569,7 @@ fn perform_quote_and_pcr_read(
         // create quote
         let (attestation, sig) = context
             .quote(ak_handle, nonce.clone(), sign_scheme, pcrs_read.clone())
-            .map_err(|e| TpmError::TSSQuoteError { e })?;
+            .map_err(|source| TpmError::TSSQuoteError { source })?;
 
         // Check whether the attestation and pcr_data match
         if check_if_pcr_data_and_attestation_match(
@@ -1613,10 +1683,10 @@ pub mod testing {
 
         let mut reader = std::io::Cursor::new(pcrsel_vec);
         let mut count_vec = [0u8; 4];
-        reader.read_exact(&mut count_vec).map_err(|e| {
+        reader.read_exact(&mut count_vec).map_err(|source| {
             TpmError::IoReadError {
                 what: "PCR selection count from slice".into(),
-                e,
+                source,
             }
         })?;
         let count = u32::from_le_bytes(count_vec);
@@ -1626,29 +1696,29 @@ pub mod testing {
 
         for selection in &mut pcr_selections {
             let mut hash_vec = [0u8; 2];
-            reader.read_exact(&mut hash_vec).map_err(|e| {
+            reader.read_exact(&mut hash_vec).map_err(|source| {
                 TpmError::IoReadError {
                     what: "PCR selection hash from slice".into(),
-                    e,
+                    source,
                 }
             })?;
             selection.hash = u16::from_le_bytes(hash_vec);
 
             let mut size_vec = [0u8; 1];
-            reader.read_exact(&mut size_vec).map_err(|e| {
+            reader.read_exact(&mut size_vec).map_err(|source| {
                 TpmError::IoReadError {
                     what: "PCR selection size from slice".into(),
-                    e,
+                    source,
                 }
             })?;
             selection.sizeofSelect = u8::from_le_bytes(size_vec);
 
-            reader.read_exact(&mut selection.pcrSelect).map_err(|e| {
-                TpmError::IoReadError {
+            reader.read_exact(&mut selection.pcrSelect).map_err(
+                |source| TpmError::IoReadError {
                     what: "PCR selection from slice".into(),
-                    e,
-                }
-            })?;
+                    source,
+                },
+            )?;
         }
 
         Ok(TPML_PCR_SELECTION {
@@ -1671,10 +1741,10 @@ pub mod testing {
         let mut reader = std::io::Cursor::new(digest_vec);
         let mut count_vec = [0u8; 4];
 
-        reader.read_exact(&mut count_vec).map_err(|e| {
+        reader.read_exact(&mut count_vec).map_err(|source| {
             TpmError::IoReadError {
                 what: "Digest count from slice".into(),
-                e,
+                source,
             }
         })?;
         let count = u32::from_le_bytes(count_vec);
@@ -1683,17 +1753,17 @@ pub mod testing {
 
         for digest in &mut digests {
             let mut size_vec = [0u8; 2];
-            reader.read_exact(&mut size_vec).map_err(|e| {
+            reader.read_exact(&mut size_vec).map_err(|source| {
                 TpmError::IoReadError {
                     what: "Digest size from slice".into(),
-                    e,
+                    source,
                 }
             })?;
             digest.size = u16::from_le_bytes(size_vec);
-            reader.read_exact(&mut digest.buffer).map_err(|e| {
+            reader.read_exact(&mut digest.buffer).map_err(|source| {
                 TpmError::IoReadError {
                     what: "Digest from slice".into(),
-                    e,
+                    source,
                 }
             })?;
         }
@@ -1704,10 +1774,10 @@ pub mod testing {
     fn vec_to_pcrdata(val: &[u8]) -> Result<(PcrSelectionList, PcrData)> {
         let mut reader = std::io::Cursor::new(val);
         let mut pcrsel_vec = [0u8; TPML_PCR_SELECTION_SIZE];
-        reader.read_exact(&mut pcrsel_vec).map_err(|e| {
+        reader.read_exact(&mut pcrsel_vec).map_err(|source| {
             TpmError::IoReadError {
                 what: "PCR selection size from slice".into(),
-                e,
+                source,
             }
         })?;
 
@@ -1715,10 +1785,10 @@ pub mod testing {
         let pcrlist: PcrSelectionList = pcrsel.try_into()?;
 
         let mut count_vec = [0u8; 4];
-        reader.read_exact(&mut count_vec).map_err(|e| {
+        reader.read_exact(&mut count_vec).map_err(|source| {
             TpmError::IoReadError {
                 what: "PCR selection count from slice".into(),
-                e,
+                source,
             }
         })?;
         let count = u32::from_le_bytes(count_vec);
@@ -1731,10 +1801,10 @@ pub mod testing {
         }
 
         let mut digest_vec = [0u8; TPML_DIGEST_SIZE];
-        reader.read_exact(&mut digest_vec).map_err(|e| {
+        reader.read_exact(&mut digest_vec).map_err(|source| {
             TpmError::IoReadError {
                 what: "Digest from slice".into(),
-                e,
+                source,
             }
         })?;
         let digest = deserialize_digest(&digest_vec)?;
@@ -1784,11 +1854,11 @@ pub mod testing {
         Ok((att.try_into()?, sig, pcrsel, pcrdata))
     }
 
-    // This performs the same checks as in tpm2_checkquote, namely:
-    // signature, nonce, and PCR digests from the quote.
-    //
-    // Reference:
-    // https://github.com/tpm2-software/tpm2-tools/blob/master/tools/tpm2_checkquote.c
+    /// This performs the same checks as in tpm2_checkquote, namely:
+    /// signature, nonce, and PCR digests from the quote.
+    ///
+    /// Reference:
+    /// https://github.com/tpm2-software/tpm2-tools/blob/master/tools/tpm2_checkquote.c
     pub fn check_quote(
         context: &mut tss_esapi::Context,
         ak_handle: KeyHandle,
@@ -1801,13 +1871,13 @@ pub mod testing {
         // bother unmarshalling the AK to OpenSSL PKey, but just use
         // Esys_VerifySignature with loaded AK
         let mut hasher = Hasher::new(MessageDigest::sha256())
-            .map_err(|e| TpmError::OpenSSLHasherNew { e })?;
+            .map_err(|source| TpmError::OpenSSLHasherNew { source })?;
         hasher
             .update(att.value())
-            .map_err(|e| TpmError::OpenSSLHasherUpdate { e })?;
+            .map_err(|source| TpmError::OpenSSLHasherUpdate { source })?;
         let digest = hasher
             .finish()
-            .map_err(|e| TpmError::OpenSSLHasherFinish { e })?;
+            .map_err(|source| TpmError::OpenSSLHasherFinish { source })?;
         let digest: Digest = digest.as_ref().try_into().unwrap(); //#[allow_ci]
         match context.verify_signature(ak_handle, digest, sig) {
             Ok(ticket) if ticket.tag() == StructureTag::Verified => {}
@@ -1829,19 +1899,19 @@ pub mod testing {
             .pcr_bank(HashingAlgorithm::Sha256)
             .ok_or_else(|| TpmError::Other("no SHA256 bank".to_string()))?;
         let mut hasher = Hasher::new(MessageDigest::sha256())
-            .map_err(|e| TpmError::OpenSSLHasherNew { e })?;
+            .map_err(|source| TpmError::OpenSSLHasherNew { source })?;
         for &sel in pcrsel.get_selections() {
             for i in &sel.selected() {
                 if let Some(digest) = pcrbank.get_digest(*i) {
-                    hasher
-                        .update(digest.value())
-                        .map_err(|e| TpmError::OpenSSLHasherUpdate { e })?;
+                    hasher.update(digest.value()).map_err(|source| {
+                        TpmError::OpenSSLHasherUpdate { source }
+                    })?;
                 }
             }
         }
         let digest = hasher
             .finish()
-            .map_err(|e| TpmError::OpenSSLHasherFinish { e })?;
+            .map_err(|source| TpmError::OpenSSLHasherFinish { source })?;
         let quote_info = match attestation.attested() {
             AttestInfo::Quote { info } => info,
             _ => {
