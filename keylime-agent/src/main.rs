@@ -599,7 +599,7 @@ async fn main() -> Result<()> {
                         "Loading existing mTLS certificate from {}",
                         cert_path.display()
                     );
-                    crypto::load_x509(cert_path)?
+                    crypto::load_x509_pem(cert_path)?
                 } else {
                     debug!("Generating new mTLS certificate");
                     let cert = crypto::generate_x509(&nk_priv, &agent_uuid)?;
@@ -641,7 +641,7 @@ async fn main() -> Result<()> {
         }?;
 
         mtls_cert = Some(&cert);
-        ssl_context = Some(crypto::generate_mtls_context(
+        ssl_context = Some(crypto::generate_tls_context(
             &cert,
             &nk_priv,
             keylime_ca_certs,
@@ -1024,10 +1024,42 @@ fn read_in_file(path: String) -> std::io::Result<String> {
 #[cfg(feature = "testing")]
 mod testing {
     use super::*;
-    use crate::config::KeylimeConfig;
+    use crate::{config::KeylimeConfig, crypto::CryptoError};
+    use thiserror::Error;
+
+    #[derive(Error, Debug)]
+    pub(crate) enum MainTestError {
+        /// Algorithm error
+        #[error("AlgorithmError")]
+        Error(#[from] keylime::algorithms::AlgorithmError),
+
+        /// Crypto error
+        #[error("CryptoError")]
+        CryptoError(#[from] CryptoError),
+
+        /// CryptoTest error
+        #[error("CryptoTestError")]
+        CryptoTestError(#[from] crate::crypto::testing::CryptoTestError),
+
+        /// IO error
+        #[error("IOError")]
+        IoError(#[from] std::io::Error),
+
+        /// OpenSSL error
+        #[error("IOError")]
+        OpenSSLError(#[from] openssl::error::ErrorStack),
+
+        /// TPM error
+        #[error("TPMError")]
+        TPMError(#[from] keylime::tpm::TpmError),
+
+        /// TSS esapi error
+        #[error("TSSError")]
+        TSSError(#[from] tss_esapi::Error),
+    }
 
     impl QuoteData {
-        pub(crate) fn fixture() -> Result<Self> {
+        pub(crate) fn fixture() -> std::result::Result<Self, MainTestError> {
             let test_config = KeylimeConfig::default();
             let mut ctx = tpm::Context::new()?;
 

@@ -4,8 +4,8 @@
 use crate::crypto;
 use crate::{
     common::{
-        AuthTag, EncryptedData, JsonWrapper, KeySet, SymmKey, AES_BLOCK_SIZE,
-        AGENT_UUID_LEN, AUTH_TAG_LEN,
+        AuthTag, EncryptedData, JsonWrapper, KeySet, SymmKey, AGENT_UUID_LEN,
+        AUTH_TAG_LEN,
     },
     config::KeylimeConfig,
     payloads::{Payload, PayloadMessage},
@@ -552,9 +552,9 @@ mod tests {
         encrypt_aead, pkey_pub_from_pem, rsa_oaep_encrypt,
     };
     use crate::{
-        common::{AES_128_KEY_LEN, AES_256_KEY_LEN, API_VERSION},
+        common::API_VERSION,
         config::KeylimeConfig,
-        crypto::compute_hmac,
+        crypto::{compute_hmac, AES_128_KEY_LEN, AES_256_KEY_LEN},
         payloads,
     };
     use actix_rt::Arbiter;
