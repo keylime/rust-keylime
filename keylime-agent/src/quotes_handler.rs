@@ -340,8 +340,9 @@ pub async fn integrity(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{common::API_VERSION, crypto::testing::pkey_pub_from_pem};
+    use crate::common::API_VERSION;
     use actix_web::{test, web, App};
+    use keylime::{crypto::testing::pkey_pub_from_pem, tpm};
 
     #[actix_rt::test]
     async fn test_identity() {

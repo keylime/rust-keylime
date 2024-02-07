@@ -59,7 +59,7 @@ pub(crate) enum Error {
     #[error("Number parsing error: {0}")]
     NumParse(#[from] std::num::ParseIntError),
     #[error("Crypto error: {0}")]
-    Crypto(#[from] crate::crypto::CryptoError),
+    Crypto(#[from] keylime::crypto::CryptoError),
     #[cfg(feature = "with-zmq")]
     #[error("ZMQ error: {0}")]
     Zmq(#[from] zmq::Error),
@@ -81,8 +81,6 @@ pub(crate) enum Error {
     Persist(#[from] tempfile::PersistError),
     #[error("Error joining threads: {0}")]
     Join(#[from] tokio::task::JoinError),
-    #[error("Asn1DerError: {0}")]
-    PickyAsn1(#[from] picky_asn1_der::Asn1DerError),
     #[error("Error sending internal message: {0}")]
     Sender(String),
     #[error("Error receiving internal message: {0}")]
