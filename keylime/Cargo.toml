@@ -19,6 +19,8 @@ serde_derive.workspace = true
 static_assertions.workspace = true
 thiserror.workspace = true
 tss-esapi.workspace = true
+picky-asn1-der.workspace = true
+picky-asn1-x509.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

@@ -2,7 +2,6 @@
 // Copyright 2021 Keylime Authors
 
 use crate::{
-    crypto::{AES_128_KEY_LEN, AES_256_KEY_LEN},
     error::{Error, Result},
     permissions,
 };
@@ -10,14 +9,12 @@ use crate::{
 use keylime::algorithms::{
     EncryptionAlgorithm, HashAlgorithm, SignAlgorithm,
 };
-use keylime::tpm;
-use log::*;
-use openssl::{
-    hash::{hash, MessageDigest},
-    pkey::PKey,
-    x509::X509,
+use keylime::{
+    crypto::{hash, tss_pubkey_to_pem, AES_128_KEY_LEN, AES_256_KEY_LEN},
+    tpm,
 };
-use picky_asn1_x509::SubjectPublicKeyInfo;
+use log::*;
+use openssl::hash::MessageDigest;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{
@@ -255,8 +252,8 @@ impl AgentData {
 /// This is used as the agent UUID when the configuration option 'uuid' is set as 'hash_ek'
 pub(crate) fn hash_ek_pubkey(ek_pub: Public) -> Result<String> {
     // Calculate the SHA-256 hash of the public key in PEM format
-    let pem = crate::crypto::tss_pubkey_to_pem(ek_pub)?;
-    let hash = crate::crypto::hash(&pem, MessageDigest::sha256())?;
+    let pem = tss_pubkey_to_pem(ek_pub)?;
+    let hash = hash(&pem, MessageDigest::sha256())?;
     Ok(hex::encode(hash))
 }
 

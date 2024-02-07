@@ -33,7 +33,6 @@
 
 mod common;
 mod config;
-mod crypto;
 mod error;
 mod errors_handler;
 mod keys_handler;
@@ -56,7 +55,7 @@ use futures::{
     future::{ok, TryFutureExt},
     try_join,
 };
-use keylime::{ima::MeasurementList, list_parser::parse_list, tpm};
+use keylime::{crypto, ima::MeasurementList, list_parser::parse_list, tpm};
 use log::*;
 use openssl::{
     pkey::{PKey, Private, Public},

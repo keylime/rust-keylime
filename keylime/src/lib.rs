@@ -1,4 +1,5 @@
 pub mod algorithms;
+pub mod crypto;
 pub mod ima;
 pub mod list_parser;
 pub mod tpm;

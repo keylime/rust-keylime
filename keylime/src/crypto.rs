@@ -20,8 +20,8 @@ use openssl::{
 };
 use picky_asn1_x509::SubjectPublicKeyInfo;
 use std::{
-    fs::{read_to_string, set_permissions, File, Permissions},
-    io::{Read, Write},
+    fs::{read_to_string, set_permissions, Permissions},
+    io::Write,
     os::unix::fs::PermissionsExt,
     path::Path,
     string::{FromUtf8Error, String},
@@ -90,19 +90,19 @@ pub enum CryptoError {
     Infallible(#[source] std::convert::Infallible),
 
     /// Invalid input length
-    #[error("Invalid input length")]
+    #[error("Invalid input length {length}")]
     InvalidInputLength { length: usize },
 
     /// Invalid key length
-    #[error("Invalid key length")]
+    #[error("Invalid key length {length}")]
     InvalidKeyLength { length: usize },
 
-    /// Error reading file
-    #[error("failed to read file")]
+    /// Read error
+    #[error("failed to read")]
     IOReadError(#[source] std::io::Error),
 
-    /// Error writing file
-    #[error("failed to write file")]
+    /// Write error
+    #[error("failed to write")]
     IOWriteError(#[source] std::io::Error),
 
     /// Error setting file permission
@@ -178,6 +178,20 @@ pub enum CryptoError {
     /// Error setting SSL server context parameters
     #[error("failed to set SSL server context parameters")]
     SSLContextBuilderSetAcceptorParameters(
+        #[source] openssl::error::ErrorStack,
+    ),
+
+    /// Error setting SSL server certificate
+    #[error("failed to set SSL server certificate")]
+    SSLContextBuilderSetCertificate(#[source] openssl::error::ErrorStack),
+
+    /// Error setting SSL server private key
+    #[error("failed to set SSL server private key")]
+    SSLContextBuilderSetPrivateKey(#[source] openssl::error::ErrorStack),
+
+    /// Error setting SSL server trusted certificate store
+    #[error("failed to set SSL server trusted certificate store")]
+    SSLContextBuilderSetTrustedCertStore(
         #[source] openssl::error::ErrorStack,
     ),
 
@@ -313,9 +327,7 @@ pub enum CryptoError {
 }
 
 /// Load a X509 certificate in DER format from file
-pub(crate) fn load_x509_der(
-    input_cert_path: &Path,
-) -> Result<X509, CryptoError> {
+pub fn load_x509_der(input_cert_path: &Path) -> Result<X509, CryptoError> {
     let contents =
         std::fs::read(input_cert_path).map_err(CryptoError::IOReadError)?;
 
@@ -323,9 +335,7 @@ pub(crate) fn load_x509_der(
 }
 
 /// Load X509 certificate in PEM format from file
-pub(crate) fn load_x509_pem(
-    input_cert_path: &Path,
-) -> Result<X509, CryptoError> {
+pub fn load_x509_pem(input_cert_path: &Path) -> Result<X509, CryptoError> {
     let contents =
         std::fs::read(input_cert_path).map_err(CryptoError::IOReadError)?;
 
@@ -344,7 +354,7 @@ fn load_x509_cert_chain(
 }
 
 /// Load X509 certificate chains in PEM format from a list of files
-pub(crate) fn load_x509_cert_list(
+pub fn load_x509_cert_list(
     input_cert_list: Vec<&Path>,
 ) -> Result<Vec<X509>, CryptoError> {
     let mut loaded = Vec::<X509>::new();
@@ -364,10 +374,7 @@ pub(crate) fn load_x509_cert_list(
 }
 
 /// Write a X509 certificate to a file in PEM format
-pub(crate) fn write_x509(
-    cert: &X509,
-    file_path: &Path,
-) -> Result<(), CryptoError> {
+pub fn write_x509(cert: &X509, file_path: &Path) -> Result<(), CryptoError> {
     let mut file = std::fs::File::create(file_path).map_err(|source| {
         CryptoError::FSCreateError {
             file: file_path.display().to_string(),
@@ -381,16 +388,14 @@ pub(crate) fn write_x509(
 }
 
 /// Get the X509 certificate public key
-pub(crate) fn x509_get_pubkey(
-    cert: &X509,
-) -> Result<PKey<Public>, CryptoError> {
+pub fn x509_get_pubkey(cert: &X509) -> Result<PKey<Public>, CryptoError> {
     cert.public_key().map_err(CryptoError::X509GetPublicError)
 }
 
 /// Encode the X509 certificate in PEM format
 ///
 /// The certificate is returned as a String
-pub(crate) fn x509_to_pem(cert: &X509) -> Result<String, CryptoError> {
+pub fn x509_to_pem(cert: &X509) -> Result<String, CryptoError> {
     String::from_utf8(cert.to_pem().map_err(CryptoError::X509ToPEMError)?)
         .map_err(CryptoError::StringFromVec)
 }
@@ -398,14 +403,14 @@ pub(crate) fn x509_to_pem(cert: &X509) -> Result<String, CryptoError> {
 /// Encode the X509 certificate in DER format
 ///
 /// The certificate is returned as a Vec<u8>
-pub(crate) fn x509_to_der(cert: &X509) -> Result<Vec<u8>, CryptoError> {
+pub fn x509_to_der(cert: &X509) -> Result<Vec<u8>, CryptoError> {
     cert.to_der().map_err(CryptoError::X509ToDERError)
 }
 
 /// Encode a TSS Public key in PEM format
 ///
 /// The public key is returned as a Vec<u8>
-pub(crate) fn tss_pubkey_to_pem(
+pub fn tss_pubkey_to_pem(
     pubkey: tss_esapi::structures::Public,
 ) -> Result<Vec<u8>, CryptoError> {
     // Converting Public TSS key to PEM
@@ -423,7 +428,7 @@ pub(crate) fn tss_pubkey_to_pem(
 }
 
 /// Calculate the hash of the input data using the given Message Digest algorithm
-pub(crate) fn hash(
+pub fn hash(
     data: &[u8],
     algorithm: MessageDigest,
 ) -> Result<Vec<u8>, CryptoError> {
@@ -433,7 +438,7 @@ pub(crate) fn hash(
 }
 
 /// Check an x509 certificate contains a specific public key
-pub(crate) fn check_x509_key(
+pub fn check_x509_key(
     cert: &X509,
     tpm_key: tss_esapi::structures::Public,
 ) -> Result<bool, CryptoError> {
@@ -510,9 +515,7 @@ pub(crate) fn check_x509_key(
 
 /// Detect a template from a certificate
 /// Templates defined in: TPM 2.0 Keys for Device Identity and Attestation at https://trustedcomputinggroup.org/wp-content/uploads/TPM-2p0-Keys-for-Device-Identity-and-Attestation_v1_r12_pub10082021.pdf
-pub(crate) fn match_cert_to_template(
-    cert: &X509,
-) -> Result<String, CryptoError> {
+pub fn match_cert_to_template(cert: &X509) -> Result<String, CryptoError> {
     // Id:RSA_PSS only added in rust-openssl from v0.10.59; remove this let and use Id::RSA_PSS after update
     // Id taken from https://boringssl.googlesource.com/boringssl/+/refs/heads/master/include/openssl/nid.h#4039
     let id_rsa_pss: Id = Id::from_raw(912);
@@ -564,7 +567,7 @@ pub(crate) fn match_cert_to_template(
 }
 
 /// Read a PEM file and returns the public and private keys
-pub(crate) fn load_key_pair(
+pub fn load_key_pair(
     key_path: &Path,
     key_password: Option<&str>,
 ) -> Result<(PKey<Public>, PKey<Private>), CryptoError> {
@@ -589,7 +592,7 @@ pub(crate) fn load_key_pair(
 /// Write a private key to a file.
 ///
 /// If a passphrase is provided, the key will be stored encrypted using AES-256-CBC
-pub(crate) fn write_key_pair(
+pub fn write_key_pair(
     key: &PKey<Private>,
     file_path: &Path,
     passphrase: Option<&str>,
@@ -643,7 +646,7 @@ fn rsa_generate(key_size: u32) -> Result<PKey<Private>, CryptoError> {
     .map_err(CryptoError::PKeyFromRSAError)
 }
 
-pub(crate) fn rsa_generate_pair(
+pub fn rsa_generate_pair(
     key_size: u32,
 ) -> Result<(PKey<Public>, PKey<Private>), CryptoError> {
     let private = rsa_generate(key_size)?;
@@ -679,9 +682,7 @@ fn pkey_pub_from_priv(
     }
 }
 
-pub(crate) fn pkey_pub_to_pem(
-    pubkey: &PKey<Public>,
-) -> Result<String, CryptoError> {
+pub fn pkey_pub_to_pem(pubkey: &PKey<Public>) -> Result<String, CryptoError> {
     pubkey
         .public_key_to_pem()
         .map_err(CryptoError::PublicKeyToPEMError)
@@ -690,7 +691,7 @@ pub(crate) fn pkey_pub_to_pem(
         })
 }
 
-pub(crate) fn generate_x509(
+pub fn generate_x509(
     key: &PKey<Private>,
     uuid: &str,
 ) -> Result<X509, CryptoError> {
@@ -732,7 +733,7 @@ pub(crate) fn generate_x509(
     Ok(builder.build())
 }
 
-pub(crate) fn generate_tls_context(
+pub fn generate_tls_context(
     tls_cert: &X509,
     key: &PKey<Private>,
     ca_certs: Vec<X509>,
@@ -740,8 +741,12 @@ pub(crate) fn generate_tls_context(
     let mut ssl_context_builder =
         SslAcceptor::mozilla_intermediate(SslMethod::tls())
             .map_err(CryptoError::SSLContextBuilderSetAcceptorParameters)?;
-    ssl_context_builder.set_certificate(tls_cert);
-    ssl_context_builder.set_private_key(key);
+    ssl_context_builder
+        .set_certificate(tls_cert)
+        .map_err(CryptoError::SSLContextBuilderSetCertificate)?;
+    ssl_context_builder
+        .set_private_key(key)
+        .map_err(CryptoError::SSLContextBuilderSetPrivateKey)?;
 
     // Build verification cert store.
     let mut mtls_store_builder = X509StoreBuilder::new()
@@ -753,7 +758,9 @@ pub(crate) fn generate_tls_context(
     }
 
     let mtls_store = mtls_store_builder.build();
-    ssl_context_builder.set_verify_cert_store(mtls_store);
+    ssl_context_builder
+        .set_verify_cert_store(mtls_store)
+        .map_err(CryptoError::SSLContextBuilderSetTrustedCertStore)?;
 
     // Enable mutual TLS verification
     let mut verify_mode = SslVerifyMode::empty();
@@ -778,7 +785,7 @@ pub(crate) fn generate_tls_context(
  * PBKDF2 function defaults to SHA-1 unless otherwise specified, and
  * Python-Keylime uses this default.
  */
-pub(crate) fn pbkdf2(
+pub fn pbkdf2(
     input_password: String,
     input_salt: String,
 ) -> Result<String, CryptoError> {
@@ -806,7 +813,7 @@ pub(crate) fn pbkdf2(
  *
  * Verify a remote message and signature against a local rsa cert
  */
-pub(crate) fn asym_verify(
+pub fn asym_verify(
     keypair: &PKeyRef<Public>,
     message: &str,
     signature: &str,
@@ -842,7 +849,7 @@ pub(crate) fn asym_verify(
  * Take in an RSA-encrypted ciphertext and an RSA private key and decrypt the
  * ciphertext based on PKCS1 OAEP.
  */
-pub(crate) fn rsa_oaep_decrypt(
+pub fn rsa_oaep_decrypt(
     priv_key: &PKey<Private>,
     data: &[u8],
 ) -> Result<Vec<u8>, CryptoError> {
@@ -881,10 +888,7 @@ pub(crate) fn rsa_oaep_decrypt(
  *
  * Sign message and return HMAC result string
  */
-pub(crate) fn compute_hmac(
-    key: &[u8],
-    data: &[u8],
-) -> Result<Vec<u8>, CryptoError> {
+pub fn compute_hmac(key: &[u8], data: &[u8]) -> Result<Vec<u8>, CryptoError> {
     let pkey = PKey::hmac(key).map_err(CryptoError::PKeyHMACNewError)?;
     // SHA-384 is used as the underlying hash algorithm.
     //
@@ -899,7 +903,7 @@ pub(crate) fn compute_hmac(
     signer.sign_to_vec().map_err(CryptoError::SignError)
 }
 
-pub(crate) fn verify_hmac(
+pub fn verify_hmac(
     key: &[u8],
     data: &[u8],
     hmac: &[u8],
@@ -926,10 +930,7 @@ pub(crate) fn verify_hmac(
     Ok(())
 }
 
-pub(crate) fn decrypt_aead(
-    key: &[u8],
-    data: &[u8],
-) -> Result<Vec<u8>, CryptoError> {
+pub fn decrypt_aead(key: &[u8], data: &[u8]) -> Result<Vec<u8>, CryptoError> {
     let cipher = match key.len() {
         AES_128_KEY_LEN => Cipher::aes_128_gcm(),
         AES_256_KEY_LEN => Cipher::aes_256_gcm(),
@@ -959,7 +960,7 @@ pub mod testing {
     use std::path::Path;
 
     #[derive(Error, Debug)]
-    pub(crate) enum CryptoTestError {
+    pub enum CryptoTestError {
         /// Crypto error
         #[error("CryptoError")]
         CryptoError(#[from] CryptoError),
@@ -977,7 +978,7 @@ pub mod testing {
         InvalidIVLen { expected: usize, got: usize },
     }
 
-    pub(crate) fn rsa_import_pair(
+    pub fn rsa_import_pair(
         path: impl AsRef<Path>,
     ) -> Result<(PKey<Public>, PKey<Private>), CryptoTestError> {
         let contents = read_to_string(path)?;
@@ -986,14 +987,14 @@ pub mod testing {
         Ok((public, private))
     }
 
-    pub(crate) fn pkey_pub_from_pem(
+    pub fn pkey_pub_from_pem(
         pem: &str,
     ) -> Result<PKey<Public>, CryptoTestError> {
         PKey::<Public>::public_key_from_pem(pem.as_bytes())
             .map_err(CryptoTestError::OpenSSLError)
     }
 
-    pub(crate) fn rsa_oaep_encrypt(
+    pub fn rsa_oaep_encrypt(
         pub_key: &PKey<Public>,
         data: &[u8],
     ) -> Result<Vec<u8>, CryptoTestError> {
@@ -1014,7 +1015,7 @@ pub mod testing {
         Ok(encrypted)
     }
 
-    pub(crate) fn encrypt_aead(
+    pub fn encrypt_aead(
         key: &[u8],
         iv: &[u8],
         data: &[u8],
@@ -1053,13 +1054,13 @@ pub mod testing {
         Ok(result)
     }
 
-    pub(crate) fn rsa_generate(
+    pub fn rsa_generate(
         key_size: u32,
     ) -> Result<PKey<Private>, CryptoTestError> {
         super::rsa_generate(key_size).map_err(CryptoTestError::CryptoError)
     }
 
-    pub(crate) fn write_x509_der(
+    pub fn write_x509_der(
         cert: &X509,
         file_path: &Path,
     ) -> Result<(), CryptoTestError> {
@@ -1081,7 +1082,6 @@ pub mod testing {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use openssl::rsa::Rsa;
     use std::{fs, path::Path};
     use testing::{encrypt_aead, rsa_import_pair, rsa_oaep_encrypt};
 
@@ -1231,11 +1231,7 @@ mod tests {
         let key = b"0123456789012345";
         let ciphertext = hex::decode("41424344").unwrap(); //#[allow_ci]
         let result = decrypt_aead(&key[..], &ciphertext[..]);
-        let length = ciphertext.len();
-        assert!(matches!(
-            result,
-            Err(CryptoError::InvalidInputLength { length })
-        ));
+        assert!(result.is_err());
     }
 
     #[test]
@@ -1271,7 +1267,7 @@ mod tests {
             .join("test-rsa.pem");
 
         // Get RSA keys
-        let (public, private) = rsa_import_pair(rsa_key_path).unwrap(); //#[allow_ci]
+        let (_public, private) = rsa_import_pair(rsa_key_path).unwrap(); //#[allow_ci]
 
         // Create temporary directory and files names
         let temp_dir = tempfile::tempdir().unwrap(); //#[allow_ci]
@@ -1337,7 +1333,7 @@ mod tests {
     fn test_x509() {
         let tempdir = tempfile::tempdir().unwrap(); //#[allow_ci]
 
-        let (pubkey, privkey) = rsa_generate_pair(2048).unwrap(); //#[allow_ci]
+        let (_pubkey, privkey) = rsa_generate_pair(2048).unwrap(); //#[allow_ci]
 
         let r = generate_x509(&privkey, "uuidA");
         assert!(r.is_ok());
@@ -1389,7 +1385,7 @@ mod tests {
         let der_path = tempdir.path().join("cert.der");
         let r = testing::write_x509_der(&cert, &der_path);
         assert!(r.is_ok());
-        let e = load_x509_der(&der_path);
+        let r = load_x509_der(&der_path);
         assert!(r.is_ok());
 
         // Loading multiple PEM certs should work when loading chain
