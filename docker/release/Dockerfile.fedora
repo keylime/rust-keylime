@@ -9,7 +9,6 @@ RUN microdnf install -y \
     clang-devel \
     dnf-plugins-core \
     git \
-    libarchive-devel \
     make \
     openssl-devel \
     rust \
@@ -43,7 +42,7 @@ LABEL vendor="The Keylime Authors"
 # Install all agent runtime dependencies from the builder image
 # NOTE: the fedora base image is "fat" and comes with basically all dependencies that we need out of the box with a few exceptions
 RUN microdnf makecache && \
-    microdnf -y install tpm2-tss libarchive openssl util-linux-core && \
+    microdnf -y install tpm2-tss openssl util-linux-core && \
     microdnf clean all && \
     rm -rf /var/cache/dnf/*
 

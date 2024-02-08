@@ -35,7 +35,6 @@ glib2-static \
 gnulib \
 kmod \
 llvm llvm-devel \
-libarchive-devel \
 libselinux-python3 \
 libtool \
 libtpms \
