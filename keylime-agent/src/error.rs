@@ -25,8 +25,6 @@ pub(crate) enum Error {
     Config(#[from] config::ConfigError),
     #[error("Infallible: {0}")]
     Infallible(#[from] std::convert::Infallible),
-    #[error("Compress tools error: {0}")]
-    CompressTools(#[from] compress_tools::Error),
     #[error("Conversion error: {0}")]
     Conversion(String),
     #[error("Configuration error: {0}")]
@@ -91,6 +89,8 @@ pub(crate) enum Error {
     Receiver(String),
     #[error("List parser error: {0}")]
     ListParser(#[from] keylime::list_parser::Error),
+    #[error("Zip error: {0}")]
+    Zip(#[from] zip::result::ZipError),
     #[error("{0}")]
     Other(String),
 }
