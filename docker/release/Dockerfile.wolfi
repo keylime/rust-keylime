@@ -10,15 +10,10 @@ RUN apk update
 # - install rust
 # - install gcc and others to compile tpm2-tss
 # - we are using the "generate-bindings" feature for the tss-esapi crate which requires clang/llvm
-# - Install libarchive (dependency for the compress-tools crate)
 RUN apk add --no-cache --update-cache \
     rust \
     make pkgconf gcc glibc glibc-dev openssl openssl-dev posix-libc-utils \
-    clang-15 llvm15 \
-    libarchive libarchive-dev
-
-# there is a bug in the libarchive.pc file which wrongly adds iconv
-RUN sed -i "s/iconv //" /usr/lib/pkgconfig/libarchive.pc
+    clang-15 llvm15 wget
 
 # Install tpm2-tss (dependency for the tss-esapi crate)
 WORKDIR /src
@@ -69,19 +64,10 @@ COPY --from=builder \
     /usr/lib/libssl.so* \
     /usr/lib/
 
-# libarchive is a direct dependency for the compress-tools crate, so we must copy itself and all its dependencies
+# libz is a direct dependency for the zip crate
 COPY --from=builder \
-    /lib/libacl.so* \
-    /lib/libattr.so* \
     /lib/libz.so* \
     /lib/
-COPY --from=builder \
-    /usr/lib/libarchive.so* \
-    /usr/lib/libexpat.so* \
-    /usr/lib/liblzma.so* \
-    /usr/lib/libzstd.so* \
-    /usr/lib/libbz2.so* \
-    /usr/lib/
 
 # tpm2-tss libraries are a dependency (probably not all of them, but we just copy all)
 # because we are using the tss-esapi crate which is essentially just a wrapper around those (unfortunately)
@@ -105,9 +91,6 @@ EXPOSE 9002/tcp
 LABEL install="podman volume create keylime-agent"
 LABEL uninstall="podman volume rm keylime-agent"
 LABEL run="podman run --read-only --name keylime-agent --rm --device /dev/tpm0 --device /dev/tpmrm0 -v keylime-agent:/var/lib/keylime -v /etc/keylime:/etc/keylime:ro --tmpfs /var/lib/keylime/secure:rw,size=1m,mode=0700 -dt IMAGE"
-
-# Create a system user 'keylime' to allow dropping privileges
-RUN useradd -s /sbin/nologin -r -G tss keylime
 
 # run as root by default
 USER 0:0
