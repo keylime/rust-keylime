@@ -59,7 +59,6 @@ Requires: keylime-base
 
 BuildRequires:  systemd
 BuildRequires:  openssl-devel
-BuildRequires:  libarchive-devel
 BuildRequires:  tpm2-tss-devel
 BuildRequires:  clang
 BuildRequires:  rust-toolset
