@@ -33,19 +33,17 @@ replaces the Python implementation.
 The following packages are required for building:
 
 * `clang`
-* `libarchive-devel`
 * `openssl-devel`
 * `tpm2-tss-devel`
 * (optional for the `with-zmq` feature): `zeromq-devel`
 
 To install, use the following command:
 ```
-$ dnf install clang libarchive-devel openssl-devel tpm2-tss-devel zeromq-devel
+$ dnf install clang openssl-devel tpm2-tss-devel zeromq-devel
 ```
 
 For runtime, the following packages are required:
 
-* `libarchive`
 * `openssl`
 * `tpm2-tss`
 * `systemd` (to run as systemd service)
@@ -56,7 +54,6 @@ For runtime, the following packages are required:
 
 For Debian and Ubuntu, use the following packages are required:
 
-* `libarchive-dev`
 * `libclang-dev`
 * `libssl-dev`
 * `libtss2-dev`
@@ -66,13 +63,12 @@ For Debian and Ubuntu, use the following packages are required:
 To install, use the following command:
 
 ```
-$ apt-get install libarchive-dev libclang-dev libssl-dev libtss2-dev libzmq3-dev pkg-config
+$ apt-get install libclang-dev libssl-dev libtss2-dev libzmq3-dev pkg-config
 ```
 
 For runtime, the following packages are required:
 
 * `coreutils` (for the `mount` command)
-* `libarchive`
 * `libssl`
 * `libtss2-esys-3.0.2-0`
 * (optional for the `with-zmq` feature): `libzmq3`
