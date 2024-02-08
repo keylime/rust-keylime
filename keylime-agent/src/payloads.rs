@@ -11,7 +11,6 @@ use crate::{
 #[cfg(feature = "with-zmq")]
 use crate::revocation::ZmqMessage;
 
-use compress_tools::*;
 use log::*;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -25,6 +24,7 @@ use std::{
     sync::{Arc, Condvar, Mutex},
 };
 use tokio::sync::mpsc::{Receiver, Sender};
+use zip::ZipArchive;
 
 #[derive(Debug, Deserialize, Serialize, PartialEq)]
 pub(crate) struct Payload {
@@ -177,7 +177,8 @@ fn optional_unzip_payload(
                 info!("Unzipping payload {} to {:?}", dec_file, unzipped);
 
                 let mut source = fs::File::open(zipped_payload_path)?;
-                uncompress_archive(&mut source, unzipped, Ownership::Ignore)?;
+                let mut zip = ZipArchive::new(source)?;
+                zip.extract(unzipped)?;
             }
         }
     }

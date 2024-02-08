@@ -12,7 +12,6 @@ actix-web.workspace = true
 base64.workspace = true
 cfg-if.workspace = true
 clap.workspace = true
-compress-tools.workspace = true
 config.workspace = true
 futures.workspace = true
 glob.workspace = true
@@ -34,6 +33,7 @@ tokio.workspace = true
 tss-esapi.workspace = true
 thiserror.workspace = true
 uuid.workspace = true
+zip.workspace = true
 zmq = {version = "0.9.2", optional = true}
 # wiremock was moved to be a regular dependency because optional
 # dev-dependencies are not supported
