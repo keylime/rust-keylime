@@ -7,4 +7,6 @@
 [allowlist]
   paths = [
     '''test-data/test-rsa.pem''',
+    '''keylime/test-data/test-rsa.pem''',
+    '''keylime/test-data/prime256v1.pem''',
   ]
