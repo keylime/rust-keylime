@@ -13,7 +13,7 @@ RUN apk update
 RUN apk add --no-cache --update-cache \
     rust \
     make pkgconf gcc glibc glibc-dev openssl openssl-dev posix-libc-utils \
-    clang-15 llvm15 wget
+    clang-17 clang-17-dev wget
 
 # Install tpm2-tss (dependency for the tss-esapi crate)
 WORKDIR /src
