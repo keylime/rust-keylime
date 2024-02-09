@@ -1388,11 +1388,8 @@ mod tests {
         assert_eq!(hex, "db9b1cd3262dee37756a09b9064973589847caa8e53d31a9d142ea2701b1b28abd97838bb9a27068ba305dc8d04a45a1fcf079de54d607666996b3cc54f6b67c");
     }
 
-    #[test]
-    fn test_x509() {
+    fn test_x509(privkey: PKey<Private>, pubkey: PKey<Public>) {
         let tempdir = tempfile::tempdir().unwrap(); //#[allow_ci]
-
-        let (_pubkey, privkey) = rsa_generate_pair(2048).unwrap(); //#[allow_ci]
 
         let r = generate_x509(&privkey, "uuidA");
         assert!(r.is_ok());
@@ -1465,5 +1462,33 @@ mod tests {
 
         let r = generate_tls_context(&loaded_a, &privkey, loaded_list);
         assert!(r.is_ok());
+    }
+
+    #[test]
+    fn test_x509_rsa() {
+        let (pubkey, privkey) = rsa_generate_pair(2048).unwrap(); //#[allow_ci]
+
+        test_x509(privkey, pubkey);
+    }
+
+    #[test]
+    fn test_match_cert_to_template() {
+        for (file_name, template) in
+            [("test-cert.pem", "H-1"), ("prime256v1.cert.pem", "H-5")]
+        {
+            let cert_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("test-data")
+                .join(file_name);
+
+            let r = load_x509_pem(&cert_path);
+            assert!(r.is_ok());
+
+            let cert = r.unwrap(); //#[allow_ci]
+
+            let r = match_cert_to_template(&cert);
+            assert!(r.is_ok());
+            let s = r.unwrap(); //#[allow_ci]
+            assert_eq!(s, template);
+        }
     }
 }
