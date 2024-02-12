@@ -5,6 +5,7 @@ use base64::{engine::general_purpose, Engine as _};
 use log::*;
 use openssl::{
     asn1::Asn1Time,
+    ec::{EcGroupRef, EcKey},
     encrypt::Decrypter,
     hash::MessageDigest,
     memcmp,
@@ -48,6 +49,18 @@ pub enum CryptoError {
     /// Error decrypting AES GCM encrypted data
     #[error("failed to decrypt AES GCM encrypted data")]
     DecryptAEADError(#[source] openssl::error::ErrorStack),
+
+    /// Error obtaining generating EC private key
+    #[error("failed to generate EC private key")]
+    ECGeneratePrivateKeyError(#[source] openssl::error::ErrorStack),
+
+    /// Error obtaining EC private key from structure
+    #[error("failed to get EC private key from structure")]
+    ECGetPrivateKeyError(#[source] openssl::error::ErrorStack),
+
+    /// Error creating EcKey structure from public point
+    #[error("failed to create EcKey structure from public point")]
+    ECKeyFromPublicPointError(#[source] openssl::error::ErrorStack),
 
     /// Error creating file
     #[error("failed to create file {file}")]
@@ -98,6 +111,10 @@ pub enum CryptoError {
     /// Error deriving key from password with PBKDF2
     #[error("failed to derive key from password with PBKDF2")]
     PBKDF2Error(#[source] openssl::error::ErrorStack),
+
+    /// Error creating PKey structure from EcKey structure
+    #[error("failed to create PKey structure from EcKey structure")]
+    PKeyFromEcKeyError(#[source] openssl::error::ErrorStack),
 
     /// Error creating PKey structure from RSA structure
     #[error("failed to create PKey structure from RSA structure")]
@@ -577,11 +594,31 @@ fn rsa_generate(key_size: u32) -> Result<PKey<Private>, CryptoError> {
     .map_err(CryptoError::PKeyFromRSAError)
 }
 
+/// Generate RSA key pair with the given size
+///
+/// Returns a tuple containing the PKey<Public> and PKey<Private>
 pub fn rsa_generate_pair(
     key_size: u32,
 ) -> Result<(PKey<Public>, PKey<Private>), CryptoError> {
     let private = rsa_generate(key_size)?;
     let public = pkey_pub_from_priv(private.clone())?;
+
+    Ok((public, private))
+}
+
+/// Generate a ECC key pair on given group
+///
+/// Returns a tuple containing the PKey<Public> and PKey<Private>
+pub fn ecc_generate_pair(
+    group: &EcGroupRef,
+) -> Result<(PKey<Public>, PKey<Private>), CryptoError> {
+    let private = PKey::from_ec_key(
+        EcKey::generate(group)
+            .map_err(CryptoError::ECGeneratePrivateKeyError)?,
+    )
+    .map_err(CryptoError::PKeyFromEcKeyError)?;
+    let public = pkey_pub_from_priv(private.clone())?;
+
     Ok((public, private))
 }
 
@@ -606,6 +643,17 @@ fn pkey_pub_from_priv(
             )
             .map_err(CryptoError::RSAFromComponents)?;
             PKey::from_rsa(rsa).map_err(CryptoError::PKeyFromRSAError)
+        }
+        Id::EC => {
+            let ec_key = privkey
+                .ec_key()
+                .map_err(CryptoError::ECGetPrivateKeyError)?;
+
+            let pubkey =
+                EcKey::from_public_key(ec_key.group(), ec_key.public_key())
+                    .map_err(CryptoError::ECKeyFromPublicPointError)?;
+
+            PKey::from_ec_key(pubkey).map_err(CryptoError::PKeyFromEcKeyError)
         }
         id => Err(CryptoError::UnsupportedKeyAlgorithm {
             id: format!("{id:?}"),
@@ -1426,8 +1474,16 @@ mod tests {
         let cert = r.unwrap(); //#[allow_ci]
 
         // Test getting public key from cert
-        let r = x509_get_pubkey(&cert);
-        assert!(r.is_ok());
+        let pubkey_from_cert = x509_get_pubkey(&cert)
+            .expect("Failed to get public key from certificate");
+        assert_eq!(
+            pubkey
+                .public_key_to_der()
+                .expect("Failed to convert public key to DER"),
+            pubkey_from_cert
+                .public_key_to_der()
+                .expect("Failed to convert public key to DER")
+        );
 
         // Test converting certificate to DER
         let r = x509_to_der(&cert);
@@ -1467,8 +1523,32 @@ mod tests {
     #[test]
     fn test_x509_rsa() {
         let (pubkey, privkey) = rsa_generate_pair(2048).unwrap(); //#[allow_ci]
-
         test_x509(privkey, pubkey);
+    }
+
+    #[test]
+    #[ignore]
+    fn test_x509_long_rsa() {
+        for length in [3072, 4096] {
+            let (pubkey, privkey) = rsa_generate_pair(length).unwrap(); //#[allow_ci]
+            test_x509(privkey, pubkey);
+        }
+    }
+
+    #[test]
+    fn test_x509_ecc() {
+        use openssl::ec::EcGroup;
+
+        for group in [
+            EcGroup::from_curve_name(Nid::X9_62_PRIME256V1).unwrap(), //#[allow_ci]
+            EcGroup::from_curve_name(Nid::SECP256K1).unwrap(), //#[allow_ci]
+            EcGroup::from_curve_name(Nid::SECP384R1).unwrap(), //#[allow_ci],
+            EcGroup::from_curve_name(Nid::SECP521R1).unwrap(), //#[allow_ci]
+        ] {
+            let (pubkey, privkey) = ecc_generate_pair(&group).unwrap(); //#[allow_ci]
+
+            test_x509(privkey, pubkey);
+        }
     }
 
     #[test]
