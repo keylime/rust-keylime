@@ -31,7 +31,8 @@ use tss_esapi::{
         response_code::Tss2ResponseCodeKind, session_type::SessionType,
     },
     handles::{
-        AuthHandle, KeyHandle, PcrHandle, PersistentTpmHandle, TpmHandle,
+        AuthHandle, KeyHandle, ObjectHandle, PcrHandle, PersistentTpmHandle,
+        TpmHandle,
     },
     interface_types::{
         algorithm::{AsymmetricAlgorithm, HashingAlgorithm, PublicAlgorithm},
@@ -44,7 +45,7 @@ use tss_esapi::{
     structures::{
         Attest, AttestInfo, Data, Digest, DigestValues, EccParameter,
         EccPoint, EccScheme, EncryptedSecret, HashScheme, IdObject,
-        KeyDerivationFunctionScheme, PcrSelectionList,
+        KeyDerivationFunctionScheme, Name, PcrSelectionList,
         PcrSelectionListBuilder, PcrSlot, PublicBuilder,
         PublicEccParametersBuilder, PublicKeyRsa, PublicRsaParametersBuilder,
         RsaExponent, RsaScheme, Signature, SignatureScheme,
@@ -151,6 +152,10 @@ pub enum TpmError {
     #[error("Error obtaining digest value from an authorization policy")]
     TSSDigestFromAuthPolicyError { source: tss_esapi::Error },
 
+    /// Error creating encrypted challenge with MakeCredential
+    #[error("Error creating encrypted challenge with MakeCredential")]
+    TSSMakeCredentialError { source: tss_esapi::Error },
+
     /// Error obtaining RSA public key from IDevID
     #[error("Error obtaining RSA public key from IDevID")]
     TSSPublicKeyFromIDevID { source: tss_esapi::Error },
@@ -186,6 +191,10 @@ pub enum TpmError {
     /// Error obtaining ECC parameter from IAK
     #[error("Error obtaining ECC parameter from IAK")]
     TSSECCParameterFromIAKError { source: tss_esapi::Error },
+
+    /// Error obtaining object name
+    #[error("Error obtaining object name")]
+    TSSGetNameError { source: tss_esapi::Error },
 
     /// Error returned in case of failure reading EK public information
     #[error("Error reading EK public info")]
@@ -654,7 +663,7 @@ impl Context {
     }
 
     /// Mount the template for IDevID
-    pub(crate) fn create_idevid_public_from_default_template(
+    fn create_idevid_public_from_default_template(
         asym_alg: AsymmetricAlgorithm,
         name_alg: HashingAlgorithm,
     ) -> Result<IDevIDPublic> {
@@ -1194,6 +1203,56 @@ impl Context {
 
         encode_quote_string(attestation, sig, pcrs_read, pcr_data)
     }
+
+    /// Get the name of the object
+    pub fn get_name(&mut self, handle: ObjectHandle) -> Result<Name> {
+        self.inner
+            .tr_get_name(handle)
+            .map_err(|source| TpmError::TSSGetNameError { source })
+    }
+
+    /// Make credential: encrypt a challenge which can only be decrypted using the corresponding
+    /// private EK and AK name
+    ///
+    /// This will return a blob encoded following the tpm2-tools format:
+    ///
+    /// BLOB = TSS_MAGIC (0xBADCCODE) + BLOB_VERSION +
+    ///        len(CREDENTIAL) + CREDENTIAL +
+    ///        len(SECRET) + SECRET
+    ///
+    /// All the lengths are big endian encoded
+    pub fn make_credential(
+        &mut self,
+        ek_handle: KeyHandle,
+        credential: Digest,
+        name: Name,
+    ) -> Result<Vec<u8>> {
+        let (credential, secret) = self
+            .inner
+            .make_credential(ek_handle, credential, name)
+            .map_err(|source| TpmError::TSSMakeCredentialError { source })?;
+
+        let mut blob = Vec::new();
+
+        // tpm2-tools specific header, added to keep compatibility
+        blob.extend(TSS_MAGIC.to_be_bytes());
+        // blob version number, should be 1
+        blob.extend(u32::to_be_bytes(1));
+
+        // Append big endian encoded credential length followed by the credential
+        let cred_len: u16 =
+            credential.len().try_into().map_err(TpmError::TryFromInt)?;
+        blob.extend(cred_len.to_be_bytes());
+        blob.extend(credential.as_slice());
+
+        // Append big endian encoded secret length followed by the secret
+        let secret_len: u16 =
+            secret.len().try_into().map_err(TpmError::TryFromInt)?;
+        blob.extend(secret_len.to_be_bytes());
+        blob.extend(secret.as_slice());
+
+        Ok(blob)
+    }
 }
 
 // Ensure that TPML_PCR_SELECTION and TPML_DIGEST have known sizes
@@ -1633,12 +1692,17 @@ pub fn get_idevid_template(
 pub mod testing {
     use super::*;
     use std::io::prelude::*;
-    use tss_esapi::constants::structure_tags::StructureTag;
-    use tss_esapi::structures::{Attest, AttestBuffer, DigestList, Ticket};
-    use tss_esapi::tss2_esys::{
-        Tss2_MU_TPMT_SIGNATURE_Unmarshal, TPM2B_ATTEST, TPM2B_DIGEST,
-        TPMS_PCR_SELECTION, TPMT_SIGNATURE,
+    use tss_esapi::{
+        constants::structure_tags::StructureTag,
+        structures::{Attest, AttestBuffer, DigestList, Ticket},
+        tss2_esys::{
+            Tss2_MU_TPMT_SIGNATURE_Unmarshal, TPM2B_ATTEST, TPM2B_DIGEST,
+            TPMS_PCR_SELECTION, TPMT_SIGNATURE,
+        },
     };
+
+    #[cfg(test)]
+    use std::{fs::File, io::BufReader, path::Path};
 
     macro_rules! create_unmarshal_fn {
         ($func:ident, $tpmobj:ty, $unmarshal:ident) => {
@@ -1817,7 +1881,7 @@ pub mod testing {
         Ok((pcrlist, pcrdata))
     }
 
-    pub(crate) fn decode_quote_string(
+    fn decode_quote_string(
         quote: &str,
     ) -> Result<(AttestBuffer, Signature, PcrSelectionList, PcrData)> {
         if !quote.starts_with('r') {
@@ -1929,18 +1993,252 @@ pub mod testing {
 
         Ok(())
     }
-}
 
-#[cfg(test)]
-pub mod tests {
-    use super::*;
+    #[test]
+    #[cfg(feature = "testing")]
+    fn test_create_ek() {
+        let mut ctx = Context::new().unwrap(); //#[allow_ci]
+        let algs = [EncryptionAlgorithm::Rsa, EncryptionAlgorithm::Ecc];
+        // TODO: create persistent handle and add to be tested: Some("0x81000000"),
+        let handles = [Some(""), None];
+
+        for alg in algs {
+            for handle in handles {
+                let r = ctx.create_ek(alg, handle);
+                assert!(r.is_ok());
+            }
+        }
+    }
+
+    #[test]
+    #[cfg(feature = "testing")]
+    fn test_create_and_load_ak() {
+        let mut ctx = Context::new().unwrap(); //#[allow_ci]
+
+        let r = ctx.create_ek(EncryptionAlgorithm::Rsa, None);
+        assert!(r.is_ok());
+
+        let ek_result = r.unwrap(); //#[allow_ci]
+        let ek_handle = ek_result.key_handle;
+
+        let hash_algs = [
+            HashAlgorithm::Sha256,
+            HashAlgorithm::Sha384,
+            //HashingAlgorithm::Sha512, // Not supported by swtpm
+            //HashingAlgorithm::Sm3_256, // Not supported by swtpm
+            //HashingAlgorithm::Sha3_384, // Not supported by swtpm
+            //HashingAlgorithm::Sha3_512, // Not supported by swtpm
+            //HashingAlgorithm::Sha1, // Not supported by swtpm
+        ];
+        let sign_algs = [
+            SignAlgorithm::RsaSsa,
+            SignAlgorithm::RsaPss,
+            // - ECC keys creation requires this: https://github.com/parallaxsecond/rust-tss-esapi/pull/464
+            //   Probably this will be released on tss_esapi version 8.0.0, which includes API
+            //   breakage
+            // SignAlgorithm::EcDsa,
+            // SignAlgorithm::EcSchnorr,
+        ];
+
+        for sign in sign_algs {
+            for hash in hash_algs {
+                let r = ctx.create_ak(ek_handle, hash, sign);
+                assert!(r.is_ok());
+
+                let ak = r.unwrap(); //#[allow_ci]
+
+                let r = ctx.load_ak(ek_handle, &ak);
+                assert!(r.is_ok());
+            }
+        }
+    }
+
+    #[test]
+    #[cfg(feature = "testing")]
+    fn test_create_idevid() {
+        let asym_algs = [AsymmetricAlgorithm::Rsa, AsymmetricAlgorithm::Ecc];
+        let hash_algs = [
+            HashingAlgorithm::Sha256,
+            HashingAlgorithm::Sha384,
+            //HashingAlgorithm::Sha512, // Not supported by swtpm
+            //HashingAlgorithm::Sm3_256, // Not supported by swtpm
+            //HashingAlgorithm::Sha3_384, // Not supported by swtpm
+            //HashingAlgorithm::Sha3_512, // Not supported by swtpm
+            //HashingAlgorithm::Sha1, // Not supported by swtpm
+        ];
+
+        let mut ctx = Context::new().unwrap(); //#[allow_ci]
+
+        for asym in asym_algs {
+            for hash in hash_algs {
+                let r = ctx.create_idevid(asym, hash);
+                assert!(r.is_ok());
+            }
+        }
+    }
+
+    #[test]
+    #[cfg(feature = "testing")]
+    fn test_create_iak() {
+        let mut ctx = Context::new().unwrap(); //#[allow_ci]
+
+        let asym_algs = [AsymmetricAlgorithm::Rsa, AsymmetricAlgorithm::Ecc];
+        let hash_algs = [
+            HashingAlgorithm::Sha256,
+            HashingAlgorithm::Sha384,
+            //HashingAlgorithm::Sha512, // Not supported by swtpm
+            //HashingAlgorithm::Sm3_256, // Not supported by swtpm
+            //HashingAlgorithm::Sha3_384, // Not supported by swtpm
+            //HashingAlgorithm::Sha3_512, // Not supported by swtpm
+            //HashingAlgorithm::Sha1, // Not supported by swtpm
+        ];
+
+        for asym in asym_algs {
+            for hash in hash_algs {
+                let r = ctx.create_iak(asym, hash);
+                assert!(r.is_ok())
+            }
+        }
+    }
+
+    #[test]
+    #[cfg(feature = "testing")]
+    fn test_activate_credential() {
+        let mut ctx = Context::new().unwrap(); //#[allow_ci]
+
+        // Create EK
+        let ek_result = ctx
+            .create_ek(EncryptionAlgorithm::Rsa, None)
+            .expect("failed to create EK");
+        let ek_handle = ek_result.key_handle;
+
+        // Create AK
+        let ak = ctx
+            .create_ak(
+                ek_handle,
+                HashAlgorithm::Sha256,
+                SignAlgorithm::RsaSsa,
+            )
+            .expect("failed to create AK");
+
+        // Get AK handle
+        let ak_handle =
+            ctx.load_ak(ek_handle, &ak).expect("failed to load AK");
+
+        // Get AK name
+        let name = ctx
+            .get_name(ak_handle.into())
+            .expect("failed to get AK name");
+
+        // Generate random challenge
+        let mut challenge: [u8; 32] = [0; 32];
+        let r = openssl::rand::rand_priv_bytes(&mut challenge);
+        assert!(r.is_ok());
+
+        let credential = Digest::try_from(challenge.as_ref())
+            .expect("Failed to convert random bytes to Digest structure");
+
+        // Make credential, which encrypts the challenge
+        let keyblob = ctx
+            .make_credential(ek_handle, credential.clone(), name)
+            .expect("failed to create keyblob");
+
+        // Activate credential, which decrypts the challenge
+        let decrypted = ctx
+            .activate_credential(keyblob, ak_handle, ek_handle)
+            .expect("failed to decrypt challenge");
+        assert_eq!(decrypted, credential);
+    }
+
+    #[test]
+    #[cfg(feature = "testing")]
+    fn test_certify_credential_with_iak() {
+        let mut ctx = Context::new().unwrap(); //#[allow_ci]
+
+        // Create EK
+        let ek_result = ctx
+            .create_ek(EncryptionAlgorithm::Rsa, None)
+            .expect("failed to create EK");
+        let ek_handle = ek_result.key_handle;
+
+        // Create AK
+        let ak = ctx
+            .create_ak(
+                ek_handle,
+                HashAlgorithm::Sha256,
+                SignAlgorithm::RsaSsa,
+            )
+            .expect("failed to create ak");
+
+        let ak_handle =
+            ctx.load_ak(ek_handle, &ak).expect("failed to load AK");
+
+        let iak_handle = ctx
+            .create_iak(AsymmetricAlgorithm::Rsa, HashingAlgorithm::Sha256)
+            .expect("failed to create IAK")
+            .handle;
+
+        let qualifying_data = "some_uuid".as_bytes();
+
+        let r = ctx.certify_credential_with_iak(
+            Data::try_from(qualifying_data).unwrap(), //#[allow_ci]
+            ak_handle,
+            iak_handle,
+        );
+        assert!(r.is_ok());
+    }
+
+    #[test]
+    fn test_check_mask() {
+        // Test simply reading a mask
+        let r = read_mask(0xFFFF);
+        assert!(r.is_ok());
+
+        // Test with mask containing the PCR
+        let should_be_true = check_mask(0xFFFF, &PcrSlot::Slot10)
+            .expect("failed to check mask");
+        assert!(should_be_true);
+
+        // Test a mask not containing the specific PCR
+        let should_be_false = check_mask(0xFFFD, &PcrSlot::Slot1)
+            .expect("failed to check mask");
+        assert!(!should_be_false);
+
+        // Test that trying a mask with bits not in the range from 0 to 23 fails
+        let r = check_mask(1 << 24, &PcrSlot::Slot1);
+        assert!(r.is_err());
+    }
+
+    #[test]
+    fn test_get_idevid_template() {
+        let cases = [
+            ("H-1", (AsymmetricAlgorithm::Rsa, HashingAlgorithm::Sha256)),
+            ("H-2", (AsymmetricAlgorithm::Ecc, HashingAlgorithm::Sha256)),
+            ("H-3", (AsymmetricAlgorithm::Ecc, HashingAlgorithm::Sha384)),
+            ("H-4", (AsymmetricAlgorithm::Ecc, HashingAlgorithm::Sha512)),
+            ("H-5", (AsymmetricAlgorithm::Ecc, HashingAlgorithm::Sm3_256)),
+        ];
+
+        for (input, output) in cases {
+            let algs = get_idevid_template("manual", input, "", "")
+                .expect("failed to get IDevID template");
+            assert_eq!(algs, output);
+        }
+
+        let auto = ["", "detect", "default"];
+
+        for keyword in auto {
+            let algs = get_idevid_template("H-1", keyword, "", "")
+                .expect("failed to get IDevID template");
+            assert_eq!(
+                algs,
+                (AsymmetricAlgorithm::Rsa, HashingAlgorithm::Sha256)
+            );
+        }
+    }
 
     #[test]
     fn test_quote_encode_decode() {
-        use std::fs::File;
-        use std::io::{BufRead, BufReader};
-        use std::path::Path;
-
         let quote_path = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("test-data")
             .join("test-quote.txt");
@@ -1952,8 +2250,8 @@ pub mod tests {
         let _ = f.read_line(&mut buf).expect("unable to read quote");
         let buf = buf.trim_end();
 
-        let (att, sig, pcrsel, pcrdata) = testing::decode_quote_string(buf)
-            .expect("unable to decode quote");
+        let (att, sig, pcrsel, pcrdata) =
+            decode_quote_string(buf).expect("unable to decode quote");
 
         let attestation: Attest =
             att.try_into().expect("unable to unmarshal attestation");
@@ -1963,6 +2261,11 @@ pub mod tests {
 
         assert_eq!(encoded, buf);
     }
+}
+
+#[cfg(test)]
+pub mod tests {
+    use super::*;
 
     #[test]
     fn test_pubkey_to_digest() {
