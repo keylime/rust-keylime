@@ -572,7 +572,6 @@ echo hello > test-output
 
         let result = payload_tx.send(PayloadMessage::Shutdown).await;
         assert!(result.is_ok());
-        drop(payload_tx);
 
         arbiter.join();
     }
