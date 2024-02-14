@@ -47,4 +47,5 @@ cargo tarpaulin --verbose \
       --ignore-panics --ignore-tests \
       --out Html --out Json \
       --all-features \
-      --engine llvm
+      --engine llvm \
+      -- --test-threads=1
