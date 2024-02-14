@@ -66,7 +66,7 @@ pub static DEFAULT_AGENT_DATA_PATH: &str = "agent_data.json";
 pub static DEFAULT_IMA_ML_PATH: &str =
     "/sys/kernel/security/ima/ascii_runtime_measurements";
 pub static DEFAULT_MEASUREDBOOT_ML_PATH: &str =
-    "/sys/kernel/security/tpm0/binary_boot_measurements";
+    "/sys/kernel/security/tpm0/binary_bios_measurements";
 pub static DEFAULT_CONFIG: &str = "/etc/keylime/agent.conf";
 pub static DEFAULT_CONFIG_SYS: &str = "/usr/etc/keylime/agent.conf";
 
