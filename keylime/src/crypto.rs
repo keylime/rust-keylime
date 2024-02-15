@@ -35,8 +35,11 @@ pub const AES_BLOCK_SIZE: usize = 16;
 #[derive(Error, Debug)]
 pub enum CryptoError {
     /// Error getting ASN.1 Time from days from now
-    #[error("failed to get ASN.1 Time from days from now")]
-    ASN1TimeDaysFromNowError(#[source] openssl::error::ErrorStack),
+    #[error("failed to get ASN.1 Time for {days} day(s) from now")]
+    ASN1TimeDaysFromNowError {
+        days: u32,
+        source: openssl::error::ErrorStack,
+    },
 
     /// Error decoding base64
     #[error("failed to decode base64")]
@@ -45,30 +48,6 @@ pub enum CryptoError {
     /// Error decrypting AES GCM encrypted data
     #[error("failed to decrypt AES GCM encrypted data")]
     DecryptAEADError(#[source] openssl::error::ErrorStack),
-
-    /// Error creating RSA decrypter object
-    #[error("failed to create RSA decrypter object")]
-    DecrypterNewError(#[source] openssl::error::ErrorStack),
-
-    /// Error setting RSA decrypter padding
-    #[error("failed to set RSA decrypter padding")]
-    DecrypterSetPaddingError(#[source] openssl::error::ErrorStack),
-
-    /// Error setting RSA decrypter Message Digest algorithm
-    #[error("failed to set RSA decrypter Message Digest algorithm")]
-    DecrypterSetMessageDigestError(#[source] openssl::error::ErrorStack),
-
-    /// Error setting RSA decrypter OAEP Message Digest algorithm
-    #[error("failed to set RSA decrypter OAEP Message Digest algorithm")]
-    DecrypterSetOAEPMessageDigestError(#[source] openssl::error::ErrorStack),
-
-    /// Error getting RSA decrypter output length
-    #[error("failed to get RSA decrypter output length")]
-    DecrypterGetOutputLenError(#[source] openssl::error::ErrorStack),
-
-    /// Error decrypting data with RSA OAEP
-    #[error("failed to decrypt data with RSA OAEP")]
-    DecryptRSAOAEPError(#[source] openssl::error::ErrorStack),
 
     /// Error creating file
     #[error("failed to create file {file}")]
@@ -81,13 +60,20 @@ pub enum CryptoError {
     #[error("failed to calculate hash")]
     HashError(#[source] openssl::error::ErrorStack),
 
-    /// Error checking HMAC
-    #[error("HMAC check failed")]
-    HMACError,
+    /// Error generating HMAC
+    #[error("Failed generating HMAC: {message}")]
+    HMACError {
+        message: String,
+        source: openssl::error::ErrorStack,
+    },
 
     /// Infallible
     #[error("Infallible")]
     Infallible(#[source] std::convert::Infallible),
+
+    /// Invalid HMAC
+    #[error("invalid HMAC")]
+    InvalidHMAC,
 
     /// Invalid input length
     #[error("Invalid input length {length}")]
@@ -163,37 +149,26 @@ pub enum CryptoError {
     #[error("failed to get RSA public key from structure")]
     RSAGetPublicKeyError(#[source] openssl::error::ErrorStack),
 
+    /// RSA OAEP decrypt error
+    #[error("RSA OAEP decrypt error: {message}")]
+    RSAOAEPDecryptError {
+        message: String,
+        source: openssl::error::ErrorStack,
+    },
+
     /// Error signing data
-    #[error("failed to sign data")]
-    SignError(#[source] openssl::error::ErrorStack),
+    #[error("failed to sign data: {message}")]
+    SignError {
+        message: String,
+        source: openssl::error::ErrorStack,
+    },
 
-    /// Error creating Signer object
-    #[error("failed to create Signer object")]
-    SignerNewError(#[source] openssl::error::ErrorStack),
-
-    /// Error add input data to Signer
-    #[error("failed to add input data to Signer")]
-    SignerUpdateError(#[source] openssl::error::ErrorStack),
-
-    /// Error setting SSL server context parameters
-    #[error("failed to set SSL server context parameters")]
-    SSLContextBuilderSetAcceptorParameters(
-        #[source] openssl::error::ErrorStack,
-    ),
-
-    /// Error setting SSL server certificate
-    #[error("failed to set SSL server certificate")]
-    SSLContextBuilderSetCertificate(#[source] openssl::error::ErrorStack),
-
-    /// Error setting SSL server private key
-    #[error("failed to set SSL server private key")]
-    SSLContextBuilderSetPrivateKey(#[source] openssl::error::ErrorStack),
-
-    /// Error setting SSL server trusted certificate store
-    #[error("failed to set SSL server trusted certificate store")]
-    SSLContextBuilderSetTrustedCertStore(
-        #[source] openssl::error::ErrorStack,
-    ),
+    /// Error generating TLS context
+    #[error("Failed to generate TLS context: {message}")]
+    SSLContextBuilderError {
+        message: String,
+        source: openssl::error::ErrorStack,
+    },
 
     /// Error getting String from UTF-8 Vec
     #[error("failed to create String from UTF-8 Vec")]
@@ -225,61 +200,26 @@ pub enum CryptoError {
     #[error("unsupported key algorithm: {id}")]
     UnsupportedKeyAlgorithm { id: String },
 
-    /// Error creating signature verifier
-    #[error("failed to create signature verifier")]
-    VerifierNewError(#[source] openssl::error::ErrorStack),
-
-    /// Error setting signature verifier padding algorithm
-    #[error("failed to set signature verifier padding algorithm")]
-    VerifierSetPaddingError(#[source] openssl::error::ErrorStack),
-
-    /// Error setting signature verifier Message Digest algorithm
-    #[error("failed to set signature verifier Message Digest algorithm")]
-    VerifierSetMessageDigestError(#[source] openssl::error::ErrorStack),
-
-    /// Error setting signature verifier RSA PSS salt length
-    #[error("failed to set signature verifier RSA PSS salt length")]
-    VerifierSetRSAPSSSaltLengthError(#[source] openssl::error::ErrorStack),
-
-    /// Error adding input data to signature verifier
-    #[error("failed adding input data to signature verifier")]
-    VerifierUpdateError(#[source] openssl::error::ErrorStack),
-
     /// Error verifying signature
-    #[error("failed verifying signature")]
-    VerifySignatureError(#[source] openssl::error::ErrorStack),
+    #[error("Signature verification failed: {message}")]
+    VerifyError {
+        message: String,
+        source: openssl::error::ErrorStack,
+    },
 
-    /// Error creating X509 builder
-    #[error("failed to create X509 builder")]
-    X509BuilderNewError(#[source] openssl::error::ErrorStack),
+    /// Trusted X509 certificate store builder error
+    #[error("Trusted certificate store builder error: {message}")]
+    X509StoreBuilderError {
+        message: String,
+        source: openssl::error::ErrorStack,
+    },
 
-    /// Error setting X509 certificate issuer name in builder
-    #[error("failed to set X509 certificate issuer name in builder")]
-    X509BuilderSetIssuerName(#[source] openssl::error::ErrorStack),
-
-    /// Error setting X509 certificate Not After in builder
-    #[error("failed to set X509 certificate Not After in builder")]
-    X509BuilderSetNotAfter(#[source] openssl::error::ErrorStack),
-
-    /// Error setting X509 certificate Not Before in builder
-    #[error("failed to set X509 certificate Not Before in builder")]
-    X509BuilderSetNotBefore(#[source] openssl::error::ErrorStack),
-
-    /// Error setting X509 certificate public key in builder
-    #[error("failed to set X509 certificate public key in builder")]
-    X509BuilderSetPubKey(#[source] openssl::error::ErrorStack),
-
-    /// Error setting X509 certificate subject name in builder
-    #[error("failed to set X509 subject name in builder")]
-    X509BuilderSetSubjectName(#[source] openssl::error::ErrorStack),
-
-    /// Error setting X509 certificate version in builder
-    #[error("failed to set X509 certificate version in builder")]
-    X509BuilderSetVersion(#[source] openssl::error::ErrorStack),
-
-    /// Error signing X509 certificate in builder
-    #[error("failed to signing X509 certificate in builder")]
-    X509BuilderSign(#[source] openssl::error::ErrorStack),
+    /// X509 certificate builder error
+    #[error("X509 certificate builder error: {message}")]
+    X509BuilderError {
+        message: String,
+        source: openssl::error::ErrorStack,
+    },
 
     /// Error loading X509 certificate chain from PEM file
     #[error("failed to load X509 certificate chain from PEM file")]
@@ -297,21 +237,12 @@ pub enum CryptoError {
     #[error("failed to get certificate public key")]
     X509GetPublicError(#[source] openssl::error::ErrorStack),
 
-    /// Error creating X509 Name object
-    #[error("failed to create X509 Name object")]
-    X509NameNewError(#[source] openssl::error::ErrorStack),
-
-    /// Error appending entry by NID to X509 Name object
-    #[error("failed to append entry by NID to X509 Name object")]
-    X509NameAppendError(#[source] openssl::error::ErrorStack),
-
-    /// Error adding X509 certificates to the store builder
-    #[error("failed to add X509 certificates to the store builder")]
-    X509StoreBuilderAddCertError(#[source] openssl::error::ErrorStack),
-
-    /// Error creating X509 certificate store builder
-    #[error("failed to create X509 certificate store builder")]
-    X509StoreBuilderNewError(#[source] openssl::error::ErrorStack),
+    /// Error creating X509 Name
+    #[error("Error creating X509 Name: {message}")]
+    X509NameError {
+        message: String,
+        source: openssl::error::ErrorStack,
+    },
 
     /// Error encoding X509 certificate in DER format
     #[error("failed to encode X509 certificate in DER format")]
@@ -696,39 +627,72 @@ pub fn generate_x509(
     uuid: &str,
 ) -> Result<X509, CryptoError> {
     let mut name =
-        X509Name::builder().map_err(CryptoError::X509NameNewError)?;
+        X509Name::builder().map_err(|source| CryptoError::X509NameError {
+            message: "failed to create X509 Name object".into(),
+            source,
+        })?;
     name.append_entry_by_nid(Nid::COMMONNAME, uuid)
-        .map_err(CryptoError::X509NameAppendError)?;
+        .map_err(|source| CryptoError::X509NameError {
+            message: "failed to append entry by NID to X509 Name".into(),
+            source,
+        })?;
     let name = name.build();
 
-    let valid_from = Asn1Time::days_from_now(0)
-        .map_err(CryptoError::ASN1TimeDaysFromNowError)?;
-    let valid_to = Asn1Time::days_from_now(356)
-        .map_err(CryptoError::ASN1TimeDaysFromNowError)?;
+    let valid_from = Asn1Time::days_from_now(0).map_err(|source| {
+        CryptoError::ASN1TimeDaysFromNowError { days: 0, source }
+    })?;
+    let valid_to = Asn1Time::days_from_now(365).map_err(|source| {
+        CryptoError::ASN1TimeDaysFromNowError { days: 365, source }
+    })?;
 
     let mut builder =
-        X509::builder().map_err(CryptoError::X509BuilderNewError)?;
-    builder
-        .set_version(2)
-        .map_err(CryptoError::X509BuilderSetVersion)?;
-    builder
-        .set_subject_name(&name)
-        .map_err(CryptoError::X509BuilderSetSubjectName)?;
-    builder
-        .set_issuer_name(&name)
-        .map_err(CryptoError::X509BuilderSetIssuerName)?;
-    builder
-        .set_not_before(&valid_from)
-        .map_err(CryptoError::X509BuilderSetNotBefore)?;
-    builder
-        .set_not_after(&valid_to)
-        .map_err(CryptoError::X509BuilderSetNotAfter)?;
-    builder
-        .set_pubkey(key)
-        .map_err(CryptoError::X509BuilderSetPubKey)?;
+        X509::builder().map_err(|source| CryptoError::X509BuilderError {
+            message: "failed to create X509 certificate builder object"
+                .into(),
+            source,
+        })?;
+    builder.set_version(2).map_err(|source| {
+        CryptoError::X509BuilderError {
+            message: "failed to set X509 certificate version".into(),
+            source,
+        }
+    })?;
+    builder.set_subject_name(&name).map_err(|source| {
+        CryptoError::X509BuilderError {
+            message: "failed to set X509 certificate subject name".into(),
+            source,
+        }
+    })?;
+    builder.set_issuer_name(&name).map_err(|source| {
+        CryptoError::X509BuilderError {
+            message: "failed to set X509 issuer name".into(),
+            source,
+        }
+    })?;
+    builder.set_not_before(&valid_from).map_err(|source| {
+        CryptoError::X509BuilderError {
+            message: "failed to set X509 certificate Not Before date".into(),
+            source,
+        }
+    })?;
+    builder.set_not_after(&valid_to).map_err(|source| {
+        CryptoError::X509BuilderError {
+            message: "failed to set X509 certificate Nof After date".into(),
+            source,
+        }
+    })?;
+    builder.set_pubkey(key).map_err(|source| {
+        CryptoError::X509BuilderError {
+            message: "failed to set X509 certificate public key".into(),
+            source,
+        }
+    })?;
     builder
         .sign(key, MessageDigest::sha256())
-        .map_err(CryptoError::X509BuilderSign)?;
+        .map_err(|source| CryptoError::X509BuilderError {
+            message: "failed to sign X509 certificate".into(),
+            source,
+        })?;
 
     Ok(builder.build())
 }
@@ -738,29 +702,53 @@ pub fn generate_tls_context(
     key: &PKey<Private>,
     ca_certs: Vec<X509>,
 ) -> Result<SslAcceptorBuilder, CryptoError> {
-    let mut ssl_context_builder =
-        SslAcceptor::mozilla_intermediate(SslMethod::tls())
-            .map_err(CryptoError::SSLContextBuilderSetAcceptorParameters)?;
+    let mut ssl_context_builder = SslAcceptor::mozilla_intermediate(
+        SslMethod::tls(),
+    )
+    .map_err(|source| CryptoError::SSLContextBuilderError {
+        message: "failed to create Context Builder object".into(),
+        source,
+    })?;
     ssl_context_builder
         .set_certificate(tls_cert)
-        .map_err(CryptoError::SSLContextBuilderSetCertificate)?;
-    ssl_context_builder
-        .set_private_key(key)
-        .map_err(CryptoError::SSLContextBuilderSetPrivateKey)?;
+        .map_err(|source| CryptoError::SSLContextBuilderError {
+            message: "failed to set SSL server certificate".into(),
+            source,
+        })?;
+    ssl_context_builder.set_private_key(key).map_err(|source| {
+        CryptoError::SSLContextBuilderError {
+            message: "failed to set SSL server private key".into(),
+            source,
+        }
+    })?;
 
     // Build verification cert store.
-    let mut mtls_store_builder = X509StoreBuilder::new()
-        .map_err(CryptoError::X509StoreBuilderNewError)?;
+    let mut mtls_store_builder =
+        X509StoreBuilder::new().map_err(|source| {
+            CryptoError::X509StoreBuilderError {
+                message:
+                    "failed to create X509 certificate store builder object"
+                        .into(),
+                source,
+            }
+        })?;
     for cert in ca_certs {
         mtls_store_builder
             .add_cert(cert)
-            .map_err(CryptoError::X509StoreBuilderAddCertError)?;
+            .map_err(|source| CryptoError::X509StoreBuilderError{
+                message: "failed to add certificate to X509 trusted certificate store".into(),
+                    source,
+            })?;
     }
 
     let mtls_store = mtls_store_builder.build();
     ssl_context_builder
         .set_verify_cert_store(mtls_store)
-        .map_err(CryptoError::SSLContextBuilderSetTrustedCertStore)?;
+        .map_err(|source| CryptoError::SSLContextBuilderError {
+            message: "failed to set SSL server trusted certificate store"
+                .into(),
+            source,
+        })?;
 
     // Enable mutual TLS verification
     let mut verify_mode = SslVerifyMode::empty();
@@ -819,26 +807,48 @@ pub fn asym_verify(
     signature: &str,
 ) -> Result<bool, CryptoError> {
     let mut verifier = Verifier::new(MessageDigest::sha256(), keypair)
-        .map_err(CryptoError::VerifierNewError)?;
+        .map_err(|source| CryptoError::VerifyError {
+            message: "failed to create signature verifier object".into(),
+            source,
+        })?;
     verifier
         .set_rsa_padding(Padding::PKCS1_PSS)
-        .map_err(CryptoError::VerifierSetPaddingError)?;
+        .map_err(|source| CryptoError::VerifyError {
+            message: "failed to set signature verifier padding algorithm"
+                .into(),
+            source,
+        })?;
     verifier
         .set_rsa_mgf1_md(MessageDigest::sha256())
-        .map_err(CryptoError::VerifierSetMessageDigestError)?;
+        .map_err(|source| CryptoError::VerifyError {
+            message:
+                "failed to set signature verifier Message Digest algorithm"
+                    .into(),
+            source,
+        })?;
     verifier
         .set_rsa_pss_saltlen(openssl::sign::RsaPssSaltlen::MAXIMUM_LENGTH)
-        .map_err(CryptoError::VerifierSetRSAPSSSaltLengthError)?;
-    verifier
-        .update(message.as_bytes())
-        .map_err(CryptoError::VerifierUpdateError)?;
+        .map_err(|source| CryptoError::VerifyError {
+            message: "failed to set signature verifier RSA PSS salt length"
+                .into(),
+            source,
+        })?;
+    verifier.update(message.as_bytes()).map_err(|source| {
+        CryptoError::VerifyError {
+            message: "failed adding input data to signature verifier".into(),
+            source,
+        }
+    })?;
     verifier
         .verify(
             &general_purpose::STANDARD
                 .decode(signature.as_bytes())
                 .map_err(CryptoError::Base64DecodeError)?,
         )
-        .map_err(CryptoError::VerifySignatureError)
+        .map_err(|source| CryptoError::VerifyError {
+            message: "invalid signature".into(),
+            source,
+        })
 }
 
 /*
@@ -853,29 +863,52 @@ pub fn rsa_oaep_decrypt(
     priv_key: &PKey<Private>,
     data: &[u8],
 ) -> Result<Vec<u8>, CryptoError> {
-    let mut decrypter =
-        Decrypter::new(priv_key).map_err(CryptoError::DecrypterNewError)?;
+    let mut decrypter = Decrypter::new(priv_key).map_err(|source| {
+        CryptoError::RSAOAEPDecryptError {
+            message: "failed to create RSA decrypter object".into(),
+            source,
+        }
+    })?;
 
     decrypter
         .set_rsa_padding(Padding::PKCS1_OAEP)
-        .map_err(CryptoError::DecrypterSetPaddingError)?;
+        .map_err(|source| CryptoError::RSAOAEPDecryptError {
+            message: "failed to set RSA decrypter padding".into(),
+            source,
+        })?;
     decrypter
         .set_rsa_mgf1_md(MessageDigest::sha1())
-        .map_err(CryptoError::DecrypterSetMessageDigestError)?;
+        .map_err(|source| CryptoError::RSAOAEPDecryptError {
+            message: "failed to set RSA decrypter Message Digest algorithm"
+                .into(),
+            source,
+        })?;
     decrypter
         .set_rsa_oaep_md(MessageDigest::sha1())
-        .map_err(CryptoError::DecrypterSetOAEPMessageDigestError)?;
+        .map_err(|source| CryptoError::RSAOAEPDecryptError {
+            message:
+                "failed to set RSA decrypter OAEP Message Digest algorithm"
+                    .into(),
+            source,
+        })?;
 
     // Create an output buffer
-    let buffer_len = decrypter
-        .decrypt_len(data)
-        .map_err(CryptoError::DecrypterGetOutputLenError)?;
+    let buffer_len = decrypter.decrypt_len(data).map_err(|source| {
+        CryptoError::RSAOAEPDecryptError {
+            message: "failed to get RSA decrypter output length".into(),
+            source,
+        }
+    })?;
     let mut decrypted = vec![0; buffer_len];
 
     // Decrypt and truncate the buffer
-    let decrypted_len = decrypter
-        .decrypt(data, &mut decrypted)
-        .map_err(CryptoError::DecryptRSAOAEPError)?;
+    let decrypted_len =
+        decrypter.decrypt(data, &mut decrypted).map_err(|source| {
+            CryptoError::RSAOAEPDecryptError {
+                message: "failed to decrypt data with RSA OAEP".into(),
+                source,
+            }
+        })?;
     decrypted.truncate(decrypted_len);
 
     Ok(decrypted)
@@ -895,12 +928,25 @@ pub fn compute_hmac(key: &[u8], data: &[u8]) -> Result<Vec<u8>, CryptoError> {
     // Reference:
     // https://keylime-docs.readthedocs.io/en/latest/rest_apis.html#post--v1.0-keys-ukey
     // https://github.com/keylime/keylime/blob/910b38b296038b187a020c095dc747e9c46cbef3/keylime/crypto.py#L151
-    let mut signer = Signer::new(MessageDigest::sha384(), &pkey)
-        .map_err(CryptoError::SignerNewError)?;
+    let mut signer =
+        Signer::new(MessageDigest::sha384(), &pkey).map_err(|source| {
+            CryptoError::SignError {
+                message: "failed creating Signer object".into(),
+                source,
+            }
+        })?;
     signer
         .update(data)
-        .map_err(CryptoError::SignerUpdateError)?;
-    signer.sign_to_vec().map_err(CryptoError::SignError)
+        .map_err(|source| CryptoError::SignError {
+            message: "failed to add input data to Signer".into(),
+            source,
+        })?;
+    signer
+        .sign_to_vec()
+        .map_err(|source| CryptoError::SignError {
+            message: "failed to generate signature".into(),
+            source,
+        })
 }
 
 pub fn verify_hmac(
@@ -914,17 +960,30 @@ pub fn verify_hmac(
     // Reference:
     // https://keylime-docs.readthedocs.io/en/latest/rest_apis.html#post--v1.0-keys-ukey
     // https://github.com/keylime/keylime/blob/910b38b296038b187a020c095dc747e9c46cbef3/keylime/crypto.py#L151
-    let mut signer = Signer::new(MessageDigest::sha384(), &pkey)
-        .map_err(CryptoError::SignerNewError)?;
+    let mut signer =
+        Signer::new(MessageDigest::sha384(), &pkey).map_err(|source| {
+            CryptoError::HMACError {
+                message: "failed to create Signer object".into(),
+                source,
+            }
+        })?;
     signer
         .update(data)
-        .map_err(CryptoError::SignerUpdateError)?;
+        .map_err(|source| CryptoError::HMACError {
+            message: "failed to add input data to Signer".into(),
+            source,
+        })?;
 
     if !memcmp::eq(
-        &signer.sign_to_vec().map_err(CryptoError::SignError)?,
+        &signer
+            .sign_to_vec()
+            .map_err(|source| CryptoError::HMACError {
+                message: "failed to generate HMAC".into(),
+                source,
+            })?,
         hmac,
     ) {
-        return Err(CryptoError::HMACError);
+        return Err(CryptoError::InvalidHMAC);
     }
 
     Ok(())
