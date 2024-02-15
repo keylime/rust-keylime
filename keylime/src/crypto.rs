@@ -17,7 +17,7 @@ use openssl::{
     ssl::{SslAcceptor, SslAcceptorBuilder, SslMethod, SslVerifyMode},
     symm::Cipher,
     x509::store::X509StoreBuilder,
-    x509::{X509Name, X509},
+    x509::{extension, X509Name, X509},
 };
 use picky_asn1_x509::SubjectPublicKeyInfo;
 use std::{
@@ -32,6 +32,9 @@ use thiserror::Error;
 pub const AES_128_KEY_LEN: usize = 16;
 pub const AES_256_KEY_LEN: usize = 32;
 pub const AES_BLOCK_SIZE: usize = 16;
+
+static LOCAL_IPS: &[&str] = &["127.0.0.1", "::1"];
+static LOCAL_DNS_NAMES: &[&str] = &["localhost", "localhost.domain"];
 
 #[derive(Error, Debug)]
 pub enum CryptoError {
@@ -673,6 +676,7 @@ pub fn pkey_pub_to_pem(pubkey: &PKey<Public>) -> Result<String, CryptoError> {
 pub fn generate_x509(
     key: &PKey<Private>,
     uuid: &str,
+    additional_ips: Option<Vec<String>>,
 ) -> Result<X509, CryptoError> {
     let mut name =
         X509Name::builder().map_err(|source| CryptoError::X509NameError {
@@ -725,13 +729,44 @@ pub fn generate_x509(
     })?;
     builder.set_not_after(&valid_to).map_err(|source| {
         CryptoError::X509BuilderError {
-            message: "failed to set X509 certificate Nof After date".into(),
+            message: "failed to set X509 certificate Not After date".into(),
             source,
         }
     })?;
     builder.set_pubkey(key).map_err(|source| {
         CryptoError::X509BuilderError {
             message: "failed to set X509 certificate public key".into(),
+            source,
+        }
+    })?;
+    let mut san = &mut extension::SubjectAlternativeName::new();
+    for local_domain_name in LOCAL_DNS_NAMES.iter() {
+        san = san.dns(local_domain_name);
+    }
+    for local_ip in LOCAL_IPS.iter() {
+        san = san.ip(local_ip);
+    }
+    match additional_ips {
+        None => {}
+        Some(ips) => {
+            for ip in ips.iter() {
+                if !LOCAL_IPS.iter().any(|e| ip.contains(e)) {
+                    san = san.ip(ip);
+                }
+            }
+        }
+    }
+    let x509 =
+        san.build(&builder.x509v3_context(None, None))
+            .map_err(|source| CryptoError::X509BuilderError {
+                message: "failed to build Subject Alternative Name".into(),
+                source,
+            })?;
+    builder.append_extension(x509).map_err(|source| {
+        CryptoError::X509BuilderError {
+            message:
+                "failed to append X509 certificate Subject Alternative Name extension"
+                    .into(),
             source,
         }
     })?;
@@ -1439,7 +1474,7 @@ mod tests {
     fn test_x509(privkey: PKey<Private>, pubkey: PKey<Public>) {
         let tempdir = tempfile::tempdir().unwrap(); //#[allow_ci]
 
-        let r = generate_x509(&privkey, "uuidA");
+        let r = generate_x509(&privkey, "uuidA", None);
         assert!(r.is_ok());
         let cert_a = r.unwrap(); //#[allow_ci]
         let cert_a_path = tempdir.path().join("cert_a.pem");
@@ -1447,7 +1482,11 @@ mod tests {
         assert!(r.is_ok());
         assert!(cert_a_path.exists());
 
-        let r = generate_x509(&privkey, "uuidB");
+        let r = generate_x509(
+            &privkey,
+            "uuidB",
+            Some(vec!["1.2.3.4".to_string(), "1.2.3.5".to_string()]),
+        );
         assert!(r.is_ok());
         let cert_b = r.unwrap(); //#[allow_ci]
         let cert_b_path = tempdir.path().join("cert_b.pem");

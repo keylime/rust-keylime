@@ -586,10 +586,16 @@ async fn main() -> Result<()> {
     let mtls_cert;
     let ssl_context;
     if config.agent.enable_agent_mtls {
+        let contact_ips = vec![config.agent.contact_ip.clone()];
         cert = match config.agent.server_cert.as_ref() {
             "" => {
                 debug!("The server_cert option was not set in the configuration file");
-                crypto::generate_x509(&nk_priv, &agent_uuid)?
+
+                crypto::generate_x509(
+                    &nk_priv,
+                    &agent_uuid,
+                    Some(contact_ips),
+                )?
             }
             path => {
                 let cert_path = Path::new(&path);
@@ -601,7 +607,11 @@ async fn main() -> Result<()> {
                     crypto::load_x509_pem(cert_path)?
                 } else {
                     debug!("Generating new mTLS certificate");
-                    let cert = crypto::generate_x509(&nk_priv, &agent_uuid)?;
+                    let cert = crypto::generate_x509(
+                        &nk_priv,
+                        &agent_uuid,
+                        Some(contact_ips),
+                    )?;
                     // Write the generated certificate
                     crypto::write_x509(&cert, cert_path)?;
                     cert
