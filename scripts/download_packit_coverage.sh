@@ -32,7 +32,7 @@ SLEEP_DELAY="${SLEEP_DELAY:-120}"
 # github user/project we are going to work with
 PROJECT="keylime/rust-keylime"
 
-# TF_JOB_DESC points to a Testing farm job that does code coverage measurement and 
+# TF_JOB_DESC points to a Testing farm job that does code coverage measurement and
 # uploads coverage XML files to a web drive
 # currently we are doing that in a job running tests on Fedora-39
 TF_JOB_DESC="testing-farm:fedora-39-x86_64"
@@ -89,11 +89,11 @@ function do_GitHub_API_call() {
 }
 
 
-# if the GitHub Action has been triggered by a PR, 
+# if the GitHub Action has been triggered by a PR,
 # we need to find Testing farm test results through GitHub API
 if [ -n "${GITHUB_SHA}" -a -z "${TF_ARTIFACTS_URL}" -a -z "${TT_LOG}" ]; then
 
-    echo "Trying to find Testing Farm / Packig CI test results using GitHub API"
+    echo "Trying to find Testing Farm / Packit CI test results using GitHub API"
 
     echo "Fist I need to find the respective PR commit"
     GITHUB_API_SHA_URL="${GITHUB_API_COMMIT_URL}/${GITHUB_SHA}"
@@ -140,9 +140,9 @@ echo "TF_TESTLOG=${TF_TESTLOG}"
 # parse the URL of coverage txt file and download it
 curl --retry 5 -s "${TF_TESTLOG}" &> ${TMPFILE}
 echo "TMPFILE=${TMPFILE}"
-# probabbly rewrite, different hardcoded files, need to figureout how to export
+# probably rewrite, different hardcoded files, need to figure out how to export
 
-#download test coverage 
+# download test coverage
 COVERAGE_URL=$( grep "e2e_coverage.txt report is available at" ${TMPFILE} | grep -E -o "https://.*\.txt" )
 echo "COVERAGE_URL=${COVERAGE_URL}"
 if [ -z "${COVERAGE_URL}" ]; then
@@ -151,7 +151,7 @@ if [ -z "${COVERAGE_URL}" ]; then
 fi
 # download the file
 curl --retry 5 -L -O ${COVERAGE_URL}
-#download upstream test coverage 
+# download upstream test coverage
 COVERAGE_URL=$( grep "upstream_coverage.xml report is available at" ${TMPFILE} | grep -E -o "https://.*\.xml" )
 echo "COVERAGE_URL=${COVERAGE_URL}"
 if [ -z "${COVERAGE_URL}" ]; then
