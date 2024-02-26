@@ -24,3 +24,8 @@ picky-asn1-x509.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
+
+[features]
+# This feature enables tests that require a TPM and the TCTI environment
+# variable properly configured
+testing = []
