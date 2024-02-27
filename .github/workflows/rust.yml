@@ -28,7 +28,7 @@ jobs:
     - uses: actions/checkout@v4
     - name: Run tests
       run: docker run --security-opt seccomp=tests/seccomp-profile.json -v $(pwd):/tmp/code_under_test -w /tmp/code_under_test quay.io/keylime/keylime-ci:latest dbus-run-session -- /tmp/code_under_test/tests/run.sh
-    - uses: actions/upload-artifact@v3
+    - uses: actions/upload-artifact@v4
       with:
         name: tarpaulin-report
         path: |

@@ -20,12 +20,12 @@ jobs:
     - name: List downloaded files.
       run: ls
     - name: Upload e2e_coverage.txt report to Codecov with GitHub Action.
-      uses: codecov/codecov-action@v2
+      uses: codecov/codecov-action@v4
       with:
         files: scripts/e2e_coverage.txt
         flags: e2e-testsuite
     - name: Upload upstream_coverage.xml report to Codecov with GitHub Action.
-      uses: codecov/codecov-action@v2
+      uses: codecov/codecov-action@v4
       with:
         files: scripts/upstream_coverage.xml
         flags: upstream-unit-tests
