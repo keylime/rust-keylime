@@ -20,7 +20,7 @@ pub(crate) async fn app_default(req: HttpRequest) -> impl Responder {
         http::Method::GET => {
             error = 400;
             message = format!(
-                "Not Implemented: Use /version or /{API_VERSION}/ interfaces"
+                "Not Implemented: Use /version or /{API_VERSION} interfaces"
             );
             response = HttpResponse::BadRequest()
                 .json(JsonWrapper::error(error, &message));
@@ -28,7 +28,7 @@ pub(crate) async fn app_default(req: HttpRequest) -> impl Responder {
         http::Method::POST => {
             error = 400;
             message =
-                format!("Not Implemented: Use /{API_VERSION}/ interface");
+                format!("Not Implemented: Use /{API_VERSION} interface");
             response = HttpResponse::BadRequest()
                 .json(JsonWrapper::error(error, &message));
         }
@@ -62,14 +62,15 @@ pub(crate) async fn api_default(req: HttpRequest) -> impl Responder {
     match req.head().method {
         http::Method::GET => {
             error = 400;
-            message = "Not Implemented: Use /keys/ or /quotes/ interfaces";
+            message =
+                "Not Implemented: Use /agent, /keys, or /quotes interfaces";
             response = HttpResponse::BadRequest()
                 .json(JsonWrapper::error(error, message));
         }
         http::Method::POST => {
             error = 400;
             message =
-                "Not Implemented: Use /keys/ or /notifications/ interfaces";
+                "Not Implemented: Use /keys or /notifications interfaces";
             response = HttpResponse::BadRequest()
                 .json(JsonWrapper::error(error, message));
         }
@@ -103,19 +104,19 @@ pub(crate) async fn keys_default(req: HttpRequest) -> impl Responder {
     match req.head().method {
         http::Method::GET => {
             error = 400;
-            message = "URI not supported, only /pubkey and /verify are supported for GET in /keys/ interface";
+            message = "URI not supported, only /pubkey and /verify are supported for GET in /keys interface";
             response = HttpResponse::BadRequest()
                 .json(JsonWrapper::error(error, message));
         }
         http::Method::POST => {
             error = 400;
-            message = "URI not supported, only /ukey and /vkey are supported for POST in /keys/ interface";
+            message = "URI not supported, only /ukey and /vkey are supported for POST in /keys interface";
             response = HttpResponse::BadRequest()
                 .json(JsonWrapper::error(error, message));
         }
         _ => {
             error = 405;
-            message = "Method is not supported in /keys/ interface";
+            message = "Method is not supported in /keys interface";
             response = HttpResponse::MethodNotAllowed()
                 .insert_header(http::header::Allow(vec![
                     http::Method::GET,
@@ -150,6 +151,37 @@ pub(crate) async fn quotes_default(req: HttpRequest) -> impl Responder {
         _ => {
             error = 405;
             message = "Method is not supported in /quotes/ interface";
+            response = HttpResponse::MethodNotAllowed()
+                .insert_header(http::header::Allow(vec![http::Method::GET]))
+                .json(JsonWrapper::error(error, message));
+        }
+    };
+
+    warn!(
+        "{} returning {} response. {}",
+        req.head().method,
+        error,
+        message
+    );
+
+    response
+}
+
+pub(crate) async fn agent_default(req: HttpRequest) -> impl Responder {
+    let error;
+    let response;
+    let message;
+
+    match req.head().method {
+        http::Method::GET => {
+            error = 400;
+            message = "URI not supported, only /info is supported for GET in /agent interface";
+            response = HttpResponse::BadRequest()
+                .json(JsonWrapper::error(error, message));
+        }
+        _ => {
+            error = 405;
+            message = "Method is not supported in /agent interface";
             response = HttpResponse::MethodNotAllowed()
                 .insert_header(http::header::Allow(vec![http::Method::GET]))
                 .json(JsonWrapper::error(error, message));
@@ -343,6 +375,11 @@ mod tests {
             .await
     }
 
+    #[actix_rt::test]
+    async fn test_agent_default() {
+        test_default(web::resource("/").to(agent_default), "GET").await
+    }
+
     #[derive(Serialize, Deserialize)]
     struct DummyQuery {
         param: String,
@@ -395,10 +432,10 @@ mod tests {
                         .error_handler(path_parser_error),
                 )
                 .service(
-                    web::resource("/v2.1/ok").route(web::get().to(dummy)),
+                    web::resource("/v2.2/ok").route(web::get().to(dummy)),
                 )
                 .service(
-                    web::resource("/v2.1/ok/{number}/{string}")
+                    web::resource("/v2.2/ok/{number}/{string}")
                         .route(web::get().to(dummy_with_path)),
                 )
                 .service(
@@ -410,7 +447,7 @@ mod tests {
 
         // Sanity well formed request
         let req = test::TestRequest::get()
-            .uri("/v2.1/ok?param=Test")
+            .uri("/v2.2/ok?param=Test")
             .set_json(&DummyPayload { field: 42 })
             .to_request();
 
@@ -432,7 +469,7 @@ mod tests {
 
         // Test JSON parsing error
         let req = test::TestRequest::get()
-            .uri("/v2.1/ok?param=Test")
+            .uri("/v2.2/ok?param=Test")
             .insert_header(http::header::ContentType::json())
             .set_payload("Not JSON")
             .to_request();
@@ -445,7 +482,7 @@ mod tests {
 
         // Test Query parsing error
         let req = test::TestRequest::get()
-            .uri("/v2.1/ok?test=query")
+            .uri("/v2.2/ok?test=query")
             .set_json(&DummyPayload { field: 42 })
             .to_request();
         let resp = test::call_service(&app, req).await;
@@ -457,7 +494,7 @@ mod tests {
 
         // Test Path parsing error
         let req = test::TestRequest::get()
-            .uri("/v2.1/ok/something/42?test=query")
+            .uri("/v2.2/ok/something/42?test=query")
             .set_json(&DummyPayload { field: 42 })
             .to_request();
         let resp = test::call_service(&app, req).await;
