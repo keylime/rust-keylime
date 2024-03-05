@@ -31,6 +31,7 @@
 //  missing_docs: there is many functions missing documentations for now
 #![allow(unused, missing_docs)]
 
+mod agent_handler;
 mod common;
 mod config;
 mod error;
@@ -861,6 +862,15 @@ async fn main() -> Result<()> {
                 )
                 .service(
                     web::scope(&format!("/{API_VERSION}"))
+                        .service(
+                            web::scope("/agent")
+                                .service(web::resource("/info").route(
+                                    web::get().to(agent_handler::info),
+                                ))
+                                .default_service(web::to(
+                                    errors_handler::agent_default,
+                                )),
+                        )
                         .service(
                             web::scope("/keys")
                                 .service(web::resource("/pubkey").route(
