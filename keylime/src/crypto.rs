@@ -655,7 +655,7 @@ pub fn generate_tls_context(
     key: &PKey<Private>,
     ca_certs: Vec<X509>,
 ) -> Result<SslAcceptorBuilder, CryptoError> {
-    let mut ssl_context_builder = SslAcceptor::mozilla_intermediate(
+    let mut ssl_context_builder = SslAcceptor::mozilla_intermediate_v5(
         SslMethod::tls(),
     )
     .map_err(|source| CryptoError::SSLContextBuilderError {
