@@ -142,22 +142,15 @@ curl --retry 5 -s "${TF_TESTLOG}" &> ${TMPFILE}
 echo "TMPFILE=${TMPFILE}"
 # probably rewrite, different hardcoded files, need to figure out how to export
 
-# download test coverage
-COVERAGE_URL=$( grep "e2e_coverage.txt report is available at" ${TMPFILE} | grep -E -o "https://.*\.txt" )
-echo "COVERAGE_URL=${COVERAGE_URL}"
-if [ -z "${COVERAGE_URL}" ]; then
-    echo "Could not parse e2e_coverage.txt URL at from test log ${TF_TESTLOG}"
-    exit 5
-fi
-# download the file
-curl --retry 5 -L -O ${COVERAGE_URL}
-# download upstream test coverage
-COVERAGE_URL=$( grep "upstream_coverage.xml report is available at" ${TMPFILE} | grep -E -o "https://.*\.xml" )
-echo "COVERAGE_URL=${COVERAGE_URL}"
-if [ -z "${COVERAGE_URL}" ]; then
-    echo "Could not parse upstream_coverage.xml from test log ${TF_TESTLOG}"
-    exit 5
-fi
-# download the file
-curl --retry 5 -L -O ${COVERAGE_URL}
+for REPORT in e2e_coverage.txt upstream_coverage.xml; do
+  # download test coverage
+  COVERAGE_URL=$( grep "$REPORT report is available at" ${TMPFILE} | grep -E -o "https://[^[:space:]]*" )
+  echo "COVERAGE_URL=${COVERAGE_URL}"
+  if [ -z "${COVERAGE_URL}" ]; then
+      echo "Could not parse $REPORT URL at from test log ${TF_TESTLOG}"
+      exit 5
+  fi
+  # download the file
+  curl --retry 5 -L -o "${REPORT}" "${COVERAGE_URL}"
+done
 rm ${TMPFILE}
