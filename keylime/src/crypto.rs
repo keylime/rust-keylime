@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2021 Keylime Authors
 
+pub mod x509;
+
 use base64::{engine::general_purpose, Engine as _};
 use log::*;
 use openssl::{
-    asn1::Asn1Time,
     ec::{EcGroupRef, EcKey},
     encrypt::Decrypter,
     hash::MessageDigest,
@@ -17,7 +18,7 @@ use openssl::{
     ssl::{SslAcceptor, SslAcceptorBuilder, SslMethod, SslVerifyMode},
     symm::Cipher,
     x509::store::X509StoreBuilder,
-    x509::{extension, X509Name, X509},
+    x509::X509,
 };
 use picky_asn1_x509::SubjectPublicKeyInfo;
 use std::{
@@ -33,18 +34,8 @@ pub const AES_128_KEY_LEN: usize = 16;
 pub const AES_256_KEY_LEN: usize = 32;
 pub const AES_BLOCK_SIZE: usize = 16;
 
-static LOCAL_IPS: &[&str] = &["127.0.0.1", "::1"];
-static LOCAL_DNS_NAMES: &[&str] = &["localhost", "localhost.domain"];
-
 #[derive(Error, Debug)]
 pub enum CryptoError {
-    /// Error getting ASN.1 Time from days from now
-    #[error("failed to get ASN.1 Time for {days} day(s) from now")]
-    ASN1TimeDaysFromNowError {
-        days: u32,
-        source: openssl::error::ErrorStack,
-    },
-
     /// Error decoding base64
     #[error("failed to decode base64")]
     Base64DecodeError(#[from] base64::DecodeError),
@@ -234,13 +225,6 @@ pub enum CryptoError {
         source: openssl::error::ErrorStack,
     },
 
-    /// X509 certificate builder error
-    #[error("X509 certificate builder error: {message}")]
-    X509BuilderError {
-        message: String,
-        source: openssl::error::ErrorStack,
-    },
-
     /// Error loading X509 certificate chain from PEM file
     #[error("failed to load X509 certificate chain from PEM file")]
     X509ChainFromPEMError(#[source] openssl::error::ErrorStack),
@@ -256,13 +240,6 @@ pub enum CryptoError {
     /// Error obtaining certificate public key
     #[error("failed to get certificate public key")]
     X509GetPublicError(#[source] openssl::error::ErrorStack),
-
-    /// Error creating X509 Name
-    #[error("Error creating X509 Name: {message}")]
-    X509NameError {
-        message: String,
-        source: openssl::error::ErrorStack,
-    },
 
     /// Error encoding X509 certificate in DER format
     #[error("failed to encode X509 certificate in DER format")]
@@ -536,7 +513,7 @@ pub fn load_key_pair(
         None => PKey::private_key_from_pem(&pem)
             .map_err(CryptoError::PrivateKeyFromPEMError)?,
     };
-    let public = pkey_pub_from_priv(private.clone())?;
+    let public = pkey_pub_from_priv(&private)?;
     Ok((public, private))
 }
 
@@ -604,7 +581,7 @@ pub fn rsa_generate_pair(
     key_size: u32,
 ) -> Result<(PKey<Public>, PKey<Private>), CryptoError> {
     let private = rsa_generate(key_size)?;
-    let public = pkey_pub_from_priv(private.clone())?;
+    let public = pkey_pub_from_priv(&private)?;
 
     Ok((public, private))
 }
@@ -620,13 +597,13 @@ pub fn ecc_generate_pair(
             .map_err(CryptoError::ECGeneratePrivateKeyError)?,
     )
     .map_err(CryptoError::PKeyFromEcKeyError)?;
-    let public = pkey_pub_from_priv(private.clone())?;
+    let public = pkey_pub_from_priv(&private)?;
 
     Ok((public, private))
 }
 
 fn pkey_pub_from_priv(
-    privkey: PKey<Private>,
+    privkey: &PKey<Private>,
 ) -> Result<PKey<Public>, CryptoError> {
     match privkey.id() {
         Id::RSA => {
@@ -671,113 +648,6 @@ pub fn pkey_pub_to_pem(pubkey: &PKey<Public>) -> Result<String, CryptoError> {
         .and_then(|s| {
             String::from_utf8(s).map_err(CryptoError::StringFromVec)
         })
-}
-
-pub fn generate_x509(
-    key: &PKey<Private>,
-    uuid: &str,
-    additional_ips: Option<Vec<String>>,
-) -> Result<X509, CryptoError> {
-    let mut name =
-        X509Name::builder().map_err(|source| CryptoError::X509NameError {
-            message: "failed to create X509 Name object".into(),
-            source,
-        })?;
-    name.append_entry_by_nid(Nid::COMMONNAME, uuid)
-        .map_err(|source| CryptoError::X509NameError {
-            message: "failed to append entry by NID to X509 Name".into(),
-            source,
-        })?;
-    let name = name.build();
-
-    let valid_from = Asn1Time::days_from_now(0).map_err(|source| {
-        CryptoError::ASN1TimeDaysFromNowError { days: 0, source }
-    })?;
-    let valid_to = Asn1Time::days_from_now(365).map_err(|source| {
-        CryptoError::ASN1TimeDaysFromNowError { days: 365, source }
-    })?;
-
-    let mut builder =
-        X509::builder().map_err(|source| CryptoError::X509BuilderError {
-            message: "failed to create X509 certificate builder object"
-                .into(),
-            source,
-        })?;
-    builder.set_version(2).map_err(|source| {
-        CryptoError::X509BuilderError {
-            message: "failed to set X509 certificate version".into(),
-            source,
-        }
-    })?;
-    builder.set_subject_name(&name).map_err(|source| {
-        CryptoError::X509BuilderError {
-            message: "failed to set X509 certificate subject name".into(),
-            source,
-        }
-    })?;
-    builder.set_issuer_name(&name).map_err(|source| {
-        CryptoError::X509BuilderError {
-            message: "failed to set X509 issuer name".into(),
-            source,
-        }
-    })?;
-    builder.set_not_before(&valid_from).map_err(|source| {
-        CryptoError::X509BuilderError {
-            message: "failed to set X509 certificate Not Before date".into(),
-            source,
-        }
-    })?;
-    builder.set_not_after(&valid_to).map_err(|source| {
-        CryptoError::X509BuilderError {
-            message: "failed to set X509 certificate Not After date".into(),
-            source,
-        }
-    })?;
-    builder.set_pubkey(key).map_err(|source| {
-        CryptoError::X509BuilderError {
-            message: "failed to set X509 certificate public key".into(),
-            source,
-        }
-    })?;
-    let mut san = &mut extension::SubjectAlternativeName::new();
-    for local_domain_name in LOCAL_DNS_NAMES.iter() {
-        san = san.dns(local_domain_name);
-    }
-    for local_ip in LOCAL_IPS.iter() {
-        san = san.ip(local_ip);
-    }
-    match additional_ips {
-        None => {}
-        Some(ips) => {
-            for ip in ips.iter() {
-                if !LOCAL_IPS.iter().any(|e| ip.contains(e)) {
-                    san = san.ip(ip);
-                }
-            }
-        }
-    }
-    let x509 =
-        san.build(&builder.x509v3_context(None, None))
-            .map_err(|source| CryptoError::X509BuilderError {
-                message: "failed to build Subject Alternative Name".into(),
-                source,
-            })?;
-    builder.append_extension(x509).map_err(|source| {
-        CryptoError::X509BuilderError {
-            message:
-                "failed to append X509 certificate Subject Alternative Name extension"
-                    .into(),
-            source,
-        }
-    })?;
-    builder
-        .sign(key, MessageDigest::sha256())
-        .map_err(|source| CryptoError::X509BuilderError {
-            message: "failed to sign X509 certificate".into(),
-            source,
-        })?;
-
-    Ok(builder.build())
 }
 
 pub fn generate_tls_context(
@@ -1125,7 +995,7 @@ pub mod testing {
     ) -> Result<(PKey<Public>, PKey<Private>), CryptoTestError> {
         let contents = read_to_string(path)?;
         let private = PKey::private_key_from_pem(contents.as_bytes())?;
-        let public = pkey_pub_from_priv(private.clone())?;
+        let public = pkey_pub_from_priv(&private)?;
         Ok((public, private))
     }
 
@@ -1224,6 +1094,7 @@ pub mod testing {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::crypto::x509::CertificateBuilder;
     use std::{fs, path::Path};
     use testing::{encrypt_aead, rsa_import_pair, rsa_oaep_encrypt};
 
@@ -1387,7 +1258,7 @@ mod tests {
         let contents = read_to_string(rsa_key_path);
         let private =
             PKey::private_key_from_pem(contents.unwrap().as_bytes()).unwrap(); //#[allow_ci]
-        let public = pkey_pub_from_priv(private).unwrap(); //#[allow_ci]
+        let public = pkey_pub_from_priv(&private).unwrap(); //#[allow_ci]
 
         let message = String::from("Hello World!");
 
@@ -1471,10 +1342,14 @@ mod tests {
         assert_eq!(hex, "db9b1cd3262dee37756a09b9064973589847caa8e53d31a9d142ea2701b1b28abd97838bb9a27068ba305dc8d04a45a1fcf079de54d607666996b3cc54f6b67c");
     }
 
-    fn test_x509(privkey: PKey<Private>, pubkey: PKey<Public>) {
+    fn test_x509(privkey: &PKey<Private>, pubkey: PKey<Public>) {
         let tempdir = tempfile::tempdir().unwrap(); //#[allow_ci]
 
-        let r = generate_x509(&privkey, "uuidA", None);
+        let r = CertificateBuilder::new()
+            .private_key(privkey)
+            .common_name("uuidA")
+            .build();
+
         assert!(r.is_ok());
         let cert_a = r.unwrap(); //#[allow_ci]
         let cert_a_path = tempdir.path().join("cert_a.pem");
@@ -1482,11 +1357,12 @@ mod tests {
         assert!(r.is_ok());
         assert!(cert_a_path.exists());
 
-        let r = generate_x509(
-            &privkey,
-            "uuidB",
-            Some(vec!["1.2.3.4".to_string(), "1.2.3.5".to_string()]),
-        );
+        let r = CertificateBuilder::new()
+            .private_key(privkey)
+            .common_name("uuidB")
+            .add_ips(vec!["1.2.3.4"])
+            .build();
+
         assert!(r.is_ok());
         let cert_b = r.unwrap(); //#[allow_ci]
         let cert_b_path = tempdir.path().join("cert_b.pem");
@@ -1555,14 +1431,14 @@ mod tests {
         let loaded_list = r.unwrap(); //#[allow_ci]
         assert!(loaded_list.len() == 2);
 
-        let r = generate_tls_context(&loaded_a, &privkey, loaded_list);
+        let r = generate_tls_context(&loaded_a, privkey, loaded_list);
         assert!(r.is_ok());
     }
 
     #[test]
     fn test_x509_rsa() {
         let (pubkey, privkey) = rsa_generate_pair(2048).unwrap(); //#[allow_ci]
-        test_x509(privkey, pubkey);
+        test_x509(&privkey, pubkey);
     }
 
     #[test]
@@ -1570,7 +1446,7 @@ mod tests {
     fn test_x509_long_rsa() {
         for length in [3072, 4096] {
             let (pubkey, privkey) = rsa_generate_pair(length).unwrap(); //#[allow_ci]
-            test_x509(privkey, pubkey);
+            test_x509(&privkey, pubkey);
         }
     }
 
@@ -1586,10 +1462,9 @@ mod tests {
         ] {
             let (pubkey, privkey) = ecc_generate_pair(&group).unwrap(); //#[allow_ci]
 
-            test_x509(privkey, pubkey);
+            test_x509(&privkey, pubkey);
         }
     }
-
     #[test]
     fn test_match_cert_to_template() {
         for (file_name, template) in

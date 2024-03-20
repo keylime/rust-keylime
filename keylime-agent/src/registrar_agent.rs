@@ -204,6 +204,7 @@ pub(crate) async fn do_register_agent(
 mod tests {
     use super::*;
     use crate::crypto;
+    use keylime::crypto;
     use wiremock::matchers::{any, method};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -233,12 +234,12 @@ mod tests {
 
         let mock_data = [0u8; 1];
         let priv_key = crypto::testing::rsa_generate(2048).unwrap(); //#[allow_ci]
-        let cert = crypto::generate_x509(
-            &priv_key,
-            "uuid",
-            Some(vec!["1.2.3.4".to_string()]),
-        )
-        .unwrap(); //#[allow_ci]
+        let cert = crypto::x509::CertificateBuilder::new()
+            .private_key(&priv_key)
+            .common_name("uuid")
+            .add_ips(vec!["1.2.3.4"])
+            .build()
+            .unwrap(); //#[allow_ci]
         let response = do_register_agent(
             ip,
             port,
@@ -286,12 +287,12 @@ mod tests {
 
         let mock_data = [0u8; 1];
         let priv_key = crypto::testing::rsa_generate(2048).unwrap(); //#[allow_ci]
-        let cert = crypto::generate_x509(
-            &priv_key,
-            "uuid",
-            Some(vec!["1.2.3.4".to_string(), "1.2.3.5".to_string()]),
-        )
-        .unwrap(); //#[allow_ci]
+        let cert = crypto::x509::CertificateBuilder::new()
+            .private_key(&priv_key)
+            .common_name("uuid")
+            .add_ips(vec!["1.2.3.4", "1.2.3.5"])
+            .build()
+            .unwrap(); //#[allow_ci]
         let response = do_register_agent(
             ip,
             port,
@@ -335,7 +336,11 @@ mod tests {
 
         let mock_data = [0u8; 1];
         let priv_key = crypto::testing::rsa_generate(2048).unwrap(); //#[allow_ci]
-        let cert = crypto::generate_x509(&priv_key, "uuid", None).unwrap(); //#[allow_ci]
+        let cert = crypto::x509::CertificateBuilder::new()
+            .private_key(&priv_key)
+            .common_name("uuid")
+            .build()
+            .unwrap(); //#[allow_ci]
         let response = do_register_agent(
             ip,
             port,

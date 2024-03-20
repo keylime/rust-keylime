@@ -55,7 +55,10 @@ use futures::{
     future::{ok, TryFutureExt},
     try_join,
 };
-use keylime::{crypto, ima::MeasurementList, list_parser::parse_list, tpm};
+use keylime::{
+    crypto, crypto::x509::CertificateBuilder, ima::MeasurementList,
+    list_parser::parse_list, tpm,
+};
 use log::*;
 use openssl::{
     pkey::{PKey, Private, Public},
@@ -586,16 +589,16 @@ async fn main() -> Result<()> {
     let mtls_cert;
     let ssl_context;
     if config.agent.enable_agent_mtls {
-        let contact_ips = vec![config.agent.contact_ip.clone()];
+        let contact_ips = vec![config.agent.contact_ip.as_str()];
         cert = match config.agent.server_cert.as_ref() {
             "" => {
                 debug!("The server_cert option was not set in the configuration file");
 
-                crypto::generate_x509(
-                    &nk_priv,
-                    &agent_uuid,
-                    Some(contact_ips),
-                )?
+                crypto::x509::CertificateBuilder::new()
+                    .private_key(&nk_priv)
+                    .common_name(&agent_uuid)
+                    .add_ips(contact_ips)
+                    .build()?
             }
             path => {
                 let cert_path = Path::new(&path);
@@ -607,11 +610,11 @@ async fn main() -> Result<()> {
                     crypto::load_x509_pem(cert_path)?
                 } else {
                     debug!("Generating new mTLS certificate");
-                    let cert = crypto::generate_x509(
-                        &nk_priv,
-                        &agent_uuid,
-                        Some(contact_ips),
-                    )?;
+                    let cert = crypto::x509::CertificateBuilder::new()
+                        .private_key(&nk_priv)
+                        .common_name(&agent_uuid)
+                        .add_ips(contact_ips)
+                        .build()?;
                     // Write the generated certificate
                     crypto::write_x509(&cert, cert_path)?;
                     cert
