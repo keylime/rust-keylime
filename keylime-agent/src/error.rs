@@ -89,6 +89,10 @@ pub(crate) enum Error {
     ListParser(#[from] keylime::list_parser::ListParsingError),
     #[error("Zip error: {0}")]
     Zip(#[from] zip::result::ZipError),
+    #[error("Certificate generation error")]
+    CertificateGeneration(
+        #[from] keylime::crypto::x509::CertificateBuilderError,
+    ),
     #[error("{0}")]
     Other(String),
 }
