@@ -1,0 +1,11 @@
+WHITESPACE = _{ " " | NEWLINE | "\t" }
+
+ipv4 = { (ASCII_DIGIT+ ~ ".") ~ (ASCII_DIGIT+ ~ ".") ~ (ASCII_DIGIT+ ~ ".") ~ (ASCII_DIGIT)+ }
+
+ipv6 = { (ASCII_HEX_DIGIT* ~ ":")? ~ (ASCII_HEX_DIGIT+ ~ ":")* ~
+(ASCII_HEX_DIGIT+)? ~ (":" ~ ASCII_HEX_DIGIT+)*  ~ (":" ~ ASCII_HEX_DIGIT*)?}
+
+unbracketed = { ipv4 | ipv6 }
+bracketed = { "[" ~ unbracketed ~ "]" }
+
+ip = { SOI ~ (bracketed | unbracketed) ~ EOI }
