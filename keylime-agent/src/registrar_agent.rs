@@ -6,6 +6,7 @@ use log::*;
 use openssl::x509::X509;
 use serde::{Deserialize, Serialize};
 use serde_json::Number;
+use std::net::IpAddr;
 
 fn is_empty(buf: &[u8]) -> bool {
     buf.is_empty()
@@ -83,12 +84,20 @@ pub(crate) async fn do_activate_agent(
 ) -> crate::error::Result<()> {
     let data = Activate { auth_tag };
 
+    // Add brackets if the address is IPv6
+    let parsed_ip = registrar_ip.parse::<IpAddr>()?;
+    let remote_ip = if parsed_ip.is_ipv6() {
+        format!("[{registrar_ip}]")
+    } else {
+        registrar_ip.to_string()
+    };
+
     #[cfg(test)]
-    let addr = format!("http://{registrar_ip}:{registrar_port}");
+    let addr = format!("http://{remote_ip}:{registrar_port}");
 
     #[cfg(not(test))]
     let addr = format!(
-        "http://{registrar_ip}:{registrar_port}/{API_VERSION}/agents/{agent_uuid}"
+        "http://{remote_ip}:{registrar_port}/{API_VERSION}/agents/{agent_uuid}"
     );
 
     info!(
@@ -164,12 +173,20 @@ pub(crate) async fn do_register_agent(
         port: Some(port),
     };
 
+    // Add brackets if the address is IPv6
+    let parsed_ip = registrar_ip.parse::<IpAddr>()?;
+    let remote_ip = if parsed_ip.is_ipv6() {
+        format!("[{registrar_ip}]")
+    } else {
+        registrar_ip.to_string()
+    };
+
     #[cfg(test)]
-    let addr = format!("http://{registrar_ip}:{registrar_port}");
+    let addr = format!("http://{remote_ip}:{registrar_port}");
 
     #[cfg(not(test))]
     let addr = format!(
-        "http://{registrar_ip}:{registrar_port}/{API_VERSION}/agents/{agent_uuid}"
+        "http://{remote_ip}:{registrar_port}/{API_VERSION}/agents/{agent_uuid}"
     );
 
     info!(
@@ -203,7 +220,6 @@ pub(crate) async fn do_register_agent(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::crypto;
     use keylime::crypto;
     use wiremock::matchers::{any, method};
     use wiremock::{Mock, MockServer, ResponseTemplate};

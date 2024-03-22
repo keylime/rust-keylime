@@ -68,6 +68,7 @@ use std::{
     convert::TryFrom,
     fs,
     io::{BufReader, Read, Write},
+    net::IpAddr,
     path::{Path, PathBuf},
     str::FromStr,
     sync::Mutex,
@@ -913,7 +914,13 @@ async fn main() -> Result<()> {
         .disable_signals();
 
     let server;
-    let ip = &config.agent.ip;
+
+    // Add bracket if IPv6
+    let ip = if config.agent.ip.parse::<IpAddr>()?.is_ipv6() {
+        format!("[{}]", config.agent.ip)
+    } else {
+        config.agent.ip.to_string()
+    };
     let port = config.agent.port;
     if config.agent.enable_agent_mtls && ssl_context.is_some() {
         server = actix_server
