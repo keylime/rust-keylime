@@ -41,8 +41,12 @@ pub(crate) enum Error {
     Glob(#[from] glob::GlobError),
     #[error("Glob pattern error")]
     GlobPattern(#[from] glob::PatternError),
+    #[error("Invalid IP: {0}")]
+    InvalidIP(#[from] std::net::AddrParseError),
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
+    #[error("Failed to parse IP")]
+    IpParserError(#[from] keylime::ip_parser::IpParsingError),
     #[error("Text decoding error: {0}")]
     Utf8(#[from] std::string::FromUtf8Error),
     #[error("Secure Mount error: {0})")]

@@ -9,6 +9,7 @@ use config::{
 use glob::glob;
 use keylime::{
     algorithms::{EncryptionAlgorithm, HashAlgorithm, SignAlgorithm},
+    ip_parser::parse_ip,
     list_parser::parse_list,
 };
 use log::*;
@@ -806,6 +807,11 @@ fn config_translate_keywords(
         s => s.to_string(),
     };
 
+    let ip = parse_ip(config.agent.ip.as_ref())?.to_string();
+    let contact_ip = parse_ip(config.agent.contact_ip.as_ref())?.to_string();
+    let registrar_ip =
+        parse_ip(config.agent.registrar_ip.as_ref())?.to_string();
+
     // Validate the configuration
 
     // If revocation notifications is enabled, verify all the required options for revocation
@@ -837,17 +843,20 @@ fn config_translate_keywords(
     Ok(KeylimeConfig {
         agent: AgentConfig {
             keylime_dir: keylime_dir.display().to_string(),
-            uuid,
-            server_key,
-            server_cert,
+            agent_data_path,
+            contact_ip,
+            ek_handle,
             iak_cert,
             idevid_cert,
-            trusted_client_ca,
-            ek_handle,
-            agent_data_path,
             ima_ml_path,
+            ip,
             measuredboot_ml_path,
+            registrar_ip,
             revocation_cert,
+            server_cert,
+            server_key,
+            trusted_client_ca,
+            uuid,
             ..config.agent.clone()
         },
     })
