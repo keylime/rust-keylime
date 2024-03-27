@@ -1141,7 +1141,7 @@ dependencies = [
 
 [[package]]
 name = "keylime"
-version = "0.2.4"
+version = "0.2.5"
 dependencies = [
  "base64 0.21.7",
  "hex",
@@ -1161,7 +1161,7 @@ dependencies = [
 
 [[package]]
 name = "keylime_agent"
-version = "0.2.4"
+version = "0.2.5"
 dependencies = [
  "actix-rt",
  "actix-web",
@@ -1194,7 +1194,7 @@ dependencies = [
 
 [[package]]
 name = "keylime_ima_emulator"
-version = "0.2.4"
+version = "0.2.5"
 dependencies = [
  "clap",
  "hex",
