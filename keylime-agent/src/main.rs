@@ -295,7 +295,15 @@ async fn main() -> Result<()> {
     // ownership of TPM access, which will not be implemented here.
     let tpm_ownerpassword = &config.agent.tpm_ownerpassword;
     if !tpm_ownerpassword.is_empty() {
-        let auth = Auth::try_from(tpm_ownerpassword.as_bytes())?;
+        let auth = if let Some(hex_ownerpassword) =
+            tpm_ownerpassword.strip_prefix("hex:")
+        {
+            let decoded_ownerpassword =
+                hex::decode(hex_ownerpassword).map_err(Error::from)?;
+            Auth::try_from(decoded_ownerpassword)?
+        } else {
+            Auth::try_from(tpm_ownerpassword.as_bytes())?
+        };
         ctx.as_mut().tr_set_auth(Hierarchy::Endorsement.into(), auth)
             .map_err(|e| {
                 Error::Configuration(format!(
