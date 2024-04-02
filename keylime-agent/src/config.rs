@@ -62,6 +62,10 @@ pub static DEFAULT_ENABLE_IAK_IDEVID: bool = false;
 pub static DEFAULT_IAK_IDEVID_ASYMMETRIC_ALG: &str = "rsa";
 pub static DEFAULT_IAK_IDEVID_NAME_ALG: &str = "sha256";
 pub static DEFAULT_IAK_IDEVID_TEMPLATE: &str = "H-1";
+pub static DEFAULT_IDEVID_PASSWORD: &str = "";
+pub static DEFAULT_IAK_PASSWORD: &str = "";
+pub static DEFAULT_IDEVID_HANDLE: &str = "";
+pub static DEFAULT_IAK_HANDLE: &str = "";
 pub static DEFAULT_RUN_AS: &str = "keylime:tss";
 pub static DEFAULT_AGENT_DATA_PATH: &str = "agent_data.json";
 pub static DEFAULT_IMA_ML_PATH: &str =
@@ -111,6 +115,10 @@ pub(crate) struct EnvConfig {
     pub iak_idevid_asymmetric_alg: Option<String>,
     pub iak_idevid_name_alg: Option<String>,
     pub iak_idevid_template: Option<String>,
+    pub idevid_password: Option<String>,
+    pub iak_password: Option<String>,
+    pub idevid_handle: Option<String>,
+    pub iak_handle: Option<String>,
     pub run_as: Option<String>,
     pub agent_data_path: Option<String>,
     pub ima_ml_path: Option<String>,
@@ -157,6 +165,10 @@ pub(crate) struct AgentConfig {
     pub iak_idevid_asymmetric_alg: String,
     pub iak_idevid_name_alg: String,
     pub iak_idevid_template: String,
+    pub idevid_password: String,
+    pub iak_password: String,
+    pub idevid_handle: String,
+    pub iak_handle: String,
     pub run_as: String,
     pub agent_data_path: String,
     pub ima_ml_path: String,
@@ -327,6 +339,24 @@ impl EnvConfig {
                 "iak_idevid_template".to_string(),
                 v.to_string().into(),
             );
+        }
+        if let Some(ref v) = self.idevid_password {
+            _ = agent.insert(
+                "idevid_password".to_string(),
+                v.to_string().into(),
+            );
+        }
+        if let Some(ref v) = self.iak_password {
+            _ = agent.insert(
+                "iak_password".to_string(),
+                v.to_string().into(),
+            );
+        }
+        if let Some(ref v) = self.idevid_handle {
+            _ = agent.insert("idevid_handle".to_string(), v.to_string().into());
+        }
+        if let Some(ref v) = self.iak_handle {
+            _ = agent.insert("iak_handle".to_string(), v.to_string().into());
         }
         if let Some(ref v) = self.run_as {
             _ = agent.insert("run_as".to_string(), v.to_string().into());
@@ -526,6 +556,22 @@ impl Source for KeylimeConfig {
             self.agent.iak_idevid_template.to_string().into(),
         );
         _ = m.insert(
+            "idevid_password".to_string(),
+            self.agent.idevid_password.to_string().into(),
+        );
+        _ = m.insert(
+            "iak_password".to_string(),
+            self.agent.iak_password.to_string().into(),
+        );
+        _ = m.insert(
+            "idevid_handle".to_string(),
+            self.agent.idevid_handle.to_string().into(),
+        );
+        _ = m.insert(
+            "iak_handle".to_string(),
+            self.agent.iak_handle.to_string().into(),
+        );
+        _ = m.insert(
             "run_as".to_string(),
             self.agent.run_as.to_string().into(),
         );
@@ -606,6 +652,10 @@ impl Default for AgentConfig {
                 .to_string(),
             iak_idevid_name_alg: DEFAULT_IAK_IDEVID_NAME_ALG.to_string(),
             iak_idevid_template: DEFAULT_IAK_IDEVID_TEMPLATE.to_string(),
+            idevid_password: DEFAULT_IDEVID_PASSWORD.to_string(),
+            iak_password: DEFAULT_IAK_PASSWORD.to_string(),
+            idevid_handle: DEFAULT_IDEVID_HANDLE.to_string(),
+            iak_handle: DEFAULT_IAK_HANDLE.to_string(),
             ima_ml_path: "default".to_string(),
             measuredboot_ml_path: "default".to_string(),
         }
@@ -1124,6 +1174,10 @@ mod tests {
             ),
             ("IAK_IDEVID_NAME_ALG", "override_iak_idevid_name_alg"),
             ("IAK_IDEVID_TEMPLATE", "override_iak_idevid_template"),
+            ("IDEVID_PASSWORD", "override_idevid_password"),
+            ("IAK_PASSWORD", "override_iak_password"),
+            ("IDEVID_HANDLE", "override_idevid_handle"),
+            ("IAK_HANDLE", "override_iak_handle"),
             ("RUN_AS", "override_run_as"),
             ("AGENT_DATA_PATH", "override_agent_data_path"),
             ("IMA_ML_PATH", "override_ima_ml_path"),
