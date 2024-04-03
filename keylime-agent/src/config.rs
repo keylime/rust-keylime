@@ -341,19 +341,16 @@ impl EnvConfig {
             );
         }
         if let Some(ref v) = self.idevid_password {
-            _ = agent.insert(
-                "idevid_password".to_string(),
-                v.to_string().into(),
-            );
+            _ = agent
+                .insert("idevid_password".to_string(), v.to_string().into());
         }
         if let Some(ref v) = self.iak_password {
-            _ = agent.insert(
-                "iak_password".to_string(),
-                v.to_string().into(),
-            );
+            _ = agent
+                .insert("iak_password".to_string(), v.to_string().into());
         }
         if let Some(ref v) = self.idevid_handle {
-            _ = agent.insert("idevid_handle".to_string(), v.to_string().into());
+            _ = agent
+                .insert("idevid_handle".to_string(), v.to_string().into());
         }
         if let Some(ref v) = self.iak_handle {
             _ = agent.insert("iak_handle".to_string(), v.to_string().into());

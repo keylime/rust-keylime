@@ -378,8 +378,9 @@ async fn main() -> Result<()> {
         iak_cert = None;
         idevid_cert = None;
     }
-    /// Regenerate the IAK and IDevID and check that the keys match the certificates that have been loaded
+    /// Regenerate the IAK and IDevID keys or collect and authorise persisted ones and check that the keys match the certificates that have been loaded
     let (iak, idevid) = if config.agent.enable_iak_idevid {
+        /// Try to detect which template has been used by checking the certificate
         let (asym_alg, name_alg) = tpm::get_idevid_template(
             &crypto::match_cert_to_template(
                 &iak_cert.clone().ok_or(Error::Other(
@@ -392,31 +393,58 @@ async fn main() -> Result<()> {
             config.agent.iak_idevid_name_alg.as_str(),
         )?;
 
-        let idevid = ctx.create_idevid(asym_alg, name_alg)?;
-        info!("IDevID created.");
-        // Flush after creating to make room for AK and EK and IAK
-        ctx.as_mut().flush_context(idevid.handle.into())?;
+        /// IDevID recreation/collection
+        let idevid = if config.agent.idevid_handle.trim().is_empty() {
+            /// If handle is not set in config, recreate IDevID according to template
+            info!("Recreating IDevID.");
+            let regen_idev = ctx.create_idevid(asym_alg, name_alg)?;
+            ctx.as_mut().flush_context(regen_idev.handle.into())?;
+            // Flush after creating to make room for AK and EK and IAK
+            regen_idev
+        } else {
+            info!("Collecting persisted IDevID.");
+            ctx.idevid_from_handle(
+                config.agent.idevid_handle.as_str(),
+                config.agent.idevid_password.as_str(),
+            )?
+        };
+        /// Check that recreated/collected IDevID key matches the one in the certificate
         if crypto::check_x509_key(
             &idevid_cert.clone().ok_or(Error::Other(
-                "IAK/IDevID enabled but cert could not be used".to_string(),
+                "IAK/IDevID enabled but IDevID cert could not be used"
+                    .to_string(),
             ))?,
             idevid.clone().public,
         )? {
-            info!("Regenerated IDevID matches certificate.");
+            info!("IDevID matches certificate.");
         } else {
             error!("IDevID template does not match certificate. Check template in configuration.");
             return Err(Error::Configuration("IDevID template does not match certificate. Check template in configuration.".to_string()));
         }
 
-        let iak = ctx.create_iak(asym_alg, name_alg)?;
-        info!("IAK created.");
+        /// IAK recreation/collection
+        let iak = if config.agent.iak_handle.trim().is_empty() {
+            /// If handle is not set in config, recreate IAK according to template
+            info!("Recreating IAK.");
+            ctx.create_iak(asym_alg, name_alg)?
+        } else {
+            /// If a handle has been set, try to collect from the handle
+            /// If there is an IAK password, add the password to the handle
+            info!("Collecting persisted IAK.");
+            ctx.iak_from_handle(
+                config.agent.iak_handle.as_str(),
+                config.agent.iak_password.as_str(),
+            )?
+        };
+        /// Check that recreated/collected IAK key matches the one in the certificate
         if crypto::check_x509_key(
             &iak_cert.clone().ok_or(Error::Other(
-                "IAK/IDevID enabled but cert could not be used".to_string(),
+                "IAK/IDevID enabled but IAK cert could not be used"
+                    .to_string(),
             ))?,
             iak.clone().public,
         )? {
-            info!("Regenerated IAK matches certificate.");
+            info!("IAK matches certificate.");
         } else {
             error!("IAK template does not match certificate. Check template in configuration.");
             return Err(Error::Configuration("IAK template does not match certificate. Check template in configuration.".to_string()));
