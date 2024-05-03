@@ -46,6 +46,7 @@ jobs:
         tar jcf rpm/fedora/rust-keylime-vendor.tar.xz vendor'
   targets:
     - fedora-all
+    - centos-stream-10-x86_64
   preserve_project: True
 
 - job: copr_build
@@ -72,5 +73,4 @@ jobs:
         tar jcf rpm/centos/rust-keylime-vendor.tar.xz vendor'
   targets:
     - centos-stream-9-x86_64
-    - centos-stream-10-x86_64
   preserve_project: True
