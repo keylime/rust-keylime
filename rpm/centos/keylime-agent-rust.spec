@@ -53,7 +53,7 @@ Requires: util-linux-core
 
 # The keylime-base package provides the keylime user creation. It is available
 # from Fedora 36
-%if 0%{?fedora} >= 36
+%if 0%{?fedora} >= 36 || 0%{?rhel} >= 9
 Requires: keylime-base
 %endif
 
@@ -77,7 +77,11 @@ Rust agent for Keylime
 %cargo_prep -V 1
 
 %build
+%if 0%{?rhel} >= 10
+%cargo_build -ftesting
+%else
 %cargo_build --features=testing
+%endif
 
 %install
 
