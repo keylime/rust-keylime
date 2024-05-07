@@ -918,7 +918,7 @@ impl Context {
             ),
             HashingAlgorithm::Sha512 => (
                 IAK_AUTH_POLICY_SHA512[0..64].to_vec(),
-                RsaKeyBits::Rsa2048,
+                RsaKeyBits::Rsa4096,
                 EccCurve::NistP521,
             ),
             _ => (
