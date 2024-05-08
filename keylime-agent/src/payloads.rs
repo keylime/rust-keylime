@@ -222,7 +222,7 @@ async fn run_encrypted_payload(
     let action_file = unzipped.join("action_list");
 
     if action_file.exists() {
-        let action_data = std::fs::read_to_string(&action_file)
+        let action_data = fs::read_to_string(&action_file)
             .expect("unable to read action_list");
 
         action_data

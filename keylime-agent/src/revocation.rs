@@ -203,7 +203,7 @@ fn run_revocation_actions(
     let action_file = unzipped.join("action_list");
 
     if action_file.exists() {
-        action_data = std::fs::read_to_string(&action_file)
+        action_data = fs::read_to_string(&action_file)
             .expect("unable to read action_list");
 
         let file_actions = parse_list(&action_data)?;
@@ -528,7 +528,7 @@ mod tests {
             env!("CARGO_MANIFEST_DIR"),
             "/tests/unzipped/test_ok.json"
         );
-        let json_str = std::fs::read_to_string(json_file).unwrap(); //#[allow_ci]
+        let json_str = fs::read_to_string(json_file).unwrap(); //#[allow_ci]
         let json = serde_json::from_str(&json_str).unwrap(); //#[allow_ci]
         let actions_dir =
             &Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/actions/");
@@ -567,7 +567,7 @@ mod tests {
             env!("CARGO_MANIFEST_DIR"),
             "/tests/unzipped/test_err.json"
         );
-        let json_str = std::fs::read_to_string(json_file).unwrap(); //#[allow_ci]
+        let json_str = fs::read_to_string(json_file).unwrap(); //#[allow_ci]
         let json = serde_json::from_str(&json_str).unwrap(); //#[allow_ci]
         let actions_dir =
             &Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/actions/");
@@ -602,7 +602,7 @@ mod tests {
                 let revocation_actions = "local_action_stand_alone.py, local_action_rev_script1.py";
             }
         }
-        let json_str = std::fs::read_to_string(json_file).unwrap(); //#[allow_ci]
+        let json_str = fs::read_to_string(json_file).unwrap(); //#[allow_ci]
         let json = serde_json::from_str(&json_str).unwrap(); //#[allow_ci]
         let actions_dir =
             &Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/actions/");
