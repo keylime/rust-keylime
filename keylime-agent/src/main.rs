@@ -1066,7 +1066,7 @@ mod testing {
 
         /// CryptoTest error
         #[error("CryptoTestError")]
-        CryptoTestError(#[from] crate::crypto::testing::CryptoTestError),
+        CryptoTestError(#[from] crypto::testing::CryptoTestError),
 
         /// IO error
         #[error("IOError")]
@@ -1078,7 +1078,7 @@ mod testing {
 
         /// TPM error
         #[error("TPMError")]
-        TPMError(#[from] keylime::tpm::TpmError),
+        TPMError(#[from] tpm::TpmError),
 
         /// TSS esapi error
         #[error("TSSError")]
