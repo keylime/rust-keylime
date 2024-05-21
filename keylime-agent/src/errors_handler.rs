@@ -266,7 +266,7 @@ pub(crate) fn wrap_404<B>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use actix_web::{middleware, test, App, Resource};
+    use actix_web::{test, App, Resource};
     use core::future::Future;
     use serde::{Deserialize, Serialize};
     use serde_json::{json, Value};
@@ -379,7 +379,7 @@ mod tests {
         let mut app = test::init_service(
             App::new()
                 .wrap(
-                    middleware::ErrorHandlers::new()
+                    ErrorHandlers::new()
                         .handler(http::StatusCode::NOT_FOUND, wrap_404),
                 )
                 .app_data(

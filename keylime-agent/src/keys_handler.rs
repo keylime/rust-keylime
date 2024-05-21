@@ -970,10 +970,7 @@ mod tests {
 
         // Send Shutdown message to the workers for a graceful shutdown
         keys_tx.send((KeyMessage::Shutdown, None)).await.unwrap(); //#[allow_ci]
-        payload_tx
-            .send(payloads::PayloadMessage::Shutdown)
-            .await
-            .unwrap(); //#[allow_ci]
+        payload_tx.send(PayloadMessage::Shutdown).await.unwrap(); //#[allow_ci]
         arbiter.join();
     }
 
