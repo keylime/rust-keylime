@@ -9,6 +9,7 @@ use config::{
 use glob::glob;
 use keylime::{
     algorithms::{EncryptionAlgorithm, HashAlgorithm, SignAlgorithm},
+    hostname_parser::parse_hostname,
     ip_parser::parse_ip,
     list_parser::parse_list,
 };
@@ -856,8 +857,12 @@ fn config_translate_keywords(
 
     let ip = parse_ip(config.agent.ip.as_ref())?.to_string();
     let contact_ip = parse_ip(config.agent.contact_ip.as_ref())?.to_string();
-    let registrar_ip =
-        parse_ip(config.agent.registrar_ip.as_ref())?.to_string();
+    let registrar_ip = match parse_ip(config.agent.registrar_ip.as_ref()) {
+        Ok(ip) => ip.to_string(),
+        Err(_) => {
+            parse_hostname(config.agent.registrar_ip.as_ref())?.to_string()
+        }
+    };
 
     // Validate the configuration
 

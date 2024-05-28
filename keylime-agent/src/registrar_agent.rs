@@ -84,12 +84,20 @@ pub(crate) async fn do_activate_agent(
 ) -> crate::error::Result<()> {
     let data = Activate { auth_tag };
 
-    // Add brackets if the address is IPv6
-    let parsed_ip = registrar_ip.parse::<IpAddr>()?;
-    let remote_ip = if parsed_ip.is_ipv6() {
-        format!("[{registrar_ip}]")
-    } else {
-        registrar_ip.to_string()
+    let remote_ip = match registrar_ip.parse::<IpAddr>() {
+        Ok(addr) => {
+            // Add brackets if the address is IPv6
+            if addr.is_ipv6() {
+                format!("[{registrar_ip}]")
+            } else {
+                registrar_ip.to_string()
+            }
+        }
+        Err(_) => {
+            // The registrar_ip option can also be a hostname. If it is the case, the hostname was
+            // already validated during configuration
+            registrar_ip.to_string()
+        }
     };
 
     #[cfg(test)]
@@ -173,12 +181,20 @@ pub(crate) async fn do_register_agent(
         port: Some(port),
     };
 
-    // Add brackets if the address is IPv6
-    let parsed_ip = registrar_ip.parse::<IpAddr>()?;
-    let remote_ip = if parsed_ip.is_ipv6() {
-        format!("[{registrar_ip}]")
-    } else {
-        registrar_ip.to_string()
+    let remote_ip = match registrar_ip.parse::<IpAddr>() {
+        Ok(addr) => {
+            // Add brackets if the address is IPv6
+            if addr.is_ipv6() {
+                format!("[{registrar_ip}]")
+            } else {
+                registrar_ip.to_string()
+            }
+        }
+        Err(_) => {
+            // The registrar_ip option can also be a hostname. If it is the case, the hostname was
+            // already validated during configuration
+            registrar_ip.to_string()
+        }
     };
 
     #[cfg(test)]
