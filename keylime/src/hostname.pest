@@ -1,0 +1,2 @@
+hostname = {SOI ~ label ~ ("." ~ label)* ~ EOI}
+label = { ASCII_ALPHANUMERIC+ ~ ("-"+ ~ ASCII_ALPHANUMERIC+)*}
