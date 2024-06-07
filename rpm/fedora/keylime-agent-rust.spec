@@ -80,19 +80,11 @@ Conflicts:      keylime-agent
 Rust agent for Keylime
 
 %prep
-%autosetup -n rust-keylime-%{version} -N
+%autosetup -n rust-keylime-%{version} -N %{?bundled_rust_deps:-a1}
 %if 0%{?bundled_rust_deps}
 %autopatch -m 100 -p1
 # Source1 contains vendored dependencies
-%cargo_prep
-tar -xoaf %{SOURCE1}
-sed -i 's/^\(replace-with\).*$/\1 = "vendored-sources"/g' .cargo/config
-cat >> .cargo/config << EOF
-
-[source.vendored-sources]
-directory = "./vendor"
-EOF
-
+%cargo_prep -v vendor
 %cargo_generate_buildrequires
 %else
 %autopatch -M 99 -p1
@@ -102,6 +94,11 @@ EOF
 
 %build
 %cargo_build -ftesting
+%cargo_license_summary
+%{cargo_license} > LICENSE.dependencies
+%if 0%{?bundled_rust_deps}
+%cargo_vendor_manifest
+%endif
 
 %install
 
@@ -149,6 +146,8 @@ chown -R keylime:keylime %{_sysconfdir}/keylime
 
 %files
 %license LICENSE
+%license LICENSE.dependencies
+%license cargo-vendor.txt
 %doc README.md
 %attr(500,keylime,keylime) %dir %{_sysconfdir}/keylime
 %attr(500,keylime,keylime) %dir %{_sysconfdir}/keylime/agent.conf.d
