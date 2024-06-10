@@ -11,7 +11,7 @@ authors = ["Keylime Authors"]
 edition = "2021"
 license = "Apache-2.0"
 repository = "https://github.com/keylime/rust-keylime"
-version = "0.2.5"
+version = "0.2.6"
 
 [workspace.dependencies]
 actix-rt = "2"
@@ -23,7 +23,7 @@ config = { version = "0.13", default-features = false, features = ["toml"] }
 futures = "0.3.6"
 glob = "0.3"
 hex = "0.4"
-keylime = { version = "=0.2.5", path = "keylime" }
+keylime = { version = "=0.2.6", path = "keylime" }
 libc = "0.2.43"
 log = "0.4"
 openssl = "0.10.15"
