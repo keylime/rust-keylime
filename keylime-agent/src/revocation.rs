@@ -162,7 +162,7 @@ pub(crate) fn run_action(
         }
         Err(err) => {
             fs::remove_file(json_path)?;
-            return Err(err.try_into()?);
+            return Err(err.into());
         }
     };
 
