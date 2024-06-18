@@ -32,7 +32,7 @@ fn check_mount(secure_dir: &Path) -> Result<bool> {
     let f = BufReader::new(f);
     let lines = f.lines();
 
-    for line in lines.flatten() {
+    for line in lines.map_while(std::result::Result::ok) {
         let mut iter = line.split(' ');
         if let Some(mount_point) = &iter.nth(4) {
             if Path::new(mount_point) == secure_dir {
