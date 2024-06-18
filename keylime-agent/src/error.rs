@@ -46,11 +46,9 @@ pub(crate) enum Error {
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
     #[error("Failed to parse IP")]
-    IpParserError(#[from] keylime::ip_parser::IpParsingError),
+    IpParser(#[from] keylime::ip_parser::IpParsingError),
     #[error("Failed to parse hostname")]
-    HostnameParserError(
-        #[from] keylime::hostname_parser::HostnameParsingError,
-    ),
+    HostnameParser(#[from] keylime::hostname_parser::HostnameParsingError),
     #[error("Text decoding error: {0}")]
     Utf8(#[from] std::string::FromUtf8Error),
     #[error("Secure Mount error: {0})")]
