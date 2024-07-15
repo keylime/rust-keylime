@@ -26,11 +26,15 @@ jobs:
       run: ls 
     - name: Upload e2e_coverage report to Codecov with GitHub Action.
       uses: codecov/codecov-action@v4
+      env:
+        CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
       with:
         files: e2e_coverage.txt
         flags: e2e-testsuite
     - name: Upload upstream_coverage report to Codecov with GitHub Action.
       uses: codecov/codecov-action@v4
+      env:
+        CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
       with:
         files: upstream_coverage.xml
         flags: upstream-unit-tests
