@@ -21,14 +21,12 @@ pub(crate) enum Error {
     #[error("Invalid request")]
     #[allow(unused)]
     InvalidRequest,
-    #[error("Configuration loading error: {0}")]
-    Config(#[from] config::ConfigError),
     #[error("Infallible: {0}")]
     Infallible(#[from] std::convert::Infallible),
     #[error("Conversion error: {0}")]
     Conversion(String),
-    #[error("Configuration error: {0}")]
-    Configuration(String),
+    #[error("Configuration error")]
+    Configuration(#[from] crate::config::KeylimeConfigError),
     #[error("Reqwest error: {0}")]
     Reqwest(#[from] reqwest::Error),
     #[error("Registrar error: received {code} from {addr}")]
