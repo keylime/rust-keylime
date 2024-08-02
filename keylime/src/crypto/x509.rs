@@ -98,7 +98,7 @@ impl<'a> CertificateBuilder<'a> {
     /// # Arguments:
     ///
     /// * days_from_now (u32): The number of days from now when the built certificate will become
-    /// valid
+    ///   valid
     pub fn not_before(
         &'a mut self,
         days_from_now: u32,
@@ -125,7 +125,7 @@ impl<'a> CertificateBuilder<'a> {
     /// # Arguments:
     ///
     /// * version (i32): The version number. Note that the version is zero-indexed, meaning passing
-    /// the value `2` corresponds to the version 3 of the X.509 standard
+    ///   the value `2` corresponds to the version 3 of the X.509 standard
     ///
     /// If not called, the version 3 of the X.509 standard will be used
     pub fn version(
@@ -154,7 +154,7 @@ impl<'a> CertificateBuilder<'a> {
     /// # Arguments:
     ///
     /// * dns_names (Vec<&str>): A Vec<&str> containing DNS names to add to the certificate Subject
-    /// Alternative Name
+    ///   Alternative Name
     pub fn add_dns_names(
         &'a mut self,
         dns_names: Vec<&'a str>,
@@ -177,7 +177,7 @@ impl<'a> CertificateBuilder<'a> {
     /// # Arguments:
     ///
     /// * ips: (Vec<&str>): A Vec<&str> containing IPs to add to the certificate Subject
-    /// Alternative Name
+    ///   Alternative Name
     pub fn add_ips(
         &'a mut self,
         ips: Vec<&'a str>,
@@ -200,7 +200,7 @@ impl<'a> CertificateBuilder<'a> {
     /// # Arguments:
     ///
     /// * extensions (Vec<X509Extension>): A Vec<X509Extension> containing the additional
-    /// extensions to include in the certificate
+    ///   extensions to include in the certificate
     pub fn add_extensions(
         &'a mut self,
         extensions: Vec<X509Extension>,
