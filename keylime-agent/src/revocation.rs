@@ -51,6 +51,7 @@ pub(crate) enum RevocationMessage {
 /// The lookup goes in the following order:
 /// 1. Look for pre-installed action
 /// 2. Look for the action in the tenant-provided initial payload
+///
 /// Then, if python revocation actions are allowed:
 /// 3. Look for pre-installed Python action
 /// 4. Look for the Python action in the tenant-provided initial payload
