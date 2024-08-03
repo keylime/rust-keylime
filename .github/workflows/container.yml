@@ -41,7 +41,7 @@ jobs:
 
       - name: Build and push agent image
         id: build_agent
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v6
         env:
           VERSION: "${{ steps.meta_base.outputs.version }}"
         with:
