@@ -7,6 +7,7 @@ use crate::algorithms::{
 use base64::{engine::general_purpose, Engine as _};
 use log::*;
 use std::convert::{TryFrom, TryInto};
+use std::io::Read;
 use std::str::FromStr;
 use thiserror::Error;
 
@@ -338,6 +339,10 @@ pub enum TpmError {
     #[error("Error finishing Hasher")]
     OpenSSLHasherFinish { source: openssl::error::ErrorStack },
 
+    /// Error when trying to decode the EK certificate
+    #[error("EK certificate parsing error")]
+    EKCertParsing(#[from] picky_asn1_der::Asn1DerError),
+
     /// Number conversion error
     #[error("Error converting number")]
     TryFromInt(#[from] std::num::TryFromIntError),
@@ -490,6 +495,13 @@ impl Context {
         })
     }
 
+    // Tries to parse the EK certificate and re-encodes it to remove potential padding
+    fn check_ek_cert(&mut self, cert: &[u8]) -> Result<Vec<u8>> {
+        let parsed_cert: picky_asn1_der::Asn1RawDer =
+            picky_asn1_der::from_bytes(cert)?;
+        Ok(picky_asn1_der::to_vec(&parsed_cert)?)
+    }
+
     /// Creates an EK, returns the key handle and public certificate
     /// in `EKResult`.
     ///
@@ -551,7 +563,13 @@ impl Context {
         };
         let cert = match ek::retrieve_ek_pubcert(&mut self.inner, alg.into())
         {
-            Ok(v) => Some(v),
+            Ok(cert) => match self.check_ek_cert(&cert) {
+                Ok(cert_checked) => Some(cert_checked),
+                Err(_) => {
+                    warn!("EK certificate in TPM NVRAM is not ASN.1 DER encoded");
+                    Some(cert)
+                }
+            },
             Err(_) => {
                 warn!("No EK certificate found in TPM NVRAM");
                 None
