@@ -126,6 +126,7 @@ mod tests {
         let ak = ctx.create_ak(
             ek_result.key_handle,
             tpm_hash_alg,
+            tpm_encryption_alg,
             tpm_signing_alg,
         )?;
 

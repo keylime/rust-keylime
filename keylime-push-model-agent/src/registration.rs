@@ -34,8 +34,12 @@ pub async fn register_agent<T: PushModelConfigTrait>(
     let mut ctx = tpm::Context::new()?;
     let ek_result = ctx.create_ek(tpm_encryption_alg, None)?;
     let ek_hash = hash_ek::hash_ek_pubkey(ek_result.public.clone())?;
-    let ak =
-        ctx.create_ak(ek_result.key_handle, tpm_hash_alg, tpm_signing_alg)?;
+    let ak = ctx.create_ak(
+        ek_result.key_handle,
+        tpm_hash_alg,
+        tpm_encryption_alg,
+        tpm_signing_alg,
+    )?;
     let ak_handle = ctx.load_ak(ek_result.key_handle, &ak)?;
 
     AgentData::create(

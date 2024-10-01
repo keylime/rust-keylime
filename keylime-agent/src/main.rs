@@ -423,6 +423,7 @@ async fn main() -> Result<()> {
             let new_ak = ctx.create_ak(
                 ek_result.key_handle,
                 tpm_hash_alg,
+                tpm_encryption_alg,
                 tpm_signing_alg,
             )?;
             let ak_handle = ctx.load_ak(ek_result.key_handle, &new_ak)?;
@@ -980,6 +981,7 @@ mod testing {
                 .create_ak(
                     ek_result.key_handle,
                     tpm_hash_alg,
+                    tpm_encryption_alg,
                     tpm_signing_alg,
                 )
                 .unwrap(); //#[allow_ci]
@@ -1057,7 +1059,8 @@ mod testing {
                     payload_tx,
                     revocation_tx,
                     hash_alg: keylime::algorithms::HashAlgorithm::Sha256,
-                    enc_alg: keylime::algorithms::EncryptionAlgorithm::Rsa,
+                    enc_alg:
+                        keylime::algorithms::EncryptionAlgorithm::Rsa2048,
                     sign_alg: keylime::algorithms::SignAlgorithm::RsaSsa,
                     agent_uuid: test_config.agent.uuid,
                     allow_payload_revocation_actions: test_config
