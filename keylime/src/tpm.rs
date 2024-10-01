@@ -562,7 +562,7 @@ impl Context<'_> {
         let key_handle: KeyHandle = match handle {
             Some(v) => {
                 if v.is_empty() {
-                    ek::create_ek_object(&mut ctx, alg.into(), DefaultKey)
+                    ek::create_ek_object_2(&mut ctx, alg.into(), DefaultKey)
                         .map_err(|source| TpmError::TSSCreateEKError {
                             source,
                         })?
@@ -591,7 +591,7 @@ impl Context<'_> {
                     .into()
                 }
             }
-            None => ek::create_ek_object(&mut ctx, alg.into(), DefaultKey)
+            None => ek::create_ek_object_2(&mut ctx, alg.into(), DefaultKey)
                 .map_err(|source| TpmError::TSSCreateEKError { source })?,
         };
 
@@ -625,6 +625,7 @@ impl Context<'_> {
     ///
     /// * `handle`: The associated EK handle
     /// * `hash_alg`: The digest algorithm used for signing with the created AK
+    /// * `key_alg`:  The key type used for signing with the created AK
     /// * `sign_alg`: The created AK signing algorithm
     ///
     /// Returns an `AKResult` structure if successful and a `TPMError` otherwise
@@ -632,12 +633,14 @@ impl Context<'_> {
         &mut self,
         handle: KeyHandle,
         hash_alg: HashAlgorithm,
+        key_alg: EncryptionAlgorithm,
         sign_alg: SignAlgorithm,
     ) -> Result<AKResult> {
-        let ak = ak::create_ak(
+        let ak = ak::create_ak_2(
             &mut self.inner.lock().unwrap(), //#[allow_ci]
             handle,
             hash_alg.into(),
+            key_alg.into(),
             sign_alg.into(),
             None,
             DefaultKey,
@@ -1921,9 +1924,7 @@ pub fn get_idevid_template(
         "H-4" => (AsymmetricAlgorithm::Ecc, HashingAlgorithm::Sha512),
         "H-5" => (AsymmetricAlgorithm::Ecc, HashingAlgorithm::Sm3_256),
         _ => (
-            AsymmetricAlgorithm::from(EncryptionAlgorithm::try_from(
-                asym_alg_str,
-            )?),
+            EncryptionAlgorithm::try_from(asym_alg_str)?.into(),
             HashingAlgorithm::from(HashAlgorithm::try_from(name_alg_str)?),
         ),
     };
@@ -2421,7 +2422,8 @@ pub mod tests {
     async fn test_create_ek() {
         let _mutex = testing::lock_tests().await;
         let mut ctx = Context::new().unwrap(); //#[allow_ci]
-        let algs = [EncryptionAlgorithm::Rsa, EncryptionAlgorithm::Ecc];
+        let algs =
+            [EncryptionAlgorithm::Rsa2048, EncryptionAlgorithm::Ecc256];
         // TODO: create persistent handle and add to be tested: Some("0x81000000"),
         let handles = [Some(""), None];
 
@@ -2444,11 +2446,14 @@ pub mod tests {
         let _mutex = testing::lock_tests().await;
         let mut ctx = Context::new().unwrap(); //#[allow_ci]
 
-        let r = ctx.create_ek(EncryptionAlgorithm::Rsa, None);
+        let r = ctx.create_ek(EncryptionAlgorithm::Rsa2048, None);
         assert!(r.is_ok(), "Result: {r:?}");
 
         let ek_result = r.unwrap(); //#[allow_ci]
         let ek_handle = ek_result.key_handle;
+
+        let eng_algs =
+            [EncryptionAlgorithm::Rsa1024, EncryptionAlgorithm::Rsa2048];
 
         let hash_algs = [
             HashAlgorithm::Sha256,
@@ -2470,18 +2475,20 @@ pub mod tests {
         ];
 
         for sign in sign_algs {
-            for hash in hash_algs {
-                let r = ctx.create_ak(ek_handle, hash, sign);
-                assert!(r.is_ok(), "Result: {r:?}");
-                let ak = r.unwrap(); //#[allow_ci]
+            for enc in eng_algs {
+                for hash in hash_algs {
+                    let r = ctx.create_ak(ek_handle, hash, enc, sign);
+                    assert!(r.is_ok(), "Result: {r:?}");
+                    let ak = r.unwrap(); //#[allow_ci]
 
-                let r = ctx.load_ak(ek_handle, &ak);
-                assert!(r.is_ok(), "Result: {r:?}");
-                let handle = r.unwrap(); //#[allow_ci]
+                    let r = ctx.load_ak(ek_handle, &ak);
+                    assert!(r.is_ok(), "Result: {r:?}");
+                    let handle = r.unwrap(); //#[allow_ci]
 
-                // Flush context to free TPM memory
-                let r = ctx.flush_context(handle.into());
-                assert!(r.is_ok(), "Result: {r:?}");
+                    // Flush context to free TPM memory
+                    let r = ctx.flush_context(handle.into());
+                    assert!(r.is_ok(), "Result: {r:?}");
+                }
             }
         }
 
@@ -2562,7 +2569,7 @@ pub mod tests {
 
         // Create EK
         let ek_result = ctx
-            .create_ek(EncryptionAlgorithm::Rsa, None)
+            .create_ek(EncryptionAlgorithm::Rsa2048, None)
             .expect("failed to create EK");
         let ek_handle = ek_result.key_handle;
 
@@ -2571,6 +2578,7 @@ pub mod tests {
             .create_ak(
                 ek_handle,
                 HashAlgorithm::Sha256,
+                EncryptionAlgorithm::Rsa2048,
                 SignAlgorithm::RsaSsa,
             )
             .expect("failed to create AK");
@@ -2618,7 +2626,7 @@ pub mod tests {
 
         // Create EK
         let ek_result = ctx
-            .create_ek(EncryptionAlgorithm::Rsa, None)
+            .create_ek(EncryptionAlgorithm::Rsa2048, None)
             .expect("failed to create EK");
         let ek_handle = ek_result.key_handle;
 
@@ -2627,6 +2635,7 @@ pub mod tests {
             .create_ak(
                 ek_handle,
                 HashAlgorithm::Sha256,
+                EncryptionAlgorithm::Rsa2048,
                 SignAlgorithm::RsaSsa,
             )
             .expect("failed to create ak");
