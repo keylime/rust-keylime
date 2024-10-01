@@ -6,8 +6,13 @@ use std::convert::TryFrom;
 use std::fmt;
 use thiserror::Error;
 use tss_esapi::{
-    interface_types::algorithm::{
-        AsymmetricAlgorithm, HashingAlgorithm, SignatureSchemeAlgorithm,
+    abstraction::AsymmetricAlgorithmSelection,
+    interface_types::{
+        algorithm::{
+            AsymmetricAlgorithm, HashingAlgorithm, SignatureSchemeAlgorithm,
+        },
+        ecc::EccCurve,
+        key_bits::RsaKeyBits,
     },
     structures::{HashScheme, SignatureScheme},
 };
@@ -89,15 +94,68 @@ impl From<HashAlgorithm> for MessageDigest {
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum EncryptionAlgorithm {
-    Rsa,
-    Ecc,
+    Rsa1024,
+    Rsa2048,
+    Rsa3072,
+    Rsa4096,
+    Ecc192,
+    Ecc224,
+    Ecc256,
+    Ecc384,
+    Ecc521,
+    EccSm2,
 }
 
 impl From<EncryptionAlgorithm> for AsymmetricAlgorithm {
     fn from(enc_alg: EncryptionAlgorithm) -> Self {
         match enc_alg {
-            EncryptionAlgorithm::Rsa => AsymmetricAlgorithm::Rsa,
-            EncryptionAlgorithm::Ecc => AsymmetricAlgorithm::Ecc,
+            EncryptionAlgorithm::Rsa1024 => AsymmetricAlgorithm::Rsa,
+            EncryptionAlgorithm::Rsa2048 => AsymmetricAlgorithm::Rsa,
+            EncryptionAlgorithm::Rsa3072 => AsymmetricAlgorithm::Rsa,
+            EncryptionAlgorithm::Rsa4096 => AsymmetricAlgorithm::Rsa,
+            EncryptionAlgorithm::Ecc192 => AsymmetricAlgorithm::Ecc,
+            EncryptionAlgorithm::Ecc224 => AsymmetricAlgorithm::Ecc,
+            EncryptionAlgorithm::Ecc256 => AsymmetricAlgorithm::Ecc,
+            EncryptionAlgorithm::Ecc384 => AsymmetricAlgorithm::Ecc,
+            EncryptionAlgorithm::Ecc521 => AsymmetricAlgorithm::Ecc,
+            EncryptionAlgorithm::EccSm2 => AsymmetricAlgorithm::Ecc,
+        }
+    }
+}
+
+impl From<EncryptionAlgorithm> for AsymmetricAlgorithmSelection {
+    fn from(enc_alg: EncryptionAlgorithm) -> Self {
+        match enc_alg {
+            EncryptionAlgorithm::Rsa1024 => {
+                AsymmetricAlgorithmSelection::Rsa(RsaKeyBits::Rsa1024)
+            }
+            EncryptionAlgorithm::Rsa2048 => {
+                AsymmetricAlgorithmSelection::Rsa(RsaKeyBits::Rsa2048)
+            }
+            EncryptionAlgorithm::Rsa3072 => {
+                AsymmetricAlgorithmSelection::Rsa(RsaKeyBits::Rsa3072)
+            }
+            EncryptionAlgorithm::Rsa4096 => {
+                AsymmetricAlgorithmSelection::Rsa(RsaKeyBits::Rsa4096)
+            }
+            EncryptionAlgorithm::Ecc192 => {
+                AsymmetricAlgorithmSelection::Ecc(EccCurve::NistP192)
+            }
+            EncryptionAlgorithm::Ecc224 => {
+                AsymmetricAlgorithmSelection::Ecc(EccCurve::NistP224)
+            }
+            EncryptionAlgorithm::Ecc256 => {
+                AsymmetricAlgorithmSelection::Ecc(EccCurve::NistP256)
+            }
+            EncryptionAlgorithm::Ecc384 => {
+                AsymmetricAlgorithmSelection::Ecc(EccCurve::NistP384)
+            }
+            EncryptionAlgorithm::Ecc521 => {
+                AsymmetricAlgorithmSelection::Ecc(EccCurve::NistP521)
+            }
+            EncryptionAlgorithm::EccSm2 => {
+                AsymmetricAlgorithmSelection::Ecc(EccCurve::Sm2P256)
+            }
         }
     }
 }
@@ -107,8 +165,25 @@ impl TryFrom<&str> for EncryptionAlgorithm {
 
     fn try_from(value: &str) -> Result<Self, Self::Error> {
         match value {
-            "rsa" => Ok(EncryptionAlgorithm::Rsa),
-            "ecc" => Ok(EncryptionAlgorithm::Ecc),
+            /* Use default key size and curve if not explicitly specified */
+            "rsa" => Ok(EncryptionAlgorithm::Rsa2048),
+            "ecc" => Ok(EncryptionAlgorithm::Ecc256),
+            "rsa1024" => Ok(EncryptionAlgorithm::Rsa1024),
+            "rsa2048" => Ok(EncryptionAlgorithm::Rsa2048),
+            "rsa3072" => Ok(EncryptionAlgorithm::Rsa3072),
+            "rsa4096" => Ok(EncryptionAlgorithm::Rsa4096),
+            "ecc192" => Ok(EncryptionAlgorithm::Ecc192),
+            "ecc_nist_p192" => Ok(EncryptionAlgorithm::Ecc192),
+            "ecc224" => Ok(EncryptionAlgorithm::Ecc224),
+            "ecc_nist_p224" => Ok(EncryptionAlgorithm::Ecc224),
+            "ecc256" => Ok(EncryptionAlgorithm::Ecc256),
+            "ecc_nist_p256" => Ok(EncryptionAlgorithm::Ecc256),
+            "ecc384" => Ok(EncryptionAlgorithm::Ecc384),
+            "ecc_nist_p384" => Ok(EncryptionAlgorithm::Ecc384),
+            "ecc521" => Ok(EncryptionAlgorithm::Ecc521),
+            "ecc_nist_p521" => Ok(EncryptionAlgorithm::Ecc521),
+            "ecc_sm2" => Ok(EncryptionAlgorithm::EccSm2),
+            "ecc_sm2_p256" => Ok(EncryptionAlgorithm::EccSm2),
             _ => Err(AlgorithmError::UnsupportedEncryptionAlgorithm(
                 value.into(),
             )),
@@ -119,8 +194,16 @@ impl TryFrom<&str> for EncryptionAlgorithm {
 impl fmt::Display for EncryptionAlgorithm {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let value = match self {
-            EncryptionAlgorithm::Rsa => "rsa",
-            EncryptionAlgorithm::Ecc => "ecc",
+            EncryptionAlgorithm::Rsa1024 => "rsa1024",
+            EncryptionAlgorithm::Rsa2048 => "rsa", /* for backwards compatibility */
+            EncryptionAlgorithm::Rsa3072 => "rsa3072",
+            EncryptionAlgorithm::Rsa4096 => "rsa4096",
+            EncryptionAlgorithm::Ecc192 => "ecc192",
+            EncryptionAlgorithm::Ecc224 => "ecc224",
+            EncryptionAlgorithm::Ecc256 => "ecc", /* for backwards compatibility */
+            EncryptionAlgorithm::Ecc384 => "ecc384",
+            EncryptionAlgorithm::Ecc521 => "ecc521",
+            EncryptionAlgorithm::EccSm2 => "ecc_sm2",
         };
         write!(f, "{value}")
     }
@@ -219,9 +302,13 @@ mod tests {
     #[test]
     fn test_encrypt_try_from() {
         let result = EncryptionAlgorithm::try_from("rsa");
-        assert!(result.is_ok());
+        assert!(result.is_ok_and(|r| r == EncryptionAlgorithm::Rsa2048));
         let result = EncryptionAlgorithm::try_from("ecc");
-        assert!(result.is_ok());
+        assert!(result.is_ok_and(|r| r == EncryptionAlgorithm::Ecc256));
+        let result = EncryptionAlgorithm::try_from("rsa4096");
+        assert!(result.is_ok_and(|r| r == EncryptionAlgorithm::Rsa4096));
+        let result = EncryptionAlgorithm::try_from("ecc256");
+        assert!(result.is_ok_and(|r| r == EncryptionAlgorithm::Ecc256));
     }
     #[test]
     fn test_unsupported_encrypt_try_from() {
