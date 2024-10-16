@@ -906,24 +906,9 @@ async fn main() -> Result<()> {
                                     errors_handler::agent_default,
                                 )),
                         )
-                        .service(
-                            web::scope("/keys")
-                                .service(web::resource("/pubkey").route(
-                                    web::get().to(keys_handler::pubkey),
-                                ))
-                                .service(web::resource("/ukey").route(
-                                    web::post().to(keys_handler::u_key),
-                                ))
-                                .service(web::resource("/verify").route(
-                                    web::get().to(keys_handler::verify),
-                                ))
-                                .service(web::resource("/vkey").route(
-                                    web::post().to(keys_handler::v_key),
-                                ))
-                                .default_service(web::to(
-                                    errors_handler::keys_default,
-                                )),
-                        )
+                        .service(web::scope("/keys").configure(
+                            keys_handler::configure_keys_endpoints,
+                        ))
                         .service(
                             web::scope("/notifications")
                                 .service(web::resource("/revocation").route(
