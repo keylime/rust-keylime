@@ -910,16 +910,9 @@ async fn main() -> Result<()> {
                             keys_handler::configure_keys_endpoints,
                         ))
                         .service(
-                            web::scope("/notifications")
-                                .service(web::resource("/revocation").route(
-                                    web::post().to(
-                                        notifications_handler::revocation,
-                                    ),
-                                ))
-                                .default_service(web::to(
-                                    errors_handler::notifications_default,
-                                )),
-                        )
+                            web::scope("/notifications").configure(
+                            notifications_handler::configure_notifications_endpoints,
+                        ))
                         .service(web::scope("/quotes").configure(
                             quotes_handler::configure_quotes_endpoints,
                         ))

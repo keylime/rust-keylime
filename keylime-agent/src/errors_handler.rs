@@ -127,39 +127,6 @@ pub(crate) async fn agent_default(req: HttpRequest) -> impl Responder {
     response
 }
 
-pub(crate) async fn notifications_default(
-    req: HttpRequest,
-) -> impl Responder {
-    let error;
-    let response;
-    let message;
-
-    match req.head().method {
-        http::Method::POST => {
-            error = 400;
-            message = "URI not supported, only /revocation is supported for POST in /notifications/ interface";
-            response = HttpResponse::BadRequest()
-                .json(JsonWrapper::error(error, message));
-        }
-        _ => {
-            error = 405;
-            message = "Method is not supported in /notifications/ interface";
-            response = HttpResponse::MethodNotAllowed()
-                .insert_header(http::header::Allow(vec![http::Method::POST]))
-                .json(JsonWrapper::error(error, message));
-        }
-    };
-
-    warn!(
-        "{} returning {} response. {}",
-        req.head().method,
-        error,
-        message
-    );
-
-    response
-}
-
 pub(crate) async fn version_not_supported(
     req: HttpRequest,
     version: web::Path<APIVersion>,
@@ -286,12 +253,6 @@ mod tests {
     #[actix_rt::test]
     async fn test_api_default() {
         test_default(web::resource("/").to(api_default), "GET, POST").await
-    }
-
-    #[actix_rt::test]
-    async fn test_notifications_default() {
-        test_default(web::resource("/").to(notifications_default), "POST")
-            .await
     }
 
     #[actix_rt::test]
