@@ -897,15 +897,9 @@ async fn main() -> Result<()> {
                 )
                 .service(
                     web::scope(&format!("/{API_VERSION}"))
-                        .service(
-                            web::scope("/agent")
-                                .service(web::resource("/info").route(
-                                    web::get().to(agent_handler::info),
-                                ))
-                                .default_service(web::to(
-                                    errors_handler::agent_default,
-                                )),
-                        )
+                        .service(web::scope("/agent").configure(
+                                agent_handler::configure_agent_endpoints,
+                        ))
                         .service(web::scope("/keys").configure(
                             keys_handler::configure_keys_endpoints,
                         ))
