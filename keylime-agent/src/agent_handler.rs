@@ -3,7 +3,7 @@
 
 use crate::common::JsonWrapper;
 use crate::{tpm, Error as KeylimeError, QuoteData};
-use actix_web::{web, HttpRequest, HttpResponse, Responder};
+use actix_web::{http, web, HttpRequest, HttpResponse, Responder};
 use base64::{engine::general_purpose, Engine as _};
 use log::*;
 use serde::{Deserialize, Serialize};
@@ -19,7 +19,7 @@ pub(crate) struct AgentInfo {
 
 // This is an Info request which gets some information about this keylime agent
 // It should return a AgentInfo object as JSON
-pub async fn info(
+async fn info(
     req: HttpRequest,
     data: web::Data<QuoteData>,
 ) -> impl Responder {
@@ -38,12 +38,52 @@ pub async fn info(
     HttpResponse::Ok().json(response)
 }
 
+/// Configure the endpoints for the /agent scope
+async fn agent_default(req: HttpRequest) -> impl Responder {
+    let error;
+    let response;
+    let message;
+
+    match req.head().method {
+        http::Method::GET => {
+            error = 400;
+            message = "URI not supported, only /info is supported for GET in /agent interface";
+            response = HttpResponse::BadRequest()
+                .json(JsonWrapper::error(error, message));
+        }
+        _ => {
+            error = 405;
+            message = "Method is not supported in /agent interface";
+            response = HttpResponse::MethodNotAllowed()
+                .insert_header(http::header::Allow(vec![http::Method::GET]))
+                .json(JsonWrapper::error(error, message));
+        }
+    };
+
+    warn!(
+        "{} returning {} response. {}",
+        req.head().method,
+        error,
+        message
+    );
+
+    response
+}
+
+/// Configure the endpoints for the /agents scope
+pub(crate) fn configure_agent_endpoints(cfg: &mut web::ServiceConfig) {
+    _ = cfg
+        .service(web::resource("/info").route(web::get().to(info)))
+        .default_service(web::to(agent_default));
+}
+
 #[cfg(test)]
 #[cfg(feature = "testing")]
 mod tests {
     use super::*;
     use crate::common::API_VERSION;
     use actix_web::{test, web, App};
+    use serde_json::{json, Value};
 
     #[actix_rt::test]
     async fn test_agent_info() {
@@ -72,5 +112,38 @@ mod tests {
         assert_eq!(result.results.tpm_hash_alg.as_str(), "sha256");
         assert_eq!(result.results.tpm_enc_alg.as_str(), "rsa");
         assert_eq!(result.results.tpm_sign_alg.as_str(), "rsassa");
+    }
+
+    #[actix_rt::test]
+    async fn test_agents_default() {
+        let mut app = test::init_service(
+            App::new().service(web::resource("/").to(agent_default)),
+        )
+        .await;
+
+        let req = test::TestRequest::get().uri("/").to_request();
+
+        let resp = test::call_service(&app, req).await;
+        assert!(resp.status().is_client_error());
+
+        let result: JsonWrapper<Value> = test::read_body_json(resp).await;
+
+        assert_eq!(result.results, json!({}));
+        assert_eq!(result.code, 400);
+
+        let req = test::TestRequest::delete().uri("/").to_request();
+
+        let resp = test::call_service(&app, req).await;
+        assert!(resp.status().is_client_error());
+
+        let headers = resp.headers();
+
+        assert!(headers.contains_key("allow"));
+        assert_eq!(headers.get("allow").unwrap().to_str().unwrap(), "GET"); //#[allow_ci]
+
+        let result: JsonWrapper<Value> = test::read_body_json(resp).await;
+
+        assert_eq!(result.results, json!({}));
+        assert_eq!(result.code, 405);
     }
 }
