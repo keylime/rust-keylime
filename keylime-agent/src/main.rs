@@ -920,18 +920,9 @@ async fn main() -> Result<()> {
                                     errors_handler::notifications_default,
                                 )),
                         )
-                        .service(
-                            web::scope("/quotes")
-                                .service(web::resource("/identity").route(
-                                    web::get().to(quotes_handler::identity),
-                                ))
-                                .service(web::resource("/integrity").route(
-                                    web::get().to(quotes_handler::integrity),
-                                ))
-                                .default_service(web::to(
-                                    errors_handler::quotes_default,
-                                )),
-                        )
+                        .service(web::scope("/quotes").configure(
+                            quotes_handler::configure_quotes_endpoints,
+                        ))
                         .default_service(web::to(
                             errors_handler::api_default,
                         )),

@@ -96,37 +96,6 @@ pub(crate) async fn api_default(req: HttpRequest) -> impl Responder {
     response
 }
 
-pub(crate) async fn quotes_default(req: HttpRequest) -> impl Responder {
-    let error;
-    let response;
-    let message;
-
-    match req.head().method {
-        http::Method::GET => {
-            error = 400;
-            message = "URI not supported, only /identity and /integrity are supported for GET in /quotes/ interface";
-            response = HttpResponse::BadRequest()
-                .json(JsonWrapper::error(error, message));
-        }
-        _ => {
-            error = 405;
-            message = "Method is not supported in /quotes/ interface";
-            response = HttpResponse::MethodNotAllowed()
-                .insert_header(http::header::Allow(vec![http::Method::GET]))
-                .json(JsonWrapper::error(error, message));
-        }
-    };
-
-    warn!(
-        "{} returning {} response. {}",
-        req.head().method,
-        error,
-        message
-    );
-
-    response
-}
-
 pub(crate) async fn agent_default(req: HttpRequest) -> impl Responder {
     let error;
     let response;
@@ -317,11 +286,6 @@ mod tests {
     #[actix_rt::test]
     async fn test_api_default() {
         test_default(web::resource("/").to(api_default), "GET, POST").await
-    }
-
-    #[actix_rt::test]
-    async fn test_quotes_default() {
-        test_default(web::resource("/").to(quotes_default), "GET").await
     }
 
     #[actix_rt::test]
