@@ -96,46 +96,6 @@ pub(crate) async fn api_default(req: HttpRequest) -> impl Responder {
     response
 }
 
-pub(crate) async fn keys_default(req: HttpRequest) -> impl Responder {
-    let error;
-    let response;
-    let message;
-
-    match req.head().method {
-        http::Method::GET => {
-            error = 400;
-            message = "URI not supported, only /pubkey and /verify are supported for GET in /keys interface";
-            response = HttpResponse::BadRequest()
-                .json(JsonWrapper::error(error, message));
-        }
-        http::Method::POST => {
-            error = 400;
-            message = "URI not supported, only /ukey and /vkey are supported for POST in /keys interface";
-            response = HttpResponse::BadRequest()
-                .json(JsonWrapper::error(error, message));
-        }
-        _ => {
-            error = 405;
-            message = "Method is not supported in /keys interface";
-            response = HttpResponse::MethodNotAllowed()
-                .insert_header(http::header::Allow(vec![
-                    http::Method::GET,
-                    http::Method::POST,
-                ]))
-                .json(JsonWrapper::error(error, message));
-        }
-    };
-
-    warn!(
-        "{} returning {} response. {}",
-        req.head().method,
-        error,
-        message
-    );
-
-    response
-}
-
 pub(crate) async fn quotes_default(req: HttpRequest) -> impl Responder {
     let error;
     let response;
@@ -357,11 +317,6 @@ mod tests {
     #[actix_rt::test]
     async fn test_api_default() {
         test_default(web::resource("/").to(api_default), "GET, POST").await
-    }
-
-    #[actix_rt::test]
-    async fn test_keys_default() {
-        test_default(web::resource("/").to(keys_default), "GET, POST").await
     }
 
     #[actix_rt::test]
