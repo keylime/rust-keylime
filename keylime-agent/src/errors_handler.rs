@@ -96,37 +96,6 @@ pub(crate) async fn api_default(req: HttpRequest) -> impl Responder {
     response
 }
 
-pub(crate) async fn agent_default(req: HttpRequest) -> impl Responder {
-    let error;
-    let response;
-    let message;
-
-    match req.head().method {
-        http::Method::GET => {
-            error = 400;
-            message = "URI not supported, only /info is supported for GET in /agent interface";
-            response = HttpResponse::BadRequest()
-                .json(JsonWrapper::error(error, message));
-        }
-        _ => {
-            error = 405;
-            message = "Method is not supported in /agent interface";
-            response = HttpResponse::MethodNotAllowed()
-                .insert_header(http::header::Allow(vec![http::Method::GET]))
-                .json(JsonWrapper::error(error, message));
-        }
-    };
-
-    warn!(
-        "{} returning {} response. {}",
-        req.head().method,
-        error,
-        message
-    );
-
-    response
-}
-
 pub(crate) async fn version_not_supported(
     req: HttpRequest,
     version: web::Path<APIVersion>,
@@ -253,11 +222,6 @@ mod tests {
     #[actix_rt::test]
     async fn test_api_default() {
         test_default(web::resource("/").to(api_default), "GET, POST").await
-    }
-
-    #[actix_rt::test]
-    async fn test_agent_default() {
-        test_default(web::resource("/").to(agent_default), "GET").await
     }
 
     #[derive(Serialize, Deserialize)]
