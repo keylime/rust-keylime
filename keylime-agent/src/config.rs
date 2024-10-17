@@ -1,24 +1,27 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2022 Keylime Authors
 
-use crate::{error::Error, permissions, tpm};
+use crate::{permissions, tpm};
 use config::{
     builder::DefaultState, Config, ConfigBuilder, ConfigError, Environment,
-    File, FileFormat, Map, Source, Value,
+    File, FileFormat, Map, Source, Value, ValueKind::Table,
 };
 use glob::glob;
 use keylime::{
     algorithms::{EncryptionAlgorithm, HashAlgorithm, SignAlgorithm},
-    hostname_parser::parse_hostname,
-    ip_parser::parse_ip,
-    list_parser::parse_list,
+    hostname_parser::{parse_hostname, HostnameParsingError},
+    ip_parser::{parse_ip, IpParsingError},
+    list_parser::{parse_list, ListParsingError},
 };
 use log::*;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, Serializer};
+use serde_json::Value as JsonValue;
 use std::{
+    collections::HashMap,
     env,
     path::{Path, PathBuf},
 };
+use thiserror::Error;
 use uuid::Uuid;
 
 pub static CONFIG_VERSION: &str = "2.0";
@@ -76,104 +79,158 @@ pub static DEFAULT_MEASUREDBOOT_ML_PATH: &str =
 pub static DEFAULT_CONFIG: &str = "/etc/keylime/agent.conf";
 pub static DEFAULT_CONFIG_SYS: &str = "/usr/etc/keylime/agent.conf";
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub(crate) struct EnvConfig {
-    pub version: Option<String>,
-    pub uuid: Option<String>,
-    pub ip: Option<String>,
-    pub port: Option<u32>,
-    pub contact_ip: Option<String>,
-    pub contact_port: Option<u32>,
-    pub registrar_ip: Option<String>,
-    pub registrar_port: Option<u32>,
-    pub enable_agent_mtls: Option<bool>,
-    pub keylime_dir: Option<String>,
-    pub server_key: Option<String>,
-    pub server_cert: Option<String>,
-    pub iak_cert: Option<String>,
-    pub idevid_cert: Option<String>,
-    pub server_key_password: Option<String>,
-    pub trusted_client_ca: Option<String>,
-    pub enc_keyname: Option<String>,
-    pub dec_payload_file: Option<String>,
-    pub secure_size: Option<String>,
-    pub tpm_ownerpassword: Option<String>,
-    pub extract_payload_zip: Option<bool>,
-    pub enable_revocation_notifications: Option<bool>,
-    pub revocation_actions_dir: Option<String>,
-    pub revocation_notification_ip: Option<String>,
-    pub revocation_notification_port: Option<u32>,
-    pub revocation_cert: Option<String>,
-    pub revocation_actions: Option<String>,
-    pub payload_script: Option<String>,
-    pub enable_insecure_payload: Option<bool>,
-    pub allow_payload_revocation_actions: Option<bool>,
-    pub tpm_hash_alg: Option<String>,
-    pub tpm_encryption_alg: Option<String>,
-    pub tpm_signing_alg: Option<String>,
-    pub ek_handle: Option<String>,
-    pub enable_iak_idevid: Option<bool>,
-    pub iak_idevid_asymmetric_alg: Option<String>,
-    pub iak_idevid_name_alg: Option<String>,
-    pub iak_idevid_template: Option<String>,
-    pub idevid_password: Option<String>,
-    pub iak_password: Option<String>,
-    pub idevid_handle: Option<String>,
-    pub iak_handle: Option<String>,
-    pub run_as: Option<String>,
-    pub agent_data_path: Option<String>,
-    pub ima_ml_path: Option<String>,
-    pub measuredboot_ml_path: Option<String>,
+#[derive(Error, Debug)]
+pub enum KeylimeConfigError {
+    // Error from config crate
+    #[error("Error from the config crate")]
+    Config(#[from] ConfigError),
+
+    // Generic configuration error
+    #[error("Configuration error: {0}")]
+    Generic(String),
+
+    // Glob error
+    #[error("Glob pattern error")]
+    GlobPattern(#[from] glob::PatternError),
+
+    // Host name parsing error
+    #[error("Host name parsing error")]
+    HostnameParsing(#[from] HostnameParsingError),
+
+    // Incompatible options error
+    #[error("Incompatible configuration options '{option_a}' set as '{value_a}', but '{option_b}' is set as '{value_b}'")]
+    IncompatibleOptions {
+        option_a: String,
+        value_a: String,
+        option_b: String,
+        value_b: String,
+    },
+
+    // Infallible
+    #[error("Infallible")]
+    Infallible(#[from] std::convert::Infallible),
+
+    // IP parsing error
+    #[error("IP parsing error")]
+    IpParsing(#[from] IpParsingError),
+
+    // Unsupported type in configuration
+    #[error(
+        "Unsupported type conversion from serde_json::Value to config::Value"
+    )]
+    JsonConversion,
+
+    // List parsing error
+    #[error("List parsing error")]
+    ListParsing(#[from] ListParsingError),
+
+    // Missing configuration file set in KEYLIME_AGENT_CONFIG
+    #[error("Missing file {file} set in 'KEYLIME_AGENT_CONFIG' environment variable")]
+    MissingEnvConfigFile { file: String },
+
+    // Missing directory set in keylime_dir configuration option
+    #[error(
+        "Missing directory {path} set in 'keylime_dir' configuration option"
+    )]
+    MissingKeylimeDir {
+        path: String,
+        source: std::io::Error,
+    },
+
+    #[error("Required option {0} not set in configuration")]
+    RequiredOption(String),
+
+    // Error from serde crate
+    #[error("Serde error")]
+    Serde(#[from] serde_json::Error),
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 pub(crate) struct AgentConfig {
-    pub version: String,
-    pub uuid: String,
-    pub ip: String,
-    pub port: u32,
+    pub agent_data_path: String,
+    pub allow_payload_revocation_actions: bool,
     pub contact_ip: String,
     pub contact_port: u32,
-    pub registrar_ip: String,
-    pub registrar_port: u32,
-    pub enable_agent_mtls: bool,
-    pub keylime_dir: String,
-    pub server_key: String,
-    pub server_cert: String,
-    pub iak_cert: String,
-    pub idevid_cert: String,
-    pub server_key_password: String,
-    pub trusted_client_ca: String,
-    pub enc_keyname: String,
     pub dec_payload_file: String,
-    pub secure_size: String,
-    pub tpm_ownerpassword: String,
-    pub extract_payload_zip: bool,
-    pub enable_revocation_notifications: bool,
-    pub revocation_actions_dir: String,
-    pub revocation_notification_ip: String,
-    pub revocation_notification_port: u32,
-    pub revocation_cert: String,
-    pub revocation_actions: String,
-    pub payload_script: String,
-    pub enable_insecure_payload: bool,
-    pub allow_payload_revocation_actions: bool,
-    pub tpm_hash_alg: String,
-    pub tpm_encryption_alg: String,
-    pub tpm_signing_alg: String,
     pub ek_handle: String,
+    pub enable_agent_mtls: bool,
     pub enable_iak_idevid: bool,
+    pub enable_insecure_payload: bool,
+    pub enable_revocation_notifications: bool,
+    pub enc_keyname: String,
+    pub extract_payload_zip: bool,
+    pub iak_cert: String,
+    pub iak_handle: String,
     pub iak_idevid_asymmetric_alg: String,
     pub iak_idevid_name_alg: String,
     pub iak_idevid_template: String,
-    pub idevid_password: String,
     pub iak_password: String,
+    pub idevid_cert: String,
     pub idevid_handle: String,
-    pub iak_handle: String,
-    pub run_as: String,
-    pub agent_data_path: String,
+    pub idevid_password: String,
     pub ima_ml_path: String,
+    pub ip: String,
+    pub keylime_dir: String,
     pub measuredboot_ml_path: String,
+    pub payload_script: String,
+    pub port: u32,
+    pub registrar_ip: String,
+    pub registrar_port: u32,
+    pub revocation_actions: String,
+    pub revocation_actions_dir: String,
+    pub revocation_cert: String,
+    pub revocation_notification_ip: String,
+    pub revocation_notification_port: u32,
+    pub run_as: String,
+    pub secure_size: String,
+    pub server_cert: String,
+    pub server_key: String,
+    pub server_key_password: String,
+    pub tpm_encryption_alg: String,
+    pub tpm_hash_alg: String,
+    pub tpm_ownerpassword: String,
+    pub tpm_signing_alg: String,
+    pub trusted_client_ca: String,
+    pub uuid: String,
+    pub version: String,
+}
+
+#[derive(Clone, Debug)]
+struct EnvConfig {
+    map: HashMap<String, Value>,
+}
+
+impl EnvConfig {
+    pub fn new() -> Result<Self, KeylimeConfigError> {
+        let env_source = Environment::with_prefix("KEYLIME_AGENT")
+            .separator(".")
+            .prefix_separator("_");
+
+        // Log debug message for configuration obtained from environment
+        env_source
+            .collect()?
+            .iter()
+            .for_each(|(c, v)| debug!("Environment configuration {c}={v}"));
+
+        // Return an EnvConfig containing the collected environment variables in a format that
+        // allows it to be used as a Source for KeylimeConfig
+        Ok(EnvConfig {
+            map: Map::from([(
+                "agent".to_string(),
+                Value::from(env_source.collect()?),
+            )]),
+        })
+    }
+}
+
+impl Source for EnvConfig {
+    fn collect(&self) -> Result<Map<String, Value>, ConfigError> {
+        Ok(self.map.clone())
+    }
+
+    fn clone_into_box(&self) -> Box<dyn Source + Send + Sync> {
+        Box::new(self.clone())
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
@@ -181,221 +238,61 @@ pub(crate) struct KeylimeConfig {
     pub agent: AgentConfig,
 }
 
-impl EnvConfig {
-    pub fn get_map(&self) -> Map<String, Value> {
-        let mut agent: Map<String, Value> = Map::new();
-        if let Some(ref v) = self.version {
-            _ = agent.insert("version".to_string(), v.to_string().into());
-        }
-        if let Some(ref v) = self.uuid {
-            _ = agent.insert("uuid".to_string(), v.to_string().into());
-        }
-        if let Some(ref v) = self.ip {
-            _ = agent.insert("ip".to_string(), v.to_string().into());
-        }
-        if let Some(v) = self.port {
-            _ = agent.insert("port".to_string(), v.into());
-        }
-        if let Some(ref v) = self.contact_ip {
-            _ = agent.insert("contact_ip".to_string(), v.to_string().into());
-        }
-        if let Some(v) = self.contact_port {
-            _ = agent.insert("contact_port".to_string(), v.into());
-        }
-        if let Some(ref v) = self.registrar_ip {
-            _ = agent
-                .insert("registrar_ip".to_string(), v.to_string().into());
-        }
-        if let Some(v) = self.registrar_port {
-            _ = agent.insert("registrar_port".to_string(), v.into());
-        }
-        if let Some(v) = self.enable_agent_mtls {
-            _ = agent.insert("enable_agent_mtls".to_string(), v.into());
-        }
-        if let Some(ref v) = self.keylime_dir {
-            _ = agent.insert("keylime_dir".to_string(), v.to_string().into());
-        }
-        if let Some(ref v) = self.server_key {
-            _ = agent.insert("server_key".to_string(), v.to_string().into());
-        }
-        if let Some(ref v) = self.server_key_password {
-            _ = agent.insert(
-                "server_key_password".to_string(),
-                v.to_string().into(),
-            );
-        }
-        if let Some(ref v) = self.server_cert {
-            _ = agent.insert("server_cert".to_string(), v.to_string().into());
-        }
-        if let Some(ref v) = self.iak_cert {
-            _ = agent.insert("iak_cert".to_string(), v.to_string().into());
-        }
-        if let Some(ref v) = self.idevid_cert {
-            _ = agent.insert("idevid_cert".to_string(), v.to_string().into());
-        }
-        if let Some(ref v) = self.trusted_client_ca {
-            _ = agent.insert(
-                "trusted_client_ca".to_string(),
-                v.to_string().into(),
-            );
-        }
-        if let Some(ref v) = self.enc_keyname {
-            _ = agent.insert("enc_keyname".to_string(), v.to_string().into());
-        }
-        if let Some(ref v) = self.dec_payload_file {
-            _ = agent
-                .insert("dec_payload_file".to_string(), v.to_string().into());
-        }
-        if let Some(ref v) = self.secure_size {
-            _ = agent.insert("secure_size".to_string(), v.to_string().into());
-        }
-        if let Some(ref v) = self.tpm_ownerpassword {
-            _ = agent.insert(
-                "tpm_ownerpassword".to_string(),
-                v.to_string().into(),
-            );
-        }
-        if let Some(v) = self.extract_payload_zip {
-            _ = agent.insert("extract_payload_zip".to_string(), v.into());
-        }
-        if let Some(v) = self.enable_revocation_notifications {
-            _ = agent.insert(
-                "enable_revocation_notifications".to_string(),
-                v.into(),
-            );
-        }
-        if let Some(ref v) = self.revocation_actions_dir {
-            _ = agent.insert(
-                "revocation_actions_dir".to_string(),
-                v.to_string().into(),
-            );
-        }
-        if let Some(ref v) = self.revocation_notification_ip {
-            _ = agent.insert(
-                "revocation_notification_ip".to_string(),
-                v.to_string().into(),
-            );
-        }
-        if let Some(v) = self.revocation_notification_port {
-            _ = agent
-                .insert("revocation_notification_port".to_string(), v.into());
-        }
-        if let Some(ref v) = self.revocation_cert {
-            _ = agent
-                .insert("revocation_cert".to_string(), v.to_string().into());
-        }
-        if let Some(ref v) = self.revocation_actions {
-            _ = agent.insert(
-                "revocation_actions".to_string(),
-                v.to_string().into(),
-            );
-        }
-        if let Some(ref v) = self.payload_script {
-            _ = agent
-                .insert("payload_script".to_string(), v.to_string().into());
-        }
-        if let Some(v) = self.enable_insecure_payload {
-            _ = agent.insert("enable_insecure_payload".to_string(), v.into());
-        }
-        if let Some(v) = self.allow_payload_revocation_actions {
-            _ = agent.insert(
-                "allow_payload_revocation_actions".to_string(),
-                v.into(),
-            );
-        }
-        if let Some(ref v) = self.tpm_hash_alg {
-            _ = agent
-                .insert("tpm_hash_alg".to_string(), v.to_string().into());
-        }
-        if let Some(ref v) = self.tpm_encryption_alg {
-            _ = agent.insert(
-                "tpm_encryption_alg".to_string(),
-                v.to_string().into(),
-            );
-        }
-        if let Some(ref v) = self.tpm_signing_alg {
-            _ = agent
-                .insert("tpm_signing_alg".to_string(), v.to_string().into());
-        }
-        if let Some(ref v) = self.ek_handle {
-            _ = agent.insert("ek_handle".to_string(), v.to_string().into());
-        }
-        if let Some(v) = self.enable_iak_idevid {
-            _ = agent.insert("enable_iak_idevid".to_string(), v.into());
-        }
-        if let Some(ref v) = self.iak_idevid_asymmetric_alg {
-            _ = agent.insert(
-                "iak_idevid_asymmetric_alg".to_string(),
-                v.to_string().into(),
-            );
-        }
-        if let Some(ref v) = self.iak_idevid_name_alg {
-            _ = agent.insert(
-                "iak_idevid_name_alg".to_string(),
-                v.to_string().into(),
-            );
-        }
-        if let Some(ref v) = self.iak_idevid_template {
-            _ = agent.insert(
-                "iak_idevid_template".to_string(),
-                v.to_string().into(),
-            );
-        }
-        if let Some(ref v) = self.idevid_password {
-            _ = agent
-                .insert("idevid_password".to_string(), v.to_string().into());
-        }
-        if let Some(ref v) = self.iak_password {
-            _ = agent
-                .insert("iak_password".to_string(), v.to_string().into());
-        }
-        if let Some(ref v) = self.idevid_handle {
-            _ = agent
-                .insert("idevid_handle".to_string(), v.to_string().into());
-        }
-        if let Some(ref v) = self.iak_handle {
-            _ = agent.insert("iak_handle".to_string(), v.to_string().into());
-        }
-        if let Some(ref v) = self.run_as {
-            _ = agent.insert("run_as".to_string(), v.to_string().into());
-        }
-        if let Some(ref v) = self.agent_data_path {
-            _ = agent
-                .insert("agent_data_path".to_string(), v.to_string().into());
-        }
-        if let Some(ref v) = self.ima_ml_path {
-            _ = agent.insert("ima_ml_path".to_string(), v.to_string().into());
-        }
-        if let Some(ref v) = self.measuredboot_ml_path {
-            _ = agent.insert(
-                "measuredboot_ml_path".to_string(),
-                v.to_string().into(),
-            );
-        }
-        agent
-    }
-
-    pub fn iter(&self) -> impl Iterator {
-        self.get_map().into_iter()
-    }
-}
-
 impl KeylimeConfig {
-    pub fn new() -> Result<Self, Error> {
+    pub fn new() -> Result<Self, KeylimeConfigError> {
         // Get the base configuration file from the environment variable or the default locations
-        let setting = config_get_setting()?.build()?;
-        let config: KeylimeConfig = setting.try_deserialize()?;
+        let config: KeylimeConfig =
+            config_get_setting()?.build()?.try_deserialize()?;
 
         // Replace keywords with actual values
         config_translate_keywords(&config)
     }
 }
 
-impl Source for EnvConfig {
+// Helper function to convert serde_json::Value to config::Value
+fn json_to_config_value(json_value: JsonValue) -> Result<Value, ConfigError> {
+    match json_value {
+        JsonValue::Bool(b) => Ok(Value::from(b)),
+        JsonValue::Number(n) => {
+            if let Some(i) = n.as_i64() {
+                Ok(Value::from(i))
+            } else if let Some(u) = n.as_u64() {
+                Ok(Value::from(u))
+            } else if let Some(f) = n.as_f64() {
+                Ok(Value::from(f))
+            } else {
+                Err(ConfigError::Foreign(Box::new(
+                    KeylimeConfigError::JsonConversion,
+                )))
+            }
+        }
+        JsonValue::String(s) => Ok(Value::from(s)),
+        JsonValue::Array(arr) => Ok(Value::from(
+            arr.into_iter()
+                .map(json_to_config_value)
+                .collect::<Result<Vec<_>, ConfigError>>()?,
+        )),
+        JsonValue::Object(obj) => {
+            let mut m = Map::new();
+            for (k, v) in obj.into_iter() {
+                _ = m.insert(k, json_to_config_value(v)?)
+            }
+            Ok(Value::from(m))
+        }
+        JsonValue::Null => Err(ConfigError::Foreign(Box::new(
+            KeylimeConfigError::JsonConversion,
+        ))),
+    }
+}
+
+impl Source for AgentConfig {
     fn collect(&self) -> Result<Map<String, Value>, ConfigError> {
-        // Note: the returned mapping matches the KeylimeConfig
-        // This is to allow overriding the values using environment variables
-        Ok(Map::from([("agent".to_string(), self.get_map().into())]))
+        let json = serde_json::to_value(self)
+            .map_err(|e| ConfigError::Foreign(Box::new(e)))?;
+
+        let config_map = json_to_config_value(json)?.into_table()?;
+
+        Ok(Map::from([("agent".to_string(), Value::from(config_map))]))
     }
 
     fn clone_into_box(&self) -> Box<dyn Source + Send + Sync> {
@@ -405,188 +302,7 @@ impl Source for EnvConfig {
 
 impl Source for KeylimeConfig {
     fn collect(&self) -> Result<Map<String, Value>, ConfigError> {
-        let mut m: Map<String, Value> = Map::new();
-
-        _ = m.insert(
-            "version".to_string(),
-            self.agent.version.to_string().into(),
-        );
-        _ = m.insert("uuid".to_string(), self.agent.uuid.to_string().into());
-        _ = m.insert("ip".to_string(), self.agent.ip.to_string().into());
-        _ = m.insert("port".to_string(), self.agent.port.into());
-        _ = m.insert(
-            "contact_ip".to_string(),
-            self.agent.contact_ip.to_string().into(),
-        );
-        _ = m.insert(
-            "contact_port".to_string(),
-            self.agent.contact_port.into(),
-        );
-        _ = m.insert(
-            "registrar_ip".to_string(),
-            self.agent.registrar_ip.to_string().into(),
-        );
-        _ = m.insert(
-            "registrar_port".to_string(),
-            self.agent.registrar_port.into(),
-        );
-        _ = m.insert(
-            "enable_agent_mtls".to_string(),
-            self.agent.enable_agent_mtls.into(),
-        );
-        _ = m.insert(
-            "keylime_dir".to_string(),
-            self.agent.keylime_dir.to_string().into(),
-        );
-        _ = m.insert(
-            "server_key".to_string(),
-            self.agent.server_key.to_string().into(),
-        );
-        _ = m.insert(
-            "server_key_password".to_string(),
-            self.agent.server_key_password.to_string().into(),
-        );
-        _ = m.insert(
-            "server_cert".to_string(),
-            self.agent.server_cert.to_string().into(),
-        );
-        _ = m.insert(
-            "iak_cert".to_string(),
-            self.agent.iak_cert.to_string().into(),
-        );
-        _ = m.insert(
-            "idevid_cert".to_string(),
-            self.agent.idevid_cert.to_string().into(),
-        );
-        _ = m.insert(
-            "trusted_client_ca".to_string(),
-            self.agent.trusted_client_ca.to_string().into(),
-        );
-        _ = m.insert(
-            "enc_keyname".to_string(),
-            self.agent.enc_keyname.to_string().into(),
-        );
-        _ = m.insert(
-            "dec_payload_file".to_string(),
-            self.agent.dec_payload_file.to_string().into(),
-        );
-        _ = m.insert(
-            "secure_size".to_string(),
-            self.agent.secure_size.to_string().into(),
-        );
-        _ = m.insert(
-            "tpm_ownerpassword".to_string(),
-            self.agent.tpm_ownerpassword.to_string().into(),
-        );
-        _ = m.insert(
-            "extract_payload_zip".to_string(),
-            self.agent.extract_payload_zip.to_string().into(),
-        );
-        _ = m.insert(
-            "enable_revocation_notifications".to_string(),
-            self.agent
-                .enable_revocation_notifications
-                .to_string()
-                .into(),
-        );
-        _ = m.insert(
-            "revocation_actions_dir".to_string(),
-            self.agent.revocation_actions_dir.to_string().into(),
-        );
-        _ = m.insert(
-            "revocation_notification_ip".to_string(),
-            self.agent.revocation_notification_ip.to_string().into(),
-        );
-        _ = m.insert(
-            "revocation_notification_port".to_string(),
-            self.agent.revocation_notification_port.into(),
-        );
-        _ = m.insert(
-            "revocation_cert".to_string(),
-            self.agent.revocation_cert.to_string().into(),
-        );
-        _ = m.insert(
-            "revocation_actions".to_string(),
-            self.agent.revocation_actions.to_string().into(),
-        );
-        _ = m.insert(
-            "payload_script".to_string(),
-            self.agent.payload_script.to_string().into(),
-        );
-        _ = m.insert(
-            "enable_insecure_payload".to_string(),
-            self.agent.enable_insecure_payload.into(),
-        );
-        _ = m.insert(
-            "allow_payload_revocation_actions".to_string(),
-            self.agent.allow_payload_revocation_actions.into(),
-        );
-        _ = m.insert(
-            "tpm_hash_alg".to_string(),
-            self.agent.tpm_hash_alg.to_string().into(),
-        );
-        _ = m.insert(
-            "tpm_encryption_alg".to_string(),
-            self.agent.tpm_encryption_alg.to_string().into(),
-        );
-        _ = m.insert(
-            "tpm_signing_alg".to_string(),
-            self.agent.tpm_signing_alg.to_string().into(),
-        );
-        _ = m.insert(
-            "ek_handle".to_string(),
-            self.agent.ek_handle.to_string().into(),
-        );
-        _ = m.insert(
-            "enable_iak_idevid".to_string(),
-            self.agent.enable_iak_idevid.into(),
-        );
-        _ = m.insert(
-            "iak_idevid_asymmetric_alg".to_string(),
-            self.agent.iak_idevid_asymmetric_alg.to_string().into(),
-        );
-        _ = m.insert(
-            "iak_idevid_name_alg".to_string(),
-            self.agent.iak_idevid_name_alg.to_string().into(),
-        );
-        _ = m.insert(
-            "iak_idevid_template".to_string(),
-            self.agent.iak_idevid_template.to_string().into(),
-        );
-        _ = m.insert(
-            "idevid_password".to_string(),
-            self.agent.idevid_password.to_string().into(),
-        );
-        _ = m.insert(
-            "iak_password".to_string(),
-            self.agent.iak_password.to_string().into(),
-        );
-        _ = m.insert(
-            "idevid_handle".to_string(),
-            self.agent.idevid_handle.to_string().into(),
-        );
-        _ = m.insert(
-            "iak_handle".to_string(),
-            self.agent.iak_handle.to_string().into(),
-        );
-        _ = m.insert(
-            "run_as".to_string(),
-            self.agent.run_as.to_string().into(),
-        );
-        _ = m.insert(
-            "agent_data_path".to_string(),
-            self.agent.agent_data_path.to_string().into(),
-        );
-        _ = m.insert(
-            "ima_ml_path".to_string(),
-            self.agent.ima_ml_path.to_string().into(),
-        );
-        _ = m.insert(
-            "measuredboot_ml_path".to_string(),
-            self.agent.measuredboot_ml_path.to_string().into(),
-        );
-
-        Ok(Map::from([("agent".to_string(), m.into())]))
+        self.agent.collect()
     }
 
     fn clone_into_box(&self) -> Box<dyn Source + Send + Sync> {
@@ -604,58 +320,58 @@ impl Default for AgentConfig {
         };
 
         AgentConfig {
-            version: CONFIG_VERSION.to_string(),
+            agent_data_path: "default".to_string(),
+            allow_payload_revocation_actions:
+                DEFAULT_ALLOW_PAYLOAD_REVOCATION_ACTIONS,
+            contact_ip: DEFAULT_CONTACT_IP.to_string(),
+            contact_port: DEFAULT_CONTACT_PORT,
+            dec_payload_file: DEFAULT_DEC_PAYLOAD_FILE.to_string(),
+            ek_handle: DEFAULT_EK_HANDLE.to_string(),
+            enable_agent_mtls: DEFAULT_ENABLE_AGENT_MTLS,
+            enable_iak_idevid: DEFAULT_ENABLE_IAK_IDEVID,
+            enable_insecure_payload: DEFAULT_ENABLE_INSECURE_PAYLOAD,
+            enable_revocation_notifications:
+                DEFAULT_ENABLE_REVOCATION_NOTIFICATIONS,
+            enc_keyname: DEFAULT_ENC_KEYNAME.to_string(),
+            extract_payload_zip: DEFAULT_EXTRACT_PAYLOAD_ZIP,
+            iak_cert: "default".to_string(),
+            iak_handle: DEFAULT_IAK_HANDLE.to_string(),
+            iak_idevid_asymmetric_alg: DEFAULT_IAK_IDEVID_ASYMMETRIC_ALG
+                .to_string(),
+            iak_idevid_name_alg: DEFAULT_IAK_IDEVID_NAME_ALG.to_string(),
+            iak_idevid_template: DEFAULT_IAK_IDEVID_TEMPLATE.to_string(),
+            iak_password: DEFAULT_IAK_PASSWORD.to_string(),
+            idevid_cert: "default".to_string(),
+            idevid_handle: DEFAULT_IDEVID_HANDLE.to_string(),
+            idevid_password: DEFAULT_IDEVID_PASSWORD.to_string(),
+            ima_ml_path: "default".to_string(),
             ip: DEFAULT_IP.to_string(),
+            keylime_dir: DEFAULT_KEYLIME_DIR.to_string(),
+            measuredboot_ml_path: "default".to_string(),
+            payload_script: DEFAULT_PAYLOAD_SCRIPT.to_string(),
             port: DEFAULT_PORT,
             registrar_ip: DEFAULT_REGISTRAR_IP.to_string(),
             registrar_port: DEFAULT_REGISTRAR_PORT,
-            uuid: DEFAULT_UUID.to_string(),
-            contact_ip: DEFAULT_CONTACT_IP.to_string(),
-            contact_port: DEFAULT_CONTACT_PORT,
-            tpm_hash_alg: DEFAULT_TPM_HASH_ALG.to_string(),
-            tpm_encryption_alg: DEFAULT_TPM_ENCRYPTION_ALG.to_string(),
-            tpm_signing_alg: DEFAULT_TPM_SIGNING_ALG.to_string(),
-            agent_data_path: "default".to_string(),
-            enable_revocation_notifications:
-                DEFAULT_ENABLE_REVOCATION_NOTIFICATIONS,
+            revocation_actions: DEFAULT_REVOCATION_ACTIONS.to_string(),
+            revocation_actions_dir: DEFAULT_REVOCATION_ACTIONS_DIR
+                .to_string(),
             revocation_cert: "default".to_string(),
             revocation_notification_ip: DEFAULT_REVOCATION_NOTIFICATION_IP
                 .to_string(),
             revocation_notification_port:
                 DEFAULT_REVOCATION_NOTIFICATION_PORT,
+            run_as,
             secure_size: DEFAULT_SECURE_SIZE.to_string(),
-            payload_script: DEFAULT_PAYLOAD_SCRIPT.to_string(),
-            dec_payload_file: DEFAULT_DEC_PAYLOAD_FILE.to_string(),
-            enc_keyname: DEFAULT_ENC_KEYNAME.to_string(),
-            extract_payload_zip: DEFAULT_EXTRACT_PAYLOAD_ZIP,
+            server_cert: "default".to_string(),
             server_key: "default".to_string(),
             server_key_password: DEFAULT_SERVER_KEY_PASSWORD.to_string(),
-            server_cert: "default".to_string(),
-            iak_cert: "default".to_string(),
-            idevid_cert: "default".to_string(),
-            trusted_client_ca: "default".to_string(),
-            revocation_actions: DEFAULT_REVOCATION_ACTIONS.to_string(),
-            revocation_actions_dir: DEFAULT_REVOCATION_ACTIONS_DIR
-                .to_string(),
-            allow_payload_revocation_actions:
-                DEFAULT_ALLOW_PAYLOAD_REVOCATION_ACTIONS,
-            keylime_dir: DEFAULT_KEYLIME_DIR.to_string(),
-            enable_agent_mtls: DEFAULT_ENABLE_AGENT_MTLS,
-            enable_insecure_payload: DEFAULT_ENABLE_INSECURE_PAYLOAD,
-            run_as,
+            tpm_encryption_alg: DEFAULT_TPM_ENCRYPTION_ALG.to_string(),
+            tpm_hash_alg: DEFAULT_TPM_HASH_ALG.to_string(),
             tpm_ownerpassword: DEFAULT_TPM_OWNERPASSWORD.to_string(),
-            ek_handle: DEFAULT_EK_HANDLE.to_string(),
-            enable_iak_idevid: DEFAULT_ENABLE_IAK_IDEVID,
-            iak_idevid_asymmetric_alg: DEFAULT_IAK_IDEVID_ASYMMETRIC_ALG
-                .to_string(),
-            iak_idevid_name_alg: DEFAULT_IAK_IDEVID_NAME_ALG.to_string(),
-            iak_idevid_template: DEFAULT_IAK_IDEVID_TEMPLATE.to_string(),
-            idevid_password: DEFAULT_IDEVID_PASSWORD.to_string(),
-            iak_password: DEFAULT_IAK_PASSWORD.to_string(),
-            idevid_handle: DEFAULT_IDEVID_HANDLE.to_string(),
-            iak_handle: DEFAULT_IAK_HANDLE.to_string(),
-            ima_ml_path: "default".to_string(),
-            measuredboot_ml_path: "default".to_string(),
+            tpm_signing_alg: DEFAULT_TPM_SIGNING_ALG.to_string(),
+            trusted_client_ca: "default".to_string(),
+            uuid: DEFAULT_UUID.to_string(),
+            version: CONFIG_VERSION.to_string(),
         }
     }
 }
@@ -671,89 +387,84 @@ impl Default for KeylimeConfig {
     }
 }
 
-fn config_get_env_setting() -> Result<impl Source, Error> {
-    let env_config: EnvConfig = Config::builder()
-        // Add environment variables overrides
-        .add_source(
-            Environment::with_prefix("KEYLIME_AGENT")
-                .separator(".")
-                .prefix_separator("_"),
-        )
-        .build()?
-        .try_deserialize()?;
-
-    // Log debug message for configuration obtained from environment
-    env_config
-        .get_map()
-        .iter()
-        .for_each(|(c, v)| debug!("Environment configuration {c}={v}"));
-
-    Ok(env_config)
-}
-
-fn config_get_file_setting() -> Result<ConfigBuilder<DefaultState>, Error> {
+fn config_get_setting(
+) -> Result<ConfigBuilder<DefaultState>, KeylimeConfigError> {
     let default_config = KeylimeConfig::default();
-
-    Ok(Config::builder()
+    let mut builder = Config::builder()
         // Default values
-        .add_source(default_config)
-        // Add system configuration file
-        .add_source(
-            File::new(DEFAULT_CONFIG_SYS, FileFormat::Toml).required(false),
-        )
-        // Add system configuration snippets
-        .add_source(
-            glob("/usr/etc/keylime/agent.conf.d/*")
-                .map_err(Error::GlobPattern)?
-                .filter_map(|entry| entry.ok())
-                .map(|path| {
-                    File::new(&path.display().to_string(), FileFormat::Toml)
-                        .required(false)
-                })
-                .collect::<Vec<_>>(),
-        )
-        .add_source(
-            File::new(DEFAULT_CONFIG, FileFormat::Toml).required(false),
-        )
-        // Add user configuration snippets
-        .add_source(
-            glob("/etc/keylime/agent.conf.d/*")
-                .map_err(Error::GlobPattern)?
-                .filter_map(|entry| entry.ok())
-                .map(|path| {
-                    File::new(&path.display().to_string(), FileFormat::Toml)
-                        .required(false)
-                })
-                .collect::<Vec<_>>(),
-        )
-        // Add environment variables overrides
-        .add_source(config_get_env_setting()?))
-}
+        .add_source(default_config);
 
-fn config_get_setting() -> Result<ConfigBuilder<DefaultState>, Error> {
+    // If the 'KEYLIME_AGENT_CONFIG' environment variable is set, load the configuration file set
+    // and ignore system configurations
     if let Ok(env_cfg) = env::var("KEYLIME_AGENT_CONFIG") {
         if !env_cfg.is_empty() {
             let path = Path::new(&env_cfg);
             if (path.exists()) {
-                return Ok(Config::builder()
-                    .add_source(
-                        File::new(&env_cfg, FileFormat::Toml).required(true),
-                    )
-                    // Add environment variables overrides
-                    .add_source(config_get_env_setting()?));
+                builder = builder.add_source(
+                    File::new(&env_cfg, FileFormat::Toml).required(true),
+                )
             } else {
                 warn!("Configuration set in KEYLIME_AGENT_CONFIG environment variable not found");
-                return Err(Error::Configuration("Configuration set in KEYLIME_AGENT_CONFIG environment variable not found".to_string()));
+                return Err(KeylimeConfigError::MissingEnvConfigFile {
+                    file: path.display().to_string(),
+                });
             }
         }
+    } else {
+        // Load the system configuration files.
+        builder = builder
+            // Add the system configuration file
+            .add_source(
+                File::new(DEFAULT_CONFIG_SYS, FileFormat::Toml)
+                    .required(false),
+            )
+            // Add system configuration snippets
+            .add_source(
+                glob("/usr/etc/keylime/agent.conf.d/*")
+                    .map_err(KeylimeConfigError::GlobPattern)?
+                    .filter_map(|entry| entry.ok())
+                    .map(|path| {
+                        File::new(
+                            &path.display().to_string(),
+                            FileFormat::Toml,
+                        )
+                        .required(false)
+                    })
+                    .collect::<Vec<_>>(),
+            )
+            // Add user configuration file
+            .add_source(
+                File::new(DEFAULT_CONFIG, FileFormat::Toml).required(false),
+            )
+            // Add user configuration snippets
+            .add_source(
+                glob("/etc/keylime/agent.conf.d/*")
+                    .map_err(KeylimeConfigError::GlobPattern)?
+                    .filter_map(|entry| entry.ok())
+                    .map(|path| {
+                        File::new(
+                            &path.display().to_string(),
+                            FileFormat::Toml,
+                        )
+                        .required(false)
+                    })
+                    .collect::<Vec<_>>(),
+            );
     }
-    config_get_file_setting()
+
+    let env_config = EnvConfig::new()?;
+
+    builder = builder
+        // Add environment variables overrides
+        .add_source(env_config);
+
+    Ok(builder)
 }
 
 /// Replace the options that support keywords with the final value
 fn config_translate_keywords(
     config: &KeylimeConfig,
-) -> Result<KeylimeConfig, Error> {
+) -> Result<KeylimeConfig, KeylimeConfigError> {
     let uuid = get_uuid(&config.agent.uuid);
 
     let env_keylime_dir = env::var("KEYLIME_DIR").ok();
@@ -777,11 +488,10 @@ fn config_translate_keywords(
     // Validate that keylime_dir exists
     #[cfg(not(test))]
     let keylime_dir = &keylime_dir.canonicalize().map_err(|e| {
-        Error::Configuration(format!(
-            "Path {} set in keylime_dir configuration option not found: {}",
-            keylime_dir.display(),
-            e
-        ))
+        KeylimeConfigError::MissingKeylimeDir {
+            path: keylime_dir.display().to_string(),
+            source: e,
+        }
     })?;
 
     let root_path = Path::new("/");
@@ -870,16 +580,31 @@ fn config_translate_keywords(
     if config.agent.enable_revocation_notifications {
         if config.agent.revocation_notification_ip.is_empty() {
             error!("The option 'enable_revocation_notifications' is set as 'true' but 'revocation_notification_ip' was set as empty");
-            return Err(Error::Configuration("The option 'enable_revocation_notifications' is set as 'true' but 'revocation_notification_ip' was set as empty".to_string()));
+            return Err(KeylimeConfigError::IncompatibleOptions {
+                option_a: "enable_revocation_notifications".into(),
+                value_a: "true".into(),
+                option_b: "revocation_notification_ip".into(),
+                value_b: "empty".into(),
+            });
         }
         if config.agent.revocation_cert.is_empty() {
             error!("The option 'enable_revocation_notifications' is set as 'true' 'revocation_cert' was set as empty");
-            return Err(Error::Configuration("The option 'enable_revocation_notifications' is set as 'true' but 'revocation_notification_cert' was set as empty".to_string()));
+            return Err(KeylimeConfigError::IncompatibleOptions {
+                option_a: "enable_revocation_notifications".into(),
+                value_a: "true".into(),
+                option_b: "revocation_notification_cert".into(),
+                value_b: "empty".into(),
+            });
         }
         let actions_dir = match config.agent.revocation_actions_dir.as_ref() {
             "" => {
                 error!("The option 'enable_revocation_notifications' is set as 'true' but the revocation actions directory was set as empty in 'revocation_actions_dir'");
-                return Err(Error::Configuration("The option 'enable_revocation_notifications' is set as 'true' but 'revocation_actions_dir' was set as empty".to_string()));
+                return Err(KeylimeConfigError::IncompatibleOptions {
+                    option_a: "enable_revocation_notifications".into(),
+                    value_a: "true".into(),
+                    option_b: "revocation_actions_dir".into(),
+                    value_b: "empty".into(),
+                });
             }
             dir => dir.to_string(),
         };
@@ -1132,99 +857,190 @@ mod tests {
     }
 
     #[test]
+    fn test_agent_config_as_source() {
+        let default = AgentConfig::default();
+
+        // Test that the AgentConfig can be used as a source for KeylimeConfig
+        let config: KeylimeConfig = Config::builder()
+            .add_source(default)
+            .build()
+            .unwrap() //#[allow_ci]
+            .try_deserialize()
+            .unwrap(); //#[allow_ci]
+    }
+
+    #[test]
+    fn test_keylime_config_as_source() {
+        let default = KeylimeConfig::default();
+
+        // Test that the KeylimeConfig can be used as a source for KeylimeConfig
+        let config: KeylimeConfig = Config::builder()
+            .add_source(default)
+            .build()
+            .unwrap() //#[allow_ci]
+            .try_deserialize()
+            .unwrap(); //#[allow_ci]
+    }
+
+    #[test]
+    fn test_env_config_as_source() {
+        let default = KeylimeConfig::default();
+        let env_config = EnvConfig::new().unwrap(); //#[allow_ci]
+
+        // Test that the EnvConfig can be used as a source for KeylimeConfig
+        let config: KeylimeConfig = Config::builder()
+            .add_source(default)
+            .add_source(env_config)
+            .build()
+            .unwrap() //#[allow_ci]
+            .try_deserialize()
+            .unwrap(); //#[allow_ci]
+    }
+
+    #[test]
+    fn test_config_get_setting() {
+        let env_config = config_get_setting().unwrap(); //#[allow_ci]
+    }
+
+    #[test]
     fn test_env_var() {
         let override_map: Map<&str, &str> = Map::from([
-            ("VERSION", "override_version"),
-            ("UUID", "override_uuid"),
-            ("IP", "override_ip"),
-            ("PORT", "9999"),
-            ("CONTACT_IP", "override_contact_ip"),
-            ("CONTACT_PORT", "9999"),
-            ("REGISTRAR_IP", "override_registrar_ip"),
-            ("REGISTRAR_PORT", "9999"),
-            ("ENABLE_AGENT_MTLS", "false"),
-            ("KEYLIME_DIR", "override_keylime_dir"),
-            ("SERVER_KEY", "override_server_key"),
-            ("SERVER_CERT", "override_server_cert"),
-            ("SERVER_KEY_PASSWORD", "override_server_key_password"),
-            ("TRUSTED_CLIENT_CA", "override_trusted_client_ca"),
-            ("ENC_KEYNAME", "override_enc_keyname"),
-            ("DEC_PAYLOAD_FILE", "override_dec_payload_file"),
-            ("SECURE_SIZE", "override_secure_size"),
-            ("TPM_OWNERPASSWORD", "override_tpm_ownerpassword"),
-            ("EXTRACT_PAYLOAD_ZIP", "false"),
-            ("ENABLE_REVOCATION_NOTIFICATIONS", "false"),
-            ("REVOCATION_ACTIONS_DIR", "override_revocation_actions_dir"),
+            ("KEYLIME_AGENT_AGENT_DATA_PATH", "override_agent_data_path"),
+            ("KEYLIME_AGENT_ALLOW_PAYLOAD_REVOCATION_ACTIONS", "false"),
+            ("KEYLIME_AGENT_CONTACT_IP", "override_contact_ip"),
+            ("KEYLIME_AGENT_CONTACT_PORT", "9999"),
             (
-                "REVOCATION_NOTIFICATION_IP",
-                "override_revocation_notification_ip",
+                "KEYLIME_AGENT_DEC_PAYLOAD_FILE",
+                "override_dec_payload_file",
             ),
-            ("REVOCATION_NOTIFICATION_PORT", "9999"),
-            ("REVOCATION_CERT", "override_revocation_cert"),
-            ("REVOCATION_ACTIONS", "override_revocation_actions"),
-            ("PAYLOAD_SCRIPT", "override_payload_script"),
-            ("ENABLE_INSECURE_PAYLOAD", "true"),
-            ("ALLOW_PAYLOAD_REVOCATION_ACTIONS", "false"),
-            ("TPM_HASH_ALG", "override_tpm_hash_alg"),
-            ("TPM_ENCRYPTION_ALG", "override_tpm_encryption_alg"),
-            ("TPM_SIGNING_ALG", "override_tpm_signing_alg"),
-            ("EK_HANDLE", "override_ek_handle"),
-            ("ENABLE_IAK_IDEVID", "true"),
+            ("KEYLIME_AGENT_EK_HANDLE", "override_ek_handle"),
+            ("KEYLIME_AGENT_ENABLE_AGENT_MTLS", "false"),
+            ("KEYLIME_AGENT_ENABLE_IAK_IDEVID", "true"),
+            ("KEYLIME_AGENT_ENABLE_INSECURE_PAYLOAD", "true"),
+            ("KEYLIME_AGENT_ENABLE_REVOCATION_NOTIFICATIONS", "false"),
+            ("KEYLIME_AGENT_ENC_KEYNAME", "override_enc_keyname"),
+            ("KEYLIME_AGENT_EXTRACT_PAYLOAD_ZIP", "false"),
+            ("KEYLIME_AGENT_IAK_CERT", "override_iak_cert"),
+            ("KEYLIME_AGENT_IAK_HANDLE", "override_iak_handle"),
             (
-                "IAK_IDEVID_ASYMMETRIC_ALG",
+                "KEYLIME_AGENT_IAK_IDEVID_ASYMMETRIC_ALG",
                 "override_iak_idevid_asymmetric_alg",
             ),
-            ("IAK_IDEVID_NAME_ALG", "override_iak_idevid_name_alg"),
-            ("IAK_IDEVID_TEMPLATE", "override_iak_idevid_template"),
-            ("IDEVID_PASSWORD", "override_idevid_password"),
-            ("IAK_PASSWORD", "override_iak_password"),
-            ("IDEVID_HANDLE", "override_idevid_handle"),
-            ("IAK_HANDLE", "override_iak_handle"),
-            ("RUN_AS", "override_run_as"),
-            ("AGENT_DATA_PATH", "override_agent_data_path"),
-            ("IMA_ML_PATH", "override_ima_ml_path"),
-            ("MEASUREDBOOT_ML_PATH", "override_measuredboot_ml_path"),
+            (
+                "KEYLIME_AGENT_IAK_IDEVID_NAME_ALG",
+                "override_iak_idevid_name_alg",
+            ),
+            (
+                "KEYLIME_AGENT_IAK_IDEVID_TEMPLATE",
+                "override_iak_idevid_template",
+            ),
+            ("KEYLIME_AGENT_IAK_PASSWORD", "override_iak_password"),
+            ("KEYLIME_AGENT_IDEVID_CERT", "override_idevid_cert"),
+            ("KEYLIME_AGENT_IDEVID_HANDLE", "override_idevid_handle"),
+            ("KEYLIME_AGENT_IDEVID_PASSWORD", "override_idevid_password"),
+            ("KEYLIME_AGENT_IMA_ML_PATH", "override_ima_ml_path"),
+            ("KEYLIME_AGENT_IP", "override_ip"),
+            ("KEYLIME_AGENT_KEYLIME_DIR", "override_keylime_dir"),
+            (
+                "KEYLIME_AGENT_MEASUREDBOOT_ML_PATH",
+                "override_measuredboot_ml_path",
+            ),
+            ("KEYLIME_AGENT_PAYLOAD_SCRIPT", "override_payload_script"),
+            ("KEYLIME_AGENT_PORT", "9999"),
+            ("KEYLIME_AGENT_REGISTRAR_IP", "override_registrar_ip"),
+            ("KEYLIME_AGENT_REGISTRAR_PORT", "9999"),
+            (
+                "KEYLIME_AGENT_REVOCATION_ACTIONS",
+                "override_revocation_actions",
+            ),
+            (
+                "KEYLIME_AGENT_REVOCATION_ACTIONS_DIR",
+                "override_revocation_actions_dir",
+            ),
+            ("KEYLIME_AGENT_REVOCATION_CERT", "override_revocation_cert"),
+            (
+                "KEYLIME_AGENT_REVOCATION_NOTIFICATION_IP",
+                "override_revocation_notification_ip",
+            ),
+            ("KEYLIME_AGENT_REVOCATION_NOTIFICATION_PORT", "9999"),
+            ("KEYLIME_AGENT_RUN_AS", "override_run_as"),
+            ("KEYLIME_AGENT_SECURE_SIZE", "override_secure_size"),
+            ("KEYLIME_AGENT_SERVER_CERT", "override_server_cert"),
+            ("KEYLIME_AGENT_SERVER_KEY", "override_server_key"),
+            (
+                "KEYLIME_AGENT_SERVER_KEY_PASSWORD",
+                "override_server_key_password",
+            ),
+            (
+                "KEYLIME_AGENT_TPM_ENCRYPTION_ALG",
+                "override_tpm_encryption_alg",
+            ),
+            ("KEYLIME_AGENT_TPM_HASH_ALG", "override_tpm_hash_alg"),
+            (
+                "KEYLIME_AGENT_TPM_OWNERPASSWORD",
+                "override_tpm_ownerpassword",
+            ),
+            ("KEYLIME_AGENT_TPM_SIGNING_ALG", "override_tpm_signing_alg"),
+            (
+                "KEYLIME_AGENT_TRUSTED_CLIENT_CA",
+                "override_trusted_client_ca",
+            ),
+            ("KEYLIME_AGENT_UUID", "override_uuid"),
+            ("KEYLIME_AGENT_VERSION", "override_version"),
         ]);
 
+        // For possible variable
         for (c, v) in override_map.into_iter() {
             let default = KeylimeConfig::default();
 
-            let env_conf: EnvConfig = Config::builder()
-                .add_source(
-                    Environment::default()
-                        .separator(".")
-                        .prefix_separator("_")
-                        .source(Some({
-                            let mut env = Map::new();
-                            _ = env.insert(c.into(), v.into());
-                            env
-                        })),
-                )
-                .build()
-                .unwrap() //#[allow_ci]
-                .try_deserialize()
-                .unwrap(); //#[allow_ci]
+            // Create a source emulating the environment with a variable set
+            let env_source = Environment::with_prefix("KEYLIME_AGENT")
+                .separator(".")
+                .prefix_separator("_")
+                .source(Some(Map::from([(c.into(), v.into())])));
 
-            let new_conf: KeylimeConfig = Config::builder()
+            let env_config = EnvConfig {
+                map: Map::from([(
+                    "agent".to_string(),
+                    Value::from(env_source.collect().unwrap()), //#[allow_ci]
+                )]),
+            };
+
+            // Create the resulting configuration with a variable overriden
+            let overriden: KeylimeConfig = Config::builder()
                 .add_source(default)
-                .add_source(env_conf)
+                .add_source(env_config)
                 .build()
                 .unwrap() //#[allow_ci]
                 .try_deserialize()
                 .unwrap(); //#[allow_ci]
 
-            let m = new_conf.collect().unwrap(); //#[allow_ci]
+            let m = overriden.collect().unwrap(); //#[allow_ci]
             let internal = m.get("agent").unwrap(); //#[allow_ci]
             let obtained = internal.to_owned().into_table().unwrap(); //#[allow_ci]
 
+            // Create the expected result by manually replacing the value
             let d = KeylimeConfig::default().collect().unwrap(); //#[allow_ci]
             let i = d.get("agent").unwrap(); //#[allow_ci]
             let mut expected = i.to_owned().into_table().unwrap(); //#[allow_ci]
-            _ = expected.insert(c.to_lowercase(), v.into());
+            _ = expected.insert(
+                c.to_lowercase()
+                    .strip_prefix("keylime_agent_")
+                    .unwrap() //#[allow_ci]
+                    .into(),
+                v.into(),
+            );
 
-            for (i, j) in obtained.iter() {
-                let e = expected.get(i).unwrap(); //#[allow_ci]
-                assert!(e.to_string() == j.to_string());
+            // Check that the obtained configuration matches the expected one
+            for (i, e) in expected.iter() {
+                let j = obtained.get(i).unwrap(); //#[allow_ci]
+                assert!(
+                    e.to_string() == j.to_string(),
+                    "Option {} mismatch: expected == '{}', obtained == '{}'",
+                    i,
+                    e,
+                    j
+                );
             }
         }
     }
@@ -1235,7 +1051,6 @@ mod tests {
         let default = "default-file-name";
 
         let list_str = "[\"\", default, '', /absolute/path, relative/path, \"with spaces\", \"with,commas\", \"double_quotes\", 'single_quotes']";
-
         let list = parse_list(list_str).unwrap(); //#[allow_ci]
 
         assert_eq!(

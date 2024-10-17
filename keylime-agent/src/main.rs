@@ -229,7 +229,9 @@ async fn main() -> Result<()> {
         let message = "The agent mTLS is disabled and 'payload_script' is not empty. To allow the agent to run, 'enable_insecure_payload' has to be set to 'True'".to_string();
 
         error!("Configuration error: {}", &message);
-        return Err(Error::Configuration(message));
+        return Err(Error::Configuration(
+            config::KeylimeConfigError::Generic(message),
+        ));
     }
 
     let secure_size = config.agent.secure_size.clone();
@@ -246,7 +248,9 @@ async fn main() -> Result<()> {
     } else {
         error!("Cannot drop privileges: not enough permission");
         return Err(Error::Configuration(
-            "Cannot drop privileges: not enough permission".to_string(),
+            config::KeylimeConfigError::Generic(
+                "Cannot drop privileges: not enough permission".to_string(),
+            ),
         ));
     };
 
@@ -257,7 +261,9 @@ async fn main() -> Result<()> {
             let message = "The user running the Keylime agent should be set in keylime-agent.conf, using the parameter `run_as`, with the format `user:group`".to_string();
 
             error!("Configuration error: {}", &message);
-            return Err(Error::Configuration(message));
+            return Err(Error::Configuration(
+                config::KeylimeConfigError::Generic(message),
+            ));
         }
         info!("Running the service as {}...", user_group);
     }
@@ -283,10 +289,11 @@ async fn main() -> Result<()> {
             let python_shim = Path::new(&actions_dir).join("shim.py");
             if !python_shim.exists() {
                 error!("Could not find python shim at {}", python_shim.display());
-                return Err(Error::Configuration(format!(
+                return Err(Error::Configuration(
+                    config::KeylimeConfigError::Generic(format!(
                     "Could not find python shim at {}",
                     python_shim.display()
-                )));
+                ))));
             }
         }
     }
@@ -307,9 +314,9 @@ async fn main() -> Result<()> {
         };
         ctx.as_mut().tr_set_auth(Hierarchy::Endorsement.into(), auth)
             .map_err(|e| {
-                Error::Configuration(format!(
+                Error::Configuration(config::KeylimeConfigError::Generic(format!(
                     "Failed to set TPM context password for Endorsement Hierarchy: {e}"
-                ))
+                )))
             })?;
     };
 
@@ -419,7 +426,7 @@ async fn main() -> Result<()> {
             info!("IDevID matches certificate.");
         } else {
             error!("IDevID template does not match certificate. Check template in configuration.");
-            return Err(Error::Configuration("IDevID template does not match certificate. Check template in configuration.".to_string()));
+            return Err(Error::Configuration(config::KeylimeConfigError::Generic("IDevID template does not match certificate. Check template in configuration.".to_string())));
         }
 
         /// IAK recreation/collection
@@ -447,7 +454,7 @@ async fn main() -> Result<()> {
             info!("IAK matches certificate.");
         } else {
             error!("IAK template does not match certificate. Check template in configuration.");
-            return Err(Error::Configuration("IAK template does not match certificate. Check template in configuration.".to_string()));
+            return Err(Error::Configuration(config::KeylimeConfigError::Generic("IAK template does not match certificate. Check template in configuration.".to_string())));
         }
 
         (Some(iak), Some(idevid))
@@ -664,7 +671,7 @@ async fn main() -> Result<()> {
         {
             "" => {
                 error!("Agent mTLS is enabled, but trusted_client_ca option was not provided");
-                return Err(Error::Configuration("Agent mTLS is enabled, but trusted_client_ca option was not provided".to_string()));
+                return Err(Error::Configuration(config::KeylimeConfigError::Generic("Agent mTLS is enabled, but trusted_client_ca option was not provided".to_string())));
             }
             l => l,
         };
@@ -675,9 +682,9 @@ async fn main() -> Result<()> {
             error!(
                 "Trusted client CA certificate list is empty: could not load any certificate"
             );
-            return Err(Error::Configuration(
+            return Err(Error::Configuration(config::KeylimeConfigError::Generic(
                 "Trusted client CA certificate list is empty: could not load any certificate".to_string()
-            ));
+            )));
         }
 
         let keylime_ca_certs = match crypto::load_x509_cert_list(
@@ -711,10 +718,10 @@ async fn main() -> Result<()> {
                 error!(
                     "IDevID and IAK are enabled but could not be generated"
                 );
-                return Err(Error::Configuration(
+                return Err(Error::Configuration(config::KeylimeConfigError::Generic(
                     "IDevID and IAK are enabled but could not be generated"
                         .to_string(),
-                ));
+                )));
             };
             registrar_agent::do_register_agent(
                 config.agent.registrar_ip.as_ref(),
@@ -806,10 +813,10 @@ async fn main() -> Result<()> {
             error!(
                 "No revocation certificate set in 'revocation_cert' option"
             );
-            return Err(Error::Configuration(
+            return Err(Error::Configuration(config::KeylimeConfigError::Generic(
                 "No revocation certificate set in 'revocation_cert' option"
                     .to_string(),
-            ));
+            )));
         }
         s => PathBuf::from(s),
     };
