@@ -5,7 +5,7 @@ use crate::common::JsonWrapper;
 use crate::crypto;
 use crate::serialization::serialize_maybe_base64;
 use crate::{tpm, Error as KeylimeError, QuoteData};
-use actix_web::{web, HttpRequest, HttpResponse, Responder};
+use actix_web::{http, web, HttpRequest, HttpResponse, Responder};
 use base64::{engine::general_purpose, Engine as _};
 use log::*;
 use serde::{Deserialize, Serialize};
@@ -47,7 +47,7 @@ pub(crate) struct KeylimeQuote {
 // This is a Quote request from the tenant, which does not check
 // integrity measurement. It should return this data:
 // { QuoteAIK(nonce, 16:H(NK_pub)), NK_pub }
-pub async fn identity(
+async fn identity(
     req: HttpRequest,
     param: web::Query<Ident>,
     data: web::Data<QuoteData>,
@@ -136,7 +136,7 @@ pub async fn identity(
 // by the mask. It should return this data:
 // { QuoteAIK(nonce, 16:H(NK_pub), xi:yi), NK_pub}
 // where xi:yi are additional PCRs to be included in the quote.
-pub async fn integrity(
+async fn integrity(
     req: HttpRequest,
     param: web::Query<Integ>,
     data: web::Data<QuoteData>,
@@ -336,6 +336,46 @@ pub async fn integrity(
     HttpResponse::Ok().json(response)
 }
 
+/// Handles the default case for the /quotes scope
+async fn quotes_default(req: HttpRequest) -> impl Responder {
+    let error;
+    let response;
+    let message;
+
+    match req.head().method {
+        http::Method::GET => {
+            error = 400;
+            message = "URI not supported, only /identity and /integrity are supported for GET in /quotes/ interface";
+            response = HttpResponse::BadRequest()
+                .json(JsonWrapper::error(error, message));
+        }
+        _ => {
+            error = 405;
+            message = "Method is not supported in /quotes/ interface";
+            response = HttpResponse::MethodNotAllowed()
+                .insert_header(http::header::Allow(vec![http::Method::GET]))
+                .json(JsonWrapper::error(error, message));
+        }
+    };
+
+    warn!(
+        "{} returning {} response. {}",
+        req.head().method,
+        error,
+        message
+    );
+
+    response
+}
+
+/// Configure the endpoints for the /quotes scope
+pub(crate) fn configure_quotes_endpoints(cfg: &mut web::ServiceConfig) {
+    _ = cfg
+        .service(web::resource("/identity").route(web::get().to(identity)))
+        .service(web::resource("/integrity").route(web::get().to(integrity)))
+        .default_service(web::to(quotes_default));
+}
+
 #[cfg(feature = "testing")]
 #[cfg(test)]
 mod tests {
@@ -343,6 +383,7 @@ mod tests {
     use crate::common::API_VERSION;
     use actix_web::{test, web, App};
     use keylime::{crypto::testing::pkey_pub_from_pem, tpm};
+    use serde_json::{json, Value};
 
     #[actix_rt::test]
     async fn test_identity() {
@@ -522,5 +563,38 @@ mod tests {
             test::read_body_json(resp).await;
         assert!(result.results.ima_measurement_list.is_none());
         assert!(result.results.ima_measurement_list_entry.is_none());
+    }
+
+    #[actix_rt::test]
+    async fn test_keys_default() {
+        let mut app = test::init_service(
+            App::new().service(web::resource("/").to(quotes_default)),
+        )
+        .await;
+
+        let req = test::TestRequest::get().uri("/").to_request();
+
+        let resp = test::call_service(&app, req).await;
+        assert!(resp.status().is_client_error());
+
+        let result: JsonWrapper<Value> = test::read_body_json(resp).await;
+
+        assert_eq!(result.results, json!({}));
+        assert_eq!(result.code, 400);
+
+        let req = test::TestRequest::delete().uri("/").to_request();
+
+        let resp = test::call_service(&app, req).await;
+        assert!(resp.status().is_client_error());
+
+        let headers = resp.headers();
+
+        assert!(headers.contains_key("allow"));
+        assert_eq!(headers.get("allow").unwrap().to_str().unwrap(), "GET"); //#[allow_ci]
+
+        let result: JsonWrapper<Value> = test::read_body_json(resp).await;
+
+        assert_eq!(result.results, json!({}));
+        assert_eq!(result.code, 405);
     }
 }
