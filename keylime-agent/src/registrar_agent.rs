@@ -16,6 +16,8 @@ fn is_empty(buf: &[u8]) -> bool {
 struct Register<'a> {
     #[serde(serialize_with = "serialize_maybe_base64")]
     ekcert: Option<Vec<u8>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    ek_ca_chain: Option<String>,
     #[serde(
         serialize_with = "serialize_as_base64",
         skip_serializing_if = "is_empty"
@@ -134,6 +136,7 @@ pub(crate) async fn do_register_agent(
     agent_uuid: &str,
     ek_tpm: &[u8],
     ekcert: Option<Vec<u8>>,
+    ek_ca_chain: Option<String>,
     aik_tpm: &[u8],
     iak_tpm: Option<&[u8]>,
     idevid_tpm: Option<&[u8]>,
@@ -168,6 +171,7 @@ pub(crate) async fn do_register_agent(
 
     let data = Register {
         ekcert,
+        ek_ca_chain,
         ek_tpm,
         aik_tpm,
         iak_tpm,

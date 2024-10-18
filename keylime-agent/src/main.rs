@@ -471,6 +471,12 @@ async fn main() -> Result<()> {
     // Calculate the SHA-256 hash of the public key in PEM format
     let ek_hash = hash_ek_pubkey(ek_result.public.clone())?;
 
+    // Read EK CA Chain form TPM
+    let ek_ca_chain = match ctx.create_ek_ca_chain() {
+        Ok(value) => Some(value),
+        Err(_) => None,
+    };
+
     // Replace the uuid with the actual EK hash if the option was set.
     // We cannot do that when the configuration is loaded initially,
     // because only have later access to the the TPM.
@@ -730,6 +736,7 @@ async fn main() -> Result<()> {
                 &PublicBuffer::try_from(ek_result.public.clone())?
                     .marshall()?,
                 ek_result.ek_cert,
+                ek_ca_chain,
                 &PublicBuffer::try_from(ak.public)?.marshall()?,
                 Some(
                     &PublicBuffer::try_from(iak.public.clone())?
@@ -756,6 +763,7 @@ async fn main() -> Result<()> {
                 &PublicBuffer::try_from(ek_result.public.clone())?
                     .marshall()?,
                 ek_result.ek_cert,
+                ek_ca_chain,
                 &PublicBuffer::try_from(ak.public)?.marshall()?,
                 None,
                 None,
