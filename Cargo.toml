@@ -41,6 +41,6 @@ static_assertions = "1"
 tempfile = "3.4.0"
 thiserror = "1.0"
 tokio = {version = "1.24", features = ["rt", "sync", "macros"]}
-tss-esapi = {version = "7.4.0", features = ["generate-bindings"]}
+tss-esapi = { git = "https://github.com/parallaxsecond/rust-tss-esapi.git", rev = "refs/pull/546/head" , features = ["generate-bindings"]}
 uuid = {version = "1.3", features = ["v4"]}
 zip = {version = "0.6", default-features = false, features= ["deflate"]}
