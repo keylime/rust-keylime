@@ -54,48 +54,6 @@ pub(crate) async fn app_default(req: HttpRequest) -> impl Responder {
     response
 }
 
-pub(crate) async fn api_default(req: HttpRequest) -> impl Responder {
-    let error;
-    let response;
-    let message;
-
-    match req.head().method {
-        http::Method::GET => {
-            error = 400;
-            message =
-                "Not Implemented: Use /agent, /keys, or /quotes interfaces";
-            response = HttpResponse::BadRequest()
-                .json(JsonWrapper::error(error, message));
-        }
-        http::Method::POST => {
-            error = 400;
-            message =
-                "Not Implemented: Use /keys or /notifications interfaces";
-            response = HttpResponse::BadRequest()
-                .json(JsonWrapper::error(error, message));
-        }
-        _ => {
-            error = 405;
-            message = "Method is not supported";
-            response = HttpResponse::MethodNotAllowed()
-                .insert_header(http::header::Allow(vec![
-                    http::Method::GET,
-                    http::Method::POST,
-                ]))
-                .json(JsonWrapper::error(error, message));
-        }
-    };
-
-    warn!(
-        "{} returning {} response. {}",
-        req.head().method,
-        error,
-        message
-    );
-
-    response
-}
-
 pub(crate) async fn version_not_supported(
     req: HttpRequest,
     version: web::Path<APIVersion>,
@@ -217,11 +175,6 @@ mod tests {
     #[actix_rt::test]
     async fn test_app_default() {
         test_default(web::resource("/").to(app_default), "GET, POST").await
-    }
-
-    #[actix_rt::test]
-    async fn test_api_default() {
-        test_default(web::resource("/").to(api_default), "GET, POST").await
     }
 
     #[derive(Serialize, Deserialize)]
