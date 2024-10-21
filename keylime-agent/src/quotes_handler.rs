@@ -380,7 +380,6 @@ pub(crate) fn configure_quotes_endpoints(cfg: &mut web::ServiceConfig) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::common::API_VERSION;
     use actix_web::{test, web, App};
     use keylime::{crypto::testing::pkey_pub_from_pem, tpm};
     use serde_json::{json, Value};
@@ -389,17 +388,15 @@ mod tests {
     async fn test_identity() {
         let (fixture, mutex) = QuoteData::fixture().await.unwrap(); //#[allow_ci]
         let quotedata = web::Data::new(fixture);
-        let mut app =
-            test::init_service(App::new().app_data(quotedata.clone()).route(
-                &format!("/{API_VERSION}/quotes/identity"),
-                web::get().to(identity),
-            ))
-            .await;
+        let mut app = test::init_service(
+            App::new()
+                .app_data(quotedata.clone())
+                .route("/vX.Y/quotes/identity", web::get().to(identity)),
+        )
+        .await;
 
         let req = test::TestRequest::get()
-            .uri(&format!(
-                "/{API_VERSION}/quotes/identity?nonce=1234567890ABCDEFHIJ",
-            ))
+            .uri("/vX.Y/quotes/identity?nonce=1234567890ABCDEFHIJ")
             .to_request();
 
         let resp = test::call_service(&app, req).await;
@@ -435,17 +432,17 @@ mod tests {
     async fn test_integrity_pre() {
         let (fixture, mutex) = QuoteData::fixture().await.unwrap(); //#[allow_ci]
         let quotedata = web::Data::new(fixture);
-        let mut app =
-            test::init_service(App::new().app_data(quotedata.clone()).route(
-                &format!("/{API_VERSION}/quotes/integrity"),
-                web::get().to(integrity),
-            ))
-            .await;
+        let mut app = test::init_service(
+            App::new()
+                .app_data(quotedata.clone())
+                .route("vX.Y/quotes/integrity", web::get().to(integrity)),
+        )
+        .await;
 
         let req = test::TestRequest::get()
-            .uri(&format!(
-                "/{API_VERSION}/quotes/integrity?nonce=1234567890ABCDEFHIJ&mask=0x408000&partial=0",
-            ))
+            .uri(
+                "/vX.Y/quotes/integrity?nonce=1234567890ABCDEFHIJ&mask=0x408000&partial=0",
+            )
             .to_request();
 
         let resp = test::call_service(&app, req).await;
@@ -497,17 +494,17 @@ mod tests {
     async fn test_integrity_post() {
         let (fixture, mutex) = QuoteData::fixture().await.unwrap(); //#[allow_ci]
         let quotedata = web::Data::new(fixture);
-        let mut app =
-            test::init_service(App::new().app_data(quotedata.clone()).route(
-                &format!("/{API_VERSION}/quotes/integrity"),
-                web::get().to(integrity),
-            ))
-            .await;
+        let mut app = test::init_service(
+            App::new()
+                .app_data(quotedata.clone())
+                .route("/vX.Y/quotes/integrity", web::get().to(integrity)),
+        )
+        .await;
 
         let req = test::TestRequest::get()
-            .uri(&format!(
-                "/{API_VERSION}/quotes/integrity?nonce=1234567890ABCDEFHIJ&mask=0x408000&partial=1",
-            ))
+            .uri(
+                "/vX.Y/quotes/integrity?nonce=1234567890ABCDEFHIJ&mask=0x408000&partial=1",
+            )
             .to_request();
 
         let resp = test::call_service(&app, req).await;
@@ -558,17 +555,17 @@ mod tests {
         // Remove the IMA log file from the context
         fixture.ima_ml_file = None;
         let quotedata = web::Data::new(fixture);
-        let mut app =
-            test::init_service(App::new().app_data(quotedata.clone()).route(
-                &format!("/{API_VERSION}/quotes/integrity"),
-                web::get().to(integrity),
-            ))
-            .await;
+        let mut app = test::init_service(
+            App::new()
+                .app_data(quotedata.clone())
+                .route("/vX.Y/quotes/integrity", web::get().to(integrity)),
+        )
+        .await;
 
         let req = test::TestRequest::get()
-            .uri(&format!(
-                "/{API_VERSION}/quotes/integrity?nonce=1234567890ABCDEFHIJ&mask=0x408000&partial=0",
-            ))
+            .uri(
+                "/vX.Y/quotes/integrity?nonce=1234567890ABCDEFHIJ&mask=0x408000&partial=0",
+            )
             .to_request();
 
         let resp = test::call_service(&app, req).await;

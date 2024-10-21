@@ -603,7 +603,6 @@ mod tests {
         encrypt_aead, pkey_pub_from_pem, rsa_oaep_encrypt,
     };
     use crate::{
-        common::API_VERSION,
         config::KeylimeConfig,
         crypto::{compute_hmac, AES_128_KEY_LEN, AES_256_KEY_LEN},
         payloads,
@@ -902,18 +901,9 @@ mod tests {
         let mut app = test::init_service(
             App::new()
                 .app_data(quotedata.clone())
-                .route(
-                    &format!("/{API_VERSION}/keys/ukey"),
-                    web::post().to(u_key),
-                )
-                .route(
-                    &format!("/{API_VERSION}/keys/vkey"),
-                    web::post().to(v_key),
-                )
-                .route(
-                    &format!("/{API_VERSION}/keys/verify"),
-                    web::get().to(verify),
-                ),
+                .route("/vX.Y/keys/ukey", web::post().to(u_key))
+                .route("/vX.Y/keys/vkey", web::post().to(v_key))
+                .route("/vX.Y/keys/verify", web::get().to(verify)),
         )
         .await;
 
@@ -980,7 +970,7 @@ mod tests {
         };
 
         let req = test::TestRequest::post()
-            .uri(&format!("/{API_VERSION}/keys/ukey"))
+            .uri("/vX.Y/keys/ukey")
             .set_json(&ukey)
             .to_request();
 
@@ -995,7 +985,7 @@ mod tests {
         };
 
         let req = test::TestRequest::post()
-            .uri(&format!("/{API_VERSION}/keys/vkey"))
+            .uri("/vX.Y/keys/vkey")
             .set_json(&vkey)
             .to_request();
 
@@ -1022,7 +1012,7 @@ mod tests {
         let expected =
             compute_hmac(k.as_ref(), challenge.as_bytes()).unwrap(); //#[allow_ci]
         let req = test::TestRequest::get()
-            .uri(&format!("/{API_VERSION}/keys/verify?challenge={challenge}"))
+            .uri(format!("/vX.Y/keys/verify?challenge={challenge}").as_ref())
             .to_request();
         let resp = test::call_service(&app, req).await;
         assert!(resp.status().is_success());
@@ -1038,7 +1028,7 @@ mod tests {
         let (new_u, new_v, new_k) =
             prepare_encrypted_keys(key_len, None, uuid, &pubkey);
         let req = test::TestRequest::post()
-            .uri(&format!("/{API_VERSION}/keys/ukey"))
+            .uri("/vX.Y/keys/ukey")
             .set_json(&new_u)
             .to_request();
         let resp = test::call_service(&app, req).await;
@@ -1054,7 +1044,7 @@ mod tests {
         };
 
         let req = test::TestRequest::post()
-            .uri(&format!("/{API_VERSION}/keys/vkey"))
+            .uri("/vX.Y/keys/vkey")
             .set_json(&new_v)
             .to_request();
         let resp = test::call_service(&app, req).await;
@@ -1095,15 +1085,15 @@ mod tests {
     async fn test_pubkey() {
         let (fixture, mutex) = QuoteData::fixture().await.unwrap(); //#[allow_ci]
         let quotedata = web::Data::new(fixture);
-        let mut app =
-            test::init_service(App::new().app_data(quotedata.clone()).route(
-                &format!("/{API_VERSION}/keys/pubkey"),
-                web::get().to(pubkey),
-            ))
-            .await;
+        let mut app = test::init_service(
+            App::new()
+                .app_data(quotedata.clone())
+                .route("/vX.Y/keys/pubkey", web::get().to(pubkey)),
+        )
+        .await;
 
         let req = test::TestRequest::get()
-            .uri(&format!("/{API_VERSION}/keys/pubkey"))
+            .uri("/vX.Y/keys/pubkey")
             .to_request();
 
         let resp = test::call_service(&app, req).await;

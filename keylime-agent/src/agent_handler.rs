@@ -81,7 +81,6 @@ pub(crate) fn configure_agent_endpoints(cfg: &mut web::ServiceConfig) {
 #[cfg(feature = "testing")]
 mod tests {
     use super::*;
-    use crate::common::API_VERSION;
     use actix_web::{test, web, App};
     use serde_json::{json, Value};
 
@@ -93,15 +92,15 @@ mod tests {
         quotedata.sign_alg = keylime::algorithms::SignAlgorithm::RsaSsa;
         quotedata.agent_uuid = "DEADBEEF".to_string();
         let data = web::Data::new(quotedata);
-        let mut app =
-            test::init_service(App::new().app_data(data.clone()).route(
-                &format!("/{API_VERSION}/agent/info"),
-                web::get().to(info),
-            ))
-            .await;
+        let mut app = test::init_service(
+            App::new()
+                .app_data(data.clone())
+                .route("/vX.Y/agent/info", web::get().to(info)),
+        )
+        .await;
 
         let req = test::TestRequest::get()
-            .uri(&format!("/{API_VERSION}/agent/info"))
+            .uri("/vX.Y/agent/info")
             .to_request();
 
         let resp = test::call_service(&app, req).await;
