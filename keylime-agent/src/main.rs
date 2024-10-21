@@ -32,6 +32,7 @@
 #![allow(unused, missing_docs)]
 
 mod agent_handler;
+mod api;
 mod common;
 mod config;
 mod error;
@@ -863,108 +864,60 @@ async fn main() -> Result<()> {
         secure_mount: PathBuf::from(&mount),
     });
 
-    let actix_server =
-        HttpServer::new(move || {
-            App::new()
-                .wrap(middleware::ErrorHandlers::new().handler(
-                    http::StatusCode::NOT_FOUND,
-                    errors_handler::wrap_404,
-                ))
-                .wrap(middleware::Logger::new(
-                    "%r from %a result %s (took %D ms)",
-                ))
-                .wrap_fn(|req, srv| {
-                    info!(
-                        "{} invoked from {:?} with uri {}",
-                        req.head().method,
-                        req.connection_info().peer_addr().unwrap(), //#[allow_ci]
-                        req.uri()
-                    );
-                    srv.call(req)
-                })
-                .app_data(quotedata.clone())
-                .app_data(
-                    web::JsonConfig::default()
-                        .error_handler(errors_handler::json_parser_error),
-                )
-                .app_data(
-                    web::QueryConfig::default()
-                        .error_handler(errors_handler::query_parser_error),
-                )
-                .app_data(
-                    web::PathConfig::default()
-                        .error_handler(errors_handler::path_parser_error),
-                )
-                .service(
-                    web::scope(&format!("/{API_VERSION}"))
-                        .service(
-                            web::scope("/agent")
-                                .service(web::resource("/info").route(
-                                    web::get().to(agent_handler::info),
-                                ))
-                                .default_service(web::to(
-                                    errors_handler::agent_default,
-                                )),
-                        )
-                        .service(
-                            web::scope("/keys")
-                                .service(web::resource("/pubkey").route(
-                                    web::get().to(keys_handler::pubkey),
-                                ))
-                                .service(web::resource("/ukey").route(
-                                    web::post().to(keys_handler::u_key),
-                                ))
-                                .service(web::resource("/verify").route(
-                                    web::get().to(keys_handler::verify),
-                                ))
-                                .service(web::resource("/vkey").route(
-                                    web::post().to(keys_handler::v_key),
-                                ))
-                                .default_service(web::to(
-                                    errors_handler::keys_default,
-                                )),
-                        )
-                        .service(
-                            web::scope("/notifications")
-                                .service(web::resource("/revocation").route(
-                                    web::post().to(
-                                        notifications_handler::revocation,
-                                    ),
-                                ))
-                                .default_service(web::to(
-                                    errors_handler::notifications_default,
-                                )),
-                        )
-                        .service(
-                            web::scope("/quotes")
-                                .service(web::resource("/identity").route(
-                                    web::get().to(quotes_handler::identity),
-                                ))
-                                .service(web::resource("/integrity").route(
-                                    web::get().to(quotes_handler::integrity),
-                                ))
-                                .default_service(web::to(
-                                    errors_handler::quotes_default,
-                                )),
-                        )
-                        .default_service(web::to(
-                            errors_handler::api_default,
-                        )),
-                )
-                .service(
-                    web::resource("/version")
-                        .route(web::get().to(version_handler::version)),
-                )
-                .service(
-                    web::resource(r"/v{major:\d+}.{minor:\d+}{tail}*")
-                        .to(errors_handler::version_not_supported),
-                )
-                .default_service(web::to(errors_handler::app_default))
-        })
-        // Disable default signal handlers.  See:
-        // https://github.com/actix/actix-web/issues/2739
-        // for details.
-        .disable_signals();
+    let actix_server = HttpServer::new(move || {
+        let mut app = App::new()
+            .wrap(middleware::ErrorHandlers::new().handler(
+                http::StatusCode::NOT_FOUND,
+                errors_handler::wrap_404,
+            ))
+            .wrap(middleware::Logger::new(
+                "%r from %a result %s (took %D ms)",
+            ))
+            .wrap_fn(|req, srv| {
+                info!(
+                    "{} invoked from {:?} with uri {}",
+                    req.head().method,
+                    req.connection_info().peer_addr().unwrap(), //#[allow_ci]
+                    req.uri()
+                );
+                srv.call(req)
+            })
+            .app_data(quotedata.clone())
+            .app_data(
+                web::JsonConfig::default()
+                    .error_handler(errors_handler::json_parser_error),
+            )
+            .app_data(
+                web::QueryConfig::default()
+                    .error_handler(errors_handler::query_parser_error),
+            )
+            .app_data(
+                web::PathConfig::default()
+                    .error_handler(errors_handler::path_parser_error),
+            );
+
+        let enabled_api_versions = api::SUPPORTED_API_VERSIONS;
+
+        for version in enabled_api_versions {
+            // This should never fail, thus unwrap should never panic
+            let scope = api::get_api_scope(version).unwrap(); //#[allow_ci]
+            app = app.service(scope);
+        }
+
+        app.service(
+            web::resource("/version")
+                .route(web::get().to(version_handler::version)),
+        )
+        .service(
+            web::resource(r"/v{major:\d+}.{minor:\d+}{tail}*")
+                .to(errors_handler::version_not_supported),
+        )
+        .default_service(web::to(errors_handler::app_default))
+    })
+    // Disable default signal handlers.  See:
+    // https://github.com/actix/actix-web/issues/2739
+    // for details.
+    .disable_signals();
 
     let server;
 
