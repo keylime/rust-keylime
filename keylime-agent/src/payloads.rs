@@ -324,7 +324,6 @@ mod tests {
         encrypt_aead, pkey_pub_from_pem, rsa_oaep_encrypt,
     };
     use crate::{
-        common::API_VERSION,
         config::KeylimeConfig,
         crypto::{AES_128_KEY_LEN, AES_256_KEY_LEN},
         payloads,
