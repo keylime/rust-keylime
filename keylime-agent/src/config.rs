@@ -685,7 +685,7 @@ fn get_uuid(agent_uuid_config: &str) -> String {
             Err(_) => {
                 warn!("Misformatted UUID: {}", &uuid_config);
                 let agent_uuid = Uuid::new_v4();
-                info!("Using generated UUID: {}", &uuid_config);
+                info!("Using generated UUID: {}", &agent_uuid);
                 agent_uuid.to_string()
             }
         },
