@@ -16,7 +16,7 @@ use openssl::{
     memcmp,
     pkey::{HasPublic, Id, PKeyRef, Public},
 };
-
+use openssl::x509::X509;
 use tss_esapi::{
     abstraction::{
         ak,
@@ -57,6 +57,10 @@ use tss_esapi::{
     tss2_esys::{TPML_DIGEST, TPML_PCR_SELECTION},
     Error::Tss2Error,
 };
+use tss_esapi::abstraction::nv;
+use tss_esapi::constants::CapabilityType;
+use tss_esapi::interface_types::resource_handles::NvAuth;
+use tss_esapi::structures::CapabilityData;
 
 /// Maximum size of nonce used in `quote`.
 pub const MAX_NONCE_SIZE: usize = 64;
@@ -107,6 +111,10 @@ const IAK_AUTH_POLICY_SHA256: [u8; 32] = [
     0x22, 0xc2, 0x1d, 0x12, 0x0b, 0x2d, 0x1e, 0x07,
 ];
 const UNIQUE_IAK: [u8; 3] = [0x49, 0x41, 0x4b];
+
+const RSA_EK_CERTIFICATE_CHAIN_START: u32 = 0x01c00100;
+const RSA_EK_CERTIFICATE_CHAIN_END: u32 = 0x01c001ff;
+
 
 /// TpmError wraps all possible errors raised in tpm.rs
 #[derive(Error, Debug)]
@@ -584,6 +592,119 @@ impl Context {
             ek_cert: cert,
             public: tpm_pub,
         })
+    }
+
+    pub fn read_ek_ca_chain(&mut self) -> tss_esapi::Result<Vec<u8>> {
+        let mut result: Vec<u8> = Vec::new();
+        let context = &mut self.inner;
+
+        // Get handles for NV-Index in range 0x01c00100 - 0x01c001ff
+        let (capabilities, _) = context.get_capability(
+            CapabilityType::Handles,
+            RSA_EK_CERTIFICATE_CHAIN_START,
+            RSA_EK_CERTIFICATE_CHAIN_END - RSA_EK_CERTIFICATE_CHAIN_START,
+        )?;
+
+        if let CapabilityData::Handles(handle_list) = capabilities {
+            for handle in handle_list.iter() {
+                if let TpmHandle::NvIndex(nv_idx) = handle {
+                    // Attempt to get the NV authorization handle
+                    let nv_auth_handle = context.execute_without_session(|ctx| {
+                        ctx.tr_from_tpm_public(*handle)
+                            .map(|v| NvAuth::NvIndex(v.into()))
+                    })?;
+
+                    // Read the full NV data
+                    let data = context.execute_with_nullauth_session(|ctx| {
+                        nv::read_full(ctx, nv_auth_handle, *nv_idx)
+                    })?;
+
+                    result.extend(data);
+                } else {
+                    // Handle other types of handles if necessary
+                    break; // Skip non-NvIndex handles
+                }
+            }
+        }
+
+        Ok(result) // Return the accumulated result
+    }
+
+    pub fn split_der_certificates(
+        &mut self,
+        der_data: &[u8]
+    ) -> Vec<Vec<u8>>
+    {
+        let mut certificates = Vec::new();
+        let mut offset = 0;
+
+        while offset < der_data.len() {
+            // Check if the current byte indicates the start of a sequence (0x30)
+            if der_data[offset] != 0x30 {
+                break; // Not a valid certificate start
+            }
+
+            // Read the length of the sequence
+            let length_byte = der_data[offset + 1];
+            let cert_length = if length_byte & 0x80 == 0 {
+                // Short form length
+                length_byte as usize + 2 // +2 for the tag and length byte
+            } else {
+                // Long form length
+                let length_of_length = (length_byte & 0x7F) as usize;
+                let length_bytes = &der_data[offset + 2..offset + 2 + length_of_length];
+                let cert_length = length_bytes.iter().fold(0, |acc, &b| (acc << 8) | b as usize);
+                cert_length + 2 + length_of_length // +2 for the tag and length byte
+            };
+
+            // Extract the certificate
+            let cert = der_data[offset..offset + cert_length].to_vec();
+            certificates.push(cert);
+
+            // Move the offset to the next certificate
+            offset += cert_length;
+        }
+
+        certificates
+    }
+
+    pub fn der_to_pem(
+        &mut self,
+        der_certificates: Vec<Vec<u8>>
+    ) -> std::result::Result<String, Box<dyn std::error::Error>> {
+        let mut pem_string = String::new();
+
+        for der in der_certificates {
+            // Convert DER to X509
+            let cert = X509::from_der(&der)?;
+
+            // Convert X509 to PEM format
+            let pem = cert.to_pem()?;
+
+            // Append the PEM string to the result
+            pem_string.push_str(&String::from_utf8(pem)?);
+        }
+
+        Ok(pem_string)
+    }
+
+    /// Read the EK CA Chain from the tpm and return it.
+    ///
+    /// As described in https://trustedcomputinggroup.org/wp-content/uploads/TCG-EK-Credential-Profile-V-2.5-R2_published.pdf (2.2.1.5.2 Handle Values for EK Certificate Chains)
+    /// Intermediate certificates can be stored directly in the TPM. The index used for it should be
+    /// 0x01c00100 - 0x01c001ff. The CA Chain is stored in DER format and will overlflow into the
+    /// next register as long as there is data.
+    ///
+    /// This is for example the case for Intel fTPM, starting 11th gen core.
+    ///
+    /// # Returns
+    ///
+    /// A `String` with all certificates in PEM format if successful, an Error otherwise
+    pub fn create_ek_ca_chain(&mut self) -> std::result::Result<String, Box<dyn std::error::Error>> {
+        let der_data = self.read_ek_ca_chain()?;
+        let der_certificates = self.split_der_certificates(&der_data);
+        let pem_string = self.der_to_pem(der_certificates)?;
+        Ok(pem_string)
     }
 
     /// Creates an AK
@@ -2130,6 +2251,14 @@ pub mod testing {
                 assert!(r.is_ok());
             }
         }
+    }
+
+    #[test]
+    #[cfg(feature = "testing")]
+    fn test_create_ek_ca_chain() {
+        let mut ctx = Context::new().unwrap(); //#[allow_ci]
+        let c = ctx.create_ek_ca_chain();
+        assert!(c.is_ok());
     }
 
     #[test]
