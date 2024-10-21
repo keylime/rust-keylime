@@ -1813,7 +1813,6 @@ pub fn get_idevid_template(
 
 pub mod testing {
     use super::*;
-    use std::io::prelude::*;
     use tss_esapi::{
         constants::structure_tags::StructureTag,
         structures::{Attest, AttestBuffer, DigestList, Ticket},
