@@ -592,6 +592,7 @@ impl Context {
     ///
     /// * `handle`: The associated EK handle
     /// * `hash_alg`: The digest algorithm used for signing with the created AK
+    /// * `key_alg`:  The key type used for signing with the created AK
     /// * `sign_alg`: The created AK signing algorithm
     ///
     /// Returns an `AKResult` structure if successful and a `TPMError` otherwise
@@ -599,12 +600,14 @@ impl Context {
         &mut self,
         handle: KeyHandle,
         hash_alg: HashAlgorithm,
+        key_alg: EncryptionAlgorithm,
         sign_alg: SignAlgorithm,
     ) -> Result<AKResult> {
         let ak = ak::create_ak(
             &mut self.inner,
             handle,
             hash_alg.into(),
+            key_alg.into(),
             sign_alg.into(),
             None,
             DefaultKey,
@@ -1802,9 +1805,7 @@ pub fn get_idevid_template(
         "H-4" => (AsymmetricAlgorithm::Ecc, HashingAlgorithm::Sha512),
         "H-5" => (AsymmetricAlgorithm::Ecc, HashingAlgorithm::Sm3_256),
         _ => (
-            AsymmetricAlgorithm::from(EncryptionAlgorithm::try_from(
-                asym_alg_str,
-            )?),
+            EncryptionAlgorithm::try_from(asym_alg_str)?.into(),
             HashingAlgorithm::from(HashAlgorithm::try_from(name_alg_str)?),
         ),
     };
@@ -2120,7 +2121,8 @@ pub mod testing {
     #[cfg(feature = "testing")]
     fn test_create_ek() {
         let mut ctx = Context::new().unwrap(); //#[allow_ci]
-        let algs = [EncryptionAlgorithm::Rsa, EncryptionAlgorithm::Ecc];
+        let algs =
+            [EncryptionAlgorithm::Rsa2048, EncryptionAlgorithm::Ecc256];
         // TODO: create persistent handle and add to be tested: Some("0x81000000"),
         let handles = [Some(""), None];
 
@@ -2137,7 +2139,7 @@ pub mod testing {
     fn test_create_and_load_ak() {
         let mut ctx = Context::new().unwrap(); //#[allow_ci]
 
-        let r = ctx.create_ek(EncryptionAlgorithm::Rsa, None);
+        let r = ctx.create_ek(EncryptionAlgorithm::Rsa2048, None);
         assert!(r.is_ok());
 
         let ek_result = r.unwrap(); //#[allow_ci]
@@ -2152,6 +2154,9 @@ pub mod testing {
             //HashingAlgorithm::Sha3_512, // Not supported by swtpm
             //HashingAlgorithm::Sha1, // Not supported by swtpm
         ];
+        let eng_algs =
+            [EncryptionAlgorithm::Rsa1024, EncryptionAlgorithm::Rsa2048];
+
         let sign_algs = [
             SignAlgorithm::RsaSsa,
             SignAlgorithm::RsaPss,
@@ -2163,14 +2168,16 @@ pub mod testing {
         ];
 
         for sign in sign_algs {
-            for hash in hash_algs {
-                let r = ctx.create_ak(ek_handle, hash, sign);
-                assert!(r.is_ok());
+            for enc in eng_algs {
+                for hash in hash_algs {
+                    let r = ctx.create_ak(ek_handle, hash, enc, sign);
+                    assert!(r.is_ok());
 
-                let ak = r.unwrap(); //#[allow_ci]
+                    let ak = r.unwrap(); //#[allow_ci]
 
-                let r = ctx.load_ak(ek_handle, &ak);
-                assert!(r.is_ok());
+                    let r = ctx.load_ak(ek_handle, &ak);
+                    assert!(r.is_ok());
+                }
             }
         }
     }
@@ -2230,7 +2237,7 @@ pub mod testing {
 
         // Create EK
         let ek_result = ctx
-            .create_ek(EncryptionAlgorithm::Rsa, None)
+            .create_ek(EncryptionAlgorithm::Rsa2048, None)
             .expect("failed to create EK");
         let ek_handle = ek_result.key_handle;
 
@@ -2239,6 +2246,7 @@ pub mod testing {
             .create_ak(
                 ek_handle,
                 HashAlgorithm::Sha256,
+                EncryptionAlgorithm::Rsa2048,
                 SignAlgorithm::RsaSsa,
             )
             .expect("failed to create AK");
@@ -2279,7 +2287,7 @@ pub mod testing {
 
         // Create EK
         let ek_result = ctx
-            .create_ek(EncryptionAlgorithm::Rsa, None)
+            .create_ek(EncryptionAlgorithm::Rsa2048, None)
             .expect("failed to create EK");
         let ek_handle = ek_result.key_handle;
 
@@ -2288,6 +2296,7 @@ pub mod testing {
             .create_ak(
                 ek_handle,
                 HashAlgorithm::Sha256,
+                EncryptionAlgorithm::Rsa2048,
                 SignAlgorithm::RsaSsa,
             )
             .expect("failed to create ak");

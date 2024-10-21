@@ -49,7 +49,7 @@ mod tests {
     async fn test_agent_info() {
         let mut quotedata = QuoteData::fixture().unwrap(); //#[allow_ci]
         quotedata.hash_alg = keylime::algorithms::HashAlgorithm::Sha256;
-        quotedata.enc_alg = keylime::algorithms::EncryptionAlgorithm::Rsa;
+        quotedata.enc_alg = keylime::algorithms::EncryptionAlgorithm::Rsa2048;
         quotedata.sign_alg = keylime::algorithms::SignAlgorithm::RsaSsa;
         quotedata.agent_uuid = "DEADBEEF".to_string();
         let data = web::Data::new(quotedata);
