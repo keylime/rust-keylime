@@ -31,9 +31,9 @@ clean::
 
 .PHONY: install
 install: all
-	mkdir -p /etc/keylime/
-	mkdir -p /etc/keylime/agent.conf.d
-	cp ${CONFFILE} /etc/keylime/agent.conf
+	mkdir -p ${DESTDIR}/etc/keylime/
+	mkdir -p ${DESTDIR}/etc/keylime/agent.conf.d
+	cp ${CONFFILE} ${DESTDIR}/etc/keylime/agent.conf
 	for f in $(programs); do \
 		install -D -t ${DESTDIR}/usr/bin "$$f"; \
 	done
