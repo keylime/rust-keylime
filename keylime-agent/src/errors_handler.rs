@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2021 Keylime Authors
 
-use crate::common::{APIVersion, JsonWrapper, API_VERSION};
+use crate::{
+    common::{APIVersion, JsonWrapper},
+    QuoteData,
+};
 use actix_web::{
     body, dev,
     error::{InternalError, JsonPayloadError, PathError, QueryPayloadError},
@@ -11,24 +14,35 @@ use actix_web::{
 };
 use log::*;
 
-pub(crate) async fn app_default(req: HttpRequest) -> impl Responder {
+pub(crate) async fn app_default(
+    req: HttpRequest,
+    quote_data: web::Data<QuoteData<'_>>,
+) -> impl Responder {
     let error;
     let response;
     let message;
+
+    let api_versions = quote_data
+        .api_versions
+        .iter()
+        .map(|v| format!("/{v}"))
+        .collect::<Vec<_>>()
+        .join(", ");
 
     match req.head().method {
         http::Method::GET => {
             error = 400;
             message = format!(
-                "Not Implemented: Use /version or /{API_VERSION} interfaces"
+                "Not Implemented: Use {api_versions} or /version interfaces"
             );
             response = HttpResponse::BadRequest()
                 .json(JsonWrapper::error(error, &message));
         }
         http::Method::POST => {
             error = 400;
-            message =
-                format!("Not Implemented: Use /{API_VERSION} interface");
+            message = format!(
+                "Not Implemented: Use {api_versions} or /version interfaces"
+            );
             response = HttpResponse::BadRequest()
                 .json(JsonWrapper::error(error, &message));
         }
@@ -126,8 +140,14 @@ mod tests {
     use serde::{Deserialize, Serialize};
     use serde_json::{json, Value};
 
+    #[cfg(feature = "testing")]
     async fn test_default(resource: Resource, allow: &str) {
-        let mut app = test::init_service(App::new().service(resource)).await;
+        let (fixture, mutex) = QuoteData::fixture().await.unwrap(); //#[allow_ci]
+        let quotedata = web::Data::new(fixture);
+        let mut app = test::init_service(
+            App::new().app_data(quotedata).service(resource),
+        )
+        .await;
 
         if allow.contains("GET") {
             let req = test::TestRequest::get().uri("/").to_request();
@@ -173,6 +193,7 @@ mod tests {
     }
 
     #[actix_rt::test]
+    #[cfg(feature = "testing")]
     async fn test_app_default() {
         test_default(web::resource("/").to(app_default), "GET, POST").await
     }

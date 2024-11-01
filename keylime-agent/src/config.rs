@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2022 Keylime Authors
 
-use crate::{permissions, tpm};
+use crate::{api::SUPPORTED_API_VERSIONS, permissions, tpm};
 use config::{
     builder::DefaultState, Config, ConfigBuilder, ConfigError, Environment,
     File, FileFormat, Map, Source, Value, ValueKind::Table,
@@ -25,6 +25,7 @@ use thiserror::Error;
 use uuid::Uuid;
 
 pub static CONFIG_VERSION: &str = "2.0";
+pub static DEFAULT_API_VERSIONS: &str = "default";
 pub static DEFAULT_UUID: &str = "d432fbb3-d2f1-4a97-9ef7-75bd81c00000";
 pub static DEFAULT_IP: &str = "127.0.0.1";
 pub static DEFAULT_PORT: u32 = 9002;
@@ -149,6 +150,7 @@ pub enum KeylimeConfigError {
 pub(crate) struct AgentConfig {
     pub agent_data_path: String,
     pub allow_payload_revocation_actions: bool,
+    pub api_versions: String,
     pub contact_ip: String,
     pub contact_port: u32,
     pub dec_payload_file: String,
@@ -323,6 +325,7 @@ impl Default for AgentConfig {
             agent_data_path: "default".to_string(),
             allow_payload_revocation_actions:
                 DEFAULT_ALLOW_PAYLOAD_REVOCATION_ACTIONS,
+            api_versions: DEFAULT_API_VERSIONS.to_string(),
             contact_ip: DEFAULT_CONTACT_IP.to_string(),
             contact_port: DEFAULT_CONTACT_PORT,
             dec_payload_file: DEFAULT_DEC_PAYLOAD_FILE.to_string(),
@@ -597,6 +600,55 @@ fn config_translate_keywords(
         }
     };
 
+    // Parse the configured API versions and check against the list of supported versions
+    // In case none of the configured API versions are supported, fallback to use all the supported
+    // versions
+    // If the "default" keyword is used, use all the supported versions
+    // If the "latest" keyword is used, use only the latest version
+    let api_versions: String = match config.agent.api_versions.as_ref() {
+        "default" => SUPPORTED_API_VERSIONS
+            .iter()
+            .map(|&s| s.to_string())
+            .collect::<Vec<String>>()
+            .join(", "),
+        "latest" => {
+            if let Some(version) =
+                SUPPORTED_API_VERSIONS.iter().map(|&s| s.to_string()).last()
+            {
+                version
+            } else {
+                unreachable!();
+            }
+        }
+        versions => {
+            let parsed: Vec::<String> = match parse_list(&config.agent.api_versions) {
+                Ok(list) => list
+                    .iter()
+                    .inspect(|e| { if !SUPPORTED_API_VERSIONS.contains(e) {
+                        warn!("Skipping API version \"{e}\" obtained from 'api_versions' configuration option")
+                    }})
+                    .filter(|e| SUPPORTED_API_VERSIONS.contains(e))
+                    .map(|&s| s.into())
+                    .collect(),
+                Err(e) => {
+                    warn!("Failed to parse list from 'api_versions' configuration option; using default supported versions");
+                    SUPPORTED_API_VERSIONS.iter().map(|&s| s.into()).collect()
+                }
+            };
+
+            if parsed.is_empty() {
+                warn!("No supported version found in 'api_versions' configuration option; using default supported versions");
+                SUPPORTED_API_VERSIONS
+                    .iter()
+                    .map(|&s| s.to_string())
+                    .collect::<Vec<String>>()
+                    .join(", ")
+            } else {
+                parsed.join(", ")
+            }
+        }
+    };
+
     // Validate the configuration
 
     // If revocation notifications is enabled, verify all the required options for revocation
@@ -643,14 +695,15 @@ fn config_translate_keywords(
 
     Ok(KeylimeConfig {
         agent: AgentConfig {
-            keylime_dir: keylime_dir.display().to_string(),
             agent_data_path,
+            api_versions,
             contact_ip,
             ek_handle,
             iak_cert,
             idevid_cert,
             ima_ml_path,
             ip,
+            keylime_dir: keylime_dir.display().to_string(),
             measuredboot_ml_path,
             registrar_ip,
             revocation_cert,
@@ -892,6 +945,58 @@ mod tests {
     }
 
     #[test]
+    fn test_translate_api_versions_latest_keyword() {
+        let mut test_config = KeylimeConfig {
+            agent: AgentConfig {
+                api_versions: "latest".to_string(),
+                ..Default::default()
+            },
+        };
+        let result = config_translate_keywords(&test_config);
+        assert!(result.is_ok());
+        let config = result.unwrap(); //#[allow_ci]
+        let version = config.agent.api_versions;
+        let expected = SUPPORTED_API_VERSIONS
+            .iter()
+            .map(|e| e.to_string())
+            .last()
+            .unwrap(); //#[allow_ci]
+        assert_eq!(version, expected);
+    }
+
+    #[test]
+    fn test_translate_api_versions_default_keyword() {
+        let default = KeylimeConfig::default();
+        let result = config_translate_keywords(&default);
+        assert!(result.is_ok());
+        let config = result.unwrap(); //#[allow_ci]
+        let version = config.agent.api_versions;
+        let expected = SUPPORTED_API_VERSIONS
+            .iter()
+            .map(|e| e.to_string())
+            .collect::<Vec<_>>()
+            .join(", ");
+        assert_eq!(version, expected);
+    }
+
+    #[test]
+    fn test_translate_api_versions_old_supported() {
+        let old = SUPPORTED_API_VERSIONS[0];
+
+        let mut test_config = KeylimeConfig {
+            agent: AgentConfig {
+                api_versions: old.to_string(),
+                ..Default::default()
+            },
+        };
+        let result = config_translate_keywords(&test_config);
+        assert!(result.is_ok());
+        let config = result.unwrap(); //#[allow_ci]
+        let version = config.agent.api_versions;
+        assert_eq!(version, old);
+    }
+
+    #[test]
     fn test_get_uuid() {
         assert_eq!(get_uuid("hash_ek"), "hash_ek");
         let _ = Uuid::parse_str(&get_uuid("generate")).unwrap(); //#[allow_ci]
@@ -960,6 +1065,7 @@ mod tests {
         let override_map: Map<&str, &str> = Map::from([
             ("KEYLIME_AGENT_AGENT_DATA_PATH", "override_agent_data_path"),
             ("KEYLIME_AGENT_ALLOW_PAYLOAD_REVOCATION_ACTIONS", "false"),
+            ("KEYLIME_AGENT_API_VERSIONS", "latest"),
             ("KEYLIME_AGENT_CONTACT_IP", "override_contact_ip"),
             ("KEYLIME_AGENT_CONTACT_PORT", "9999"),
             (
