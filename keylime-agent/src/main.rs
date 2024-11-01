@@ -45,7 +45,6 @@ mod quotes_handler;
 mod registrar_agent;
 mod revocation;
 mod secure_mount;
-mod version_handler;
 
 use actix_web::{dev::Service, http, middleware, rt, web, App, HttpServer};
 use base64::{engine::general_purpose, Engine as _};
@@ -102,27 +101,28 @@ static NOTFOUND: &[u8] = b"Not Found";
 // handle quotes.
 #[derive(Debug)]
 pub struct QuoteData<'a> {
-    tpmcontext: Mutex<tpm::Context<'a>>,
-    priv_key: PKey<Private>,
-    pub_key: PKey<Public>,
+    agent_uuid: String,
     ak_handle: KeyHandle,
-    payload_tx: mpsc::Sender<payloads::PayloadMessage>,
-    revocation_tx: mpsc::Sender<revocation::RevocationMessage>,
+    allow_payload_revocation_actions: bool,
+    api_versions: Vec<String>,
+    enc_alg: keylime::algorithms::EncryptionAlgorithm,
+    hash_alg: keylime::algorithms::HashAlgorithm,
+    ima_ml: Mutex<MeasurementList>,
+    ima_ml_file: Option<Mutex<fs::File>>,
     keys_tx: mpsc::Sender<(
         keys_handler::KeyMessage,
         Option<oneshot::Sender<keys_handler::SymmKeyMessage>>,
     )>,
-    hash_alg: keylime::algorithms::HashAlgorithm,
-    enc_alg: keylime::algorithms::EncryptionAlgorithm,
-    sign_alg: keylime::algorithms::SignAlgorithm,
-    agent_uuid: String,
-    allow_payload_revocation_actions: bool,
-    secure_size: String,
-    work_dir: PathBuf,
-    ima_ml_file: Option<Mutex<fs::File>>,
     measuredboot_ml_file: Option<Mutex<fs::File>>,
-    ima_ml: Mutex<MeasurementList>,
+    payload_tx: mpsc::Sender<payloads::PayloadMessage>,
+    priv_key: PKey<Private>,
+    pub_key: PKey<Public>,
+    revocation_tx: mpsc::Sender<revocation::RevocationMessage>,
     secure_mount: PathBuf,
+    secure_size: String,
+    sign_alg: keylime::algorithms::SignAlgorithm,
+    tpmcontext: Mutex<tpm::Context<'a>>,
+    work_dir: PathBuf,
 }
 
 #[actix_web::main]
@@ -272,7 +272,16 @@ async fn main() -> Result<()> {
         info!("Running the service as {}...", user_group);
     }
 
-    info!("Starting server with API version {}...", API_VERSION);
+    // Parse the configured API versions
+    let api_versions = parse_list(&config.agent.api_versions)?
+        .iter()
+        .map(|s| s.to_string())
+        .collect::<Vec<_>>();
+
+    info!(
+        "Starting server with API versions: {}",
+        &config.agent.api_versions
+    );
 
     let mut ctx = tpm::Context::new()?;
 
@@ -736,24 +745,25 @@ async fn main() -> Result<()> {
     .map_err(Error::from);
 
     let quotedata = web::Data::new(QuoteData {
-        tpmcontext: Mutex::new(ctx),
+        agent_uuid: agent_uuid.clone(),
+        ak_handle,
+        allow_payload_revocation_actions,
+        api_versions: api_versions.clone(),
+        enc_alg: tpm_encryption_alg,
+        hash_alg: tpm_hash_alg,
+        ima_ml: Mutex::new(MeasurementList::new()),
+        ima_ml_file,
+        keys_tx: keys_tx.clone(),
+        measuredboot_ml_file,
+        payload_tx: payload_tx.clone(),
         priv_key: nk_priv,
         pub_key: nk_pub,
-        ak_handle,
-        keys_tx: keys_tx.clone(),
-        payload_tx: payload_tx.clone(),
         revocation_tx: revocation_tx.clone(),
-        hash_alg: tpm_hash_alg,
-        enc_alg: tpm_encryption_alg,
-        sign_alg: tpm_signing_alg,
-        agent_uuid: agent_uuid.clone(),
-        allow_payload_revocation_actions,
-        secure_size,
-        work_dir,
-        ima_ml_file,
-        measuredboot_ml_file,
-        ima_ml: Mutex::new(MeasurementList::new()),
         secure_mount: PathBuf::from(&mount),
+        secure_size,
+        sign_alg: tpm_signing_alg,
+        tpmcontext: Mutex::new(ctx),
+        work_dir,
     });
 
     let actix_server = HttpServer::new(move || {
@@ -788,17 +798,14 @@ async fn main() -> Result<()> {
                     .error_handler(errors_handler::path_parser_error),
             );
 
-        let enabled_api_versions = api::SUPPORTED_API_VERSIONS;
-
-        for version in enabled_api_versions {
+        for version in &api_versions {
             // This should never fail, thus unwrap should never panic
             let scope = api::get_api_scope(version).unwrap(); //#[allow_ci]
             app = app.service(scope);
         }
 
         app.service(
-            web::resource("/version")
-                .route(web::get().to(version_handler::version)),
+            web::resource("/version").route(web::get().to(api::version)),
         )
         .service(
             web::resource(r"/v{major:\d+}.{minor:\d+}{tail}*")
@@ -949,6 +956,7 @@ fn read_in_file(path: String) -> std::io::Result<String> {
 }
 
 #[cfg(feature = "testing")]
+#[cfg(test)]
 mod testing {
     use super::*;
     use crate::{config::KeylimeConfig, crypto::CryptoError};
@@ -1077,7 +1085,7 @@ mod testing {
             // Allow setting the binary bios measurements log path when testing
             let mut measuredboot_ml_path =
                 Path::new(&test_config.agent.measuredboot_ml_path);
-            let env_mb_path;
+            let env_mb_path: String;
             #[cfg(feature = "testing")]
             if let Ok(v) = std::env::var("TPM_BINARY_MEASUREMENTS") {
                 env_mb_path = v;
@@ -1090,8 +1098,14 @@ mod testing {
                     Err(err) => None,
                 };
 
+            let api_versions = api::SUPPORTED_API_VERSIONS
+                .iter()
+                .map(|&s| s.to_string())
+                .collect::<Vec<String>>();
+
             Ok((
                 QuoteData {
+                    api_versions,
                     tpmcontext: Mutex::new(ctx),
                     priv_key: nk_priv,
                     pub_key: nk_pub,
