@@ -565,11 +565,26 @@ fn config_translate_keywords(
         s => s.to_string(),
     };
 
-    let ip = parse_ip(config.agent.ip.as_ref())?.to_string();
-    let contact_ip = parse_ip(config.agent.contact_ip.as_ref())?.to_string();
+    let ip = match parse_ip(config.agent.ip.as_ref()) {
+        Ok(ip) => ip.to_string(),
+        Err(_) => {
+            debug!("Parsing configured IP as hostname");
+            parse_hostname(config.agent.ip.as_ref())?.to_string()
+        }
+    };
+
+    let contact_ip = match parse_ip(config.agent.contact_ip.as_ref()) {
+        Ok(ip) => ip.to_string(),
+        Err(_) => {
+            debug!("Parsing configured contact IP as hostname");
+            parse_hostname(config.agent.contact_ip.as_ref())?.to_string()
+        }
+    };
+
     let registrar_ip = match parse_ip(config.agent.registrar_ip.as_ref()) {
         Ok(ip) => ip.to_string(),
         Err(_) => {
+            debug!("Parsing configured registrar IP as hostname");
             parse_hostname(config.agent.registrar_ip.as_ref())?.to_string()
         }
     };
@@ -709,6 +724,30 @@ mod tests {
         assert!(result.is_ok());
         let expected = result.unwrap(); //#[allow_ci]
         assert_eq!(expected, default);
+    }
+
+    #[test]
+    fn test_hostname_support() {
+        let default = AgentConfig::default();
+
+        let modified = AgentConfig {
+            ip: "localhost".to_string(),
+            contact_ip: "contact.ip".to_string(),
+            registrar_ip: "registrar.ip".to_string(),
+            ..default
+        };
+
+        let c = KeylimeConfig { agent: modified };
+
+        let result = config_translate_keywords(&c);
+        assert!(result.is_ok());
+        let result = result.unwrap(); //#[allow_ci]
+        let resulting_ip = result.agent.ip;
+        let resulting_contact_ip = result.agent.contact_ip;
+        let resulting_registrar_ip = result.agent.registrar_ip;
+        assert_eq!(resulting_ip, "localhost");
+        assert_eq!(resulting_contact_ip, "contact.ip");
+        assert_eq!(resulting_registrar_ip, "registrar.ip");
     }
 
     #[test]

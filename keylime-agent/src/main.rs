@@ -921,12 +921,22 @@ async fn main() -> Result<()> {
 
     let server;
 
-    // Add bracket if IPv6
-    let ip = if config.agent.ip.parse::<IpAddr>()?.is_ipv6() {
-        format!("[{}]", config.agent.ip)
-    } else {
-        config.agent.ip.to_string()
+    // Try to parse as an IP address
+    let ip = match config.agent.ip.parse::<IpAddr>() {
+        Ok(ip_addr) => {
+            // Add bracket if IPv6, otherwise use as it is
+            if ip_addr.is_ipv6() {
+                format!("[{}]", ip_addr)
+            } else {
+                ip_addr.to_string()
+            }
+        }
+        Err(_) => {
+            // If the address was not an IP address, treat as a hostname
+            config.agent.ip.to_string()
+        }
     };
+
     let port = config.agent.port;
     if config.agent.enable_agent_mtls && ssl_context.is_some() {
         server = actix_server
