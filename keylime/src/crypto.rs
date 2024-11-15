@@ -56,6 +56,10 @@ pub enum CryptoError {
     #[error("failed to create EcKey structure from public point")]
     ECKeyFromPublicPointError(#[source] openssl::error::ErrorStack),
 
+    /// File not found
+    #[error("could not find file {0}")]
+    FileNotFound(String),
+
     /// Error creating file
     #[error("failed to create file {file}")]
     FSCreateError {
@@ -270,6 +274,15 @@ pub fn load_x509_pem(input_cert_path: &Path) -> Result<X509, CryptoError> {
     X509::from_pem(&contents).map_err(CryptoError::X509FromPEMError)
 }
 
+/// Load a X509 certificate in PEM or DER format from a given path
+pub fn load_x509(path: &Path) -> Result<X509, CryptoError> {
+    if path.exists() {
+        load_x509_der(path).or(load_x509_pem(path))
+    } else {
+        Err(CryptoError::FileNotFound(path.display().to_string()))
+    }
+}
+
 /// Load X509 certificate chain in PEM format from file
 fn load_x509_cert_chain(
     input_cert_path: &Path,
@@ -368,7 +381,7 @@ pub fn hash(
 /// Check an x509 certificate contains a specific public key
 pub fn check_x509_key(
     cert: &X509,
-    tpm_key: tss_esapi::structures::Public,
+    tpm_key: &tss_esapi::structures::Public,
 ) -> Result<bool, CryptoError> {
     // Id:RSA_PSS only added in rust-openssl from v0.10.59; remove this let and use Id::RSA_PSS after update
     // Id taken from https://boringssl.googlesource.com/boringssl/+/refs/heads/master/include/openssl/nid.h#4039
@@ -389,7 +402,7 @@ pub fn check_x509_key(
             let mut cert_n_str = format!("{:?}", cert_n);
             _ = cert_n_str.pop();
             _ = cert_n_str.remove(0);
-            let key = SubjectPublicKeyInfo::try_from(tpm_key)
+            let key = SubjectPublicKeyInfo::try_from(tpm_key.clone())
                 .map_err(CryptoError::SubjectPublicKeyInfoFromRSAError)?;
             let key_der = picky_asn1_der::to_vec(&key)
                 .map_err(CryptoError::SubjectPublicKeyInfoToDERError)?;
@@ -408,7 +421,7 @@ pub fn check_x509_key(
             let mut cert_n_str = format!("{:?}", cert_n);
             _ = cert_n_str.pop();
             _ = cert_n_str.remove(0);
-            let key = SubjectPublicKeyInfo::try_from(tpm_key)
+            let key = SubjectPublicKeyInfo::try_from(tpm_key.clone())
                 .map_err(CryptoError::SubjectPublicKeyInfoFromRSAError)?;
             let key_der = picky_asn1_der::to_vec(&key)
                 .map_err(CryptoError::SubjectPublicKeyInfoToDERError)?;
@@ -427,7 +440,7 @@ pub fn check_x509_key(
             let mut cert_n_str = format!("{:?}", cert_n);
             _ = cert_n_str.pop();
             _ = cert_n_str.remove(0);
-            let key = SubjectPublicKeyInfo::try_from(tpm_key)
+            let key = SubjectPublicKeyInfo::try_from(tpm_key.clone())
                 .map_err(CryptoError::SubjectPublicKeyInfoFromECCError)?;
             let key_der = picky_asn1_der::to_vec(&key)
                 .map_err(CryptoError::SubjectPublicKeyInfoToDERError)?;
