@@ -27,6 +27,10 @@ pub(crate) enum Error {
     Conversion(String),
     #[error("Configuration error")]
     Configuration(#[from] crate::config::KeylimeConfigError),
+    #[error("Device ID error")]
+    DeviceID(#[from] keylime::device_id::DeviceIDError),
+    #[error("Device ID builder error")]
+    DeviceIDBuilder(#[from] keylime::device_id::DeviceIDBuilderError),
     #[error("Reqwest error: {0}")]
     Reqwest(#[from] reqwest::Error),
     #[error("Registrar error: received {code} from {addr}")]

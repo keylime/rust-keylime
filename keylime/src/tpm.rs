@@ -1,8 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2021 Keylime Authors
 
-use crate::algorithms::{
-    AlgorithmError, EncryptionAlgorithm, HashAlgorithm, SignAlgorithm,
+use crate::{
+    algorithms::{
+        AlgorithmError, EncryptionAlgorithm, HashAlgorithm, SignAlgorithm,
+    },
+    crypto,
 };
 use base64::{engine::general_purpose, Engine as _};
 use log::*;
@@ -18,6 +21,7 @@ use openssl::{
     hash::{Hasher, MessageDigest},
     memcmp,
     pkey::{HasPublic, Id, PKeyRef, Public},
+    x509::X509,
 };
 
 use tss_esapi::{
@@ -50,10 +54,11 @@ use tss_esapi::{
         Attest, AttestInfo, Auth, Data, Digest, DigestValues, EccParameter,
         EccPoint, EccScheme, EncryptedSecret, HashScheme, IdObject,
         KeyDerivationFunctionScheme, Name, PcrSelectionList,
-        PcrSelectionListBuilder, PcrSlot, PublicBuilder,
-        PublicEccParametersBuilder, PublicKeyRsa, PublicRsaParametersBuilder,
-        RsaExponent, RsaScheme, Signature, SignatureScheme,
-        SymmetricDefinitionObject, Ticket, VerifiedTicket,
+        PcrSelectionListBuilder, PcrSlot, Private as TssPrivate,
+        Public as TssPublic, PublicBuilder, PublicEccParametersBuilder,
+        PublicKeyRsa, PublicRsaParametersBuilder, RsaExponent, RsaScheme,
+        Signature, SignatureScheme, SymmetricDefinitionObject, Ticket,
+        VerifiedTicket,
     },
     tcti_ldr::TctiNameConf,
     traits::Marshall,
@@ -114,6 +119,10 @@ const UNIQUE_IAK: [u8; 3] = [0x49, 0x41, 0x4b];
 /// TpmError wraps all possible errors raised in tpm.rs
 #[derive(Error, Debug)]
 pub enum TpmError {
+    /// Public key does not match with certificate
+    #[error("{0} key does not match with certificate. Check template in configuration.")]
+    PublicKeyCertificateMismatch(String),
+
     /// Unsupported hashing algorithm error
     #[error("Unsupported hashing algorithm : {alg:?}")]
     UnsupportedHashingAlgorithm { alg: HashingAlgorithm },
@@ -405,6 +414,10 @@ pub enum TpmError {
     #[error("AlgorithmError")]
     AlgorithmError(#[from] AlgorithmError),
 
+    /// Generic catch-all crypto error
+    #[error("CryptoError")]
+    CryptoError(#[from] crypto::CryptoError),
+
     /// Generic catch-all error
     #[error("{0}")]
     Other(String),
@@ -430,40 +443,40 @@ type Result<T> = std::result::Result<T, TpmError>;
 pub struct EKResult {
     pub key_handle: KeyHandle,
     pub ek_cert: Option<Vec<u8>>,
-    pub public: tss_esapi::structures::Public,
+    pub public: TssPublic,
 }
 
 /// Holds the output of create_ak.
 #[derive(Clone, Debug)]
 pub struct AKResult {
-    pub public: tss_esapi::structures::Public,
-    pub private: tss_esapi::structures::Private,
+    pub public: TssPublic,
+    pub private: TssPrivate,
 }
 
 /// Holds the output of create_iak.
 #[derive(Clone, Debug)]
 pub struct IAKResult {
-    pub public: tss_esapi::structures::Public,
+    pub public: TssPublic,
     pub handle: tss_esapi::handles::KeyHandle,
 }
 
 /// Holds the output of create_idevid.
 #[derive(Clone, Debug)]
 pub struct IDevIDResult {
-    pub public: tss_esapi::structures::Public,
+    pub public: TssPublic,
     pub handle: tss_esapi::handles::KeyHandle,
 }
 
 /// Holds the Public result from create_idevid_public_from_default_template
 #[derive(Clone, Debug)]
 pub struct IDevIDPublic {
-    pub public: tss_esapi::structures::Public,
+    pub public: TssPublic,
 }
 
 /// Holds the Public result from create_iak_public_from_default_template
 #[derive(Clone, Debug)]
 pub struct IAKPublic {
-    pub public: tss_esapi::structures::Public,
+    pub public: TssPublic,
 }
 
 /// Wrapper around tss_esapi::Context.
@@ -1909,6 +1922,23 @@ pub fn get_idevid_template(
         ),
     };
     Ok((asym_alg, name_alg))
+}
+
+/// Check if a public key and certificate match
+///
+/// The provided label is used to generate logging messages
+pub fn check_pubkey_match_cert(
+    pubkey: &TssPublic,
+    certificate: &X509,
+    label: &str,
+) -> Result<()> {
+    if crypto::check_x509_key(certificate, pubkey)? {
+        info!("{label} public key matches certificate.");
+        Ok(())
+    } else {
+        error!("{label} public key does not match certificate. Check template in configuration.");
+        Err(TpmError::PublicKeyCertificateMismatch(label.to_string()))
+    }
 }
 
 pub mod testing {
