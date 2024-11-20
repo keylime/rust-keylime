@@ -21,6 +21,7 @@ thiserror.workspace = true
 tss-esapi.workspace = true
 picky-asn1-der.workspace = true
 picky-asn1-x509.workspace = true
+tokio.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

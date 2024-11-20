@@ -133,7 +133,7 @@ fn try_combine_keys(
 async fn u_key(
     body: web::Json<KeylimeUKey>,
     req: HttpRequest,
-    quote_data: web::Data<QuoteData>,
+    quote_data: web::Data<QuoteData<'_>>,
 ) -> impl Responder {
     debug!("Received ukey");
 
@@ -247,7 +247,7 @@ async fn u_key(
 async fn v_key(
     body: web::Json<KeylimeVKey>,
     req: HttpRequest,
-    quote_data: web::Data<QuoteData>,
+    quote_data: web::Data<QuoteData<'_>>,
 ) -> impl Responder {
     debug!("Received vkey");
 
@@ -317,7 +317,7 @@ async fn v_key(
 
 async fn pubkey(
     req: HttpRequest,
-    data: web::Data<QuoteData>,
+    data: web::Data<QuoteData<'_>>,
 ) -> impl Responder {
     match crypto::pkey_pub_to_pem(&data.pub_key) {
         Ok(pubkey) => {
@@ -367,7 +367,7 @@ async fn get_symm_key(
 async fn verify(
     param: web::Query<KeylimeChallenge>,
     req: HttpRequest,
-    data: web::Data<QuoteData>,
+    data: web::Data<QuoteData<'_>>,
 ) -> impl Responder {
     if param.challenge.is_empty() {
         warn!(
@@ -875,7 +875,7 @@ mod tests {
     #[cfg(feature = "testing")]
     async fn test_u_or_v_key(key_len: usize, payload: Option<&[u8]>) {
         let test_config = KeylimeConfig::default();
-        let mut fixture = QuoteData::fixture().unwrap(); //#[allow_ci]
+        let (mut fixture, mutex) = QuoteData::fixture().await.unwrap(); //#[allow_ci]
 
         // Create temporary working directory and secure mount
         let temp_workdir = tempfile::tempdir().unwrap(); //#[allow_ci]
@@ -1073,6 +1073,9 @@ mod tests {
         keys_tx.send((KeyMessage::Shutdown, None)).await.unwrap(); //#[allow_ci]
         payload_tx.send(PayloadMessage::Shutdown).await.unwrap(); //#[allow_ci]
         arbiter.join();
+
+        // Explicitly drop QuoteData to cleanup keys
+        drop(quotedata);
     }
 
     #[cfg(feature = "testing")]
@@ -1090,7 +1093,8 @@ mod tests {
     #[cfg(feature = "testing")]
     #[actix_rt::test]
     async fn test_pubkey() {
-        let quotedata = web::Data::new(QuoteData::fixture().unwrap()); //#[allow_ci]
+        let (fixture, mutex) = QuoteData::fixture().await.unwrap(); //#[allow_ci]
+        let quotedata = web::Data::new(fixture);
         let mut app =
             test::init_service(App::new().app_data(quotedata.clone()).route(
                 &format!("/{API_VERSION}/keys/pubkey"),
@@ -1110,5 +1114,8 @@ mod tests {
         assert!(pkey_pub_from_pem(&result.results.pubkey)
             .unwrap() //#[allow_ci]
             .public_eq(&quotedata.pub_key));
+
+        // Explicitly drop QuoteData to cleanup keys
+        drop(quotedata);
     }
 }
