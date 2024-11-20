@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 async fn revocation(
     body: web::Json<Revocation>,
     req: HttpRequest,
-    data: web::Data<QuoteData>,
+    data: web::Data<QuoteData<'_>>,
 ) -> impl Responder {
     info!("Received revocation");
 
@@ -138,7 +138,7 @@ mod tests {
             PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/actions"),
         );
 
-        let mut fixture = QuoteData::fixture().unwrap(); //#[allow_ci]
+        let (mut fixture, mutex) = QuoteData::fixture().await.unwrap(); //#[allow_ci]
 
         // Replace the channels on the fixture with some local ones
         let (mut revocation_tx, mut revocation_rx) =
@@ -188,5 +188,8 @@ mod tests {
 
         let resp = test::call_service(&app, req).await;
         assert!(resp.status().is_success());
+
+        // Explicitly drop QuoteData to cleanup keys
+        drop(quotedata);
     }
 }

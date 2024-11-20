@@ -274,9 +274,10 @@ mod tests {
         Context,
     };
 
+    #[tokio::test]
     #[cfg(feature = "testing")]
-    #[test]
-    fn test_agent_data() -> Result<()> {
+    async fn test_agent_data() -> Result<()> {
+        let _mutex = tpm::testing::lock_tests().await;
         let mut config = KeylimeConfig::default();
 
         let mut ctx = tpm::Context::new()?;
@@ -319,13 +320,21 @@ mod tests {
             tpm_signing_alg,
             ek_hash.as_bytes(),
         );
+
         assert!(valid);
+
+        // Cleanup created keys
+        let ak_handle = ctx.load_ak(ek_result.key_handle, &ak)?;
+        ctx.flush_context(ak_handle.into());
+        ctx.flush_context(ek_result.key_handle.into());
+
         Ok(())
     }
 
+    #[tokio::test]
     #[cfg(feature = "testing")]
-    #[test]
-    fn test_hash() -> Result<()> {
+    async fn test_hash() -> Result<()> {
+        let _mutex = tpm::testing::lock_tests().await;
         let mut config = KeylimeConfig::default();
 
         let mut ctx = tpm::Context::new()?;
@@ -342,6 +351,10 @@ mod tests {
         let result = hash_ek_pubkey(ek_result.public);
 
         assert!(result.is_ok());
+
+        // Cleanup created keys
+        ctx.flush_context(ek_result.key_handle.into());
+
         Ok(())
     }
 }

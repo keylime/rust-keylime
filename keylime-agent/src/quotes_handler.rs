@@ -50,7 +50,7 @@ pub(crate) struct KeylimeQuote {
 async fn identity(
     req: HttpRequest,
     param: web::Query<Ident>,
-    data: web::Data<QuoteData>,
+    data: web::Data<QuoteData<'_>>,
 ) -> impl Responder {
     // nonce can only be in alphanumerical format
     if !param.nonce.chars().all(char::is_alphanumeric) {
@@ -139,7 +139,7 @@ async fn identity(
 async fn integrity(
     req: HttpRequest,
     param: web::Query<Integ>,
-    data: web::Data<QuoteData>,
+    data: web::Data<QuoteData<'_>>,
 ) -> impl Responder {
     // nonce, mask can only be in alphanumerical format
     if !param.nonce.chars().all(char::is_alphanumeric) {
@@ -387,7 +387,8 @@ mod tests {
 
     #[actix_rt::test]
     async fn test_identity() {
-        let quotedata = web::Data::new(QuoteData::fixture().unwrap()); //#[allow_ci]
+        let (fixture, mutex) = QuoteData::fixture().await.unwrap(); //#[allow_ci]
+        let quotedata = web::Data::new(fixture);
         let mut app =
             test::init_service(App::new().app_data(quotedata.clone()).route(
                 &format!("/{API_VERSION}/quotes/identity"),
@@ -418,17 +419,22 @@ mod tests {
 
         let mut context = quotedata.tpmcontext.lock().unwrap(); //#[allow_ci]
         tpm::testing::check_quote(
-            context.as_mut(),
+            &mut context,
             quotedata.ak_handle,
             &result.results.quote,
             b"1234567890ABCDEFHIJ",
         )
         .expect("unable to verify quote");
+
+        // Explicitly drop QuoteData to cleanup keys
+        drop(context);
+        drop(quotedata);
     }
 
     #[actix_rt::test]
     async fn test_integrity_pre() {
-        let quotedata = web::Data::new(QuoteData::fixture().unwrap()); //#[allow_ci]
+        let (fixture, mutex) = QuoteData::fixture().await.unwrap(); //#[allow_ci]
+        let quotedata = web::Data::new(fixture);
         let mut app =
             test::init_service(App::new().app_data(quotedata.clone()).route(
                 &format!("/{API_VERSION}/quotes/integrity"),
@@ -470,7 +476,7 @@ mod tests {
 
                     let mut context = quotedata.tpmcontext.lock().unwrap(); //#[allow_ci]
                     tpm::testing::check_quote(
-                        context.as_mut(),
+                        &mut context,
                         quotedata.ak_handle,
                         &result.results.quote,
                         b"1234567890ABCDEFHIJ",
@@ -482,11 +488,15 @@ mod tests {
         } else {
             panic!("IMA file was None"); //#[allow_ci]
         }
+
+        // Explicitly drop QuoteData to cleanup keys
+        drop(quotedata);
     }
 
     #[actix_rt::test]
     async fn test_integrity_post() {
-        let quotedata = web::Data::new(QuoteData::fixture().unwrap()); //#[allow_ci]
+        let (fixture, mutex) = QuoteData::fixture().await.unwrap(); //#[allow_ci]
+        let quotedata = web::Data::new(fixture);
         let mut app =
             test::init_service(App::new().app_data(quotedata.clone()).route(
                 &format!("/{API_VERSION}/quotes/integrity"),
@@ -529,22 +539,27 @@ mod tests {
 
         let mut context = quotedata.tpmcontext.lock().unwrap(); //#[allow_ci]
         tpm::testing::check_quote(
-            context.as_mut(),
+            &mut context,
             quotedata.ak_handle,
             &result.results.quote,
             b"1234567890ABCDEFHIJ",
         )
         .expect("unable to verify quote");
+
+        // Explicitly drop QuoteData to cleanup keys
+        drop(context);
+        drop(quotedata);
     }
 
     #[actix_rt::test]
     async fn test_missing_ima_file() {
-        let mut quotedata = QuoteData::fixture().unwrap(); //#[allow_ci]
-                                                           // Remove the IMA log file from the context
-        quotedata.ima_ml_file = None;
-        let data = web::Data::new(quotedata);
+        let (mut fixture, mutex) = QuoteData::fixture().await.unwrap(); //#[allow_ci]
+
+        // Remove the IMA log file from the context
+        fixture.ima_ml_file = None;
+        let quotedata = web::Data::new(fixture);
         let mut app =
-            test::init_service(App::new().app_data(data.clone()).route(
+            test::init_service(App::new().app_data(quotedata.clone()).route(
                 &format!("/{API_VERSION}/quotes/integrity"),
                 web::get().to(integrity),
             ))
@@ -563,6 +578,9 @@ mod tests {
             test::read_body_json(resp).await;
         assert!(result.results.ima_measurement_list.is_none());
         assert!(result.results.ima_measurement_list_entry.is_none());
+
+        // Explicitly drop QuoteData to cleanup keys
+        drop(quotedata);
     }
 
     #[actix_rt::test]

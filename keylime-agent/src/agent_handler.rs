@@ -21,7 +21,7 @@ pub(crate) struct AgentInfo {
 // It should return a AgentInfo object as JSON
 async fn info(
     req: HttpRequest,
-    data: web::Data<QuoteData>,
+    data: web::Data<QuoteData<'_>>,
 ) -> impl Responder {
     debug!("Returning agent information");
 
@@ -87,7 +87,7 @@ mod tests {
 
     #[actix_rt::test]
     async fn test_agent_info() {
-        let mut quotedata = QuoteData::fixture().unwrap(); //#[allow_ci]
+        let (mut quotedata, mutex) = QuoteData::fixture().await.unwrap(); //#[allow_ci]
         quotedata.hash_alg = keylime::algorithms::HashAlgorithm::Sha256;
         quotedata.enc_alg = keylime::algorithms::EncryptionAlgorithm::Rsa;
         quotedata.sign_alg = keylime::algorithms::SignAlgorithm::RsaSsa;
@@ -112,6 +112,9 @@ mod tests {
         assert_eq!(result.results.tpm_hash_alg.as_str(), "sha256");
         assert_eq!(result.results.tpm_enc_alg.as_str(), "rsa");
         assert_eq!(result.results.tpm_sign_alg.as_str(), "rsassa");
+
+        // Explicitly drop QuoteData to cleanup keys
+        drop(data);
     }
 
     #[actix_rt::test]
