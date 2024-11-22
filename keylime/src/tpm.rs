@@ -472,7 +472,10 @@ impl AsMut<tss_esapi::Context> for Context {
 impl Context {
     /// Creates a connection context.
     pub fn new() -> Result<Self> {
-        let tcti_path = match std::env::var("TCTI") {
+        let tcti_path = match std::env::var("TPM2TOOLS_TCTI")
+            .or_else(|_| std::env::var("TCTI"))
+            .or_else(|_| std::env::var("TEST_TCTI"))
+        {
             Ok(val) => val,
             Err(_) => if std::path::Path::new("/dev/tpmrm0").exists() {
                 "device:/dev/tpmrm0"
