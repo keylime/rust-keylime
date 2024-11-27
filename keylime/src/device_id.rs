@@ -485,4 +485,51 @@ mod tests {
             .idevid_asym_alg("")
             .idevid_hash_alg("");
     }
+
+    #[tokio::test]
+    #[cfg(feature = "testing")]
+    async fn test_device_id_builder() {
+        let _mutex = tpm::testing::lock_tests().await;
+        let certs_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("test-data")
+            .join("iak-idevid-certs");
+
+        if certs_dir.exists() {
+            let iak_cert = certs_dir.join("iak.cert.pem");
+            let idevid_cert = certs_dir.join("idevid.cert.pem");
+            if iak_cert.exists() && idevid_cert.exists() {
+                let mut tpm_ctx = tpm::Context::new().unwrap(); //#[allow_ci]
+                let result = DeviceIDBuilder::new()
+                    .iak_handle("")
+                    .iak_cert_path(
+                        iak_cert
+                            .to_str()
+                            .expect("Failed to get str for IAK cert"),
+                    )
+                    .iak_password("")
+                    .iak_template("")
+                    .iak_asym_alg("")
+                    .iak_hash_alg("")
+                    .idevid_handle("")
+                    .idevid_cert_path(
+                        idevid_cert
+                            .to_str()
+                            .expect("Failed to get str for IDevID cert"),
+                    )
+                    .idevid_password("")
+                    .idevid_template("")
+                    .idevid_asym_alg("")
+                    .idevid_hash_alg("")
+                    .build(&mut tpm_ctx);
+                assert!(result.is_ok(), "Result: {result:?}");
+                let dev_id = result.unwrap(); //#[allow_ci]
+
+                // Flush context to free TPM memory
+                let r = tpm_ctx.flush_context(dev_id.iak.handle.into());
+                assert!(r.is_ok(), "Result: {r:?}");
+                let r = tpm_ctx.flush_context(dev_id.idevid.handle.into());
+                assert!(r.is_ok(), "Result: {r:?}");
+            }
+        }
+    }
 }
