@@ -10,6 +10,9 @@ use std::convert::{TryFrom, TryInto};
 use std::io::Read;
 use std::str::FromStr;
 use thiserror::Error;
+use tss_esapi::handles::SessionHandle;
+use tss_esapi::interface_types::session_handles::PolicySession;
+use tss_esapi::structures::{DigestList, SymmetricDefinition};
 
 use openssl::{
     hash::{Hasher, MessageDigest},
@@ -19,9 +22,7 @@ use openssl::{
 
 use tss_esapi::{
     abstraction::{
-        ak,
-        cipher::Cipher,
-        ek,
+        ak, ek,
         pcr::{read_all, PcrData},
         DefaultKey,
     },
@@ -107,6 +108,47 @@ const IAK_AUTH_POLICY_SHA256: [u8; 32] = [
     0x22, 0xc2, 0x1d, 0x12, 0x0b, 0x2d, 0x1e, 0x07,
 ];
 const UNIQUE_IAK: [u8; 3] = [0x49, 0x41, 0x4b];
+
+// Source: TCG EK Credential Profile for TPM Family 2.0; Level 0 Version 2.5 Revision 2
+// Section B.6
+const POLICY_A_SHA384: [u8; 48] = [
+    0x8b, 0xbf, 0x22, 0x66, 0x53, 0x7c, 0x17, 0x1c, 0xb5, 0x6e, 0x40, 0x3c,
+    0x4d, 0xc1, 0xd4, 0xb6, 0x4f, 0x43, 0x26, 0x11, 0xdc, 0x38, 0x6e, 0x6f,
+    0x53, 0x20, 0x50, 0xc3, 0x27, 0x8c, 0x93, 0x0e, 0x14, 0x3e, 0x8b, 0xb1,
+    0x13, 0x38, 0x24, 0xcc, 0xb4, 0x31, 0x05, 0x38, 0x71, 0xc6, 0xdb, 0x53,
+];
+const POLICY_A_SHA512: [u8; 64] = [
+    0x1e, 0x3b, 0x76, 0x50, 0x2c, 0x8a, 0x14, 0x25, 0xaa, 0x0b, 0x7b, 0x3f,
+    0xc6, 0x46, 0xa1, 0xb0, 0xfa, 0xe0, 0x63, 0xb0, 0x3b, 0x53, 0x68, 0xf9,
+    0xc4, 0xcd, 0xde, 0xca, 0xff, 0x08, 0x91, 0xdd, 0x68, 0x2b, 0xac, 0x1a,
+    0x85, 0xd4, 0xd8, 0x32, 0xb7, 0x81, 0xea, 0x45, 0x19, 0x15, 0xde, 0x5f,
+    0xc5, 0xbf, 0x0d, 0xc4, 0xa1, 0x91, 0x7c, 0xd4, 0x2f, 0xa0, 0x41, 0xe3,
+    0xf9, 0x98, 0xe0, 0xee,
+];
+const POLICY_A_SM3_256: [u8; 32] = [
+    0xc6, 0x7f, 0x7d, 0x35, 0xf6, 0x6f, 0x3b, 0xec, 0x13, 0xc8, 0x9f, 0xe8,
+    0x98, 0x92, 0x1c, 0x65, 0x1b, 0x0c, 0xb5, 0xa3, 0x8a, 0x92, 0x69, 0x0a,
+    0x62, 0xa4, 0x3c, 0x00, 0x12, 0xe4, 0xfb, 0x8b,
+];
+const POLICY_C_SHA384: [u8; 48] = [
+    0xd6, 0x03, 0x2c, 0xe6, 0x1f, 0x2f, 0xb3, 0xc2, 0x40, 0xeb, 0x3c, 0xf6,
+    0xa3, 0x32, 0x37, 0xef, 0x2b, 0x6a, 0x16, 0xf4, 0x29, 0x3c, 0x22, 0xb4,
+    0x55, 0xe2, 0x61, 0xcf, 0xfd, 0x21, 0x7a, 0xd5, 0xb4, 0x94, 0x7c, 0x2d,
+    0x73, 0xe6, 0x30, 0x05, 0xee, 0xd2, 0xdc, 0x2b, 0x35, 0x93, 0xd1, 0x65,
+];
+const POLICY_C_SHA512: [u8; 64] = [
+    0x58, 0x9e, 0xe1, 0xe1, 0x46, 0x54, 0x47, 0x16, 0xe8, 0xde, 0xaf, 0xe6,
+    0xdb, 0x24, 0x7b, 0x01, 0xb8, 0x1e, 0x9f, 0x9c, 0x7d, 0xd1, 0x6b, 0x81,
+    0x4a, 0xa1, 0x59, 0x13, 0x87, 0x49, 0x10, 0x5f, 0xba, 0x53, 0x88, 0xdd,
+    0x1d, 0xea, 0x70, 0x2f, 0x35, 0x24, 0x0c, 0x18, 0x49, 0x33, 0x12, 0x1e,
+    0x2c, 0x61, 0xb8, 0xf5, 0x0d, 0x3e, 0xf9, 0x13, 0x93, 0xa4, 0x9a, 0x38,
+    0xc3, 0xf7, 0x3f, 0xc8,
+];
+const POLICY_C_SM3_256: [u8; 32] = [
+    0x2d, 0x4e, 0x81, 0x57, 0x8c, 0x35, 0x31, 0xd9, 0xbd, 0x1c, 0xdd, 0x7d,
+    0x02, 0xba, 0x29, 0x8d, 0x56, 0x99, 0xa3, 0xe3, 0x9f, 0xc3, 0x55, 0x1b,
+    0xfe, 0xff, 0xcf, 0x13, 0x2b, 0x49, 0xe1, 0x1d,
+];
 
 /// TpmError wraps all possible errors raised in tpm.rs
 #[derive(Error, Debug)]
@@ -592,6 +634,7 @@ impl Context {
     ///
     /// * `handle`: The associated EK handle
     /// * `hash_alg`: The digest algorithm used for signing with the created AK
+    /// * `key_alg`:  The key type used for signing with the created AK
     /// * `sign_alg`: The created AK signing algorithm
     ///
     /// Returns an `AKResult` structure if successful and a `TPMError` otherwise
@@ -599,12 +642,14 @@ impl Context {
         &mut self,
         handle: KeyHandle,
         hash_alg: HashAlgorithm,
+        key_alg: EncryptionAlgorithm,
         sign_alg: SignAlgorithm,
     ) -> Result<AKResult> {
         let ak = ak::create_ak(
             &mut self.inner,
             handle,
             hash_alg.into(),
+            key_alg.into(),
             sign_alg.into(),
             None,
             DefaultKey,
@@ -1168,18 +1213,13 @@ impl Context {
     fn create_empty_session(
         &mut self,
         ses_type: SessionType,
+        symmetric: SymmetricDefinition,
+        hash_alg: HashingAlgorithm,
     ) -> Result<AuthSession> {
         let Some(session) = self
             .inner
             .start_auth_session(
-                None,
-                None,
-                None,
-                ses_type,
-                Cipher::aes_128_cfb().try_into().map_err(|source| {
-                    TpmError::TSSSymmetricDefinitionFromCipher { source }
-                })?,
-                HashingAlgorithm::Sha256,
+                None, None, None, ses_type, symmetric, hash_alg,
             )
             .map_err(|source| {
                 TpmError::TSSStartAuthenticationSessionError { source }
@@ -1209,26 +1249,76 @@ impl Context {
         ek: KeyHandle,
     ) -> Result<Digest> {
         let (credential, secret) = parse_cred_and_secret(keyblob)?;
+        let mut policy_digests = DigestList::new();
+        let (parent_public, _, _) = self.inner.read_public(ek)?;
+        let ek_hash_alg = parent_public.name_hashing_algorithm();
+        let ek_symmetric =
+            parent_public.symmetric_algorithm().ok_or_else(|| {
+                TpmError::TSSReadPublicError {
+                    source: tss_esapi::Error::WrapperError(
+                        tss_esapi::WrapperErrorKind::InvalidParam,
+                    ),
+                }
+            })?;
+        match ek_hash_alg {
+            HashingAlgorithm::Sha384 => {
+                policy_digests
+                    .add(Digest::try_from(POLICY_A_SHA384.as_slice())?)?;
+                policy_digests
+                    .add(Digest::try_from(POLICY_C_SHA384.as_slice())?)?;
+            }
+            HashingAlgorithm::Sha512 => {
+                policy_digests
+                    .add(Digest::try_from(POLICY_A_SHA512.as_slice())?)?;
+                policy_digests
+                    .add(Digest::try_from(POLICY_C_SHA512.as_slice())?)?;
+            }
+            HashingAlgorithm::Sm3_256 => {
+                policy_digests
+                    .add(Digest::try_from(POLICY_A_SM3_256.as_slice())?)?;
+                policy_digests
+                    .add(Digest::try_from(POLICY_C_SM3_256.as_slice())?)?;
+            }
+            _ => (),
+        };
 
-        let ek_auth = self.create_empty_session(SessionType::Policy)?;
+        let ek_auth = self.create_empty_session(
+            SessionType::Policy,
+            ek_symmetric.into(),
+            ek_hash_alg,
+        )?;
 
-        // We authorize ses2 with PolicySecret(ENDORSEMENT) as per PolicyA
-        let _ = self.inner.execute_with_nullauth_session(|context| {
-            context.policy_secret(
-                ek_auth.try_into()?,
-                AuthHandle::Endorsement,
-                Default::default(),
-                Default::default(),
-                Default::default(),
-                None,
-            )
-        })?;
-
+        // We authorize session according to the EK profile spec
         self.inner
-            .execute_with_sessions(
-                (Some(AuthSession::Password), Some(ek_auth), None),
-                |context| {
-                    context.activate_credential(ak, ek, credential, secret)
+            .execute_with_temporary_object(
+                SessionHandle::from(ek_auth).into(),
+                |ctx, _| {
+                    let _ = ctx.execute_with_nullauth_session(|ctx| {
+                        ctx.policy_secret(
+                            PolicySession::try_from(ek_auth)?,
+                            AuthHandle::Endorsement,
+                            Default::default(),
+                            Default::default(),
+                            Default::default(),
+                            None,
+                        )
+                    })?;
+
+                    if !policy_digests.is_empty() {
+                        ctx.policy_or(
+                            PolicySession::try_from(ek_auth)?,
+                            policy_digests,
+                        )?
+                    }
+
+                    ctx.execute_with_sessions(
+                        (Some(AuthSession::Password), Some(ek_auth), None),
+                        |ctx| {
+                            ctx.activate_credential(
+                                ak, ek, credential, secret,
+                            )
+                        },
+                    )
                 },
             )
             .map_err(TpmError::from)
@@ -1802,9 +1892,7 @@ pub fn get_idevid_template(
         "H-4" => (AsymmetricAlgorithm::Ecc, HashingAlgorithm::Sha512),
         "H-5" => (AsymmetricAlgorithm::Ecc, HashingAlgorithm::Sm3_256),
         _ => (
-            AsymmetricAlgorithm::from(EncryptionAlgorithm::try_from(
-                asym_alg_str,
-            )?),
+            EncryptionAlgorithm::try_from(asym_alg_str)?.into(),
             HashingAlgorithm::from(HashAlgorithm::try_from(name_alg_str)?),
         ),
     };
@@ -2120,7 +2208,8 @@ pub mod testing {
     #[cfg(feature = "testing")]
     fn test_create_ek() {
         let mut ctx = Context::new().unwrap(); //#[allow_ci]
-        let algs = [EncryptionAlgorithm::Rsa, EncryptionAlgorithm::Ecc];
+        let algs =
+            [EncryptionAlgorithm::Rsa2048, EncryptionAlgorithm::Ecc256];
         // TODO: create persistent handle and add to be tested: Some("0x81000000"),
         let handles = [Some(""), None];
 
@@ -2137,7 +2226,7 @@ pub mod testing {
     fn test_create_and_load_ak() {
         let mut ctx = Context::new().unwrap(); //#[allow_ci]
 
-        let r = ctx.create_ek(EncryptionAlgorithm::Rsa, None);
+        let r = ctx.create_ek(EncryptionAlgorithm::Rsa2048, None);
         assert!(r.is_ok());
 
         let ek_result = r.unwrap(); //#[allow_ci]
@@ -2152,6 +2241,9 @@ pub mod testing {
             //HashingAlgorithm::Sha3_512, // Not supported by swtpm
             //HashingAlgorithm::Sha1, // Not supported by swtpm
         ];
+        let eng_algs =
+            [EncryptionAlgorithm::Rsa1024, EncryptionAlgorithm::Rsa2048];
+
         let sign_algs = [
             SignAlgorithm::RsaSsa,
             SignAlgorithm::RsaPss,
@@ -2163,14 +2255,16 @@ pub mod testing {
         ];
 
         for sign in sign_algs {
-            for hash in hash_algs {
-                let r = ctx.create_ak(ek_handle, hash, sign);
-                assert!(r.is_ok());
+            for enc in eng_algs {
+                for hash in hash_algs {
+                    let r = ctx.create_ak(ek_handle, hash, enc, sign);
+                    assert!(r.is_ok());
 
-                let ak = r.unwrap(); //#[allow_ci]
+                    let ak = r.unwrap(); //#[allow_ci]
 
-                let r = ctx.load_ak(ek_handle, &ak);
-                assert!(r.is_ok());
+                    let r = ctx.load_ak(ek_handle, &ak);
+                    assert!(r.is_ok());
+                }
             }
         }
     }
@@ -2230,7 +2324,7 @@ pub mod testing {
 
         // Create EK
         let ek_result = ctx
-            .create_ek(EncryptionAlgorithm::Rsa, None)
+            .create_ek(EncryptionAlgorithm::Rsa2048, None)
             .expect("failed to create EK");
         let ek_handle = ek_result.key_handle;
 
@@ -2239,6 +2333,7 @@ pub mod testing {
             .create_ak(
                 ek_handle,
                 HashAlgorithm::Sha256,
+                EncryptionAlgorithm::Rsa2048,
                 SignAlgorithm::RsaSsa,
             )
             .expect("failed to create AK");
@@ -2279,7 +2374,7 @@ pub mod testing {
 
         // Create EK
         let ek_result = ctx
-            .create_ek(EncryptionAlgorithm::Rsa, None)
+            .create_ek(EncryptionAlgorithm::Rsa2048, None)
             .expect("failed to create EK");
         let ek_handle = ek_result.key_handle;
 
@@ -2288,6 +2383,7 @@ pub mod testing {
             .create_ak(
                 ek_handle,
                 HashAlgorithm::Sha256,
+                EncryptionAlgorithm::Rsa2048,
                 SignAlgorithm::RsaSsa,
             )
             .expect("failed to create ak");
