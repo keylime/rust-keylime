@@ -5,6 +5,7 @@
 # Store the old TCTI setting
 OLD_TCTI=$TCTI
 OLD_TPM2TOOLS_TCTI=$TPM2TOOLS_TCTI
+OLD_TPM2OPENSSL_TCTI=$TPM2OPENSSL_TCTI
 
 set -euf -o pipefail
 
@@ -50,6 +51,7 @@ function cleanup {
     echo "-------- Restore TCTI settings"
     TCTI=$OLD_TCTI
     TPM2TOOLS_TCTI=$OLD_TPM2TOOLS_TCTI
+    TPM2OPENSSL_TCTI=$OLD_TPM2OPENSSL_TCTI
 
     echo "-------- Cleanup processes"
     stop_swtpm
@@ -59,6 +61,7 @@ trap cleanup EXIT
 # Set the TCTI to use the swtpm socket
 export TCTI=swtpm
 export TPM2TOOLS_TCTI=swtpm
+export TPM2OPENSSL_TCTI=swtpm
 
 echo "-------- Running clippy"
 # The cargo denies are currently disabled, because that will require a bunch of dep cleanup
