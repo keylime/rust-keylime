@@ -159,7 +159,7 @@ pushd "${OUTPUTDIR}" > /dev/null || exit 1
             -out cacert.pem
     popd > /dev/null || exit 1
     cat intermediate/cacert.pem root/cacert.pem \
-        > cert-chain.pem
+        > ca-cert-chain.pem
 popd > /dev/null || exit 1
 
 mkdir "${OUTPUTDIR}/ikeys"

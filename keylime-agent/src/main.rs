@@ -58,8 +58,11 @@ use futures::{
     try_join,
 };
 use keylime::{
-    crypto, crypto::x509::CertificateBuilder, ima::MeasurementList,
-    list_parser::parse_list, tpm,
+    crypto::{self, x509::CertificateBuilder},
+    device_id::{DeviceID, DeviceIDBuilder},
+    ima::MeasurementList,
+    list_parser::parse_list,
+    tpm::{self, IAKResult, IDevIDResult},
 };
 use log::*;
 use openssl::{
@@ -324,137 +327,6 @@ async fn main() -> Result<()> {
         config.agent.tpm_signing_alg.as_ref(),
     )?;
 
-    let iak_cert: Option<X509>;
-    let idevid_cert: Option<X509>;
-    // Attempt to load the IAK and IDevID certificates
-    if config.agent.enable_iak_idevid {
-        iak_cert = match config.agent.iak_cert.as_ref() {
-            "" => {
-                debug!("The iak_cert option was not set in the configuration file");
-                None
-            }
-            path => {
-                let iak_path = Path::new(&path);
-                if iak_path.exists() {
-                    debug!(
-                        "Loading IAK certificate from {}",
-                        iak_path.display()
-                    );
-                    let iakcert = match crypto::load_x509_der(iak_path) {
-                        Ok(cert) => cert,
-                        Err(error) => crypto::load_x509_pem(iak_path)?,
-                    };
-                    Some(iakcert)
-                } else {
-                    debug!("Can not find IAK certificate");
-                    None
-                }
-            }
-        };
-        idevid_cert = match config.agent.idevid_cert.as_ref() {
-            "" => {
-                debug!("The idevid_cert option was not set in the configuration file");
-                None
-            }
-            path => {
-                let idevid_path = Path::new(&path);
-                if idevid_path.exists() {
-                    debug!(
-                        "Loading IDevID certificate from {}",
-                        idevid_path.display()
-                    );
-                    let idevcert = match crypto::load_x509_der(idevid_path) {
-                        Ok(cert) => cert,
-                        Err(error) => crypto::load_x509_pem(idevid_path)?,
-                    };
-                    Some(idevcert)
-                } else {
-                    debug!("Can not find IDevID certificate");
-                    None
-                }
-            }
-        };
-    } else {
-        iak_cert = None;
-        idevid_cert = None;
-    }
-    /// Regenerate the IAK and IDevID keys or collect and authorise persisted ones and check that the keys match the certificates that have been loaded
-    let (iak, idevid) = if config.agent.enable_iak_idevid {
-        /// Try to detect which template has been used by checking the certificate
-        let (asym_alg, name_alg) = tpm::get_idevid_template(
-            &crypto::match_cert_to_template(
-                &iak_cert.clone().ok_or(Error::Other(
-                    "IAK/IDevID enabled but cert could not be used"
-                        .to_string(),
-                ))?,
-            )?,
-            config.agent.iak_idevid_template.as_str(),
-            config.agent.iak_idevid_asymmetric_alg.as_str(),
-            config.agent.iak_idevid_name_alg.as_str(),
-        )?;
-
-        /// IDevID recreation/collection
-        let idevid = if config.agent.idevid_handle.trim().is_empty() {
-            /// If handle is not set in config, recreate IDevID according to template
-            info!("Recreating IDevID.");
-            let regen_idev = ctx.create_idevid(asym_alg, name_alg)?;
-            ctx.flush_context(regen_idev.handle.into())?;
-            // Flush after creating to make room for AK and EK and IAK
-            regen_idev
-        } else {
-            info!("Collecting persisted IDevID.");
-            ctx.idevid_from_handle(
-                config.agent.idevid_handle.as_str(),
-                config.agent.idevid_password.as_str(),
-            )?
-        };
-        /// Check that recreated/collected IDevID key matches the one in the certificate
-        if crypto::check_x509_key(
-            &idevid_cert.clone().ok_or(Error::Other(
-                "IAK/IDevID enabled but IDevID cert could not be used"
-                    .to_string(),
-            ))?,
-            idevid.clone().public,
-        )? {
-            info!("IDevID matches certificate.");
-        } else {
-            error!("IDevID template does not match certificate. Check template in configuration.");
-            return Err(Error::Configuration(config::KeylimeConfigError::Generic("IDevID template does not match certificate. Check template in configuration.".to_string())));
-        }
-
-        /// IAK recreation/collection
-        let iak = if config.agent.iak_handle.trim().is_empty() {
-            /// If handle is not set in config, recreate IAK according to template
-            info!("Recreating IAK.");
-            ctx.create_iak(asym_alg, name_alg)?
-        } else {
-            /// If a handle has been set, try to collect from the handle
-            /// If there is an IAK password, add the password to the handle
-            info!("Collecting persisted IAK.");
-            ctx.iak_from_handle(
-                config.agent.iak_handle.as_str(),
-                config.agent.iak_password.as_str(),
-            )?
-        };
-        /// Check that recreated/collected IAK key matches the one in the certificate
-        if crypto::check_x509_key(
-            &iak_cert.clone().ok_or(Error::Other(
-                "IAK/IDevID enabled but IAK cert could not be used"
-                    .to_string(),
-            ))?,
-            iak.clone().public,
-        )? {
-            info!("IAK matches certificate.");
-        } else {
-            error!("IAK template does not match certificate. Check template in configuration.");
-            return Err(Error::Configuration(config::KeylimeConfigError::Generic("IAK template does not match certificate. Check template in configuration.".to_string())));
-        }
-
-        (Some(iak), Some(idevid))
-    } else {
-        (None, None)
-    };
-
     // Gather EK values and certs
     let ek_result = match config.agent.ek_handle.as_ref() {
         "" => ctx.create_ek(tpm_encryption_alg, None)?,
@@ -562,13 +434,33 @@ async fn main() -> Result<()> {
 
     info!("Agent UUID: {}", agent_uuid);
 
-    let (attest, signature) = if config.agent.enable_iak_idevid {
-        let qualifying_data = config.agent.uuid.as_bytes();
-        let (attest, signature) = ctx.certify_credential_with_iak(
-            Data::try_from(qualifying_data).unwrap(), //#[allow_ci]
-            ak_handle,
-            iak.as_ref().unwrap().handle, //#[allow_ci]
-        )?;
+    // If using IAK/IDevID is enabled, obtain IAK/IDevID and respective certificates
+    let mut device_id = if config.agent.enable_iak_idevid {
+        Some(
+            DeviceIDBuilder::new()
+                .iak_handle(&config.agent.iak_handle)
+                .iak_cert_path(&config.agent.iak_cert)
+                .iak_password(&config.agent.iak_password)
+                .iak_template(&config.agent.iak_idevid_template)
+                .iak_asym_alg(&config.agent.iak_idevid_asymmetric_alg)
+                .iak_hash_alg(&config.agent.iak_idevid_name_alg)
+                .idevid_handle(&config.agent.idevid_handle)
+                .idevid_cert_path(&config.agent.idevid_cert)
+                .idevid_password(&config.agent.idevid_password)
+                .idevid_template(&config.agent.iak_idevid_template)
+                .idevid_asym_alg(&config.agent.iak_idevid_asymmetric_alg)
+                .idevid_hash_alg(&config.agent.iak_idevid_name_alg)
+                .build(&mut ctx)?,
+        )
+    } else {
+        None
+    };
+
+    let (attest, signature) = if let Some(dev_id) = &mut device_id {
+        let qualifying_data = Data::try_from(agent_uuid.as_bytes())?;
+        let (attest, signature) =
+            dev_id.certify(qualifying_data, ak_handle, &mut ctx)?;
+
         info!("AK certified with IAK.");
 
         // // For debugging certify(), the following checks the generated signature
@@ -705,8 +597,8 @@ async fn main() -> Result<()> {
     {
         // Request keyblob material
         let keyblob = if config.agent.enable_iak_idevid {
-            let (Some(iak), Some(idevid), Some(attest), Some(signature)) =
-                (iak, idevid, attest, signature)
+            let (Some(dev_id), Some(attest), Some(signature)) =
+                (&device_id, attest, signature)
             else {
                 error!(
                     "IDevID and IAK are enabled but could not be generated"
@@ -725,15 +617,15 @@ async fn main() -> Result<()> {
                 ek_result.ek_cert,
                 &PublicBuffer::try_from(ak.public)?.marshall()?,
                 Some(
-                    &PublicBuffer::try_from(iak.public.clone())?
+                    &PublicBuffer::try_from(dev_id.iak.public.clone())?
                         .marshall()?,
                 ),
                 Some(
-                    &PublicBuffer::try_from(idevid.public.clone())?
+                    &PublicBuffer::try_from(dev_id.idevid.public.clone())?
                         .marshall()?,
                 ),
-                idevid_cert,
-                iak_cert,
+                Some(dev_id.idevid_cert.clone()),
+                Some(dev_id.iak_cert.clone()),
                 Some(attest.marshall()?),
                 Some(signature.marshall()?),
                 mtls_cert,
