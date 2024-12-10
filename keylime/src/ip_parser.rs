@@ -85,7 +85,7 @@ pub fn parse_ip(ip: &str) -> Result<&str, IpParsingError> {
     else {
         return Err(IpParsingError::InvalidInput(ip.to_string()));
     };
-    return get_inner_ip(pair);
+    get_inner_ip(pair)
 }
 
 // Unit Testing

@@ -982,7 +982,7 @@ mod testing {
         TSSError(#[from] tss_esapi::Error),
     }
 
-    impl<'a> Drop for QuoteData<'a> {
+    impl Drop for QuoteData<'_> {
         /// Flush the created AK when dropping
         fn drop(&mut self) {
             self.tpmcontext

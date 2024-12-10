@@ -75,7 +75,7 @@ impl<'a> CertificateBuilder<'a> {
     pub fn common_name(
         &'a mut self,
         cn: &'a str,
-    ) -> &mut CertificateBuilder<'a> {
+    ) -> &'a mut CertificateBuilder<'a> {
         self.common_name = Some(cn);
         self
     }
@@ -88,7 +88,7 @@ impl<'a> CertificateBuilder<'a> {
     pub fn hash_algorithm(
         &'a mut self,
         hash_algorithm: MessageDigest,
-    ) -> &mut CertificateBuilder<'a> {
+    ) -> &'a mut CertificateBuilder<'a> {
         self.hash_algorithm = Some(hash_algorithm);
         self
     }
@@ -102,7 +102,7 @@ impl<'a> CertificateBuilder<'a> {
     pub fn not_before(
         &'a mut self,
         days_from_now: u32,
-    ) -> &mut CertificateBuilder<'a> {
+    ) -> &'a mut CertificateBuilder<'a> {
         self.not_before = Some(days_from_now);
         self
     }
@@ -115,7 +115,7 @@ impl<'a> CertificateBuilder<'a> {
     pub fn not_after(
         &'a mut self,
         days_from_now: u32,
-    ) -> &mut CertificateBuilder<'a> {
+    ) -> &'a mut CertificateBuilder<'a> {
         self.not_after = Some(days_from_now);
         self
     }
@@ -131,7 +131,7 @@ impl<'a> CertificateBuilder<'a> {
     pub fn version(
         &'a mut self,
         version: i32,
-    ) -> &mut CertificateBuilder<'a> {
+    ) -> &'a mut CertificateBuilder<'a> {
         self.version = Some(version);
         self
     }
@@ -144,7 +144,7 @@ impl<'a> CertificateBuilder<'a> {
     pub fn private_key(
         &'a mut self,
         private_key: &'a PKey<Private>,
-    ) -> &mut CertificateBuilder<'a> {
+    ) -> &'a mut CertificateBuilder<'a> {
         self.private_key = Some(private_key);
         self
     }
@@ -158,7 +158,7 @@ impl<'a> CertificateBuilder<'a> {
     pub fn add_dns_names(
         &'a mut self,
         dns_names: Vec<&'a str>,
-    ) -> &mut CertificateBuilder<'a> {
+    ) -> &'a mut CertificateBuilder<'a> {
         match &mut self.dns_names {
             None => {
                 self.dns_names = Some(dns_names);
@@ -181,7 +181,7 @@ impl<'a> CertificateBuilder<'a> {
     pub fn add_ips(
         &'a mut self,
         ips: Vec<&'a str>,
-    ) -> &mut CertificateBuilder<'a> {
+    ) -> &'a mut CertificateBuilder<'a> {
         match &mut self.ips {
             None => {
                 self.ips = Some(ips);
@@ -204,7 +204,7 @@ impl<'a> CertificateBuilder<'a> {
     pub fn add_extensions(
         &'a mut self,
         extensions: Vec<X509Extension>,
-    ) -> &mut CertificateBuilder<'a> {
+    ) -> &'a mut CertificateBuilder<'a> {
         match &mut self.extensions {
             None => {
                 self.extensions = Some(extensions);
