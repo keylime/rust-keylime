@@ -60,7 +60,7 @@ pub fn parse_hostname(hostname: &str) -> Result<&str, HostnameParsingError> {
     else {
         return Err(HostnameParsingError::InvalidInput(hostname.to_string()));
     };
-    return Ok(pair.as_str());
+    Ok(pair.as_str())
 }
 
 // Unit Testing

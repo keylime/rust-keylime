@@ -487,7 +487,7 @@ pub struct Context<'a> {
 
 static TPM_CTX: OnceLock<Arc<Mutex<tss_esapi::Context>>> = OnceLock::new();
 
-impl<'a> Context<'a> {
+impl Context<'_> {
     /// Creates a connection context.
     pub fn new() -> Result<Self> {
         let tcti_path = match std::env::var("TCTI") {
