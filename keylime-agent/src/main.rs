@@ -436,22 +436,30 @@ async fn main() -> Result<()> {
 
     // If using IAK/IDevID is enabled, obtain IAK/IDevID and respective certificates
     let mut device_id = if config.agent.enable_iak_idevid {
-        Some(
-            DeviceIDBuilder::new()
-                .iak_handle(&config.agent.iak_handle)
-                .iak_cert_path(&config.agent.iak_cert)
-                .iak_password(&config.agent.iak_password)
-                .iak_template(&config.agent.iak_idevid_template)
-                .iak_asym_alg(&config.agent.iak_idevid_asymmetric_alg)
-                .iak_hash_alg(&config.agent.iak_idevid_name_alg)
-                .idevid_handle(&config.agent.idevid_handle)
-                .idevid_cert_path(&config.agent.idevid_cert)
-                .idevid_password(&config.agent.idevid_password)
-                .idevid_template(&config.agent.iak_idevid_template)
-                .idevid_asym_alg(&config.agent.iak_idevid_asymmetric_alg)
-                .idevid_hash_alg(&config.agent.iak_idevid_name_alg)
-                .build(&mut ctx)?,
-        )
+        let mut builder = DeviceIDBuilder::new()
+            .iak_handle(&config.agent.iak_handle)
+            .iak_password(&config.agent.iak_password)
+            .iak_default_template(config::DEFAULT_IAK_IDEVID_TEMPLATE)
+            .iak_template(&config.agent.iak_idevid_template)
+            .iak_asym_alg(&config.agent.iak_idevid_asymmetric_alg)
+            .iak_hash_alg(&config.agent.iak_idevid_name_alg)
+            .idevid_handle(&config.agent.idevid_handle)
+            .idevid_cert_path(&config.agent.idevid_cert)
+            .idevid_password(&config.agent.idevid_password)
+            .idevid_default_template(config::DEFAULT_IAK_IDEVID_TEMPLATE)
+            .idevid_template(&config.agent.iak_idevid_template)
+            .idevid_asym_alg(&config.agent.iak_idevid_asymmetric_alg)
+            .idevid_hash_alg(&config.agent.iak_idevid_name_alg);
+
+        if !&config.agent.iak_cert.is_empty() {
+            builder = builder.iak_cert_path(&config.agent.iak_cert);
+        }
+
+        if !&config.agent.idevid_cert.is_empty() {
+            builder = builder.idevid_cert_path(&config.agent.idevid_cert);
+        }
+
+        Some(builder.build(&mut ctx)?)
     } else {
         None
     };
@@ -617,15 +625,15 @@ async fn main() -> Result<()> {
                 ek_result.ek_cert,
                 &PublicBuffer::try_from(ak.public)?.marshall()?,
                 Some(
-                    &PublicBuffer::try_from(dev_id.iak.public.clone())?
+                    &PublicBuffer::try_from(dev_id.iak_pubkey.clone())?
                         .marshall()?,
                 ),
                 Some(
-                    &PublicBuffer::try_from(dev_id.idevid.public.clone())?
+                    &PublicBuffer::try_from(dev_id.idevid_pubkey.clone())?
                         .marshall()?,
                 ),
-                Some(dev_id.idevid_cert.clone()),
-                Some(dev_id.iak_cert.clone()),
+                dev_id.idevid_cert.clone(),
+                dev_id.iak_cert.clone(),
                 Some(attest.marshall()?),
                 Some(signature.marshall()?),
                 mtls_cert,

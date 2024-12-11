@@ -458,6 +458,7 @@ pub struct AKResult {
 pub struct IAKResult {
     pub public: TssPublic,
     pub handle: tss_esapi::handles::KeyHandle,
+    pub is_persistent: bool,
 }
 
 /// Holds the output of create_idevid.
@@ -465,6 +466,7 @@ pub struct IAKResult {
 pub struct IDevIDResult {
     pub public: TssPublic,
     pub handle: tss_esapi::handles::KeyHandle,
+    pub is_persistent: bool,
 }
 
 /// Holds the Public result from create_idevid_public_from_default_template
@@ -748,6 +750,7 @@ impl Context<'_> {
         Ok(IDevIDResult {
             public: idevid_pub,
             handle: idevid_handle,
+            is_persistent: true,
         })
     }
 
@@ -767,6 +770,7 @@ impl Context<'_> {
         Ok(IAKResult {
             public: iak_pub,
             handle: iak_handle,
+            is_persistent: true,
         })
     }
 
@@ -818,6 +822,7 @@ impl Context<'_> {
         Ok(IDevIDResult {
             public: primary_key.out_public,
             handle: primary_key.key_handle,
+            is_persistent: false,
         })
     }
 
@@ -1035,6 +1040,7 @@ impl Context<'_> {
         Ok(IAKResult {
             public: primary_key.out_public,
             handle: primary_key.key_handle,
+            is_persistent: false,
         })
     }
 
