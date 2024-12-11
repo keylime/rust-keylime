@@ -9,7 +9,7 @@ use thiserror::Error;
 use tss_esapi::{
     handles::KeyHandle,
     interface_types::algorithm::{AsymmetricAlgorithm, HashingAlgorithm},
-    structures::{Attest, Data, Signature},
+    structures::{Attest, Data, Public as TssPublic, Signature},
 };
 
 #[derive(Error, Debug)]
@@ -22,9 +22,17 @@ pub enum DeviceIDBuilderError {
     #[error("Public key does not match the certificate")]
     CertPubKeyMismatch(#[source] tpm::TpmError),
 
+    /// Failed to flush context
+    #[error("Failed to flush context")]
+    FlushContext(#[source] TpmError),
+
     /// Failed to create IAK
     #[error("Failed to create IAK")]
     IAKCreate(#[source] TpmError),
+
+    /// IAK default Template not set
+    #[error("IAK default template not set")]
+    IAKDefaultTemplateNotSet,
 
     /// Could not get IAK from provided handle
     #[error("Could not get IAK from provided handle")]
@@ -34,10 +42,6 @@ pub enum DeviceIDBuilderError {
     #[error("IAK handle not set in DeviceBuilder. Set the IAK handle with the iak_handle() method from the DeviceIDBuilder object")]
     IAKHandleNotSet,
 
-    /// IAK certificate not set in DeviceIDBuilder
-    #[error("IAK certificate not set in DeviceBuilder. Set the IAK certificate with the iak_cert() method from the DeviceIDBuilder object")]
-    IAKCertNotSet,
-
     /// IAK password not set in DeviceIDBuilder
     #[error("IAK password not set in DeviceBuilder. Set the IAK password with the iak_password() method from the DeviceIDBuilder object")]
     IAKPasswordNotSet,
@@ -46,6 +50,10 @@ pub enum DeviceIDBuilderError {
     #[error("Failed to create IDevID")]
     IDevIDCreate(#[source] TpmError),
 
+    /// IDevID default Template not set
+    #[error("IDevID default template not set")]
+    IDevIDDefaultTemplateNotSet,
+
     /// Could not get IDevID from provided handle
     #[error("Could not get IDevID from provided handle")]
     IDevIDFromHandle(#[source] TpmError),
@@ -53,10 +61,6 @@ pub enum DeviceIDBuilderError {
     /// IDevID handle not set in DeviceIDBuilder
     #[error("IDevID handle not set in DeviceBuilder. Set the IDevID handle with the idevid_handle() method from the DeviceIDBuilder object")]
     IDevIDHandleNotSet,
-
-    /// IDevID certificate not set in DeviceIDBuilder
-    #[error("IDevID certificate not set in DeviceBuilder. Set the IDevID certificate with the idevid_cert() method from the DeviceIDBuilder object")]
-    IDevIDCertNotSet,
 
     /// IDevID password not set in DeviceIDBuilder
     #[error("IDevID password not set in DeviceBuilder. Set the IDevID password with the idevid_password() method from the DeviceIDBuilder object")]
@@ -80,20 +84,22 @@ pub enum DeviceIDError {
 
 #[derive(Debug, Default)]
 pub struct DeviceIDBuilder<'a> {
-    iak_handle: Option<&'a str>,
-    iak_password: Option<&'a str>,
+    iak_asym_alg: Option<&'a str>,
     iak_cert: Option<X509>,
     iak_cert_path: Option<&'a str>,
-    iak_template: Option<&'a str>,
-    iak_asym_alg: Option<&'a str>,
+    iak_default_template: Option<&'a str>,
+    iak_handle: Option<&'a str>,
     iak_hash_alg: Option<&'a str>,
-    idevid_handle: Option<&'a str>,
-    idevid_password: Option<&'a str>,
+    iak_password: Option<&'a str>,
+    iak_template: Option<&'a str>,
+    idevid_asym_alg: Option<&'a str>,
     idevid_cert: Option<X509>,
     idevid_cert_path: Option<&'a str>,
-    idevid_template: Option<&'a str>,
-    idevid_asym_alg: Option<&'a str>,
+    idevid_default_template: Option<&'a str>,
+    idevid_handle: Option<&'a str>,
     idevid_hash_alg: Option<&'a str>,
+    idevid_password: Option<&'a str>,
+    idevid_template: Option<&'a str>,
 }
 
 impl<'a> DeviceIDBuilder<'a> {
@@ -132,6 +138,22 @@ impl<'a> DeviceIDBuilder<'a> {
     /// * path (&str): The path to the IAK certificate
     pub fn iak_cert_path(mut self, path: &'a str) -> DeviceIDBuilder<'a> {
         self.iak_cert_path = Some(path);
+        self
+    }
+
+    /// Set the default template to use for the IAK
+    ///
+    /// When `iak_cert` is not set, the provided template is used when `iak_template` string is
+    /// empty, or the special keywords 'detect' or 'default' are set
+    ///
+    /// # Arguments:
+    ///
+    /// * template(&str): The name of the default template to use.
+    pub fn iak_default_template(
+        mut self,
+        template: &'a str,
+    ) -> DeviceIDBuilder<'a> {
+        self.iak_default_template = Some(template);
         self
     }
 
@@ -204,6 +226,22 @@ impl<'a> DeviceIDBuilder<'a> {
         self
     }
 
+    /// Set the default template to use for the IDevID
+    ///
+    /// When `idevid_cert` is not set, the provided template is used when `idevid_template` string is
+    /// empty, or the special keywords 'detect' or 'default' are set
+    ///
+    /// # Arguments:
+    ///
+    /// * template(&str): The name of the default template to use.
+    pub fn idevid_default_template(
+        mut self,
+        template: &'a str,
+    ) -> DeviceIDBuilder<'a> {
+        self.idevid_default_template = Some(template);
+        self
+    }
+
     /// Set the template to use for the IDevID
     ///
     /// If the string is empty, or the special keywords 'detect' or 'default' are set, the template
@@ -255,14 +293,28 @@ impl<'a> DeviceIDBuilder<'a> {
     ) -> Result<(AsymmetricAlgorithm, HashingAlgorithm), DeviceIDBuilderError>
     {
         let iak_cert = self.get_iak_cert()?;
-        let detected = &crypto::match_cert_to_template(iak_cert)
-            .map_err(DeviceIDBuilderError::TemplateFromCert)?;
+
+        // If the IAK cert is set, get the template based on it
+        // Otherwise use the default template set
+        let detected = match iak_cert {
+            Some(cert) => crypto::match_cert_to_template(cert)
+                .map_err(DeviceIDBuilderError::TemplateFromCert)?,
+            None => {
+                if let Some(default) = self.iak_default_template {
+                    default.trim().to_string()
+                } else {
+                    return Err(
+                        DeviceIDBuilderError::IAKDefaultTemplateNotSet,
+                    );
+                }
+            }
+        };
 
         let template = self.iak_template.unwrap_or("").trim();
         let asym_alg = self.iak_asym_alg.unwrap_or("").trim();
         let hash_alg = self.iak_hash_alg.unwrap_or("").trim();
 
-        tpm::get_idevid_template(detected, template, asym_alg, hash_alg)
+        tpm::get_idevid_template(&detected, template, asym_alg, hash_alg)
             .map_err(DeviceIDBuilderError::Template)
     }
 
@@ -275,14 +327,28 @@ impl<'a> DeviceIDBuilder<'a> {
     ) -> Result<(AsymmetricAlgorithm, HashingAlgorithm), DeviceIDBuilderError>
     {
         let idevid_cert = self.get_idevid_cert()?;
-        let detected = &crypto::match_cert_to_template(idevid_cert)
-            .map_err(DeviceIDBuilderError::TemplateFromCert)?;
+
+        // If the IAK cert is set, get the template based on it
+        // Otherwise use the default template set
+        let detected = match idevid_cert {
+            Some(cert) => crypto::match_cert_to_template(cert)
+                .map_err(DeviceIDBuilderError::TemplateFromCert)?,
+            None => {
+                if let Some(default) = self.idevid_default_template {
+                    default.trim().to_string()
+                } else {
+                    return Err(
+                        DeviceIDBuilderError::IDevIDDefaultTemplateNotSet,
+                    );
+                }
+            }
+        };
 
         let template = self.idevid_template.unwrap_or("").trim();
         let asym_alg = self.idevid_asym_alg.unwrap_or("").trim();
         let hash_alg = self.idevid_hash_alg.unwrap_or("").trim();
 
-        tpm::get_idevid_template(detected, template, asym_alg, hash_alg)
+        tpm::get_idevid_template(&detected, template, asym_alg, hash_alg)
             .map_err(DeviceIDBuilderError::Template)
     }
 
@@ -349,29 +415,31 @@ impl<'a> DeviceIDBuilder<'a> {
     /// Get the IAK certificate
     /// If the iak_cert is not set, try to load the certificate from the iak_cert_path and cache
     /// the loaded certificate
-    fn get_iak_cert(&mut self) -> Result<&X509, DeviceIDBuilderError> {
+    fn get_iak_cert(
+        &mut self,
+    ) -> Result<Option<&X509>, DeviceIDBuilderError> {
         match self.iak_cert {
-            Some(ref cert) => Ok(cert),
+            Some(ref cert) => Ok(Some(cert)),
             None => match &self.iak_cert_path {
                 Some(path) => {
                     if path.trim().is_empty() {
                         debug!(
-                                "The IAK certificate was not set in the configuration file"
+                                "The IAK certificate was not set in the configuration file and will be ignored"
                             );
-                        Err(DeviceIDBuilderError::IAKCertNotSet)
+                        Ok(None)
                     } else {
                         self.iak_cert = Some(crypto::load_x509(Path::new(path.trim())).map_err(|e| {
                                 debug!("Could not load IAK certificate from {path}: {e}");
                                 e
                             }).map_err(DeviceIDBuilderError::CertLoad)?);
                         if let Some(ref cert) = &self.iak_cert {
-                            Ok(cert)
+                            Ok(Some(cert))
                         } else {
                             unreachable!();
                         }
                     }
                 }
-                None => Err(DeviceIDBuilderError::IAKCertNotSet),
+                None => Ok(None),
             },
         }
     }
@@ -379,29 +447,31 @@ impl<'a> DeviceIDBuilder<'a> {
     /// Get the IDevID certificate
     ///
     /// If the idevid_cert is not set, try to load the certificate from the idevid_cert_path and cache the loaded certificate
-    fn get_idevid_cert(&mut self) -> Result<&X509, DeviceIDBuilderError> {
+    fn get_idevid_cert(
+        &mut self,
+    ) -> Result<Option<&X509>, DeviceIDBuilderError> {
         match self.idevid_cert {
-            Some(ref cert) => Ok(cert),
+            Some(ref cert) => Ok(Some(cert)),
             None => match self.idevid_cert_path {
                 Some(path) => {
                     if path.trim().is_empty() {
                         debug!(
-                                "The IDevId certificate was not set in the configuration file"
+                                "The IDevId certificate was not set in the configuration file and will be ignored"
                             );
-                        Err(DeviceIDBuilderError::IDevIDCertNotSet)
+                        Ok(None)
                     } else {
                         self.idevid_cert = Some(crypto::load_x509(Path::new(path.trim())).map_err(|e| {
                                 debug!("Could not load IAK certificate from {path}: {e}");
                                 e
                             }).map_err(DeviceIDBuilderError::CertLoad)?);
                         if let Some(ref cert) = self.idevid_cert {
-                            Ok(cert)
+                            Ok(Some(cert))
                         } else {
                             unreachable!();
                         }
                     }
                 }
-                None => Err(DeviceIDBuilderError::IDevIDCertNotSet),
+                None => Ok(None),
             },
         }
     }
@@ -411,28 +481,43 @@ impl<'a> DeviceIDBuilder<'a> {
         mut self,
         tpm_ctx: &mut tpm::Context,
     ) -> Result<DeviceID, DeviceIDBuilderError> {
-        let iak = self.get_iak(tpm_ctx)?;
-        let Some(iak_cert) = self.iak_cert.take() else {
-            unreachable!();
-        };
-
-        // Check that recreated/collected IAK key matches the one in the certificate
-        tpm::check_pubkey_match_cert(&iak.public, &iak_cert, "IAK")
-            .map_err(DeviceIDBuilderError::CertPubKeyMismatch)?;
-
         let idevid = self.get_idevid(tpm_ctx)?;
-        let Some(idevid_cert) = self.idevid_cert.take() else {
-            unreachable!();
-        };
+
+        // Flush the IDevID handle to free TPM memory
+        if !idevid.is_persistent {
+            tpm_ctx
+                .flush_context(idevid.handle.into())
+                .map_err(DeviceIDBuilderError::FlushContext)?;
+        }
 
         // Check that recreated/collected IDevID key matches the one in the certificate
-        tpm::check_pubkey_match_cert(&idevid.public, &idevid_cert, "IDevID")
-            .map_err(DeviceIDBuilderError::CertPubKeyMismatch)?;
+        let idevid_cert = match self.idevid_cert.take() {
+            Some(cert) => {
+                tpm::check_pubkey_match_cert(&idevid.public, &cert, "IDevID")
+                    .map_err(DeviceIDBuilderError::CertPubKeyMismatch)?;
+
+                Some(cert)
+            }
+            None => None,
+        };
+
+        let iak = self.get_iak(tpm_ctx)?;
+        let iak_cert = match self.iak_cert.take() {
+            Some(cert) => {
+                tpm::check_pubkey_match_cert(&iak.public, &cert, "IDevID")
+                    .map_err(DeviceIDBuilderError::CertPubKeyMismatch)?;
+
+                Some(cert)
+            }
+            None => None,
+        };
 
         Ok(DeviceID {
-            iak,
+            iak_handle: iak.handle,
+            iak_handle_persistent: iak.is_persistent,
+            iak_pubkey: iak.public,
             iak_cert,
-            idevid,
+            idevid_pubkey: idevid.public,
             idevid_cert,
         })
     }
@@ -440,10 +525,12 @@ impl<'a> DeviceIDBuilder<'a> {
 
 #[derive(Debug)]
 pub struct DeviceID {
-    pub iak: IAKResult,
-    pub iak_cert: X509,
-    pub idevid: IDevIDResult,
-    pub idevid_cert: X509,
+    pub iak_handle: KeyHandle,
+    pub iak_handle_persistent: bool,
+    pub iak_pubkey: TssPublic,
+    pub iak_cert: Option<X509>,
+    pub idevid_pubkey: TssPublic,
+    pub idevid_cert: Option<X509>,
 }
 
 impl DeviceID {
@@ -460,7 +547,7 @@ impl DeviceID {
         tpm_ctx: &mut tpm::Context,
     ) -> Result<(Attest, Signature), DeviceIDError> {
         tpm_ctx
-            .certify_credential_with_iak(qualifying_data, ak, self.iak.handle)
+            .certify_credential_with_iak(qualifying_data, ak, self.iak_handle)
             .map_err(DeviceIDError::Certify)
     }
 }
@@ -475,12 +562,14 @@ mod tests {
             .iak_handle("")
             .iak_cert_path("")
             .iak_password("")
+            .iak_default_template("")
             .iak_template("")
             .iak_asym_alg("")
             .iak_hash_alg("")
             .idevid_handle("")
             .idevid_cert_path("")
             .idevid_password("")
+            .idevid_default_template("")
             .idevid_template("")
             .idevid_asym_alg("")
             .idevid_hash_alg("");
@@ -507,6 +596,7 @@ mod tests {
                             .expect("Failed to get str for IAK cert"),
                     )
                     .iak_password("")
+                    .iak_default_template("")
                     .iak_template("")
                     .iak_asym_alg("")
                     .iak_hash_alg("")
@@ -517,6 +607,7 @@ mod tests {
                             .expect("Failed to get str for IDevID cert"),
                     )
                     .idevid_password("")
+                    .idevid_default_template("")
                     .idevid_template("")
                     .idevid_asym_alg("")
                     .idevid_hash_alg("")
@@ -525,11 +616,63 @@ mod tests {
                 let dev_id = result.unwrap(); //#[allow_ci]
 
                 // Flush context to free TPM memory
-                let r = tpm_ctx.flush_context(dev_id.iak.handle.into());
-                assert!(r.is_ok(), "Result: {r:?}");
-                let r = tpm_ctx.flush_context(dev_id.idevid.handle.into());
+                let r = tpm_ctx.flush_context(dev_id.iak_handle.into());
                 assert!(r.is_ok(), "Result: {r:?}");
             }
         }
+    }
+
+    #[tokio::test]
+    #[cfg(feature = "testing")]
+    async fn test_device_id_builder_no_certs() {
+        let _mutex = tpm::testing::lock_tests().await;
+        let mut tpm_ctx = tpm::Context::new().unwrap(); //#[allow_ci]
+        let result = DeviceIDBuilder::new()
+            .iak_handle("")
+            .iak_password("")
+            .iak_default_template("H-1")
+            .iak_template("detect")
+            .iak_asym_alg("")
+            .iak_hash_alg("")
+            .idevid_handle("")
+            .idevid_password("")
+            .idevid_default_template("H-1")
+            .idevid_template("detect")
+            .idevid_asym_alg("")
+            .idevid_hash_alg("")
+            .build(&mut tpm_ctx);
+        assert!(result.is_ok(), "Result: {result:?}");
+        let dev_id = result.unwrap(); //#[allow_ci]
+
+        // Flush context to free TPM memory
+        let r = tpm_ctx.flush_context(dev_id.iak_handle.into());
+        assert!(r.is_ok(), "Result: {r:?}");
+    }
+
+    #[tokio::test]
+    #[cfg(feature = "testing")]
+    async fn test_device_id_builder_no_certs_no_default() {
+        let _mutex = tpm::testing::lock_tests().await;
+        let mut tpm_ctx = tpm::Context::new().unwrap(); //#[allow_ci]
+        let result = DeviceIDBuilder::new()
+            .iak_handle("")
+            .iak_password("")
+            .iak_default_template("")
+            .iak_template("detect")
+            .iak_asym_alg("rsa")
+            .iak_hash_alg("sha256")
+            .idevid_handle("")
+            .idevid_password("")
+            .idevid_default_template("")
+            .idevid_template("detect")
+            .idevid_asym_alg("rsa")
+            .idevid_hash_alg("sha256")
+            .build(&mut tpm_ctx);
+        assert!(result.is_ok(), "Result: {result:?}");
+        let dev_id = result.unwrap(); //#[allow_ci]
+
+        // Flush context to free TPM memory
+        let r = tpm_ctx.flush_context(dev_id.iak_handle.into());
+        assert!(r.is_ok(), "Result: {r:?}");
     }
 }

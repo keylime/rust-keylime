@@ -501,6 +501,7 @@ fn config_translate_keywords(
         &config.agent.agent_data_path,
         keylime_dir,
         DEFAULT_AGENT_DATA_PATH,
+        false,
     );
 
     let mut ima_ml_path = config_get_file_path(
@@ -508,6 +509,7 @@ fn config_translate_keywords(
         &config.agent.ima_ml_path,
         root_path,
         DEFAULT_IMA_ML_PATH,
+        false,
     );
 
     let mut measuredboot_ml_path = config_get_file_path(
@@ -515,6 +517,7 @@ fn config_translate_keywords(
         &config.agent.measuredboot_ml_path,
         root_path,
         DEFAULT_MEASUREDBOOT_ML_PATH,
+        false,
     );
 
     let mut server_key = config_get_file_path(
@@ -522,6 +525,7 @@ fn config_translate_keywords(
         &config.agent.server_key,
         keylime_dir,
         DEFAULT_SERVER_KEY,
+        false,
     );
 
     let mut server_cert = config_get_file_path(
@@ -529,6 +533,7 @@ fn config_translate_keywords(
         &config.agent.server_cert,
         keylime_dir,
         DEFAULT_SERVER_CERT,
+        false,
     );
 
     let trusted_client_ca: String =
@@ -540,6 +545,7 @@ fn config_translate_keywords(
                     t,
                     keylime_dir,
                     DEFAULT_TRUSTED_CLIENT_CA,
+                    false,
                 )
             })
             .collect::<Vec<_>>()
@@ -550,6 +556,7 @@ fn config_translate_keywords(
         &config.agent.iak_cert,
         keylime_dir,
         DEFAULT_IAK_CERT,
+        true,
     );
 
     let mut idevid_cert = config_get_file_path(
@@ -557,6 +564,7 @@ fn config_translate_keywords(
         &config.agent.idevid_cert,
         keylime_dir,
         DEFAULT_IDEVID_CERT,
+        true,
     );
 
     let ek_handle = match config.agent.ek_handle.as_ref() {
@@ -630,6 +638,7 @@ fn config_translate_keywords(
         &config.agent.revocation_cert,
         keylime_dir,
         &format!("secure/unzipped/{DEFAULT_REVOCATION_CERT}"),
+        false,
     );
 
     Ok(KeylimeConfig {
@@ -657,7 +666,7 @@ fn config_translate_keywords(
 /// Expand a file path from the configuration file.
 ///
 /// If the string is set as "default", return the provided default path relative from the provided work_dir.
-/// If the string is empty, use again the default value
+/// If the string is empty, use the default value unless the 'leave_empty' is 'true'
 /// If the string is a relative path, return the path relative from the provided work_dir
 /// If the string is an absolute path, return the path without change.
 fn config_get_file_path(
@@ -665,10 +674,15 @@ fn config_get_file_path(
     path: &str,
     work_dir: &Path,
     default: &str,
+    leave_empty: bool,
 ) -> String {
     match path {
         "default" => work_dir.join(default).display().to_string(),
         "" => {
+            if leave_empty {
+                return "".to_string();
+            }
+
             warn!("Empty string provided in configuration option {option}, using default {default}");
             work_dir.join(default).display().to_string()
         }
@@ -1107,7 +1121,7 @@ mod tests {
 
         let translated: Vec<String> = list
             .iter()
-            .map(|e| config_get_file_path("test", e, workdir, default))
+            .map(|e| config_get_file_path("test", e, workdir, default, false))
             .collect();
 
         assert_eq!(
@@ -1122,5 +1136,13 @@ mod tests {
             ],
             translated
         );
+
+        let translated =
+            config_get_file_path("test", "", workdir, "default", true);
+        assert_eq!("", translated);
+
+        let translated =
+            config_get_file_path("test", "", workdir, "default", false);
+        assert_eq!("/workdir/default", translated);
     }
 }
