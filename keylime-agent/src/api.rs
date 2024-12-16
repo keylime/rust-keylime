@@ -3,17 +3,12 @@ use crate::{
     notifications_handler, quotes_handler, QuoteData,
 };
 use actix_web::{http, web, HttpRequest, HttpResponse, Responder, Scope};
-use keylime::list_parser::parse_list;
+use keylime::{list_parser::parse_list, version::KeylimeVersion};
 use log::*;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 pub static SUPPORTED_API_VERSIONS: &[&str] = &["2.1", "2.2"];
-
-#[derive(Serialize, Deserialize, Debug)]
-struct KeylimeVersion {
-    supported_version: String,
-}
 
 #[derive(Error, Debug, PartialEq)]
 pub enum APIError {
