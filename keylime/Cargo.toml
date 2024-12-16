@@ -16,6 +16,7 @@ pest.workspace = true
 pest_derive.workspace = true
 serde.workspace = true
 serde_derive.workspace = true
+serde_json.workspace = true
 static_assertions.workspace = true
 thiserror.workspace = true
 tss-esapi.workspace = true
