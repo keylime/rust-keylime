@@ -45,7 +45,6 @@ mod quotes_handler;
 mod registrar_agent;
 mod revocation;
 mod secure_mount;
-mod serialization;
 mod version_handler;
 
 use actix_web::{dev::Service, http, middleware, rt, web, App, HttpServer};
@@ -62,6 +61,7 @@ use keylime::{
     device_id::{DeviceID, DeviceIDBuilder},
     ima::MeasurementList,
     list_parser::parse_list,
+    serialization,
     tpm::{self, IAKResult, IDevIDResult},
 };
 use log::*;
