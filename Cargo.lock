@@ -38,7 +38,7 @@ dependencies = [
  "derive_more",
  "encoding_rs",
  "futures-core",
- "h2",
+ "h2 0.3.26",
  "http 0.2.8",
  "httparse",
  "httpdate",
@@ -318,6 +318,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "atomic-waker"
+version = "1.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1505bd5d3d116872e7271a6d4e16d81d0c8570876c8de68093a09ac269d8aac0"
+
+[[package]]
 name = "atty"
 version = "0.2.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -586,6 +592,18 @@ dependencies = [
  "deadpool-runtime",
  "num_cpus",
  "retain_mut",
+ "tokio",
+]
+
+[[package]]
+name = "deadpool"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fb84100978c1c7b37f09ed3ce3e5f843af02c2a2c431bae5b19230dad2c1b490"
+dependencies = [
+ "async-trait",
+ "deadpool-runtime",
+ "num_cpus",
  "tokio",
 ]
 
@@ -917,6 +935,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "h2"
+version = "0.4.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ccae279728d634d083c00f6099cb58f01cc99c145b84b8be2f6c74618d79922e"
+dependencies = [
+ "atomic-waker",
+ "bytes",
+ "fnv",
+ "futures-core",
+ "futures-sink",
+ "http 1.1.0",
+ "indexmap",
+ "slab",
+ "tokio",
+ "tokio-util",
+ "tracing",
+]
+
+[[package]]
 name = "hashbrown"
 version = "0.14.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1057,7 +1094,7 @@ dependencies = [
  "futures-channel",
  "futures-core",
  "futures-util",
- "h2",
+ "h2 0.3.26",
  "http 0.2.8",
  "http-body 0.4.5",
  "httparse",
@@ -1080,9 +1117,11 @@ dependencies = [
  "bytes",
  "futures-channel",
  "futures-util",
+ "h2 0.4.7",
  "http 1.1.0",
  "http-body 1.0.1",
  "httparse",
+ "httpdate",
  "itoa",
  "pin-project-lite",
  "smallvec",
@@ -1181,6 +1220,7 @@ dependencies = [
 name = "keylime"
 version = "0.2.6"
 dependencies = [
+ "actix-rt",
  "base64 0.21.7",
  "hex",
  "log",
@@ -1189,6 +1229,7 @@ dependencies = [
  "pest_derive",
  "picky-asn1-der",
  "picky-asn1-x509",
+ "reqwest",
  "serde",
  "serde_derive",
  "serde_json",
@@ -1197,6 +1238,7 @@ dependencies = [
  "thiserror 1.0.63",
  "tokio",
  "tss-esapi",
+ "wiremock 0.6.2",
 ]
 
 [[package]]
@@ -1227,7 +1269,7 @@ dependencies = [
  "tokio",
  "tss-esapi",
  "uuid",
- "wiremock",
+ "wiremock 0.5.22",
  "zip",
  "zmq",
 ]
@@ -2124,7 +2166,7 @@ dependencies = [
  "fastrand 2.2.0",
  "once_cell",
  "rustix",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -2793,7 +2835,7 @@ dependencies = [
  "assert-json-diff",
  "async-trait",
  "base64 0.21.7",
- "deadpool",
+ "deadpool 0.9.5",
  "futures",
  "futures-timer",
  "http-types",
@@ -2804,6 +2846,30 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
+]
+
+[[package]]
+name = "wiremock"
+version = "0.6.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7fff469918e7ca034884c7fd8f93fe27bacb7fcb599fd879df6c7b429a29b646"
+dependencies = [
+ "assert-json-diff",
+ "async-trait",
+ "base64 0.22.1",
+ "deadpool 0.10.0",
+ "futures",
+ "http 1.1.0",
+ "http-body-util",
+ "hyper 1.4.1",
+ "hyper-util",
+ "log",
+ "once_cell",
+ "regex",
+ "serde",
+ "serde_json",
+ "tokio",
+ "url",
 ]
 
 [[package]]

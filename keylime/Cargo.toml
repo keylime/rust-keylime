@@ -14,6 +14,7 @@ log.workspace = true
 openssl.workspace = true
 pest.workspace = true
 pest_derive.workspace = true
+reqwest.workspace = true
 serde.workspace = true
 serde_derive.workspace = true
 serde_json.workspace = true
@@ -23,11 +24,17 @@ tss-esapi.workspace = true
 picky-asn1-der.workspace = true
 picky-asn1-x509.workspace = true
 tokio.workspace = true
+# wiremock was moved to be a regular dependency because optional
+# dev-dependencies are not supported
+# see: https://github.com/rust-lang/cargo/issues/1596
+wiremock = {version = "0.6", optional = true}
 
 [dev-dependencies]
 tempfile.workspace = true
+actix-rt.workspace = true
 
 [features]
 # This feature enables tests that require a TPM and the TCTI environment
 # variable properly configured
-testing = []
+# This should change to dev-dependencies when we have integration testing
+testing = ["wiremock"]
