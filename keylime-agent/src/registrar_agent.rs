@@ -1,16 +1,12 @@
 use crate::error::Error;
 
 use crate::common::API_VERSION;
-use crate::serialization::*;
+use keylime::serialization::*;
 use log::*;
 use openssl::x509::X509;
 use serde::{Deserialize, Serialize};
 use serde_json::Number;
 use std::net::IpAddr;
-
-fn is_empty(buf: &[u8]) -> bool {
-    buf.is_empty()
-}
 
 #[derive(Debug, Serialize, Deserialize)]
 struct Register<'a> {
