@@ -42,7 +42,6 @@ mod notifications_handler;
 mod payloads;
 mod permissions;
 mod quotes_handler;
-mod registrar_agent;
 mod revocation;
 mod secure_mount;
 
@@ -60,6 +59,7 @@ use keylime::{
     device_id::{DeviceID, DeviceIDBuilder},
     ima::MeasurementList,
     list_parser::parse_list,
+    registrar_client::RegistrarClientBuilder,
     serialization,
     tpm::{self, IAKResult, IDevIDResult},
 };
@@ -599,7 +599,7 @@ async fn main() -> Result<()> {
             }
         }?;
 
-        mtls_cert = Some(&cert);
+        mtls_cert = Some(cert.clone());
         ssl_context = Some(crypto::generate_tls_context(
             &cert,
             &nk_priv,
@@ -612,8 +612,37 @@ async fn main() -> Result<()> {
     }
 
     {
-        // Request keyblob material
-        let keyblob = if config.agent.enable_iak_idevid {
+        // Declare here as these must live longer than the builder
+        let iak_pub;
+        let idevid_pub;
+        let ak_pub = &PublicBuffer::try_from(ak.public)?.marshall()?;
+        let ek_pub =
+            &PublicBuffer::try_from(ek_result.public.clone())?.marshall()?;
+
+        // Create a RegistrarClientBuilder and set the parameters
+        let mut builder = RegistrarClientBuilder::new()
+            .ak_pub(ak_pub)
+            .ek_pub(ek_pub)
+            .enabled_api_versions(
+                api_versions.iter().map(|ver| ver.as_ref()).collect(),
+            )
+            .registrar_ip(config.agent.registrar_ip.clone())
+            .registrar_port(config.agent.registrar_port)
+            .uuid(&agent_uuid)
+            .ip(config.agent.contact_ip.clone())
+            .port(config.agent.contact_port);
+
+        if let Some(mtls_cert) = mtls_cert {
+            builder = builder.mtls_cert(mtls_cert);
+        }
+
+        // If the certificate is not None add it to the builder
+        if let Some(ek_cert) = ek_result.ek_cert {
+            builder = builder.ek_cert(ek_cert);
+        }
+
+        // Set the IAK/IDevID related fields, if enabled
+        if config.agent.enable_iak_idevid {
             let (Some(dev_id), Some(attest), Some(signature)) =
                 (&device_id, attest, signature)
             else {
@@ -625,52 +654,34 @@ async fn main() -> Result<()> {
                         .to_string(),
                 )));
             };
-            registrar_agent::do_register_agent(
-                config.agent.registrar_ip.as_ref(),
-                config.agent.registrar_port,
-                &agent_uuid,
-                &PublicBuffer::try_from(ek_result.public.clone())?
-                    .marshall()?,
-                ek_result.ek_cert,
-                &PublicBuffer::try_from(ak.public)?.marshall()?,
-                Some(
-                    &PublicBuffer::try_from(dev_id.iak_pubkey.clone())?
-                        .marshall()?,
-                ),
-                Some(
-                    &PublicBuffer::try_from(dev_id.idevid_pubkey.clone())?
-                        .marshall()?,
-                ),
-                dev_id.idevid_cert.clone(),
-                dev_id.iak_cert.clone(),
-                Some(attest.marshall()?),
-                Some(signature.marshall()?),
-                mtls_cert,
-                config.agent.contact_ip.as_ref(),
-                config.agent.contact_port,
-            )
-            .await?
-        } else {
-            registrar_agent::do_register_agent(
-                config.agent.registrar_ip.as_ref(),
-                config.agent.registrar_port,
-                &agent_uuid,
-                &PublicBuffer::try_from(ek_result.public.clone())?
-                    .marshall()?,
-                ek_result.ek_cert,
-                &PublicBuffer::try_from(ak.public)?.marshall()?,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                mtls_cert,
-                config.agent.contact_ip.as_ref(),
-                config.agent.contact_port,
-            )
-            .await?
-        };
+
+            iak_pub = PublicBuffer::try_from(dev_id.iak_pubkey.clone())?
+                .marshall()?;
+            idevid_pub =
+                PublicBuffer::try_from(dev_id.idevid_pubkey.clone())?
+                    .marshall()?;
+            builder = builder
+                .iak_attest(attest.marshall()?)
+                .iak_sign(signature.marshall()?)
+                .iak_pub(&iak_pub)
+                .idevid_pub(&idevid_pub);
+
+            // If the IAK certificate was provided, set it
+            if let Some(iak_cert) = dev_id.iak_cert.clone() {
+                builder = builder.iak_cert(iak_cert);
+            }
+
+            // If the IDevID certificate was provided, set it
+            if let Some(idevid_cert) = dev_id.idevid_cert.clone() {
+                builder = builder.idevid_cert(idevid_cert);
+            }
+        }
+
+        // Build the registrar client
+        let mut registrar_client = builder.build().await?;
+
+        // Request keyblob material
+        let keyblob = registrar_client.register_agent().await?;
 
         info!("SUCCESS: Agent {} registered", &agent_uuid);
 
@@ -679,22 +690,18 @@ async fn main() -> Result<()> {
             ak_handle,
             ek_result.key_handle,
         )?;
+
         // Flush EK if we created it
         if config.agent.ek_handle.is_empty() {
             ctx.flush_context(ek_result.key_handle.into())?;
         }
+
         let mackey = general_purpose::STANDARD.encode(key.value());
         let auth_tag =
             crypto::compute_hmac(mackey.as_bytes(), agent_uuid.as_bytes())?;
         let auth_tag = hex::encode(&auth_tag);
 
-        registrar_agent::do_activate_agent(
-            config.agent.registrar_ip.as_ref(),
-            config.agent.registrar_port,
-            &agent_uuid,
-            &auth_tag,
-        )
-        .await?;
+        registrar_client.activate_agent(&auth_tag).await?;
         info!("SUCCESS: Agent {} activated", &agent_uuid);
     }
 
