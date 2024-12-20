@@ -12,6 +12,7 @@ use keylime::{
     hostname_parser::{parse_hostname, HostnameParsingError},
     ip_parser::{parse_ip, IpParsingError},
     list_parser::{parse_list, ListParsingError},
+    version::{self, GetErrorInput},
 };
 use log::*;
 use serde::{Deserialize, Serialize, Serializer};
@@ -20,6 +21,7 @@ use std::{
     collections::HashMap,
     env,
     path::{Path, PathBuf},
+    str::FromStr,
 };
 use thiserror::Error;
 use uuid::Uuid;
@@ -621,15 +623,34 @@ fn config_translate_keywords(
             }
         }
         versions => {
-            let parsed: Vec::<String> = match parse_list(&config.agent.api_versions) {
-                Ok(list) => list
+            let parsed: Vec<String> = match parse_list(
+                &config.agent.api_versions,
+            ) {
+                Ok(list) => {
+                    let mut filtered_versions = list
                     .iter()
                     .inspect(|e| { if !SUPPORTED_API_VERSIONS.contains(e) {
                         warn!("Skipping API version \"{e}\" obtained from 'api_versions' configuration option")
                     }})
                     .filter(|e| SUPPORTED_API_VERSIONS.contains(e))
-                    .map(|&s| s.into())
-                    .collect(),
+                    .map(|&s| version::Version::from_str(s))
+                    .inspect(|err| if let Err(e) = err {
+                        warn!("Skipping API version \"{}\" obtained from 'api_versions' configuration option", e.input());
+                    })
+                    .filter(|e| e.is_ok())
+                    .map(|v| {
+                        let Ok(ver) = v else {unreachable!();};
+                        ver
+                    })
+                    .collect::<Vec<version::Version>>();
+
+                    // Sort the versions from the configuration from the oldest to the newest
+                    filtered_versions.sort();
+                    filtered_versions
+                        .iter()
+                        .map(|v| v.to_string())
+                        .collect::<Vec<String>>()
+                }
                 Err(e) => {
                     warn!("Failed to parse list from 'api_versions' configuration option; using default supported versions");
                     SUPPORTED_API_VERSIONS.iter().map(|&s| s.into()).collect()
@@ -994,6 +1015,63 @@ mod tests {
         let config = result.unwrap(); //#[allow_ci]
         let version = config.agent.api_versions;
         assert_eq!(version, old);
+    }
+
+    #[test]
+    fn test_translate_invalid_api_versions_filtered() {
+        let old = SUPPORTED_API_VERSIONS[0];
+
+        let mut test_config = KeylimeConfig {
+            agent: AgentConfig {
+                api_versions: format!("a.b, {old}, c.d"),
+                ..Default::default()
+            },
+        };
+        let result = config_translate_keywords(&test_config);
+        assert!(result.is_ok());
+        let config = result.unwrap(); //#[allow_ci]
+        let version = config.agent.api_versions;
+        assert_eq!(version, old);
+    }
+
+    #[test]
+    fn test_translate_invalid_api_versions_fallback_default() {
+        let old = SUPPORTED_API_VERSIONS;
+
+        let mut test_config = KeylimeConfig {
+            agent: AgentConfig {
+                api_versions: "a.b, c.d".to_string(),
+                ..Default::default()
+            },
+        };
+        let result = config_translate_keywords(&test_config);
+        assert!(result.is_ok());
+        let config = result.unwrap(); //#[allow_ci]
+        let version = config.agent.api_versions;
+        assert_eq!(version, old.join(", "));
+    }
+
+    #[test]
+    fn test_translate_api_versions_sort() {
+        let old = SUPPORTED_API_VERSIONS;
+        let reversed = SUPPORTED_API_VERSIONS
+            .iter()
+            .rev()
+            .copied()
+            .collect::<Vec<_>>()
+            .join(", ");
+
+        let mut test_config = KeylimeConfig {
+            agent: AgentConfig {
+                api_versions: reversed,
+                ..Default::default()
+            },
+        };
+        let result = config_translate_keywords(&test_config);
+        assert!(result.is_ok());
+        let config = result.unwrap(); //#[allow_ci]
+        let version = config.agent.api_versions;
+        assert_eq!(version, old.join(", "));
     }
 
     #[test]
