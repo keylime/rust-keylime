@@ -341,7 +341,8 @@ impl<'a> RegistrarClientBuilder<'a> {
             Ok(registrar_api_version.to_string())
         } else {
             // Check if one of the API versions that the registrar supports is enabled
-            // from the latest to the oldest
+            // from the latest to the oldest, assuming the reported versions are ordered from the
+            // oldest to the newest
             for reg_supported_version in
                 resp.results.supported_versions.iter().rev()
             {
@@ -632,7 +633,8 @@ impl RegistrarClient<'_> {
         // In case the registrar does not support the '/version' endpoint, try the enabled API
         // versions
         if self.api_version == UNKNOWN_API_VERSION {
-            for api_version in &self.enabled_api_versions {
+            // Assume the list of enabled versions is ordered from the oldest to the newest
+            for api_version in self.enabled_api_versions.iter().rev() {
                 info!("Trying to register agent using API version {api_version}");
                 let r = self.try_register_agent(api_version).await;
 
