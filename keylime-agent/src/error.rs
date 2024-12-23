@@ -33,8 +33,12 @@ pub(crate) enum Error {
     DeviceIDBuilder(#[from] keylime::device_id::DeviceIDBuilderError),
     #[error("Reqwest error: {0}")]
     Reqwest(#[from] reqwest::Error),
-    #[error("Registrar error: received {code} from {addr}")]
-    Registrar { addr: String, code: u16 },
+    #[error("RegistrarClient error")]
+    RegistrarClient(#[from] keylime::registrar_client::RegistrarClientError),
+    #[error("RegistrarClientBuilder error")]
+    RegistrarClientBuilder(
+        #[from] keylime::registrar_client::RegistrarClientBuilderError,
+    ),
     #[error("Serialization/deserialization error: {0}")]
     Serde(#[from] serde_json::Error),
     #[error("Permission error")]
@@ -108,15 +112,6 @@ pub(crate) enum Error {
 impl actix_web::ResponseError for Error {}
 
 impl Error {
-    pub(crate) fn http_code(&self) -> Result<u16> {
-        match self {
-            Error::Registrar { addr, code } => Ok(*code),
-            other => Err(Error::Other(format!(
-                "cannot get http code for Error type {other}"
-            ))),
-        }
-    }
-
     pub(crate) fn exe_code(&self) -> Result<Option<i32>> {
         match self {
             Error::Execution(code, _) => Ok(code.to_owned()),

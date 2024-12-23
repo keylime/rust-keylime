@@ -80,7 +80,6 @@ pub(crate) fn configure_notifications_endpoints(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::common::API_VERSION;
     use actix_rt::Arbiter;
     use actix_web::{test, web, App};
     use serde_json::{json, Value};
@@ -149,7 +148,7 @@ mod tests {
 
         let mut app =
             test::init_service(App::new().app_data(quotedata.clone()).route(
-                &format!("/{API_VERSION}/notifications/revocation"),
+                "/vX.Y/notifications/revocation",
                 web::post().to(revocation),
             ))
             .await;
@@ -182,7 +181,7 @@ mod tests {
         })));
 
         let req = test::TestRequest::post()
-            .uri(&format!("/{API_VERSION}/notifications/revocation",))
+            .uri("/vX.Y/notifications/revocation")
             .set_json(&revocation)
             .to_request();
 
