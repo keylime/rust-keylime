@@ -42,11 +42,8 @@ mod notifications_handler;
 mod payloads;
 mod permissions;
 mod quotes_handler;
-mod registrar_agent;
 mod revocation;
 mod secure_mount;
-mod serialization;
-mod version_handler;
 
 use actix_web::{dev::Service, http, middleware, rt, web, App, HttpServer};
 use base64::{engine::general_purpose, Engine as _};
@@ -62,6 +59,8 @@ use keylime::{
     device_id::{DeviceID, DeviceIDBuilder},
     ima::MeasurementList,
     list_parser::parse_list,
+    registrar_client::RegistrarClientBuilder,
+    serialization,
     tpm::{self, IAKResult, IDevIDResult},
 };
 use log::*;
@@ -102,27 +101,28 @@ static NOTFOUND: &[u8] = b"Not Found";
 // handle quotes.
 #[derive(Debug)]
 pub struct QuoteData<'a> {
-    tpmcontext: Mutex<tpm::Context<'a>>,
-    priv_key: PKey<Private>,
-    pub_key: PKey<Public>,
+    agent_uuid: String,
     ak_handle: KeyHandle,
-    payload_tx: mpsc::Sender<payloads::PayloadMessage>,
-    revocation_tx: mpsc::Sender<revocation::RevocationMessage>,
+    allow_payload_revocation_actions: bool,
+    api_versions: Vec<String>,
+    enc_alg: keylime::algorithms::EncryptionAlgorithm,
+    hash_alg: keylime::algorithms::HashAlgorithm,
+    ima_ml: Mutex<MeasurementList>,
+    ima_ml_file: Option<Mutex<fs::File>>,
     keys_tx: mpsc::Sender<(
         keys_handler::KeyMessage,
         Option<oneshot::Sender<keys_handler::SymmKeyMessage>>,
     )>,
-    hash_alg: keylime::algorithms::HashAlgorithm,
-    enc_alg: keylime::algorithms::EncryptionAlgorithm,
-    sign_alg: keylime::algorithms::SignAlgorithm,
-    agent_uuid: String,
-    allow_payload_revocation_actions: bool,
-    secure_size: String,
-    work_dir: PathBuf,
-    ima_ml_file: Option<Mutex<fs::File>>,
     measuredboot_ml_file: Option<Mutex<fs::File>>,
-    ima_ml: Mutex<MeasurementList>,
+    payload_tx: mpsc::Sender<payloads::PayloadMessage>,
+    priv_key: PKey<Private>,
+    pub_key: PKey<Public>,
+    revocation_tx: mpsc::Sender<revocation::RevocationMessage>,
     secure_mount: PathBuf,
+    secure_size: String,
+    sign_alg: keylime::algorithms::SignAlgorithm,
+    tpmcontext: Mutex<tpm::Context<'a>>,
+    work_dir: PathBuf,
 }
 
 #[actix_web::main]
@@ -272,7 +272,16 @@ async fn main() -> Result<()> {
         info!("Running the service as {}...", user_group);
     }
 
-    info!("Starting server with API version {}...", API_VERSION);
+    // Parse the configured API versions
+    let api_versions = parse_list(&config.agent.api_versions)?
+        .iter()
+        .map(|s| s.to_string())
+        .collect::<Vec<_>>();
+
+    info!(
+        "Starting server with API versions: {}",
+        &config.agent.api_versions
+    );
 
     let mut ctx = tpm::Context::new()?;
 
@@ -590,7 +599,7 @@ async fn main() -> Result<()> {
             }
         }?;
 
-        mtls_cert = Some(&cert);
+        mtls_cert = Some(cert.clone());
         ssl_context = Some(crypto::generate_tls_context(
             &cert,
             &nk_priv,
@@ -603,8 +612,37 @@ async fn main() -> Result<()> {
     }
 
     {
-        // Request keyblob material
-        let keyblob = if config.agent.enable_iak_idevid {
+        // Declare here as these must live longer than the builder
+        let iak_pub;
+        let idevid_pub;
+        let ak_pub = &PublicBuffer::try_from(ak.public)?.marshall()?;
+        let ek_pub =
+            &PublicBuffer::try_from(ek_result.public.clone())?.marshall()?;
+
+        // Create a RegistrarClientBuilder and set the parameters
+        let mut builder = RegistrarClientBuilder::new()
+            .ak_pub(ak_pub)
+            .ek_pub(ek_pub)
+            .enabled_api_versions(
+                api_versions.iter().map(|ver| ver.as_ref()).collect(),
+            )
+            .registrar_ip(config.agent.registrar_ip.clone())
+            .registrar_port(config.agent.registrar_port)
+            .uuid(&agent_uuid)
+            .ip(config.agent.contact_ip.clone())
+            .port(config.agent.contact_port);
+
+        if let Some(mtls_cert) = mtls_cert {
+            builder = builder.mtls_cert(mtls_cert);
+        }
+
+        // If the certificate is not None add it to the builder
+        if let Some(ek_cert) = ek_result.ek_cert {
+            builder = builder.ek_cert(ek_cert);
+        }
+
+        // Set the IAK/IDevID related fields, if enabled
+        if config.agent.enable_iak_idevid {
             let (Some(dev_id), Some(attest), Some(signature)) =
                 (&device_id, attest, signature)
             else {
@@ -616,52 +654,34 @@ async fn main() -> Result<()> {
                         .to_string(),
                 )));
             };
-            registrar_agent::do_register_agent(
-                config.agent.registrar_ip.as_ref(),
-                config.agent.registrar_port,
-                &agent_uuid,
-                &PublicBuffer::try_from(ek_result.public.clone())?
-                    .marshall()?,
-                ek_result.ek_cert,
-                &PublicBuffer::try_from(ak.public)?.marshall()?,
-                Some(
-                    &PublicBuffer::try_from(dev_id.iak_pubkey.clone())?
-                        .marshall()?,
-                ),
-                Some(
-                    &PublicBuffer::try_from(dev_id.idevid_pubkey.clone())?
-                        .marshall()?,
-                ),
-                dev_id.idevid_cert.clone(),
-                dev_id.iak_cert.clone(),
-                Some(attest.marshall()?),
-                Some(signature.marshall()?),
-                mtls_cert,
-                config.agent.contact_ip.as_ref(),
-                config.agent.contact_port,
-            )
-            .await?
-        } else {
-            registrar_agent::do_register_agent(
-                config.agent.registrar_ip.as_ref(),
-                config.agent.registrar_port,
-                &agent_uuid,
-                &PublicBuffer::try_from(ek_result.public.clone())?
-                    .marshall()?,
-                ek_result.ek_cert,
-                &PublicBuffer::try_from(ak.public)?.marshall()?,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                mtls_cert,
-                config.agent.contact_ip.as_ref(),
-                config.agent.contact_port,
-            )
-            .await?
-        };
+
+            iak_pub = PublicBuffer::try_from(dev_id.iak_pubkey.clone())?
+                .marshall()?;
+            idevid_pub =
+                PublicBuffer::try_from(dev_id.idevid_pubkey.clone())?
+                    .marshall()?;
+            builder = builder
+                .iak_attest(attest.marshall()?)
+                .iak_sign(signature.marshall()?)
+                .iak_pub(&iak_pub)
+                .idevid_pub(&idevid_pub);
+
+            // If the IAK certificate was provided, set it
+            if let Some(iak_cert) = dev_id.iak_cert.clone() {
+                builder = builder.iak_cert(iak_cert);
+            }
+
+            // If the IDevID certificate was provided, set it
+            if let Some(idevid_cert) = dev_id.idevid_cert.clone() {
+                builder = builder.idevid_cert(idevid_cert);
+            }
+        }
+
+        // Build the registrar client
+        let mut registrar_client = builder.build().await?;
+
+        // Request keyblob material
+        let keyblob = registrar_client.register_agent().await?;
 
         info!("SUCCESS: Agent {} registered", &agent_uuid);
 
@@ -670,22 +690,18 @@ async fn main() -> Result<()> {
             ak_handle,
             ek_result.key_handle,
         )?;
+
         // Flush EK if we created it
         if config.agent.ek_handle.is_empty() {
             ctx.flush_context(ek_result.key_handle.into())?;
         }
+
         let mackey = general_purpose::STANDARD.encode(key.value());
         let auth_tag =
             crypto::compute_hmac(mackey.as_bytes(), agent_uuid.as_bytes())?;
         let auth_tag = hex::encode(&auth_tag);
 
-        registrar_agent::do_activate_agent(
-            config.agent.registrar_ip.as_ref(),
-            config.agent.registrar_port,
-            &agent_uuid,
-            &auth_tag,
-        )
-        .await?;
+        registrar_client.activate_agent(&auth_tag).await?;
         info!("SUCCESS: Agent {} activated", &agent_uuid);
     }
 
@@ -736,24 +752,25 @@ async fn main() -> Result<()> {
     .map_err(Error::from);
 
     let quotedata = web::Data::new(QuoteData {
-        tpmcontext: Mutex::new(ctx),
+        agent_uuid: agent_uuid.clone(),
+        ak_handle,
+        allow_payload_revocation_actions,
+        api_versions: api_versions.clone(),
+        enc_alg: tpm_encryption_alg,
+        hash_alg: tpm_hash_alg,
+        ima_ml: Mutex::new(MeasurementList::new()),
+        ima_ml_file,
+        keys_tx: keys_tx.clone(),
+        measuredboot_ml_file,
+        payload_tx: payload_tx.clone(),
         priv_key: nk_priv,
         pub_key: nk_pub,
-        ak_handle,
-        keys_tx: keys_tx.clone(),
-        payload_tx: payload_tx.clone(),
         revocation_tx: revocation_tx.clone(),
-        hash_alg: tpm_hash_alg,
-        enc_alg: tpm_encryption_alg,
-        sign_alg: tpm_signing_alg,
-        agent_uuid: agent_uuid.clone(),
-        allow_payload_revocation_actions,
-        secure_size,
-        work_dir,
-        ima_ml_file,
-        measuredboot_ml_file,
-        ima_ml: Mutex::new(MeasurementList::new()),
         secure_mount: PathBuf::from(&mount),
+        secure_size,
+        sign_alg: tpm_signing_alg,
+        tpmcontext: Mutex::new(ctx),
+        work_dir,
     });
 
     let actix_server = HttpServer::new(move || {
@@ -788,17 +805,14 @@ async fn main() -> Result<()> {
                     .error_handler(errors_handler::path_parser_error),
             );
 
-        let enabled_api_versions = api::SUPPORTED_API_VERSIONS;
-
-        for version in enabled_api_versions {
+        for version in &api_versions {
             // This should never fail, thus unwrap should never panic
             let scope = api::get_api_scope(version).unwrap(); //#[allow_ci]
             app = app.service(scope);
         }
 
         app.service(
-            web::resource("/version")
-                .route(web::get().to(version_handler::version)),
+            web::resource("/version").route(web::get().to(api::version)),
         )
         .service(
             web::resource(r"/v{major:\d+}.{minor:\d+}{tail}*")
@@ -949,6 +963,7 @@ fn read_in_file(path: String) -> std::io::Result<String> {
 }
 
 #[cfg(feature = "testing")]
+#[cfg(test)]
 mod testing {
     use super::*;
     use crate::{config::KeylimeConfig, crypto::CryptoError};
@@ -1077,7 +1092,7 @@ mod testing {
             // Allow setting the binary bios measurements log path when testing
             let mut measuredboot_ml_path =
                 Path::new(&test_config.agent.measuredboot_ml_path);
-            let env_mb_path;
+            let env_mb_path: String;
             #[cfg(feature = "testing")]
             if let Ok(v) = std::env::var("TPM_BINARY_MEASUREMENTS") {
                 env_mb_path = v;
@@ -1090,8 +1105,14 @@ mod testing {
                     Err(err) => None,
                 };
 
+            let api_versions = api::SUPPORTED_API_VERSIONS
+                .iter()
+                .map(|&s| s.to_string())
+                .collect::<Vec<String>>();
+
             Ok((
                 QuoteData {
+                    api_versions,
                     tpmcontext: Mutex::new(ctx),
                     priv_key: nk_priv,
                     pub_key: nk_pub,

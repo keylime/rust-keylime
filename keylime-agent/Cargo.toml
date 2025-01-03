@@ -33,10 +33,6 @@ thiserror.workspace = true
 uuid.workspace = true
 zip.workspace = true
 zmq = {version = "0.9.2", optional = true}
-# wiremock was moved to be a regular dependency because optional
-# dev-dependencies are not supported
-# see: https://github.com/rust-lang/cargo/issues/1596
-wiremock = {version = "0.5", optional = true}
 
 [dev-dependencies]
 actix-rt.workspace = true
@@ -44,8 +40,7 @@ actix-rt.workspace = true
 [features]
 # The features enabled by default
 default = []
-# this should change to dev-dependencies when we have integration testing
-testing = ["wiremock"]
+testing = []
 # Whether the agent should be compiled with support to listen for notification
 # messages on ZeroMQ
 #
