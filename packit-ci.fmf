@@ -22,8 +22,8 @@
 
   discover:
     how: fmf
-    url: https://github.com/RedHat-SP-Security/keylime-tests
-    ref: main
+    url: https://github.com/ansasaki/keylime-tests
+    ref: fix_multiple_api
     test:
        - /setup/apply_workarounds
        - /setup/configure_tpm_emulator
