@@ -18,7 +18,7 @@ actix-rt = "2"
 actix-web =  { version = "4", default-features = false, features = ["macros", "openssl"] }
 base64 = "0.22"
 cfg-if = "1"
-clap = { version = "4.3", features = ["derive"] }
+clap = { version = "4.5", features = ["derive"] }
 config = { version = "0.13", default-features = false, features = ["toml"] }
 futures = "0.3.6"
 glob = "0.3"
