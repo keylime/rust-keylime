@@ -16,7 +16,7 @@ version = "0.2.6"
 [workspace.dependencies]
 actix-rt = "2"
 actix-web =  { version = "4", default-features = false, features = ["macros", "openssl"] }
-base64 = "0.21"
+base64 = "0.22"
 cfg-if = "1"
 clap = { version = "4.3", features = ["derive"] }
 config = { version = "0.13", default-features = false, features = ["toml"] }
