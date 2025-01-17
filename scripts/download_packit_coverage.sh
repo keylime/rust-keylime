@@ -36,8 +36,8 @@ PROJECT="keylime/rust-keylime"
 # uploads coverage XML files to a web drive
 # currently we are doing that in a job running tests on Fedora-41
 TF_JOB_DESC="testing-farm:fedora-41-x86_64"
-TF_TEST_OUTPUT="/setup/generate_upstream_rust_keylime_code_coverage.*/output.txt"
 TF_ARTIFACTS_URL_PREFIX="https://artifacts.dev.testing-farm.io"
+TF_COVERAGE_DATA_DIR="/setup/generate_upstream_rust_keylime_code_coverage.*/data"
 
 GITHUB_API_PREFIX_URL="https://api.github.com/repos/${PROJECT}"
 
@@ -134,23 +134,27 @@ fi
 # now we have TF_ARTIFACTS_URL so we can proceed with the download
 echo "TF_ARTIFACTS_URL=${TF_ARTIFACTS_URL}"
 
-TF_TESTLOG=$( curl --retry 5 ${TF_ARTIFACTS_URL}/results.xml | grep -E -o "${TF_ARTIFACTS_URL}.*${TF_TEST_OUTPUT}" )
-echo "TF_TESTLOG=${TF_TESTLOG}"
+COVERAGE_DIR=$( curl --retry 5 ${TF_ARTIFACTS_URL}/results.xml | grep -E -o "${TF_ARTIFACTS_URL}.*${TF_COVERAGE_DATA_DIR}" )
+echo "COVERAGE_DIR=${COVERAGE_DIR}"
 
-# parse the URL of coverage txt file and download it
-curl --retry 5 -s "${TF_TESTLOG}" &> ${TMPFILE}
-echo "TMPFILE=${TMPFILE}"
-# probably rewrite, different hardcoded files, need to figure out how to export
-
-for REPORT in e2e_coverage.txt upstream_coverage.xml; do
+DOWNLOADED="False"
+for REPORT in e2e_coverage.txt.tar.gz upstream_coverage.xml.tar.gz; do
   # download test coverage
-  COVERAGE_URL=$( grep "$REPORT report is available at" ${TMPFILE} | grep -E -o "https?://[^[:space:]]*" )
-  echo "COVERAGE_URL=${COVERAGE_URL}"
-  if [ -z "${COVERAGE_URL}" ]; then
-      echo "Could not parse $REPORT URL at from test log ${TF_TESTLOG}"
-      exit 5
-  fi
+  COVERAGE_URL=${COVERAGE_DIR}/${REPORT}
+  echo "Trying to download \"${COVERAGE_URL}\""
   # download the file
-  curl --retry 5 -L -o "${REPORT}" "${COVERAGE_URL}"
+  if curl --fail-with-body --retry 5 -L -o "${REPORT}" "${COVERAGE_URL}"; then
+    echo "Successfully downloaded \"${COVERAGE_URL}\""
+    DOWNLOADED="True"
+    tar -xvf ${REPORT}
+  else
+    echo "Failed to download \"${COVERAGE_URL}\""
+    rm -f ${REPORT}
+  fi
 done
-rm ${TMPFILE}
+
+# Fail in case no file was downloaded
+if [[ "${DOWNLOADED}" != "True" ]]; then
+  echo "Could not download any coverage report"
+  exit 5
+fi
