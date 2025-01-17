@@ -144,7 +144,7 @@ echo "TMPFILE=${TMPFILE}"
 
 for REPORT in e2e_coverage.txt upstream_coverage.xml; do
   # download test coverage
-  COVERAGE_URL=$( grep "$REPORT report is available at" ${TMPFILE} | grep -E -o "https://[^[:space:]]*" )
+  COVERAGE_URL=$( grep "$REPORT report is available at" ${TMPFILE} | grep -E -o "https?://[^[:space:]]*" )
   echo "COVERAGE_URL=${COVERAGE_URL}"
   if [ -z "${COVERAGE_URL}" ]; then
       echo "Could not parse $REPORT URL at from test log ${TF_TESTLOG}"
