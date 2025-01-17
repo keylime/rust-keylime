@@ -1015,7 +1015,7 @@ mod testing {
         }
     }
 
-    impl<'a> QuoteData<'a> {
+    impl QuoteData<'_> {
         pub(crate) async fn fixture() -> std::result::Result<
             (Self, AsyncMutexGuard<'static, ()>),
             MainTestError,
