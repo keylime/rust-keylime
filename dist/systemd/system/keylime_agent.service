@@ -17,7 +17,7 @@ ExecStart=/usr/bin/keylime_agent
 TimeoutSec=60s
 Restart=on-failure
 RestartSec=120s
-Environment="RUST_LOG=keylime_agent=info"
+Environment="RUST_LOG=keylime_agent=info,keylime=info"
 # If using swtpm with tpm2-abrmd service, uncomment the line below to set TCTI
 # variable on the service environment
 #Environment="TCTI=tabrmd:"
