@@ -32,6 +32,7 @@
 #![allow(unused, missing_docs)]
 
 mod agent_handler;
+mod agent_registration;
 mod api;
 mod common;
 mod config;
@@ -46,6 +47,7 @@ mod revocation;
 mod secure_mount;
 
 use actix_web::{dev::Service, http, middleware, rt, web, App, HttpServer};
+use agent_registration::AgentRegistration;
 use base64::{engine::general_purpose, Engine as _};
 use clap::{Arg, Command as ClapApp};
 use common::*;
@@ -609,98 +611,23 @@ async fn main() -> Result<()> {
         warn!("mTLS disabled, Tenant and Verifier will reach out to agent via HTTP");
     }
 
-    {
-        // Declare here as these must live longer than the builder
-        let iak_pub;
-        let idevid_pub;
-        let ak_pub = &PublicBuffer::try_from(ak.public)?.marshall()?;
-        let ek_pub =
-            &PublicBuffer::try_from(ek_result.public.clone())?.marshall()?;
-
-        // Create a RegistrarClientBuilder and set the parameters
-        let mut builder = RegistrarClientBuilder::new()
-            .ak_pub(ak_pub)
-            .ek_pub(ek_pub)
-            .enabled_api_versions(
-                api_versions.iter().map(|ver| ver.as_ref()).collect(),
-            )
-            .registrar_ip(config.agent.registrar_ip.clone())
-            .registrar_port(config.agent.registrar_port)
-            .uuid(&agent_uuid)
-            .ip(config.agent.contact_ip.clone())
-            .port(config.agent.contact_port);
-
-        if let Some(mtls_cert) = mtls_cert {
-            builder = builder.mtls_cert(mtls_cert);
+    let aa = AgentRegistration {
+        ak,
+        ek_result,
+        api_versions: api_versions.clone(),
+        agent: config.agent.clone(),
+        agent_uuid: agent_uuid.clone(),
+        mtls_cert,
+        device_id,
+        attest,
+        signature,
+        ak_handle,
+    };
+    match agent_registration::register_agent(aa, &mut ctx).await {
+        Ok(()) => (),
+        Err(e) => {
+            error!("Failed to register agent: {}", e);
         }
-
-        // If the certificate is not None add it to the builder
-        if let Some(ekchain) = ek_result.to_pem() {
-            builder = builder.ek_cert(ekchain);
-        }
-
-        // Set the IAK/IDevID related fields, if enabled
-        if config.agent.enable_iak_idevid {
-            let (Some(dev_id), Some(attest), Some(signature)) =
-                (&device_id, attest, signature)
-            else {
-                error!(
-                    "IDevID and IAK are enabled but could not be generated"
-                );
-                return Err(Error::Configuration(config::KeylimeConfigError::Generic(
-                    "IDevID and IAK are enabled but could not be generated"
-                        .to_string(),
-                )));
-            };
-
-            iak_pub = PublicBuffer::try_from(dev_id.iak_pubkey.clone())?
-                .marshall()?;
-            idevid_pub =
-                PublicBuffer::try_from(dev_id.idevid_pubkey.clone())?
-                    .marshall()?;
-            builder = builder
-                .iak_attest(attest.marshall()?)
-                .iak_sign(signature.marshall()?)
-                .iak_pub(&iak_pub)
-                .idevid_pub(&idevid_pub);
-
-            // If the IAK certificate was provided, set it
-            if let Some(iak_cert) = dev_id.iak_cert.clone() {
-                builder = builder.iak_cert(iak_cert);
-            }
-
-            // If the IDevID certificate was provided, set it
-            if let Some(idevid_cert) = dev_id.idevid_cert.clone() {
-                builder = builder.idevid_cert(idevid_cert);
-            }
-        }
-
-        // Build the registrar client
-        let mut registrar_client = builder.build().await?;
-
-        // Request keyblob material
-        let keyblob = registrar_client.register_agent().await?;
-
-        info!("SUCCESS: Agent {} registered", &agent_uuid);
-
-        let key = ctx.activate_credential(
-            keyblob,
-            ak_handle,
-            ek_result.key_handle,
-        )?;
-
-        // Flush EK if we created it
-        if config.agent.ek_handle.is_empty() {
-            ctx.flush_context(ek_result.key_handle.into())?;
-        }
-
-        let mackey = general_purpose::STANDARD.encode(key.value());
-        let auth_tag =
-            crypto::compute_hmac(mackey.as_bytes(), agent_uuid.as_bytes())?;
-        let auth_tag = hex::encode(&auth_tag);
-
-        registrar_client.activate_agent(&auth_tag).await?;
-        info!("SUCCESS: Agent {} activated", &agent_uuid);
     }
 
     let (mut payload_tx, mut payload_rx) =
