@@ -250,12 +250,10 @@ async fn main() -> Result<()> {
             Some(&config.agent.run_as)
         }
     } else {
-        error!("Cannot drop privileges: not enough permission");
-        return Err(Error::Configuration(
-            config::KeylimeConfigError::Generic(
-                "Cannot drop privileges: not enough permission".to_string(),
-            ),
-        ));
+        if !(config.agent.run_as).is_empty() {
+            warn!("Ignoring 'run_as' option because Keylime agent has not been started as root.");
+        }
+        None
     };
 
     // Drop privileges
