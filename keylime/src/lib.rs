@@ -7,6 +7,7 @@ pub mod ip_parser;
 pub mod list_parser;
 pub mod registrar_client;
 pub mod serialization;
+pub mod structures;
 pub mod tpm;
 pub mod version;
 
