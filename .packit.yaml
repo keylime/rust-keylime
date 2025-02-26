@@ -23,6 +23,7 @@ jobs:
 - job: copr_build
   trigger: commit
   branch: master
+  identifier: fedora
   specfile_path: rpm/fedora/keylime-agent-rust.spec
   files_to_sync:
     - rpm/fedora/*
@@ -50,6 +51,7 @@ jobs:
 - job: copr_build
   trigger: commit
   branch: master
+  identifier: centos
   specfile_path: rpm/centos/keylime-agent-rust.spec
   files_to_sync:
     - rpm/centos/*
