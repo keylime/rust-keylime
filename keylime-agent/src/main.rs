@@ -635,8 +635,8 @@ async fn main() -> Result<()> {
         }
 
         // If the certificate is not None add it to the builder
-        if let Some(ek_cert) = ek_result.ek_cert {
-            builder = builder.ek_cert(ek_cert);
+        if let Some(ekchain) = ek_result.to_pem() {
+            builder = builder.ek_cert(ekchain);
         }
 
         // Set the IAK/IDevID related fields, if enabled
