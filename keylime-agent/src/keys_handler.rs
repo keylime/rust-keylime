@@ -4,8 +4,7 @@
 use crate::crypto;
 use crate::{
     common::{
-        AuthTag, EncryptedData, JsonWrapper, KeySet, SymmKey, AGENT_UUID_LEN,
-        AUTH_TAG_LEN,
+        AuthTag, EncryptedData, JsonWrapper, KeySet, SymmKey,
     },
     config::KeylimeConfig,
     payloads::{Payload, PayloadMessage},

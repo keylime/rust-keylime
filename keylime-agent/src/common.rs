@@ -36,11 +36,6 @@ use tss_esapi::{
 /*
  * Constants and static variables
  */
-pub const TPM_DATA_PCR: usize = 16;
-pub const IMA_PCR: usize = 10;
-pub static RSA_PUBLICKEY_EXPORTABLE: &str = "rsa placeholder";
-pub static KEY: &str = "secret";
-pub const AGENT_UUID_LEN: usize = 36;
 pub const AUTH_TAG_LEN: usize = 48;
 
 #[derive(Serialize, Deserialize, Debug)]
