@@ -17,8 +17,9 @@ pub struct RequestData {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Attributes {
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub evidence_supported: Vec<EvidenceSupported>,
-    pub boot_time: String,
+    pub system_info: SystemInfo,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -26,42 +27,53 @@ pub struct Attributes {
 pub enum EvidenceSupported {
     Certification {
         evidence_type: String,
-        agent_capabilities: AgentCapabilities,
+        capabilities: Capabilities,
     },
-    FullLog {
+    #[serde(rename = "log", rename_all = "snake_case")]
+    EvidenceLog {
         evidence_type: String,
-        version: String,
-    },
-    PartialLog {
-        evidence_type: String,
+        capabilities: LogCapabilities,
     },
 }
 
-#[derive(Serialize, Deserialize, Debug)]
-pub struct MbLog {
-    evidence_class: String,
-    version: String,
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct LogCapabilities {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub evidence_version: Option<String>,
+    pub entry_count: u32,
+    pub supports_partial_access: bool,
+    pub appendable: bool,
+    pub formats: Vec<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct ImaEntries {
-    evidence_class: String,
+    pub evidence_class: String,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-pub struct AgentCapabilities {
-    spec_version: String,
-    hash_algorithms: Vec<String>,
-    signing_schemes: Vec<String>,
-    attestation_keys: Vec<AttestationKey>,
+pub struct Capabilities {
+    pub component_version: String,
+    pub hash_algorithms: Vec<String>,
+    pub signature_schemes: Vec<String>,
+    pub available_subjects: ShaValues,
+    pub certification_keys: Vec<CertificationKey>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct AttestationKey {
-    key_class: String,
-    key_identifier: String,
-    key_algorithm: String,
-    public_hash: String,
+// Do not serialize the struct name, only the fields
+pub struct ShaValues {
+    pub sha1: Vec<u8>,
+    pub sha256: Vec<u8>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct CertificationKey {
+    pub key_algorithm: String,
+    pub key_size: u32,
+    pub server_identifier: String,
+    pub local_identifier: String,
+    pub public: String,
 }
 
 // Define the structure for the AttestationResponse:
@@ -80,7 +92,12 @@ pub struct ResponseData {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct ResponseAttributes {
+    pub stage: String,
     pub evidence_requested: Vec<EvidenceRequested>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct SystemInfo {
     pub boot_time: String,
 }
 
@@ -90,54 +107,53 @@ pub struct EvidenceRequested {
     pub evidence_type: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub chosen_parameters: Option<ChosenParameters>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub version: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct TpmParameters {
+pub struct CertificationParameters {
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub nonce: Option<String>,
+    pub challenge: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub pcr_selection: Option<Vec<i32>>,
+    pub selected_subjects: Option<ShaValues>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hash_algorithm: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub signing_scheme: Option<String>,
+    pub signature_scheme: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub attestation_key: Option<AttestationKey>,
+    pub certification_key: Option<CertificationKey>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct StartingOffset {
+pub struct LogParameters {
+    pub format: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub starting_offset: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub entry_count: Option<i32>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(try_from = "JsonValue", into = "JsonValue")]
 pub enum ChosenParameters {
-    Parameters(TpmParameters),
-    Offset(StartingOffset),
+    Parameters(Box<CertificationParameters>),
+    Offset(LogParameters),
 }
 
 impl TryFrom<JsonValue> for ChosenParameters {
     type Error = String;
 
     fn try_from(value: JsonValue) -> Result<Self, Self::Error> {
-        if let Ok(offset) = from_value::<StartingOffset>(value.clone()) {
-            if offset.starting_offset.is_some() {
-                return Ok(ChosenParameters::Offset(offset));
-            }
+        if let Ok(offset) = from_value::<LogParameters>(value.clone()) {
+            return Ok(ChosenParameters::Offset(offset));
         }
-        if let Ok(params) = from_value::<TpmParameters>(value) {
-            if params.attestation_key.is_some()
+        if let Ok(params) = from_value::<CertificationParameters>(value) {
+            if params.certification_key.is_some()
                 || params.hash_algorithm.is_some()
-                || params.nonce.is_some()
-                || params.pcr_selection.is_some()
-                || params.signing_scheme.is_some()
+                || params.challenge.is_some()
+                || params.selected_subjects.is_some()
+                || params.signature_scheme.is_some()
             {
-                return Ok(ChosenParameters::Parameters(params));
+                return Ok(ChosenParameters::Parameters(Box::new(params)));
             }
         }
         Err("Failed to deserialize ChosenParameters".to_string())
@@ -168,51 +184,156 @@ mod tests {
                     evidence_supported: vec![
                         EvidenceSupported::Certification {
                             evidence_type: "tpm_quote".to_string(),
-                            agent_capabilities: AgentCapabilities {
-                                spec_version: "2.0".to_string(),
+                            capabilities: Capabilities {
+                                component_version: "2.0".to_string(),
                                 hash_algorithms: vec!["sha3_512".to_string()],
-                                signing_schemes: vec!["rsassa".to_string()],
-                                attestation_keys: vec![
-                                    AttestationKey {
-                                        key_class: "private_key".to_string(),
-                                        key_identifier: "att_key_identifier".to_string(),
+                                signature_schemes: vec!["rsassa".to_string()],
+                                available_subjects: ShaValues {
+                                    sha1: vec![0x01, 0x02, 0x03],
+                                    sha256: vec![0x04, 0x05, 0x06],
+                                },
+                                certification_keys: vec![
+                                    CertificationKey {
+                                        local_identifier: "att_local_identifier".to_string(),
                                         key_algorithm: "rsa".to_string(),
-                                        public_hash: "cd293be6cea034bd45a0352775a219ef5dc7825ce55d1f7dae9762d80ce64411".to_string(),
+                                        key_size: 2048,
+                                        server_identifier: "ak".to_string(),
+                                        public: "OTgtMjkzODQ1LTg5MjMtNDk1OGlrYXNkamZnO2Frc2pka2ZqYXM7a2RqZjtramJrY3hqejk4MS0zMjQ5MDhpLWpmZDth".to_string(),
                                     },
                                 ],
                             },
                         },
                     ],
-                    boot_time: "2024-11-12T16:21:17Z".to_string(),
+                    system_info: SystemInfo {
+                        boot_time: "2024-11-12T16:21:17Z".to_string(),
+                    },
                 },
             },
         };
-        let json = serde_json::to_string(&request).unwrap(); //#[allow_ci]
+        let json = serde_json::to_string_pretty(&request).unwrap(); //#[allow_ci]
         assert_eq!(
             json,
-            r#"{"data":{"type":"attestation","attributes":{"evidence_supported":[{"evidence_class":"certification","evidence_type":"tpm_quote","agent_capabilities":{"spec_version":"2.0","hash_algorithms":["sha3_512"],"signing_schemes":["rsassa"],"attestation_keys":[{"key_class":"private_key","key_identifier":"att_key_identifier","key_algorithm":"rsa","public_hash":"cd293be6cea034bd45a0352775a219ef5dc7825ce55d1f7dae9762d80ce64411"}]}}],"boot_time":"2024-11-12T16:21:17Z"}}}"#
+            r#"{
+  "data": {
+    "type": "attestation",
+    "attributes": {
+      "evidence_supported": [
+        {
+          "evidence_class": "certification",
+          "evidence_type": "tpm_quote",
+          "capabilities": {
+            "component_version": "2.0",
+            "hash_algorithms": [
+              "sha3_512"
+            ],
+            "signature_schemes": [
+              "rsassa"
+            ],
+            "available_subjects": {
+              "sha1": [
+                1,
+                2,
+                3
+              ],
+              "sha256": [
+                4,
+                5,
+                6
+              ]
+            },
+            "certification_keys": [
+              {
+                "key_algorithm": "rsa",
+                "key_size": 2048,
+                "server_identifier": "ak",
+                "local_identifier": "att_local_identifier",
+                "public": "OTgtMjkzODQ1LTg5MjMtNDk1OGlrYXNkamZnO2Frc2pka2ZqYXM7a2RqZjtramJrY3hqejk4MS0zMjQ5MDhpLWpmZDth"
+              }
+            ]
+          }
+        }
+      ],
+      "system_info": {
+        "boot_time": "2024-11-12T16:21:17Z"
+      }
+    }
+  }
+}"#,
         );
         let request = AttestationRequest {
             data: RequestData {
                 type_: "attestation".to_string(),
                 attributes: Attributes {
                     evidence_supported: vec![
-                        EvidenceSupported::FullLog {
-                            evidence_type: "mb_log".to_string(),
-                            version: "2.1".to_string(),
+                        EvidenceSupported::EvidenceLog {
+                            evidence_type: "uefi_log".to_string(),
+                            capabilities: LogCapabilities {
+                                evidence_version: Some("2.1".to_string()),
+                                entry_count: 20,
+                                supports_partial_access: false,
+                                appendable: false,
+                                formats: vec![
+                                    "application/octet-stream".to_string()
+                                ],
+                            },
                         },
-                        EvidenceSupported::PartialLog {
-                            evidence_type: "ima_entries".to_string(),
+                        EvidenceSupported::EvidenceLog {
+                            evidence_type: "ima_log".to_string(),
+                            capabilities: LogCapabilities {
+                                evidence_version: None,
+                                entry_count: 20,
+                                supports_partial_access: true,
+                                appendable: false,
+                                formats: vec!["text/plain".to_string()],
+                            },
                         },
                     ],
-                    boot_time: "2024-11-12T16:21:17Z".to_string(),
+                    system_info: SystemInfo {
+                        boot_time: "2024-11-12T16:21:17Z".to_string(),
+                    },
                 },
             },
         };
-        let json = serde_json::to_string(&request).unwrap(); //#[allow_ci]
+        let json = serde_json::to_string_pretty(&request).unwrap(); //#[allow_ci]
         assert_eq!(
             json,
-            r#"{"data":{"type":"attestation","attributes":{"evidence_supported":[{"evidence_class":"full_log","evidence_type":"mb_log","version":"2.1"},{"evidence_class":"partial_log","evidence_type":"ima_entries"}],"boot_time":"2024-11-12T16:21:17Z"}}}"#
+            r#"{
+  "data": {
+    "type": "attestation",
+    "attributes": {
+      "evidence_supported": [
+        {
+          "evidence_class": "log",
+          "evidence_type": "uefi_log",
+          "capabilities": {
+            "evidence_version": "2.1",
+            "entry_count": 20,
+            "supports_partial_access": false,
+            "appendable": false,
+            "formats": [
+              "application/octet-stream"
+            ]
+          }
+        },
+        {
+          "evidence_class": "log",
+          "evidence_type": "ima_log",
+          "capabilities": {
+            "entry_count": 20,
+            "supports_partial_access": true,
+            "appendable": false,
+            "formats": [
+              "text/plain"
+            ]
+          }
+        }
+      ],
+      "system_info": {
+        "boot_time": "2024-11-12T16:21:17Z"
+      }
+    }
+  }
+}"#
         );
         let request = AttestationRequest {
             data: RequestData {
@@ -221,36 +342,126 @@ mod tests {
                     evidence_supported: vec![
                         EvidenceSupported::Certification {
                             evidence_type: "tpm_quote".to_string(),
-                            agent_capabilities: AgentCapabilities {
-                                spec_version: "2.0".to_string(),
+                            capabilities: Capabilities {
+                                component_version: "2.0".to_string(),
                                 hash_algorithms: vec!["sha3_512".to_string()],
-                                signing_schemes: vec!["rsassa".to_string()],
-                                attestation_keys: vec![
-                                    AttestationKey {
-                                        key_class: "private_key".to_string(),
-                                        key_identifier: "att_key_identifier".to_string(),
+                                signature_schemes: vec!["rsassa".to_string()],
+                                available_subjects: ShaValues {
+                                    sha1: vec![0x01, 0x02, 0x03],
+                                    sha256: vec![0x04, 0x05, 0x06],
+                                },
+                                certification_keys: vec![
+                                    CertificationKey {
+                                        key_size: 2048,
+                                        server_identifier: "ak".to_string(),
+                                        local_identifier: "att_local_identifier".to_string(),
                                         key_algorithm: "rsa".to_string(),
-                                        public_hash: "cd293be6cea034bd45a0352775a219ef5dc7825ce55d1f7dae9762d80ce64411".to_string(),
+                                        public: "OTgtMjkzODQ1LTg5MjMtNDk1OGlrYXNkamZnO2Frc2pka2ZqYXM7a2RqZjtramJrY3hqejk4MS0zMjQ5MDhpLWpmZDth".to_string(),
                                     },
                                 ],
                             },
                         },
-                        EvidenceSupported::FullLog {
-                            evidence_type: "mb_log".to_string(),
-                            version: "2.1".to_string(),
+                        EvidenceSupported::EvidenceLog {
+                            evidence_type: "uefi_log".to_string(),
+                            capabilities: LogCapabilities {
+                                evidence_version: Some("2.1".to_string()),
+                                entry_count: 20,
+                                supports_partial_access: false,
+                                appendable: false,
+                                formats: vec!["application/octet-stream".to_string()],
+                            },
                         },
-                        EvidenceSupported::PartialLog {
-                            evidence_type: "ima_entries".to_string(),
+                        EvidenceSupported::EvidenceLog {
+                            evidence_type: "ima_log".to_string(),
+                            capabilities: LogCapabilities {
+                                evidence_version: None,
+                                entry_count: 20,
+                                supports_partial_access: true,
+                                appendable: true,
+                                formats: vec!["text/plain".to_string()],
+                            },
                         },
                     ],
-                    boot_time: "2025-02-26T:12:32:41".to_string(),
+                    system_info: SystemInfo {
+                        boot_time: "2025-02-26T:12:32:41".to_string(),
+                    },
                 },
             },
         };
-        let json = serde_json::to_string(&request).unwrap(); //#[allow_ci]
+        let json = serde_json::to_string_pretty(&request).unwrap(); //#[allow_ci]
         assert_eq!(
             json,
-            r#"{"data":{"type":"attestation","attributes":{"evidence_supported":[{"evidence_class":"certification","evidence_type":"tpm_quote","agent_capabilities":{"spec_version":"2.0","hash_algorithms":["sha3_512"],"signing_schemes":["rsassa"],"attestation_keys":[{"key_class":"private_key","key_identifier":"att_key_identifier","key_algorithm":"rsa","public_hash":"cd293be6cea034bd45a0352775a219ef5dc7825ce55d1f7dae9762d80ce64411"}]}},{"evidence_class":"full_log","evidence_type":"mb_log","version":"2.1"},{"evidence_class":"partial_log","evidence_type":"ima_entries"}],"boot_time":"2025-02-26T:12:32:41"}}}"#
+            r#"{
+  "data": {
+    "type": "attestation",
+    "attributes": {
+      "evidence_supported": [
+        {
+          "evidence_class": "certification",
+          "evidence_type": "tpm_quote",
+          "capabilities": {
+            "component_version": "2.0",
+            "hash_algorithms": [
+              "sha3_512"
+            ],
+            "signature_schemes": [
+              "rsassa"
+            ],
+            "available_subjects": {
+              "sha1": [
+                1,
+                2,
+                3
+              ],
+              "sha256": [
+                4,
+                5,
+                6
+              ]
+            },
+            "certification_keys": [
+              {
+                "key_algorithm": "rsa",
+                "key_size": 2048,
+                "server_identifier": "ak",
+                "local_identifier": "att_local_identifier",
+                "public": "OTgtMjkzODQ1LTg5MjMtNDk1OGlrYXNkamZnO2Frc2pka2ZqYXM7a2RqZjtramJrY3hqejk4MS0zMjQ5MDhpLWpmZDth"
+              }
+            ]
+          }
+        },
+        {
+          "evidence_class": "log",
+          "evidence_type": "uefi_log",
+          "capabilities": {
+            "evidence_version": "2.1",
+            "entry_count": 20,
+            "supports_partial_access": false,
+            "appendable": false,
+            "formats": [
+              "application/octet-stream"
+            ]
+          }
+        },
+        {
+          "evidence_class": "log",
+          "evidence_type": "ima_log",
+          "capabilities": {
+            "entry_count": 20,
+            "supports_partial_access": true,
+            "appendable": true,
+            "formats": [
+              "text/plain"
+            ]
+          }
+        }
+      ],
+      "system_info": {
+        "boot_time": "2025-02-26T:12:32:41"
+      }
+    }
+  }
+}"#
         );
     }
 
@@ -264,18 +475,31 @@ mod tests {
                 "attributes": {
                     "evidence_supported":[{"evidence_class":"certification",
                                             "evidence_type":"tpm_quote",
-                                            "agent_capabilities":{"spec_version":"2.0",
+                                            "capabilities":{"component_version":"2.0",
                                             "hash_algorithms":["sha3_512"],
-                                            "signing_schemes":["rsassa"],
-                                            "attestation_keys":[{"key_class":"private_key","key_identifier":"att_key_identifier",
-                                                                "key_algorithm":"rsa",
-                                                                "public_hash":"cd293be6cea034bd45a0352775a219ef5dc7825ce55d1f7dae9762d80ce64411"}]}},
-                                          {"evidence_class":"full_log",
-                                           "evidence_type":"mb_log",
-                                           "version":"2.1"},
-                                          {"evidence_class": "partial_log",
-                                           "evidence_type": "ima_entries"}],
-                    "boot_time":"2024-11-12T16:21:17Z"
+                                            "signature_schemes":["rsassa"],
+                                            "available_subjects":{"sha1":[1,2,3],
+                                                                 "sha256":[4,5,6]},
+                                            "certification_keys":[{"key_algorithm":"rsa",
+                                                                   "key_size":2048,
+                                                                    "local_identifier":"att_local_identifier",
+                                                                   "server_identifier":"ak",
+                                                                   "public":"OTgtMjkzODQ1LTg5MjMtNDk1OGlrYXNkamZnO2Frc2pka2ZqYXM7a2RqZjtramJrY3hqejk4MS0zMjQ5MDhpLWpmZDth"}]}},
+                                          {"evidence_class":"log",
+                                           "evidence_type":"uefi_log",
+                                           "capabilities":{"evidence_version":"2.1",
+                                                           "entry_count":20,
+                                                           "supports_partial_access":false,
+                                                           "appendable":false,
+                                                           "formats":["application/octet-stream"]}},
+                                          {"evidence_class": "log",
+                                           "evidence_type": "ima_log",
+                                           "capabilities": {"entry_count": 20,
+                                                            "supports_partial_access": true,
+                                                            "appendable": true,
+                                                            "formats": ["text/plain"]}
+                                           }],
+                    "system_info":{"boot_time":"2024-11-12T16:21:17Z"}
                 }
             }
         }"#;
@@ -289,23 +513,32 @@ mod tests {
         match evidence_supported {
             EvidenceSupported::Certification {
                 evidence_type,
-                agent_capabilities,
+                capabilities,
             } => {
                 assert_eq!(evidence_type, "tpm_quote");
-                assert_eq!(agent_capabilities.spec_version, "2.0");
-                assert_eq!(agent_capabilities.hash_algorithms[0], "sha3_512");
-                assert_eq!(agent_capabilities.signing_schemes[0], "rsassa");
-                let some_attestation_keys =
-                    agent_capabilities.attestation_keys.first();
-                assert!(some_attestation_keys.is_some());
-                let attestation_key = some_attestation_keys.unwrap(); //#[allow_ci]
-                assert_eq!(attestation_key.key_class, "private_key");
-                assert_eq!(
-                    attestation_key.key_identifier,
-                    "att_key_identifier"
+                assert_eq!(capabilities.component_version, "2.0");
+                assert_eq!(capabilities.hash_algorithms[0], "sha3_512");
+                assert_eq!(capabilities.signature_schemes[0], "rsassa");
+                assert!(
+                    capabilities.available_subjects.sha1
+                        == vec![0x01, 0x02, 0x03]
                 );
-                assert_eq!(attestation_key.key_algorithm, "rsa");
-                assert_eq!(attestation_key.public_hash, "cd293be6cea034bd45a0352775a219ef5dc7825ce55d1f7dae9762d80ce64411");
+                assert!(
+                    capabilities.available_subjects.sha256
+                        == vec![0x04, 0x05, 0x06]
+                );
+                let some_certification_keys =
+                    capabilities.certification_keys.first();
+                assert!(some_certification_keys.is_some());
+                let certification_key = some_certification_keys.unwrap(); //#[allow_ci]
+                assert_eq!(
+                    certification_key.local_identifier,
+                    "att_local_identifier"
+                );
+                assert_eq!(certification_key.key_algorithm, "rsa");
+                assert_eq!(certification_key.key_size, 2048);
+                assert_eq!(certification_key.server_identifier, "ak");
+                assert_eq!(certification_key.public, "OTgtMjkzODQ1LTg5MjMtNDk1OGlrYXNkamZnO2Frc2pka2ZqYXM7a2RqZjtramJrY3hqejk4MS0zMjQ5MDhpLWpmZDth");
             }
             _ => panic!("Expected Certification"), //#[allow_ci]
         }
@@ -314,26 +547,48 @@ mod tests {
         assert!(some_evidence_supported.is_some());
         let evidence_supported = some_evidence_supported.unwrap(); //#[allow_ci]
         match evidence_supported {
-            EvidenceSupported::FullLog {
+            EvidenceSupported::EvidenceLog {
                 evidence_type,
-                version,
+                capabilities,
             } => {
-                assert_eq!(evidence_type, "mb_log");
-                assert_eq!(version, "2.1");
+                assert_eq!(evidence_type, "uefi_log");
+                assert!(capabilities.evidence_version.is_some());
+                assert_eq!(
+                    capabilities.evidence_version.clone().unwrap(), //#[allow_ci]
+                    "2.1"
+                );
+                assert_eq!(capabilities.entry_count, 20);
+                assert!(!capabilities.supports_partial_access);
+                assert!(!capabilities.appendable);
+                assert_eq!(
+                    capabilities.formats[0],
+                    "application/octet-stream"
+                );
             }
-            _ => panic!("Expected FullLog"), //#[allow_ci]
+            _ => panic!("Expected Log"), //#[allow_ci]
         }
         let some_evidence_supported =
             attestation_data.evidence_supported.get(2);
         assert!(some_evidence_supported.is_some());
         let evidence_supported = some_evidence_supported.unwrap(); //#[allow_ci]
         match evidence_supported {
-            EvidenceSupported::PartialLog { evidence_type } => {
-                assert_eq!(evidence_type, "ima_entries");
+            EvidenceSupported::EvidenceLog {
+                evidence_type,
+                capabilities,
+            } => {
+                assert_eq!(evidence_type, "ima_log");
+                assert!(capabilities.evidence_version.is_none());
+                assert_eq!(capabilities.entry_count, 20);
+                assert!(capabilities.supports_partial_access);
+                assert!(capabilities.appendable);
+                assert_eq!(capabilities.formats[0], "text/plain");
             }
-            _ => panic!("Expected PartialLog"), //#[allow_ci]
+            _ => panic!("Expected Log"), //#[allow_ci]
         }
-        assert_eq!(request.data.attributes.boot_time, "2024-11-12T16:21:17Z");
+        assert_eq!(
+            request.data.attributes.system_info.boot_time,
+            "2024-11-12T16:21:17Z"
+        );
     }
 
     #[test]
@@ -345,7 +600,7 @@ mod tests {
                 "type":"attestation",
                 "attributes": {
                     "evidence_supported":[],
-                    "boot_time":"2024-11-12T16:21:17Z"
+                    "system_info":{"boot_time":"2024-11-12T16:21:17Z"}
                 }
             }
         }"#;
@@ -355,7 +610,10 @@ mod tests {
         let some_evidence_supported =
             attestation_data.evidence_supported.first();
         assert!(some_evidence_supported.is_none());
-        assert_eq!(request.data.attributes.boot_time, "2024-11-12T16:21:17Z");
+        assert_eq!(
+            request.data.attributes.system_info.boot_time,
+            "2024-11-12T16:21:17Z"
+        );
     }
 
     #[test]
@@ -367,7 +625,7 @@ mod tests {
                 "type":"attestation",
                 "attributes": {
                     "unexpected_evidence_supported":[],
-                    "boot_time":"2024-11-12T16:21:17Z"
+                    "system_info"{"boot_time":"2024-11-12T16:21:17Z"}
                 }
             }
         }"#;
@@ -387,80 +645,180 @@ mod tests {
             data: ResponseData {
                 type_: "attestation".to_string(),
                 attributes: ResponseAttributes {
+                    stage : "awaiting_evidence".to_string(),
                     evidence_requested: vec![
                         EvidenceRequested {
                             evidence_class: "certification".to_string(),
                             evidence_type: "tpm_quote".to_string(),
-                            chosen_parameters: Some(ChosenParameters::Parameters(TpmParameters {
-                                nonce: Some("nonce".to_string()),
-                                pcr_selection: Some(vec![0]),
-                                hash_algorithm: Some("sha384".to_string()),
-                                signing_scheme: Some("rsassa".to_string()),
-                                attestation_key: Some(AttestationKey {
-                                    key_class: "private_key".to_string(),
-                                    key_identifier: "att_key_identifier".to_string(),
-                                    key_algorithm: "rsa".to_string(),
-                                    public_hash: "cd293be6cea034bd45a0352775a219ef5dc7825ce55d1f7dae9762d80ce64411".to_string(),
+                            chosen_parameters: Some(ChosenParameters::Parameters(Box::new(CertificationParameters {
+                                challenge: Some("challenge".to_string()),
+                                selected_subjects: Some(ShaValues {
+                                    sha1: vec![0x01, 0x02, 0x03],
+                                    sha256: vec![0x04, 0x05, 0x06],
                                 }),
-                            })),
-                            version: None,
+                                hash_algorithm: Some("sha384".to_string()),
+                                signature_scheme: Some("rsassa".to_string()),
+                                certification_key: Some(CertificationKey {
+                                    key_size: 2048,
+                                    server_identifier: "ak".to_string(),
+                                    local_identifier: "att_local_identifier".to_string(),
+                                    key_algorithm: "rsa".to_string(),
+                                    public: "OTgtMjkzODQ1LTg5MjMtNDk1OGlrYXNkamZnO2Frc2pka2ZqYXM7a2RqZjtramJrY3hqejk4MS0zMjQ5MDhpLWpmZDth".to_string(),
+                                }),
+                            }))),
                         },
                     ],
-                    boot_time: "2024-11-12T16:21:17Z".to_string(),
                 },
             },
         };
-        let json = serde_json::to_string(&response).unwrap(); //#[allow_ci]
+        let json = serde_json::to_string_pretty(&response).unwrap(); //#[allow_ci]
         assert_eq!(
             json,
-            r#"{"data":{"type":"attestation","attributes":{"evidence_requested":[{"evidence_class":"certification","evidence_type":"tpm_quote","chosen_parameters":{"attestation_key":{"key_algorithm":"rsa","key_class":"private_key","key_identifier":"att_key_identifier","public_hash":"cd293be6cea034bd45a0352775a219ef5dc7825ce55d1f7dae9762d80ce64411"},"hash_algorithm":"sha384","nonce":"nonce","pcr_selection":[0],"signing_scheme":"rsassa"}}],"boot_time":"2024-11-12T16:21:17Z"}}}"#
+            r#"{
+  "data": {
+    "type": "attestation",
+    "attributes": {
+      "stage": "awaiting_evidence",
+      "evidence_requested": [
+        {
+          "evidence_class": "certification",
+          "evidence_type": "tpm_quote",
+          "chosen_parameters": {
+            "certification_key": {
+              "key_algorithm": "rsa",
+              "key_size": 2048,
+              "local_identifier": "att_local_identifier",
+              "public": "OTgtMjkzODQ1LTg5MjMtNDk1OGlrYXNkamZnO2Frc2pka2ZqYXM7a2RqZjtramJrY3hqejk4MS0zMjQ5MDhpLWpmZDth",
+              "server_identifier": "ak"
+            },
+            "challenge": "challenge",
+            "hash_algorithm": "sha384",
+            "selected_subjects": {
+              "sha1": [
+                1,
+                2,
+                3
+              ],
+              "sha256": [
+                4,
+                5,
+                6
+              ]
+            },
+            "signature_scheme": "rsassa"
+          }
+        }
+      ]
+    }
+  }
+}"#
         );
 
         let response = AttestationResponse {
             data: ResponseData {
                 type_: "attestation".to_string(),
                 attributes: ResponseAttributes {
+                    stage : "awaiting_evidence".to_string(),
                     evidence_requested: vec![
                         EvidenceRequested {
                             evidence_class: "certification".to_string(),
                             evidence_type: "tpm_quote".to_string(),
-                            chosen_parameters: Some(ChosenParameters::Parameters(TpmParameters {
-                                nonce: Some("nonce".to_string()),
-                                pcr_selection: Some(vec![0]),
-                                hash_algorithm: Some("sha384".to_string()),
-                                signing_scheme: Some("rsassa".to_string()),
-                                attestation_key: Some(AttestationKey {
-                                    key_class: "private_key".to_string(),
-                                    key_identifier: "att_key_identifier".to_string(),
-                                    key_algorithm: "rsa".to_string(),
-                                    public_hash: "cd293be6cea034bd45a0352775a219ef5dc7825ce55d1f7dae9762d80ce64411".to_string(),
+                            chosen_parameters: Some(ChosenParameters::Parameters(Box::new(CertificationParameters {
+                                challenge: Some("challenge".to_string()),
+                                selected_subjects: Some(ShaValues {
+                                    sha1: vec![0x01, 0x02, 0x03],
+                                    sha256: vec![0x04, 0x05, 0x06],
                                 }),
+                                hash_algorithm: Some("sha384".to_string()),
+                                signature_scheme: Some("rsassa".to_string()),
+                                certification_key: Some(CertificationKey {
+                                    key_size: 2048,
+                                    server_identifier: "ak".to_string(),
+                                    local_identifier: "att_local_identifier".to_string(),
+                                    key_algorithm: "rsa".to_string(),
+                                    public: "OTgtMjkzODQ1LTg5MjMtNDk1OGlrYXNkamZnO2Frc2pka2ZqYXM7a2RqZjtramJrY3hqejk4MS0zMjQ5MDhpLWpmZDth".to_string(),
+                                }),
+                            }))),
+                        },
+                        EvidenceRequested {
+                            evidence_class: "log".to_string(),
+                            evidence_type: "uefi_log".to_string(),
+                            chosen_parameters: Some(ChosenParameters::Offset(LogParameters {
+                                format: "application/octet-stream".to_string(),
+                                starting_offset: None,
+                                entry_count: None,
                             })),
-                            version: None,
                         },
                         EvidenceRequested {
-                            evidence_class: "full_log".to_string(),
-                            evidence_type: "mb_log".to_string(),
-                            chosen_parameters: None,
-                            version: Some("2.1".to_string()),
-                        },
-                        EvidenceRequested {
-                            evidence_class: "partial_log".to_string(),
-                            evidence_type: "ima_entries".to_string(),
-                            chosen_parameters: Some(ChosenParameters::Offset(StartingOffset {
+                            evidence_class: "log".to_string(),
+                            evidence_type: "ima_log".to_string(),
+                            chosen_parameters: Some(ChosenParameters::Offset(LogParameters {
+                                entry_count: Some(100),
+                                format: "text/plain".to_string(),
                                 starting_offset: Some(25),
                             })),
-                            version: None,
                         },
                     ],
-                    boot_time: "2024-11-12T16:21:17Z".to_string(),
                 },
             },
         };
-        let json = serde_json::to_string(&response).unwrap(); //#[allow_ci]
+        let json = serde_json::to_string_pretty(&response).unwrap(); //#[allow_ci]
         assert_eq!(
             json,
-            r#"{"data":{"type":"attestation","attributes":{"evidence_requested":[{"evidence_class":"certification","evidence_type":"tpm_quote","chosen_parameters":{"attestation_key":{"key_algorithm":"rsa","key_class":"private_key","key_identifier":"att_key_identifier","public_hash":"cd293be6cea034bd45a0352775a219ef5dc7825ce55d1f7dae9762d80ce64411"},"hash_algorithm":"sha384","nonce":"nonce","pcr_selection":[0],"signing_scheme":"rsassa"}},{"evidence_class":"full_log","evidence_type":"mb_log","version":"2.1"},{"evidence_class":"partial_log","evidence_type":"ima_entries","chosen_parameters":{"starting_offset":25}}],"boot_time":"2024-11-12T16:21:17Z"}}}"#
+            r#"{
+  "data": {
+    "type": "attestation",
+    "attributes": {
+      "stage": "awaiting_evidence",
+      "evidence_requested": [
+        {
+          "evidence_class": "certification",
+          "evidence_type": "tpm_quote",
+          "chosen_parameters": {
+            "certification_key": {
+              "key_algorithm": "rsa",
+              "key_size": 2048,
+              "local_identifier": "att_local_identifier",
+              "public": "OTgtMjkzODQ1LTg5MjMtNDk1OGlrYXNkamZnO2Frc2pka2ZqYXM7a2RqZjtramJrY3hqejk4MS0zMjQ5MDhpLWpmZDth",
+              "server_identifier": "ak"
+            },
+            "challenge": "challenge",
+            "hash_algorithm": "sha384",
+            "selected_subjects": {
+              "sha1": [
+                1,
+                2,
+                3
+              ],
+              "sha256": [
+                4,
+                5,
+                6
+              ]
+            },
+            "signature_scheme": "rsassa"
+          }
+        },
+        {
+          "evidence_class": "log",
+          "evidence_type": "uefi_log",
+          "chosen_parameters": {
+            "format": "application/octet-stream"
+          }
+        },
+        {
+          "evidence_class": "log",
+          "evidence_type": "ima_log",
+          "chosen_parameters": {
+            "entry_count": 100,
+            "format": "text/plain",
+            "starting_offset": 25
+          }
+        }
+      ]
+    }
+  }
+}"#
         );
     }
 
@@ -471,30 +829,50 @@ mod tests {
         {
             "data": {
                 "type":"attestation",
+                "stage": "awaiting_evidence",
                 "attributes": {
+                    "stage": "awaiting_evidence",
                     "evidence_requested":[{"evidence_class":"certification",
                                            "evidence_type":"tpm_quote",
-                                           "chosen_parameters":{"nonce":"nonce",
-                                                                "pcr_selection":[0],
-                                                                "hash_algorithm":"sha384",
-                                                                "signing_scheme":"rsassa",
-                                                                "attestation_key":{"key_class":"private_key",
-                                                                                    "key_identifier":"att_key_identifier",
-                                                                                    "key_algorithm":"rsa",
-                                                                                    "public_hash":"cd293be6cea034bd45a0352775a219ef5dc7825ce55d1f7dae9762d80ce64411"}}},
-                                          {"evidence_class": "full_log",
-                                           "evidence_type": "mb_log",
-                                           "version": "2.1"},
-                                          {"evidence_class": "partial_log",
-                                           "evidence_type": "ima_entries",
-                                           "chosen_parameters": {"starting_offset": 25}}],
-                     "boot_time":"2024-11-12T16:21:17Z"
+                                           "chosen_parameters": {
+                                                "challenge": "challenge",
+                                                "hash_algorithm": "sha384",
+                                                "signature_scheme": "rsassa",
+                                                "selected_subjects": {
+                                                    "sha1": [1, 2, 3],
+                                                    "sha256": [4, 5, 6]
+                                                },
+                                                "certification_key": {
+                                                    "key_algorithm": "rsa",
+                                                    "key_size": 2048,
+                                                    "server_identifier": "ak",
+                                                    "local_identifier": "local_id",
+                                                    "public": "OTgtMjkzODQ1LTg5MjMtNDk1OGlrYXNkamZnO2Frc2pka2ZqYXM7a2RqZjtramJrY3hqejk4MS0zMjQ5MDhpLWpmZDth"
+                                                }
+                                           }
+                                          },
+                                          {"evidence_class":"log",
+                                           "evidence_type":"uefi_log",
+                                           "chosen_parameters": {
+                                                "format": "application/octet-stream"
+                                           }
+                                          },
+                                          {"evidence_class":"log",
+                                           "evidence_type":"ima_log",
+                                           "chosen_parameters": {
+                                                "starting_offset": 25,
+                                                "entry_count": 100,
+                                                "format": "text/plain"
+                                           }
+                                          }],
+                    "system_info":{"boot_time":"2024-11-12T16:21:17Z"}
                 }
             }
         }"#;
         let response: AttestationResponse =
             serde_json::from_str(json).unwrap(); //#[allow_ci]
         assert_eq!(response.data.type_, "attestation");
+        assert_eq!(response.data.attributes.stage, "awaiting_evidence");
         assert_eq!(
             response.data.attributes.evidence_requested[0].evidence_class,
             "certification"
@@ -511,44 +889,46 @@ mod tests {
         let chosen_parameters = some_chosen_parameters.unwrap(); //#[allow_ci]
         match chosen_parameters {
             ChosenParameters::Parameters(params) => {
-                assert_eq!(params.nonce, Some("nonce".to_string()));
-                assert_eq!(params.pcr_selection.as_ref().unwrap()[0], 0); //#[allow_ci]
-                assert_eq!(params.hash_algorithm, Some("sha384".to_string()));
-                assert_eq!(params.signing_scheme, Some("rsassa".to_string()));
-                let attestation_key =
-                    params.attestation_key.as_ref().unwrap(); //#[allow_ci]
-                assert_eq!(attestation_key.key_class, "private_key");
+                assert_eq!(params.challenge, Some("challenge".to_string()));
                 assert_eq!(
-                    attestation_key.key_identifier,
-                    "att_key_identifier"
+                    params.selected_subjects.clone().unwrap().sha1, //#[allow_ci]
+                    vec![0x01, 0x02, 0x03]
                 );
-                assert_eq!(attestation_key.key_algorithm, "rsa");
-                assert_eq!(attestation_key
-                        .public_hash,
-                    "cd293be6cea034bd45a0352775a219ef5dc7825ce55d1f7dae9762d80ce64411"
+                assert_eq!(
+                    params.selected_subjects.clone().unwrap().sha256, //#[allow_ci]
+                    vec![0x04, 0x05, 0x06]
+                );
+                assert_eq!(params.hash_algorithm, Some("sha384".to_string()));
+                assert_eq!(
+                    params.signature_scheme,
+                    Some("rsassa".to_string())
+                );
+                let certification_key =
+                    params.certification_key.as_ref().unwrap(); //#[allow_ci]
+                assert_eq!(certification_key.local_identifier, "local_id");
+                assert_eq!(certification_key.key_algorithm, "rsa");
+                assert_eq!(certification_key
+                        .public,
+                    "OTgtMjkzODQ1LTg5MjMtNDk1OGlrYXNkamZnO2Frc2pka2ZqYXM7a2RqZjtramJrY3hqejk4MS0zMjQ5MDhpLWpmZDth"
                 );
             }
             _ => panic!("Expected Parameters"), //#[allow_ci]
         }
         assert_eq!(
             response.data.attributes.evidence_requested[1].evidence_class,
-            "full_log"
+            "log"
         );
         assert_eq!(
             response.data.attributes.evidence_requested[1].evidence_type,
-            "mb_log"
-        );
-        assert_eq!(
-            response.data.attributes.evidence_requested[1].version,
-            Some("2.1".to_string())
+            "uefi_log"
         );
         assert_eq!(
             response.data.attributes.evidence_requested[2].evidence_class,
-            "partial_log"
+            "log"
         );
         assert_eq!(
             response.data.attributes.evidence_requested[2].evidence_type,
-            "ima_entries"
+            "ima_log"
         );
         let some_chosen_parameters =
             response.data.attributes.evidence_requested[2]
@@ -564,10 +944,6 @@ mod tests {
                 panic!("Unexpected Parameters"); //#[allow_ci]
             }
         }
-        assert_eq!(
-            response.data.attributes.boot_time,
-            "2024-11-12T16:21:17Z"
-        );
     }
 
     #[test]
@@ -578,16 +954,18 @@ mod tests {
             "data": {
                 "type":"attestation",
                 "attributes": {
+                    "stage": "awaiting_evidence",
                     "evidence_requested":[{"evidence_class":"certification",
                                            "evidence_type":"tpm_quote",
-                                           "unexpected_chosen_parameters":{"nonce":"nonce"}}],
-                     "boot_time":"2024-11-12T16:21:17Z"
+                                           "unexpected_chosen_parameters":{"challenge":"challenge"}}],
+                    "system_info":{"boot_time":"2024-11-12T16:21:17Z"}
                 }
             }
         }"#;
         let response: AttestationResponse =
             serde_json::from_str(json).unwrap(); //#[allow_ci]
         assert_eq!(response.data.type_, "attestation");
+        assert_eq!(response.data.attributes.stage, "awaiting_evidence");
         assert_eq!(
             response.data.attributes.evidence_requested[0].evidence_class,
             "certification"
@@ -607,10 +985,11 @@ mod tests {
             "data": {
                 "type":"attestation",
                 "attributes": {
+                    "stage": "awaiting_evidence",
                     "evidence_requested":[{"evidence_class":"certification",
                                            "evidence_type":"tpm_quote",
                                            "chosen_parameters":{"unexpected":"unexpected"}}],
-                    "boot_time":"2025-02-26T13:01:17Z"
+                    "system_info":{"boot_time":"2024-11-12T16:21:17Z"}
                 }
             }
         }"#;
