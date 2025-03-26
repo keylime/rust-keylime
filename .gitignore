@@ -5,3 +5,5 @@ tpmdata.json
 tests/.tmp*
 tests/actions/__pycache__
 tests/unzipped/__pycache__
+**/tarpaulin-report.*
+**/__pycache__
