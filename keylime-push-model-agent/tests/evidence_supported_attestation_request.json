@@ -1,0 +1,72 @@
+{
+  "data": {
+    "type": "attestation",
+    "attributes": {
+      "evidence_supported": [
+        {
+          "evidence_class": "certification",
+          "evidence_type": "tpm_quote",
+          "capabilities": {
+            "component_version": "2.0",
+            "hash_algorithms": [
+              "sha3_512"
+            ],
+            "signature_schemes": [
+              "rsassa"
+            ],
+            "available_subjects": {
+              "sha1": [
+                1,
+                2,
+                3
+              ],
+              "sha256": [
+                4,
+                5,
+                6
+              ]
+            },
+            "certification_keys": [
+              {
+                "key_class": "asymmetric",
+                "local_identifier": "att_local_identifier",
+                "key_algorithm": "rsa",
+                "key_size": 2048,
+                "server_identifier": "ak",
+                "public": "VGhpcyBpcyBhIHRlc3QgZm9yIGEgYmFzZTY0IGVuY29kZWQgZm9ybWF0IHN0cmluZw=="
+              }
+            ]
+          }
+        },
+        {
+          "evidence_class": "log",
+          "evidence_type": "uefi_log",
+          "capabilities": {
+            "evidence_version": "2.1",
+            "entry_count": 20,
+            "supports_partial_access": false,
+            "appendable": false,
+            "formats": [
+              "application/octet-stream"
+            ]
+          }
+        },
+        {
+          "evidence_class": "log",
+          "evidence_type": "ima_log",
+          "capabilities": {
+            "entry_count": 20,
+            "supports_partial_access": true,
+            "appendable": true,
+            "formats": [
+              "text/plain"
+            ]
+          }
+        }
+      ],
+      "system_info": {
+        "boot_time": "2025-04-02T12:12:51Z"
+      }
+    }
+  }
+}
