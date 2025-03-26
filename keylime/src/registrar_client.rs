@@ -75,7 +75,7 @@ pub enum RegistrarClientBuilderError {
 pub struct RegistrarClientBuilder<'a> {
     ak_pub: Option<&'a [u8]>,
     ek_pub: Option<&'a [u8]>,
-    ek_cert: Option<Vec<u8>>,
+    ek_cert: Option<String>,
     enabled_api_versions: Option<Vec<&'a str>>,
     iak_attest: Option<Vec<u8>>,
     iak_cert: Option<X509>,
@@ -135,8 +135,8 @@ impl<'a> RegistrarClientBuilder<'a> {
     ///
     /// # Arguments:
     ///
-    /// * ek_cert (Vec<u8>): A vector containing the EK certificate in DER format
-    pub fn ek_cert(mut self, ek_cert: Vec<u8>) -> Self {
+    /// * ek_cert (String): A string containing the EK certificate in PEM format
+    pub fn ek_cert(mut self, ek_cert: String) -> Self {
         self.ek_cert = Some(ek_cert);
         self
     }
@@ -445,7 +445,7 @@ impl<'a> RegistrarClientBuilder<'a> {
             ak_pub,
             api_version: registrar_api_version,
             ek_pub,
-            ek_cert: self.ek_cert.take(),
+            ek_cert: self.ek_cert,
             iak_attest: self.iak_attest.take(),
             iak_cert,
             iak_sign: self.iak_sign.take(),
@@ -489,7 +489,7 @@ pub enum RegistrarClientError {
 pub struct RegistrarClient<'a> {
     ak_pub: &'a [u8],
     api_version: String,
-    ek_cert: Option<Vec<u8>>,
+    ek_cert: Option<String>,
     ek_pub: &'a [u8],
     enabled_api_versions: Vec<&'a str>,
     iak_attest: Option<Vec<u8>>,
@@ -536,8 +536,8 @@ struct Register<'a> {
         skip_serializing_if = "is_empty"
     )]
     ek_tpm: &'a [u8],
-    #[serde(serialize_with = "serialize_maybe_base64")]
-    ekcert: Option<Vec<u8>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    ekcert: Option<String>,
     #[serde(
         serialize_with = "serialize_maybe_base64",
         skip_serializing_if = "Option::is_none"
@@ -783,6 +783,7 @@ mod tests {
         let port = uri[1].parse().unwrap(); //#[allow_ci]
 
         let mock_data = [0u8; 1];
+        let mock_chain = String::from("");
         let priv_key = crypto::testing::rsa_generate(2048).unwrap(); //#[allow_ci]
         let cert = crypto::x509::CertificateBuilder::new()
             .private_key(&priv_key)
@@ -794,7 +795,7 @@ mod tests {
         let response = RegistrarClientBuilder::new()
             .ak_pub(&mock_data)
             .ek_pub(&mock_data)
-            .ek_cert(mock_data.to_vec())
+            .ek_cert(mock_chain)
             .enabled_api_versions(vec!["1.2"])
             .iak_attest(vec![0])
             .iak_cert(cert.clone())
@@ -841,6 +842,7 @@ mod tests {
         let port = uri[1].parse().unwrap(); //#[allow_ci]
 
         let mock_data = [0u8; 1];
+        let mock_chain = String::from("");
         let priv_key = crypto::testing::rsa_generate(2048).unwrap(); //#[allow_ci]
         let cert = crypto::x509::CertificateBuilder::new()
             .private_key(&priv_key)
@@ -852,7 +854,7 @@ mod tests {
         let builder = RegistrarClientBuilder::new()
             .ak_pub(&mock_data)
             .ek_pub(&mock_data)
-            .ek_cert(mock_data.to_vec())
+            .ek_cert(mock_chain)
             .enabled_api_versions(vec!["1.2", "3.4"])
             .mtls_cert(cert)
             .ip("1.2.3.4".to_string())
@@ -906,6 +908,7 @@ mod tests {
         let port = uri[1].parse().unwrap(); //#[allow_ci]
 
         let mock_data = [0u8; 1];
+        let mock_chain = String::from("");
         let priv_key = crypto::testing::rsa_generate(2048).unwrap(); //#[allow_ci]
         let cert = crypto::x509::CertificateBuilder::new()
             .private_key(&priv_key)
@@ -917,7 +920,7 @@ mod tests {
         let builder = RegistrarClientBuilder::new()
             .ak_pub(&mock_data)
             .ek_pub(&mock_data)
-            .ek_cert(mock_data.to_vec())
+            .ek_cert(mock_chain)
             .enabled_api_versions(vec!["1.2", "3.4"])
             .mtls_cert(cert)
             .ip("1.2.3.4".to_string())
@@ -1078,6 +1081,7 @@ mod tests {
         let port = uri[1].parse().unwrap(); //#[allow_ci]
 
         let mock_data = [0u8; 1];
+        let mock_chain = String::from("");
         let priv_key = crypto::testing::rsa_generate(2048).unwrap(); //#[allow_ci]
         let cert = crypto::x509::CertificateBuilder::new()
             .private_key(&priv_key)
@@ -1090,7 +1094,7 @@ mod tests {
         let response = RegistrarClientBuilder::new()
             .ak_pub(&mock_data)
             .ek_pub(&mock_data)
-            .ek_cert(mock_data.to_vec())
+            .ek_cert(mock_chain)
             .enabled_api_versions(vec!["1.2"])
             .mtls_cert(cert)
             .ip("1.2.3.4".to_string())
