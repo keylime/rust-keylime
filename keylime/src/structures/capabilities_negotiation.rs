@@ -70,6 +70,7 @@ pub struct ShaValues {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct CertificationKey {
     pub key_algorithm: String,
+    pub key_class: String,
     pub key_size: u32,
     pub server_identifier: String,
     pub local_identifier: String,
@@ -194,6 +195,7 @@ mod tests {
                                 },
                                 certification_keys: vec![
                                     CertificationKey {
+                                        key_class: "asymmetric".to_string(),
                                         local_identifier: "att_local_identifier".to_string(),
                                         key_algorithm: "rsa".to_string(),
                                         key_size: 2048,
@@ -244,6 +246,7 @@ mod tests {
             "certification_keys": [
               {
                 "key_algorithm": "rsa",
+                "key_class": "asymmetric",
                 "key_size": 2048,
                 "server_identifier": "ak",
                 "local_identifier": "att_local_identifier",
@@ -352,6 +355,7 @@ mod tests {
                                 },
                                 certification_keys: vec![
                                     CertificationKey {
+                                        key_class: "asymmetric".to_string(),
                                         key_size: 2048,
                                         server_identifier: "ak".to_string(),
                                         local_identifier: "att_local_identifier".to_string(),
@@ -422,6 +426,7 @@ mod tests {
             "certification_keys": [
               {
                 "key_algorithm": "rsa",
+                "key_class": "asymmetric",
                 "key_size": 2048,
                 "server_identifier": "ak",
                 "local_identifier": "att_local_identifier",
@@ -480,9 +485,10 @@ mod tests {
                                             "signature_schemes":["rsassa"],
                                             "available_subjects":{"sha1":[1,2,3],
                                                                  "sha256":[4,5,6]},
-                                            "certification_keys":[{"key_algorithm":"rsa",
+                                            "certification_keys":[{"key_class":"asymmetric",
+                                                                   "local_identifier":"att_local_identifier",
+                                                                   "key_algorithm":"rsa",
                                                                    "key_size":2048,
-                                                                    "local_identifier":"att_local_identifier",
                                                                    "server_identifier":"ak",
                                                                    "public":"OTgtMjkzODQ1LTg5MjMtNDk1OGlrYXNkamZnO2Frc2pka2ZqYXM7a2RqZjtramJrY3hqejk4MS0zMjQ5MDhpLWpmZDth"}]}},
                                           {"evidence_class":"log",
@@ -531,6 +537,7 @@ mod tests {
                     capabilities.certification_keys.first();
                 assert!(some_certification_keys.is_some());
                 let certification_key = some_certification_keys.unwrap(); //#[allow_ci]
+                assert_eq!(certification_key.key_class, "asymmetric");
                 assert_eq!(
                     certification_key.local_identifier,
                     "att_local_identifier"
@@ -659,6 +666,7 @@ mod tests {
                                 hash_algorithm: Some("sha384".to_string()),
                                 signature_scheme: Some("rsassa".to_string()),
                                 certification_key: Some(CertificationKey {
+                                    key_class: "asymmetric".to_string(),
                                     key_size: 2048,
                                     server_identifier: "ak".to_string(),
                                     local_identifier: "att_local_identifier".to_string(),
@@ -686,6 +694,7 @@ mod tests {
           "chosen_parameters": {
             "certification_key": {
               "key_algorithm": "rsa",
+              "key_class": "asymmetric",
               "key_size": 2048,
               "local_identifier": "att_local_identifier",
               "public": "OTgtMjkzODQ1LTg5MjMtNDk1OGlrYXNkamZnO2Frc2pka2ZqYXM7a2RqZjtramJrY3hqejk4MS0zMjQ5MDhpLWpmZDth",
@@ -732,6 +741,7 @@ mod tests {
                                 hash_algorithm: Some("sha384".to_string()),
                                 signature_scheme: Some("rsassa".to_string()),
                                 certification_key: Some(CertificationKey {
+                                    key_class: "asymmetric".to_string(),
                                     key_size: 2048,
                                     server_identifier: "ak".to_string(),
                                     local_identifier: "att_local_identifier".to_string(),
@@ -777,6 +787,7 @@ mod tests {
           "chosen_parameters": {
             "certification_key": {
               "key_algorithm": "rsa",
+              "key_class": "asymmetric",
               "key_size": 2048,
               "local_identifier": "att_local_identifier",
               "public": "OTgtMjkzODQ1LTg5MjMtNDk1OGlrYXNkamZnO2Frc2pka2ZqYXM7a2RqZjtramJrY3hqejk4MS0zMjQ5MDhpLWpmZDth",
@@ -843,6 +854,7 @@ mod tests {
                                                     "sha256": [4, 5, 6]
                                                 },
                                                 "certification_key": {
+                                                    "key_class": "asymmetric",
                                                     "key_algorithm": "rsa",
                                                     "key_size": 2048,
                                                     "server_identifier": "ak",
@@ -905,6 +917,7 @@ mod tests {
                 );
                 let certification_key =
                     params.certification_key.as_ref().unwrap(); //#[allow_ci]
+                assert_eq!(certification_key.key_class, "asymmetric");
                 assert_eq!(certification_key.local_identifier, "local_id");
                 assert_eq!(certification_key.key_algorithm, "rsa");
                 assert_eq!(certification_key
