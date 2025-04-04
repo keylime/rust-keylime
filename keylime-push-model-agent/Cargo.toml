@@ -1,0 +1,40 @@
+[package]
+name = "keylime_push_model_agent"
+description = "Rust agent for Keylime (Push Model)"
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+version.workspace = true
+
+[dependencies]
+actix-web.workspace = true
+assert_cmd.workspace = true
+clap.workspace = true
+keylime.workspace = true
+predicates.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_derive.workspace = true
+serde_json.workspace = true
+static_assertions.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+actix-rt.workspace = true
+
+[features]
+# The features enabled by default
+default = []
+testing = []
+legacy-python-actions = []
+
+[package.metadata.deb]
+section = "net"
+assets = [
+  ["target/release/keylime_push_model_agent", "usr/bin/", "755"],
+  ["../README.md", "usr/share/doc/keylime-agent/README", "644"],
+  ["../keylime-agent.conf", "/etc/keylime/agent.conf", "640"],
+]
+maintainer-scripts = "../debian/"
+systemd-units = { unit-scripts = "../dist/systemd/system/", enable = true }
