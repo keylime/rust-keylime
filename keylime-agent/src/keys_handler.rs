@@ -1,17 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2021 Keylime Authors
 
-use crate::crypto;
 use crate::{
-    common::{
-        AuthTag, EncryptedData, JsonWrapper, KeySet, SymmKey,
-    },
+    common::{AuthTag, EncryptedData, JsonWrapper},
     config::KeylimeConfig,
     payloads::{Payload, PayloadMessage},
     Error, QuoteData, Result,
 };
 use actix_web::{http, web, HttpRequest, HttpResponse, Responder};
 use base64::{engine::general_purpose, Engine as _};
+use keylime::crypto::{
+    self,
+    symmkey::{KeySet, SymmKey},
+};
 use log::*;
 use serde::{Deserialize, Serialize};
 use serde_json::json;

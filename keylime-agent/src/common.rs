@@ -10,7 +10,7 @@ use keylime::algorithms::{
     EncryptionAlgorithm, HashAlgorithm, SignAlgorithm,
 };
 use keylime::{
-    crypto::{hash, tss_pubkey_to_pem, AES_128_KEY_LEN, AES_256_KEY_LEN},
+    crypto::{hash, tss_pubkey_to_pem},
     tpm,
 };
 use log::*;
@@ -79,55 +79,6 @@ where
             code: 200,
             status: String::from("Success"),
             results,
-        }
-    }
-}
-
-// a vector holding keys
-pub type KeySet = Vec<SymmKey>;
-
-// a key of len AES_128_KEY_LEN or AES_256_KEY_LEN
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct SymmKey {
-    bytes: Vec<u8>,
-}
-
-impl SymmKey {
-    pub(crate) fn xor(&self, other: &Self) -> Result<Self> {
-        let my_bytes = self.as_ref();
-        let other_bytes = other.as_ref();
-        if my_bytes.len() != other_bytes.len() {
-            return Err(Error::Other(
-                "cannot xor differing length slices".to_string(),
-            ));
-        }
-        let mut outbuf = vec![0u8; my_bytes.len()];
-        for (out, (x, y)) in
-            outbuf.iter_mut().zip(my_bytes.iter().zip(other_bytes))
-        {
-            *out = x ^ y;
-        }
-        Ok(Self { bytes: outbuf })
-    }
-}
-
-impl AsRef<[u8]> for SymmKey {
-    fn as_ref(&self) -> &[u8] {
-        self.bytes.as_slice()
-    }
-}
-
-impl TryFrom<&[u8]> for SymmKey {
-    type Error = String;
-
-    fn try_from(v: &[u8]) -> std::result::Result<Self, Self::Error> {
-        match v.len() {
-            AES_128_KEY_LEN | AES_256_KEY_LEN => {
-                Ok(SymmKey { bytes: v.to_vec() })
-            }
-            other => Err(format!(
-                "key length {other} does not correspond to valid GCM cipher",
-            )),
         }
     }
 }

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2021 Keylime Authors
 
+pub mod symmkey;
 pub mod x509;
 
 use base64::{engine::general_purpose, Engine as _};
