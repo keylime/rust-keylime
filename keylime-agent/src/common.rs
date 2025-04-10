@@ -33,11 +33,6 @@ use tss_esapi::{
     structures::PcrSlot, traits::UnMarshall, utils::TpmsContext,
 };
 
-/*
- * Constants and static variables
- */
-pub const AUTH_TAG_LEN: usize = 48;
-
 #[derive(Serialize, Deserialize, Debug)]
 pub(crate) struct APIVersion {
     major: u32,
@@ -79,32 +74,6 @@ where
             code: 200,
             status: String::from("Success"),
             results,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AuthTag {
-    bytes: Vec<u8>,
-}
-
-impl AsRef<[u8]> for AuthTag {
-    fn as_ref(&self) -> &[u8] {
-        self.bytes.as_slice()
-    }
-}
-
-impl TryFrom<&[u8]> for AuthTag {
-    type Error = String;
-
-    fn try_from(v: &[u8]) -> std::result::Result<Self, Self::Error> {
-        match v.len() {
-            AUTH_TAG_LEN => {
-                Ok(AuthTag { bytes: v.to_vec() })
-            }
-            other => Err(format!(
-                "auth tag length {other} does not correspond to valid SHA-384 HMAC",
-            )),
         }
     }
 }

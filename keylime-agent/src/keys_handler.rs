@@ -2,7 +2,7 @@
 // Copyright 2021 Keylime Authors
 
 use crate::{
-    common::{AuthTag, EncryptedData, JsonWrapper},
+    common::{EncryptedData, JsonWrapper},
     config::KeylimeConfig,
     payloads::{Payload, PayloadMessage},
     Error, QuoteData, Result,
@@ -12,6 +12,7 @@ use base64::{engine::general_purpose, Engine as _};
 use keylime::crypto::{
     self,
     symmkey::{KeySet, SymmKey},
+    auth_tag::AuthTag,
 };
 use log::*;
 use serde::{Deserialize, Serialize};

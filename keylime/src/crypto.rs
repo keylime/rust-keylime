@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2021 Keylime Authors
 
+pub mod auth_tag;
 pub mod symmkey;
 pub mod x509;
 
@@ -34,6 +35,7 @@ use thiserror::Error;
 pub const AES_128_KEY_LEN: usize = 16;
 pub const AES_256_KEY_LEN: usize = 32;
 pub const AES_BLOCK_SIZE: usize = 16;
+pub const AUTH_TAG_LEN: usize = 48;
 
 #[derive(Error, Debug)]
 pub enum CryptoError {
