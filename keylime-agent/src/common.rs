@@ -78,29 +78,6 @@ where
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct EncryptedData {
-    bytes: Vec<u8>,
-}
-
-impl AsRef<[u8]> for EncryptedData {
-    fn as_ref(&self) -> &[u8] {
-        self.bytes.as_slice()
-    }
-}
-
-impl From<&[u8]> for EncryptedData {
-    fn from(v: &[u8]) -> Self {
-        EncryptedData { bytes: v.to_vec() }
-    }
-}
-
-impl From<Vec<u8>> for EncryptedData {
-    fn from(v: Vec<u8>) -> Self {
-        EncryptedData { bytes: v }
-    }
-}
-
 // TPM data and agent related that can be persisted and loaded on agent startup.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct AgentData {
