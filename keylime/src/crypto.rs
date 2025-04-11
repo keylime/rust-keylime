@@ -2,6 +2,7 @@
 // Copyright 2021 Keylime Authors
 
 pub mod auth_tag;
+pub mod encrypted_data;
 pub mod symmkey;
 pub mod x509;
 

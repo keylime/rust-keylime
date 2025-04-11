@@ -2,7 +2,6 @@
 // Copyright 2021 Keylime Authors
 
 use crate::{
-    common::EncryptedData,
     config,
     revocation::{Revocation, RevocationMessage},
     Error, Result,
@@ -13,6 +12,7 @@ use crate::revocation::ZmqMessage;
 
 use keylime::crypto::{
     self,
+    encrypted_data::EncryptedData,
     symmkey::{KeySet, SymmKey},
 };
 use log::*;
