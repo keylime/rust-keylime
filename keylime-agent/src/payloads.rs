@@ -2,8 +2,8 @@
 // Copyright 2021 Keylime Authors
 
 use crate::{
-    common::{EncryptedData, SymmKey},
-    config, crypto,
+    common::EncryptedData,
+    config,
     revocation::{Revocation, RevocationMessage},
     Error, Result,
 };
@@ -11,6 +11,10 @@ use crate::{
 #[cfg(feature = "with-zmq")]
 use crate::revocation::ZmqMessage;
 
+use keylime::crypto::{
+    self,
+    symmkey::{KeySet, SymmKey},
+};
 use log::*;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
