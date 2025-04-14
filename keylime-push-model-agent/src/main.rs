@@ -32,22 +32,19 @@ fn get_attestation_request_url(args: &Args) -> String {
 }
 
 fn get_https_client(args: &Args) -> Result<reqwest::Client, Box<dyn Error>> {
-    let mut buf = Vec::new();
-    File::open(args.certificate.clone())?.read_to_end(&mut buf)?;
-    let cert = reqwest::Certificate::from_pem(&buf)?;
-    if args.insecure.is_some() && args.insecure.unwrap() {
-        return Ok(reqwest::Client::builder()
-            .connection_verbose(true)
-            .add_root_certificate(cert)
-            .danger_accept_invalid_certs(true)
-            .timeout(Duration::from_millis(args.timeout))
-            .build()?);
-    }
-    Ok(reqwest::Client::builder()
+    let mut builder = reqwest::Client::builder()
         .connection_verbose(true)
-        .add_root_certificate(cert)
-        .timeout(Duration::from_millis(args.timeout))
-        .build()?)
+        .timeout(Duration::from_millis(args.timeout));
+
+    if args.insecure.unwrap_or(false) {
+        builder = builder.danger_accept_invalid_certs(true);
+    } else {
+        let mut buf = Vec::new();
+        File::open(args.certificate.clone())?.read_to_end(&mut buf)?;
+        let cert = reqwest::Certificate::from_pem(&buf)?;
+        builder = builder.add_root_certificate(cert);
+    }
+    Ok(builder.build()?)
 }
 
 fn get_client(args: &Args) -> Result<reqwest::Client, Box<dyn Error>> {
@@ -201,7 +198,7 @@ mod tests {
             verifier_url: "https://1.2.3.4:5678".to_string(),
             timeout: TEST_TIMEOUT_MILLIS,
             certificate: "/tmp/unexisting_cert_file".to_string(),
-            insecure: Some(true),
+            insecure: Some(false),
             id: "12345678".to_string(),
             json_file: None,
             method: None,
@@ -255,7 +252,7 @@ mod tests {
         {
             Ok(_) => unreachable!(),
             Err(e) => {
-                assert!(e.to_string().contains("builder error"))
+                assert!(e.to_string().contains("error sending request"))
             }
         }
         match send_attestation_request(&Args {
@@ -275,7 +272,7 @@ mod tests {
         {
             Ok(_) => unreachable!(),
             Err(e) => {
-                assert!(e.to_string().contains("builder error"))
+                assert!(e.to_string().contains("error sending request"))
             }
         }
         // Clean up the test certificate file
