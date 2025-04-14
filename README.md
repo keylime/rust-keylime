@@ -93,6 +93,12 @@ Unit tests are gating in CI for new code submission.  To run them:
 ```
 $ cargo test
 ```
+In case you want to execute [Mockoon](https://mockoon.com/) based tests, you need to follow two steps:
+1 - Start Mockoon with [appropriate configuration file](https://github.com/keylime/rust-keylime/blob/master/keylime-push-model-agent/test-data/verifier.json) on port 3000
+2 - Execute tests through MOCKOON environment variable:
+```
+$ MOCKOON=1 cargo test
+```
 
 ## Running agent as a systemd-managed service
 
