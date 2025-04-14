@@ -4,13 +4,6 @@
 
 source ./tests/common_tests.sh || source ./common_tests.sh
 
-echo "-------- Running clippy"
-# The cargo denies are currently disabled, because that will require a bunch of dep cleanup
-cargo clippy --all-targets --all-features -- -D clippy::all  # -D clippy::cargo
-
-echo "-------- Building"
-RUST_BACKTRACE=1 cargo build
-
 echo "-------- Testing"
 start_swtpm
 
@@ -35,16 +28,4 @@ fi
 mkdir -p /var/lib/keylime
 RUST_BACKTRACE=1 RUST_LOG=info \
 KEYLIME_CONFIG=$PWD/keylime-agent.conf \
-cargo test --features testing -- --nocapture
-
-echo "-------- Testing with coverage"
-RUST_BACKTRACE=1 RUST_LOG=info \
-KEYLIME_CONFIG=$PWD/keylime-agent.conf \
-cargo tarpaulin --verbose \
-      --target-dir target/tarpaulin \
-      --workspace \
-      --exclude-files 'target/*' \
-      --ignore-panics --ignore-tests \
-      --out Html --out Json \
-      --all-features \
-      --engine llvm
+MOCKOON=1 cargo test --features testing -- --nocapture
