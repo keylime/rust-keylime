@@ -2,10 +2,8 @@
 // Copyright 2025 Keylime Authors
 use crate::struct_filler::StructureFiller;
 use clap::Parser;
-use std::error::Error;
-use std::fs::File;
-use std::io::Read;
-use std::time::Duration;
+use log::{debug, error, info};
+use std::{error::Error, fs::File, io::Read, time::Duration};
 mod struct_filler;
 
 const DEFAULT_TIMEOUT_MILLIS: &str = "5000";
@@ -95,7 +93,7 @@ async fn send_attestation_request(
     let filler = get_attestation_filler_request(args);
     let request = filler.get_attestation_request();
     let serialized = serde_json::to_string(&request).unwrap();
-    println!("Serialized Request: {}", serialized);
+    info!("Serialized Request: {}", serialized);
     let reqb = get_request_builder_from_method(args)?;
 
     let response = reqb
@@ -105,11 +103,11 @@ async fn send_attestation_request(
         .timeout(Duration::from_millis(args.timeout))
         .send()
         .await?;
-    println!("Response code:{}", response.status());
-    println!("Response headers: {:?}", response.headers());
+    info!("Response code:{}", response.status());
+    info!("Response headers: {:?}", response.headers());
     let response_body = response.text().await?;
     if !response_body.is_empty() {
-        println!("Response body: {}", response_body);
+        info!("Response body: {}", response_body);
     }
     Ok(response_body)
 }
@@ -149,21 +147,22 @@ struct Args {
 
 async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
-    println!("API version: {}", get_api_version(&args));
-    println!("Verifier URL: {}", args.verifier_url);
-    println!("Timeout: {}", args.timeout);
-    println!("Certificate file: {}", args.certificate);
-    println!("Insecure: {}", args.insecure.unwrap_or(false));
+    info!("API version: {}", get_api_version(&args));
+    info!("Verifier URL: {}", args.verifier_url);
+    debug!("Timeout: {}", args.timeout);
+    debug!("Certificate file: {}", args.certificate);
+    debug!("Insecure: {}", args.insecure.unwrap_or(false));
     let res = send_attestation_request(&args).await;
     match res {
-        Ok(_) => println!("Request sent successfully"),
-        Err(e) => eprintln!("Error: {}", e),
+        Ok(_) => info!("Request sent successfully"),
+        Err(e) => error!("Error: {}", e),
     }
     Ok(())
 }
 
 #[actix_web::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    pretty_env_logger::init();
     run().await
 }
 
