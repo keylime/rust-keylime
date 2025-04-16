@@ -4,7 +4,8 @@ use assert_cmd::Command;
 use predicates::prelude::*;
 
 const KEYLIME_PUSH_MODEL_AGENT_BINARY: &str = "keylime_push_model_agent";
-const ERROR_SENDING_REQUEST: &str = "error sending request";
+const ERROR_SENDING_REQUEST: &str =
+    "error sending request for url (http://1.2.3.4:5678/v3.0/agents/12345678/attestations)";
 
 #[cfg(test)]
 mod tests {

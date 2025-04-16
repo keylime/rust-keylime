@@ -295,6 +295,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "anyhow"
+version = "1.0.98"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e16d2d3311acee920a9eb8d33b8cbc1787ce4a264e85f964c2404b969bdcd487"
+dependencies = [
+ "backtrace",
+]
+
+[[package]]
 name = "assert-json-diff"
 version = "2.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1399,6 +1408,7 @@ version = "0.2.7"
 dependencies = [
  "actix-rt",
  "actix-web",
+ "anyhow",
  "assert_cmd",
  "clap",
  "keylime",
@@ -1410,6 +1420,7 @@ dependencies = [
  "serde_derive",
  "serde_json",
  "static_assertions",
+ "tempfile",
  "tokio",
 ]
 
