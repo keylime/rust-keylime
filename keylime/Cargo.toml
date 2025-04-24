@@ -28,6 +28,7 @@ tokio.workspace = true
 # dev-dependencies are not supported
 # see: https://github.com/rust-lang/cargo/issues/1596
 wiremock = {version = "0.6", optional = true}
+chrono = { version = "0.4.40", features = ["serde"] }
 
 [dev-dependencies]
 tempfile.workspace = true
