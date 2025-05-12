@@ -1,0 +1,14 @@
+{
+    "data": {
+        "type": "session",
+        "attributes": {
+            "agent_id": "example-agent",
+            "authentication_supported": [
+            {
+                "authentication_class": "pop",
+                "authentication_type": "tpm_pop"
+            }
+            ]
+        }
+    }
+}
