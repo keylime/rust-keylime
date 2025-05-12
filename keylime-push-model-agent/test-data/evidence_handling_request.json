@@ -1,0 +1,33 @@
+{
+    "data": {
+        "type": "attestation",
+        "attributes": {
+            "evidence_collected": [
+                {
+                    "evidence_class": "certification",
+                    "evidence_type": "tpm_quote",
+                    "data": {
+                        "subject_data": "subject_data_deserialized",
+                        "message": "message_deserialized",
+                        "signature": "signature_deserialized"
+                    }
+                },
+                {
+                    "evidence_class": "log",
+                    "evidence_type": "uefi_log",
+                    "data": {
+                        "entries": "uefi_log_entries_deserialized"
+                    }
+                },
+                {
+                    "evidence_class": "log",
+                    "evidence_type": "ima_log",
+                    "data": {
+                        "entries": "ima_log_entries_deserialized",
+                        "entry_count": 96
+                    }
+                }
+            ]
+        }
+    }
+}

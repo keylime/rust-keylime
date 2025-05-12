@@ -1,1 +1,239 @@
-{"openapi":"3.0.0","info":{"title":"Verifier","version":"1.0.0"},"servers":[{"url":"http://localhost:3000/"}],"paths":{"/v3.0/agents/[0-9]*/attestations":{"post":{"description":"","responses":{"200":{"description":"","content":{"application/json":{"example":"{                                                                                                                                                                     \n  \"data\": {                                                                                                                                                                          \n    \"type\": \"attestation\",                                                                                                                                                           \n    \"attributes\": {                                                                                                                                                                  \n      \"stage\": \"awaiting_evidence\",                                                                                                                                                  \n      \"evidence_requested\": [                                                                                                                                                        \n        {                                                                                                                                                                            \n          \"evidence_class\": \"certification\",                                                                                                                                         \n          \"evidence_type\": \"tpm_quote\",                                                                                                                                              \n          \"chosen_parameters\": {                                                                                                                                                     \n            \"certification_key\": {                                                                                                                                                   \n              \"key_algorithm\": \"rsa\",                                                                                                                                                \n              \"key_class\": \"asymmetric\",                                                                                                                                             \n              \"key_size\": 2048,                                                                                                                                                      \n              \"local_identifier\": \"att_local_identifier\",                                                                                                                            \n              \"public\": \"OTgtMjkzODQ1LTg5MjMtNDk1OGlrYXNkamZnO2Frc2pka2ZqYXM7a2RqZjtramJrY3hqejk4MS0zMjQ5MDhpLWpmZDth\",                                                              \n              \"server_identifier\": \"ak\"                                                                                                                                              \n            },                                                                                                                                                                       \n            \"challenge\": \"challenge\",                                                                                                                                                \n            \"hash_algorithm\": \"sha384\",                                                                                                                                              \n            \"selected_subjects\": {                                                                                                                                                   \n              \"sha1\": [                                                                                                                                                              \n                1,                                                                                                                                                                   \n                2,                                                                                                                                                                   \n                3                                                                                                                                                                    \n              ],                                                                                                                                                                     \n              \"sha256\": [                                                                                                                                                            \n                4,                                                                                                                                                                   \n                5,                                                                                                                                                                   \n                6                                                                                                                                                                    \n              ]                                                                                                                                                                      \n            },                                                                                                                                                                       \n            \"signature_scheme\": \"rsassa\"                                                                                                                                             \n          }                                                                                                                                                                          \n        }                                                                                                                                                                            \n      ]                                                                                                                                                                              \n    }                                                                                                                                                                                \n  }                                                                                                                                                                                  \n}"}},"headers":{"Access-Control-Allow-Origin":{"schema":{"type":"string"},"example":"*"},"Access-Control-Allow-Methods":{"schema":{"type":"string"},"example":"GET,POST,PUT,PATCH,DELETE,HEAD,OPTIONS"},"Access-Control-Allow-Headers":{"schema":{"type":"string"},"example":"Content-Type, Origin, Accept, Authorization, Content-Length, X-Requested-With"}}}}}},"/v3.0/agents/[0-9]*/attestations/[0-9]*":{"patch":{"description":"","responses":{"200":{"description":"","content":{"application/json":{"example":"{\n  \"data\": {\n    \"type\": \"attestation\",\n    \"attributes\": {\n      \"stage\": \"evaluating_evidence\",\n      \"evidence\": [\n        {\n          \"evidence_class\": \"certification\",\n          \"evidence_type\": \"tpm_quote\",\n          \"capabilities\": {\n            \"component_version\": \"2.0\",\n            \"hash_algorithms\": [\n              \"sha3_512\"\n            ],\n            \"signature_schemes\": [\n              \"rsassa\"\n            ],\n            \"available_subjects\": {\n              \"sha1\": [\n                1,\n                2,\n                3\n              ],\n              \"sha256\": [\n                4,\n                5,\n                6\n              ]\n            },\n            \"certification_keys\": []\n          },\n          \"chosen_parameters\": {\n            \"certification_key\": {\n              \"key_algorithm\": \"rsa\",\n              \"key_class\": \"asymmetric\",\n              \"key_size\": 2048,\n              \"local_identifier\": \"att_local_identifier\",\n              \"public\": \"OTgtMjkzODQ1LTg5MjMtNDk1OGlrYXNkamZnO2Frc2pka2ZqYXM7a2RqZjtramJrY3hqejk4MS0zMjQ5MDhpLWpmZDth\",\n              \"server_identifier\": \"ak\"\n            },\n            \"challenge\": \"challenge\",\n            \"hash_algorithm\": \"sha384\",\n            \"selected_subjects\": {\n              \"sha1\": [\n                1,\n                2,\n                3\n              ],\n              \"sha256\": [\n                4,\n                5,\n                6\n              ]\n            },\n            \"signature_scheme\": \"rsassa\"\n          },\n          \"data\": {\n            \"message\": \"message\",\n            \"signature\": \"signature\",\n            \"subject_data\": \"subject_data\"\n          }\n        },\n        {\n          \"evidence_class\": \"log\",\n          \"evidence_type\": \"uefi_log\",\n          \"capabilities\": {\n            \"component_version\": \"2.0\",\n            \"hash_algorithms\": [\n              \"sha3_512\"\n            ],\n            \"signature_schemes\": [\n              \"rsassa\"\n            ],\n            \"available_subjects\": {\n              \"sha1\": [\n                1,\n                2,\n                3\n              ],\n              \"sha256\": [\n                4,\n                5,\n                6\n              ]\n            },\n            \"certification_keys\": []\n          },\n          \"chosen_parameters\": {\n            \"certification_key\": {\n              \"key_algorithm\": \"rsa\",\n              \"key_class\": \"asymmetric\",\n              \"key_size\": 2048,\n              \"local_identifier\": \"att_local_identifier\",\n              \"public\": \"OTgtMjkzODQ1LTg5MjMtNDk1OGlrYXNkamZnO2Frc2pka2ZqYXM7a2RqZjtramJrY3hqejk4MS0zMjQ5MDhpLWpmZDth\",\n              \"server_identifier\": \"ak\"\n            },\n            \"challenge\": \"challenge\",\n            \"hash_algorithm\": \"sha384\",\n            \"selected_subjects\": {\n              \"sha1\": [\n                1,\n                2,\n                3\n              ],\n              \"sha256\": [\n                4,\n                5,\n                6\n              ]\n            },\n            \"signature_scheme\": \"rsassa\"\n          },\n          \"data\": {\n            \"entries\": \"uefi_log_entries\"\n          }\n        },\n        {\n          \"evidence_class\": \"log\",\n          \"evidence_type\": \"ima_log\",\n          \"capabilities\": {\n            \"component_version\": \"2.0\",\n            \"hash_algorithms\": [\n              \"sha3_512\"\n            ],\n            \"signature_schemes\": [\n              \"rsassa\"\n            ],\n            \"available_subjects\": {\n              \"sha1\": [\n                1,\n                2,\n                3\n              ],\n              \"sha256\": [\n                4,\n                5,\n                6\n              ]\n            },\n            \"certification_keys\": []\n          },\n          \"chosen_parameters\": {\n            \"format\": \"application/octet-stream\"\n          },\n          \"data\": {\n            \"entries\": \"ima_log_entries\",\n            \"entry_count\": 96\n          }\n        }\n      ],\n      \"system_info\": {\n        \"boot_time\": \"2025-04-08T12:00:17Z\"\n      }\n    }\n  }\n}\n"}},"headers":{"Access-Control-Allow-Origin":{"schema":{"type":"string"},"example":"*"},"Access-Control-Allow-Methods":{"schema":{"type":"string"},"example":"GET,POST,PUT,PATCH,DELETE,HEAD,OPTIONS"},"Access-Control-Allow-Headers":{"schema":{"type":"string"},"example":"Content-Type, Origin, Accept, Authorization, Content-Length, X-Requested-With"}}}}}}}}
+{
+    "uuid": "4b17987c-f296-4b7e-91ce-d0202aec07f0",
+    "lastMigration": 33,
+    "name": "Verifier",
+    "endpointPrefix": "",
+    "latency": 0,
+    "port": 3000,
+    "hostname": "",
+    "folders": [],
+    "routes": [
+        {
+            "uuid": "54a5d1d1-ad70-459d-8413-2dcf2f6fb172",
+            "type": "http",
+            "documentation": "",
+            "method": "post",
+            "endpoint": "v3.0/agents/[0-9]*/attestations",
+            "responses": [
+                {
+                    "uuid": "b614c34a-a72c-46f4-b53a-debb18076ee3",
+                    "body": "{\n  \"data\": {\n    \"type\": \"attestation\",\n    \"attributes\": {\n      \"stage\": \"awaiting_evidence\",\n      \"evidence_requested\": [\n        {\n          \"evidence_class\": \"certification\",\n          \"evidence_type\": \"tpm_quote\",\n          \"chosen_parameters\": {\n            \"certification_key\": {\n              \"key_algorithm\": \"rsa\",\n              \"key_class\": \"asymmetric\",\n              \"key_size\": 2048,\n              \"local_identifier\": \"att_local_identifier\",\n              \"public\": \"OTgtMjkzODQ1LTg5MjMtNDk1OGlrYXNkamZnO2Frc2pka2ZqYXM7a2RqZjtramJrY3hqejk4MS0zMjQ5MDhpLWpmZDth\",\n              \"server_identifier\": \"ak\"\n            },\n            \"challenge\": \"challenge\",\n            \"hash_algorithm\": \"sha384\",\n            \"selected_subjects\": {\n              \"sha1\": [\n                1,\n                2,\n                3\n              ],\n              \"sha256\": [\n                4,\n                5,\n                6\n              ]\n            },\n            \"signature_scheme\": \"rsassa\"\n          }\n        }\n      ]\n    }\n  }\n}",
+                    "latency": 0,
+                    "statusCode": 200,
+                    "label": "",
+                    "headers": [
+                        {
+                            "key": "Content-Type",
+                            "value": "application/json"
+                        },
+                        {
+                            "key": "Access-Control-Allow-Origin",
+                            "value": "*"
+                        },
+                        {
+                            "key": "Access-Control-Allow-Methods",
+                            "value": "GET,POST,PUT,PATCH,DELETE,HEAD,OPTIONS"
+                        },
+                        {
+                            "key": "Access-Control-Allow-Headers",
+                            "value": "Content-Type, Origin, Accept, Authorization, Content-Length, X-Requested-With"
+                        }
+                    ],
+                    "bodyType": "INLINE",
+                    "filePath": "",
+                    "databucketID": "",
+                    "sendFileAsBody": false,
+                    "rules": [],
+                    "rulesOperator": "OR",
+                    "disableTemplating": false,
+                    "fallbackTo404": false,
+                    "default": true,
+                    "crudKey": "id",
+                    "callbacks": []
+                }
+            ],
+            "responseMode": null,
+            "streamingMode": null,
+            "streamingInterval": 0
+        },
+        {
+            "uuid": "fc519ac8-ea05-491f-a671-e6fe7701eed7",
+            "type": "http",
+            "documentation": "",
+            "method": "patch",
+            "endpoint": "v3.0/agents/[0-9]*/attestations/[0-9]*",
+            "responses": [
+                {
+                    "uuid": "58aa7b8d-e223-479e-a175-22e90e0d4575",
+                    "body": "{\n  \"data\": {\n    \"type\": \"attestation\",\n    \"attributes\": {\n      \"stage\": \"evaluating_evidence\",\n      \"evidence\": [\n        {\n          \"evidence_class\": \"certification\",\n          \"evidence_type\": \"tpm_quote\",\n          \"capabilities\": {\n            \"component_version\": \"2.0\",\n            \"hash_algorithms\": [\n              \"sha3_512\"\n            ],\n            \"signature_schemes\": [\n              \"rsassa\"\n            ],\n            \"available_subjects\": {\n              \"sha1\": [\n                1,\n                2,\n                3\n              ],\n              \"sha256\": [\n                4,\n                5,\n                6\n              ]\n            },\n            \"certification_keys\": []\n          },\n          \"chosen_parameters\": {\n            \"certification_key\": {\n              \"key_algorithm\": \"rsa\",\n              \"key_class\": \"asymmetric\",\n              \"key_size\": 2048,\n              \"local_identifier\": \"att_local_identifier\",\n              \"public\": \"OTgtMjkzODQ1LTg5MjMtNDk1OGlrYXNkamZnO2Frc2pka2ZqYXM7a2RqZjtramJrY3hqejk4MS0zMjQ5MDhpLWpmZDth\",\n              \"server_identifier\": \"ak\"\n            },\n            \"challenge\": \"challenge\",\n            \"hash_algorithm\": \"sha384\",\n            \"selected_subjects\": {\n              \"sha1\": [\n                1,\n                2,\n                3\n              ],\n              \"sha256\": [\n                4,\n                5,\n                6\n              ]\n            },\n            \"signature_scheme\": \"rsassa\"\n          },\n          \"data\": {\n            \"message\": \"message\",\n            \"signature\": \"signature\",\n            \"subject_data\": \"subject_data\"\n          }\n        },\n        {\n          \"evidence_class\": \"log\",\n          \"evidence_type\": \"uefi_log\",\n          \"capabilities\": {\n            \"component_version\": \"2.0\",\n            \"hash_algorithms\": [\n              \"sha3_512\"\n            ],\n            \"signature_schemes\": [\n              \"rsassa\"\n            ],\n            \"available_subjects\": {\n              \"sha1\": [\n                1,\n                2,\n                3\n              ],\n              \"sha256\": [\n                4,\n                5,\n                6\n              ]\n            },\n            \"certification_keys\": []\n          },\n          \"chosen_parameters\": {\n            \"certification_key\": {\n              \"key_algorithm\": \"rsa\",\n              \"key_class\": \"asymmetric\",\n              \"key_size\": 2048,\n              \"local_identifier\": \"att_local_identifier\",\n              \"public\": \"OTgtMjkzODQ1LTg5MjMtNDk1OGlrYXNkamZnO2Frc2pka2ZqYXM7a2RqZjtramJrY3hqejk4MS0zMjQ5MDhpLWpmZDth\",\n              \"server_identifier\": \"ak\"\n            },\n            \"challenge\": \"challenge\",\n            \"hash_algorithm\": \"sha384\",\n            \"selected_subjects\": {\n              \"sha1\": [\n                1,\n                2,\n                3\n              ],\n              \"sha256\": [\n                4,\n                5,\n                6\n              ]\n            },\n            \"signature_scheme\": \"rsassa\"\n          },\n          \"data\": {\n            \"entries\": \"uefi_log_entries\"\n          }\n        },\n        {\n          \"evidence_class\": \"log\",\n          \"evidence_type\": \"ima_log\",\n          \"capabilities\": {\n            \"component_version\": \"2.0\",\n            \"hash_algorithms\": [\n              \"sha3_512\"\n            ],\n            \"signature_schemes\": [\n              \"rsassa\"\n            ],\n            \"available_subjects\": {\n              \"sha1\": [\n                1,\n                2,\n                3\n              ],\n              \"sha256\": [\n                4,\n                5,\n                6\n              ]\n            },\n            \"certification_keys\": []\n          },\n          \"chosen_parameters\": {\n            \"format\": \"application/octet-stream\"\n          },\n          \"data\": {\n            \"entries\": \"ima_log_entries\",\n            \"entry_count\": 96\n          }\n        }\n      ],\n      \"system_info\": {\n        \"boot_time\": \"2025-04-08T12:00:17Z\"\n      }\n    }\n  }\n}\n",
+                    "latency": 0,
+                    "statusCode": 200,
+                    "label": "",
+                    "headers": [
+                        {
+                            "key": "Content-Type",
+                            "value": "application/json"
+                        },
+                        {
+                            "key": "Access-Control-Allow-Origin",
+                            "value": "*"
+                        },
+                        {
+                            "key": "Access-Control-Allow-Methods",
+                            "value": "GET,POST,PUT,PATCH,DELETE,HEAD,OPTIONS"
+                        },
+                        {
+                            "key": "Access-Control-Allow-Headers",
+                            "value": "Content-Type, Origin, Accept, Authorization, Content-Length, X-Requested-With"
+                        }
+                    ],
+                    "bodyType": "INLINE",
+                    "filePath": "",
+                    "databucketID": "",
+                    "sendFileAsBody": false,
+                    "rules": [],
+                    "rulesOperator": "OR",
+                    "disableTemplating": false,
+                    "fallbackTo404": false,
+                    "default": true,
+                    "crudKey": "id",
+                    "callbacks": []
+                }
+            ],
+            "responseMode": null,
+            "streamingMode": null,
+            "streamingInterval": 0
+        },
+        {
+            "uuid": "ef96f420-df60-44d2-8ce0-061c13c11d8f",
+            "type": "http",
+            "documentation": "",
+            "method": "post",
+            "endpoint": "v3.0/sessions",
+            "responses": [
+                {
+                    "uuid": "d3a3da35-d03e-40ca-8353-306c4f81edc0",
+                    "body": "{\n  \"data\": {\n    \"type\": \"session\",\n    \"id\": 1,\n    \"attributes\": {\n      \"agent_id\": \"example-agent\",\n      \"authentication_requested\": [\n          {\n              \"authentication_class\": \"pop\",\n              \"authentication_type\": \"tpm_pop\",\n              \"chosen_parameters\": {\n                  \"challenge\": \"here_the_challenge\"\n              }\n          }\n      ],\n      \"created_at\": \"2025-04-03T09:44:12+00:00\",\n      \"challenges_expire_at\": \"2025-04-03T10:56:57+00:00\"\n    }\n  }\n}",
+                    "latency": 0,
+                    "statusCode": 200,
+                    "label": "",
+                    "headers": [
+                        {
+                            "key": "Content-Type",
+                            "value": "application/json"
+                        }
+                    ],
+                    "bodyType": "INLINE",
+                    "filePath": "",
+                    "databucketID": "",
+                    "sendFileAsBody": false,
+                    "rules": [],
+                    "rulesOperator": "OR",
+                    "disableTemplating": false,
+                    "fallbackTo404": false,
+                    "default": true,
+                    "crudKey": "id",
+                    "callbacks": []
+                }
+            ],
+            "responseMode": null,
+            "streamingMode": null,
+            "streamingInterval": 0
+        },
+        {
+            "uuid": "19bdff83-8fee-41c2-a8f5-462a69393d45",
+            "type": "http",
+            "documentation": "",
+            "method": "patch",
+            "endpoint": "v3.0/sessions/[0-9]*",
+            "responses": [
+                {
+                    "uuid": "315464d8-3fcb-42ed-90b2-1f9f2e48b6fa",
+                    "body": "{\n    \"data\": {\n        \"type\": \"session\",\n        \"id\": 1,\n        \"attributes\": {\n            \"agent_id\": \"example-agent\",\n            \"evaluation\": \"pass\",\n            \"token\": \"vNjC5eXpXlBSTwIt5kVeWntEY\",\n            \"authentication\": [\n                {\n                    \"authentication_class\": \"pop\",\n                    \"authentication_type\": \"tpm_pop\",\n                    \"chosen_parameters\": {\n                        \"challenge\": \"response\"\n                    },\n                    \"data\": {\n                        \"message\": \"test_message\",\n                        \"signature\": \"test_isgnature\"\n                    }\n                }\n            ],\n            \"created_at\": \"2025-04-03T09:44:12+00:00\",\n            \"challenges_expire_at\": \"2025-04-03T10:56:57+00:00\",\n            \"response_received_at\": \"2025-04-03T11:56:57+00:00\",\n            \"token_expires_at\": \"2025-04-03T22:56:57+00:00\"\n        }\n    }\n}",
+                    "latency": 0,
+                    "statusCode": 200,
+                    "label": "",
+                    "headers": [
+                        {
+                            "key": "Content-Type",
+                            "value": "application/json"
+                        }
+                    ],
+                    "bodyType": "INLINE",
+                    "filePath": "",
+                    "databucketID": "",
+                    "sendFileAsBody": false,
+                    "rules": [],
+                    "rulesOperator": "OR",
+                    "disableTemplating": false,
+                    "fallbackTo404": false,
+                    "default": true,
+                    "crudKey": "id",
+                    "callbacks": []
+                }
+            ],
+            "responseMode": null,
+            "streamingMode": null,
+            "streamingInterval": 0
+        }
+    ],
+    "rootChildren": [
+        {
+            "type": "route",
+            "uuid": "54a5d1d1-ad70-459d-8413-2dcf2f6fb172"
+        },
+        {
+            "type": "route",
+            "uuid": "fc519ac8-ea05-491f-a671-e6fe7701eed7"
+        },
+        {
+            "type": "route",
+            "uuid": "ef96f420-df60-44d2-8ce0-061c13c11d8f"
+        },
+        {
+            "type": "route",
+            "uuid": "19bdff83-8fee-41c2-a8f5-462a69393d45"
+        }
+    ],
+    "proxyMode": false,
+    "proxyHost": "",
+    "proxyRemovePrefix": false,
+    "tlsOptions": {
+        "enabled": false,
+        "type": "CERT",
+        "pfxPath": "",
+        "certPath": "",
+        "keyPath": "",
+        "caPath": "",
+        "passphrase": ""
+    },
+    "cors": true,
+    "headers": [
+        {
+            "key": "Access-Control-Allow-Origin",
+            "value": "*"
+        },
+        {
+            "key": "Access-Control-Allow-Methods",
+            "value": "GET,POST,PUT,PATCH,DELETE,HEAD,OPTIONS"
+        },
+        {
+            "key": "Access-Control-Allow-Headers",
+            "value": "Content-Type, Origin, Accept, Authorization, Content-Length, X-Requested-With"
+        }
+    ],
+    "proxyReqHeaders": [
+        {
+            "key": "",
+            "value": ""
+        }
+    ],
+    "proxyResHeaders": [
+        {
+            "key": "",
+            "value": ""
+        }
+    ],
+    "data": [],
+    "callbacks": []
+}

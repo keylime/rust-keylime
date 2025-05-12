@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2025 Keylime Authors
 use keylime::structures;
 
 // Implement a structure filler for the attestation request
@@ -9,28 +11,64 @@ use keylime::structures;
 // 5. Use the trait to fill the structure with data from real TPM quote
 pub trait StructureFiller {
     fn get_attestation_request(&self) -> structures::AttestationRequest;
+    fn get_session_request(&self) -> structures::SessionRequest;
+    fn get_evidence_handling_request(
+        &self,
+    ) -> structures::EvidenceHandlingRequest;
 }
 
-pub struct AttestationRequestFillerFromCode;
-impl StructureFiller for AttestationRequestFillerFromCode {
+pub struct FillerFromCode;
+impl StructureFiller for FillerFromCode {
     fn get_attestation_request(&self) -> structures::AttestationRequest {
         get_attestation_request_from_code()
     }
+    fn get_session_request(&self) -> structures::SessionRequest {
+        get_session_request_from_code()
+    }
+    fn get_evidence_handling_request(
+        &self,
+    ) -> structures::EvidenceHandlingRequest {
+        get_evidence_handling_request_from_code()
+    }
 }
 
-pub struct AttestationRequestFillerFromFile {
+pub struct FillerFromFile {
     pub file_path: String,
 }
 
-impl StructureFiller for AttestationRequestFillerFromFile {
+impl StructureFiller for FillerFromFile {
     fn get_attestation_request(&self) -> structures::AttestationRequest {
         get_attestation_request_from_file(self.file_path.clone())
+    }
+    fn get_session_request(&self) -> structures::SessionRequest {
+        get_session_request_from_file(self.file_path.clone())
+    }
+    fn get_evidence_handling_request(
+        &self,
+    ) -> structures::EvidenceHandlingRequest {
+        get_evidence_handling_request_from_file(self.file_path.clone())
     }
 }
 
 fn get_attestation_request_from_file(
     json_file: String,
 ) -> structures::AttestationRequest {
+    let reader =
+        std::io::BufReader::new(std::fs::File::open(json_file).unwrap());
+    serde_json::from_reader(reader).unwrap()
+}
+
+fn get_session_request_from_file(
+    json_file: String,
+) -> structures::SessionRequest {
+    let reader =
+        std::io::BufReader::new(std::fs::File::open(json_file).unwrap());
+    serde_json::from_reader(reader).unwrap()
+}
+
+fn get_evidence_handling_request_from_file(
+    json_file: String,
+) -> structures::EvidenceHandlingRequest {
     let reader =
         std::io::BufReader::new(std::fs::File::open(json_file).unwrap());
     serde_json::from_reader(reader).unwrap()
@@ -71,6 +109,67 @@ fn get_attestation_request_from_code() -> structures::AttestationRequest {
             },
         },
     }
+}
+
+fn get_session_request_from_code() -> structures::SessionRequest {
+    structures::SessionRequest {
+        data: structures::SessionRequestData {
+            data_type: "session".to_string(),
+            attributes: structures::SessionRequestAttributes {
+                agent_id: "example-agent".to_string(),
+                auth_supported: vec![
+                    structures::SessionRequestAuthSupported {
+                        auth_class: "pop".to_string(),
+                        auth_type: "tpm_pop".to_string(),
+                    },
+                ],
+            },
+        },
+    }
+}
+
+fn get_evidence_handling_request_from_code(
+) -> structures::EvidenceHandlingRequest {
+    let tpm_evidence_data = structures::EvidenceData::TpmQuoteData {
+        subject_data: "subject_data".to_string(),
+        message: "message".to_string(),
+        signature: "signature".to_string(),
+    };
+
+    let tpm_evidence_collected = structures::EvidenceCollected {
+        evidence_class: "certification".to_string(),
+        evidence_type: "tpm_quote".to_string(),
+        data: tpm_evidence_data,
+    };
+    let uefi_evidence_data = structures::EvidenceData::UefiLog {
+        entries: "uefi_log_entries".to_string(),
+    };
+    let uefi_evidence_collected = structures::EvidenceCollected {
+        evidence_class: "log".to_string(),
+        evidence_type: "uefi_log".to_string(),
+        data: uefi_evidence_data,
+    };
+    let ima_evidence_data = structures::EvidenceData::ImaLog {
+        entry_count: 95,
+        entries: "ima_log_entries".to_string(),
+    };
+    let ima_evidence_collected = structures::EvidenceCollected {
+        evidence_class: "log".to_string(),
+        evidence_type: "ima_log".to_string(),
+        data: ima_evidence_data,
+    };
+    let attributes = structures::EvidenceHandlingRequestAttributes {
+        evidence_collected: vec![
+            tpm_evidence_collected,
+            uefi_evidence_collected,
+            ima_evidence_collected,
+        ],
+    };
+    let data = structures::EvidenceHandlingRequestData {
+        data_type: "attestation".to_string(),
+        attributes,
+    };
+    structures::EvidenceHandlingRequest { data }
 }
 
 #[cfg(test)]
@@ -120,7 +219,7 @@ mod tests {
 
     #[test]
     fn get_attestation_request_filler_from_code_test() {
-        let req = AttestationRequestFillerFromCode.get_attestation_request();
+        let req = FillerFromCode.get_attestation_request();
         assert_eq!(req.data.type_, "attestation");
         assert_eq!(req.data.attributes.evidence_supported.len(), 1);
         let some_evidence_supported =
@@ -160,9 +259,10 @@ mod tests {
 
     #[test]
     fn get_attestation_request_from_file_test() {
-        let req = AttestationRequestFillerFromFile {
-            file_path: "tests/evidence_supported_attestation_request.json"
-                .to_string(),
+        let req = FillerFromFile {
+            file_path:
+                "test-data/evidence_supported_attestation_request.json"
+                    .to_string(),
         }
         .get_attestation_request();
 
@@ -253,4 +353,87 @@ mod tests {
             "2025-04-02T12:12:51Z"
         );
     }
+
+    #[test]
+    fn get_evidence_handling_request_from_file_test() {
+        let deserialized = FillerFromFile {
+            file_path: "test-data/evidence_handling_request.json".to_string(),
+        }
+        .get_evidence_handling_request();
+
+        assert_eq!(deserialized.data.data_type, "attestation");
+        assert_eq!(deserialized.data.attributes.evidence_collected.len(), 3);
+        assert_eq!(
+            deserialized.data.attributes.evidence_collected[0].evidence_class,
+            "certification"
+        );
+        assert_eq!(
+            deserialized.data.attributes.evidence_collected[0].evidence_type,
+            "tpm_quote"
+        );
+        if let structures::EvidenceData::TpmQuoteData {
+            subject_data,
+            message,
+            signature,
+        } = &deserialized.data.attributes.evidence_collected[0].data
+        {
+            assert_eq!(subject_data, "subject_data_deserialized");
+            assert_eq!(message, "message_deserialized");
+            assert_eq!(signature, "signature_deserialized");
+        } else {
+            panic!("Expected TpmQuoteData"); //#[allow_ci]
+        }
+        assert_eq!(
+            deserialized.data.attributes.evidence_collected[1].evidence_class,
+            "log"
+        );
+        assert_eq!(
+            deserialized.data.attributes.evidence_collected[1].evidence_type,
+            "uefi_log"
+        );
+        if let structures::EvidenceData::UefiLog { entries } =
+            &deserialized.data.attributes.evidence_collected[1].data
+        {
+            assert_eq!(entries, "uefi_log_entries_deserialized");
+        } else {
+            panic!("Expected UefiLog"); //#[allow_ci]
+        }
+        assert_eq!(
+            deserialized.data.attributes.evidence_collected[2].evidence_class,
+            "log"
+        );
+        assert_eq!(
+            deserialized.data.attributes.evidence_collected[2].evidence_type,
+            "ima_log"
+        );
+        if let structures::EvidenceData::ImaLog {
+            entry_count,
+            entries,
+        } = &deserialized.data.attributes.evidence_collected[2].data
+        {
+            assert_eq!(*entry_count, 96);
+            assert_eq!(entries, "ima_log_entries_deserialized");
+        } else {
+            panic!("Expected ImaLog"); //#[allow_ci]
+        }
+    }
+
+    #[test]
+    fn get_authentication_request_from_file_test() {
+        let deserialized = FillerFromFile {
+            file_path: "test-data/session_request.json".to_string(),
+        }
+        .get_session_request();
+        assert_eq!(deserialized.data.data_type, "session");
+        assert_eq!(deserialized.data.attributes.agent_id, "example-agent");
+        assert_eq!(deserialized.data.attributes.auth_supported.len(), 1);
+        assert_eq!(
+            deserialized.data.attributes.auth_supported[0].auth_class,
+            "pop"
+        );
+        assert_eq!(
+            deserialized.data.attributes.auth_supported[0].auth_type,
+            "tpm_pop"
+        );
+    } // get_authentication_request_from_file_test
 }

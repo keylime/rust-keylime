@@ -9,54 +9,37 @@ use std::{
     io::Read,
     time::Duration,
 };
+mod json_dump;
 mod struct_filler;
+mod url_selector;
 
 const DEFAULT_TIMEOUT_MILLIS: &str = "5000";
 const HTTPS_PREFIX: &str = "https://";
-const DEFAULT_API_VERSION: &str = "v3.0";
-const DEFAULT_INDEX: &str = "1";
 const DEFAULT_METHOD: &str = "POST";
+
+enum MessageType {
+    Attestation,
+    EvidenceHandling,
+    Session,
+}
+const DEFAULT_MESSAGE_TYPE: MessageType = MessageType::Attestation;
+const DEFAULT_MESSAGE_TYPE_STR: &str = "Attestation";
 
 pub struct ResponseInformation {
     pub status_code: reqwest::StatusCode,
     pub body: String,
 }
 
-fn get_api_version(args: &Args) -> String {
-    if args.api_version.is_some() {
-        return args.api_version.clone().unwrap();
+fn get_message_type(args: &Args) -> MessageType {
+    if args.message_type.is_some() {
+        match args.message_type.as_ref().unwrap().as_str() {
+            "Attestation" => return MessageType::Attestation,
+            "EvidenceHandling" => return MessageType::EvidenceHandling,
+            "Session" => return MessageType::Session,
+            _ => {}
+        }
     }
-    DEFAULT_API_VERSION.to_string()
-}
-
-fn get_index(args: &Args) -> String {
-    if args.index.is_some() {
-        return args.index.clone().unwrap();
-    }
-    DEFAULT_INDEX.to_string()
-}
-
-fn get_index_suffix(args: &Args) -> String {
-    let index = get_index(args);
-    if args.method.is_some() && args.method.as_ref().unwrap() == "PATCH" {
-        return format!("/{index}");
-    }
-    "".to_string()
-}
-
-fn get_attestation_request_url(args: &Args) -> String {
-    let id = args.identifier.clone();
-    let verifier_url = args.verifier_url.clone();
-    let api_version = get_api_version(args);
-    let index_suffix = get_index_suffix(args);
-    if verifier_url.ends_with('/') {
-        return format!(
-            "{verifier_url}{api_version}/agents/{id}/attestations{index_suffix}"
-        );
-    }
-    format!(
-        "{verifier_url}/{api_version}/agents/{id}/attestations{index_suffix}"
-    )
+    DEFAULT_MESSAGE_TYPE
 }
 
 fn get_https_client(args: &Args) -> Result<reqwest::Client> {
@@ -122,13 +105,40 @@ fn get_client(args: &Args) -> Result<reqwest::Client> {
         .context("Failed to build plain HTTP client")
 }
 
-fn get_attestation_filler_request(args: &Args) -> Box<dyn StructureFiller> {
+fn get_filler_request(args: &Args) -> Box<dyn StructureFiller> {
     if args.json_file.is_none() {
-        return Box::new(struct_filler::AttestationRequestFillerFromCode {});
+        return Box::new(struct_filler::FillerFromCode {});
     }
-    Box::new(struct_filler::AttestationRequestFillerFromFile {
+    Box::new(struct_filler::FillerFromFile {
         file_path: args.json_file.clone().unwrap(),
     })
+}
+
+fn get_url_from_message_type(args: &Args) -> String {
+    let url_args = url_selector::UrlArgs {
+        verifier_url: args.verifier_url.clone(),
+        api_version: args.api_version.clone(),
+        session_index: args.session_index.clone(),
+        agent_identifier: Some(args.agent_identifier.clone()),
+        attestation_index: args.attestation_index.clone(),
+    };
+    match get_message_type(args) {
+        MessageType::Attestation => {
+            url_selector::get_attestation_request_url(&url_args)
+        }
+        MessageType::EvidenceHandling => {
+            if args.attestation_index.is_some() {
+                url_selector::get_evidence_handling_request_url_with_index(
+                    &url_args,
+                )
+            } else {
+                url_selector::get_evidence_handling_request_url(&url_args)
+            }
+        }
+        MessageType::Session => {
+            url_selector::get_session_request_url(&url_args)
+        }
+    }
 }
 
 fn get_request_builder_from_method(
@@ -137,37 +147,47 @@ fn get_request_builder_from_method(
     let client = get_client(args)?;
     match args.method.as_deref() {
         Some("POST") => {
-            Ok(client.post(get_attestation_request_url(args).as_str()))
+            Ok(client.post(get_url_from_message_type(args).as_str()))
         }
         Some("PUT") => {
-            Ok(client.put(get_attestation_request_url(args).as_str()))
+            Ok(client.put(get_url_from_message_type(args).as_str()))
         }
         Some("DELETE") => {
-            Ok(client.delete(get_attestation_request_url(args).as_str()))
+            Ok(client.delete(get_url_from_message_type(args).as_str()))
         }
         Some("GET") => {
-            Ok(client.get(get_attestation_request_url(args).as_str()))
+            Ok(client.get(get_url_from_message_type(args).as_str()))
         }
         Some("PATCH") => {
-            Ok(client.patch(get_attestation_request_url(args).as_str()))
+            Ok(client.patch(get_url_from_message_type(args).as_str()))
         }
-        _ => Ok(client.post(get_attestation_request_url(args).as_str())),
+        _ => Ok(client.post(get_url_from_message_type(args).as_str())),
     }
 }
 
-async fn send_attestation_request(
-    args: &Args,
-) -> Result<ResponseInformation> {
-    let filler = get_attestation_filler_request(args);
-    let request = filler.get_attestation_request();
-    let serialized = serde_json::to_string(&request)
-        .expect("failed to serialize request as JSON");
-    debug!("Serialized Request: {}", serialized);
+async fn send_push_model_request(args: &Args) -> Result<ResponseInformation> {
+    let filler = get_filler_request(args);
 
+    let json_value = match get_message_type(args) {
+        MessageType::Attestation => {
+            json_dump::dump_attestation_request_to_value(
+                &filler.get_attestation_request(),
+            )
+        }
+        MessageType::EvidenceHandling => {
+            json_dump::dump_evidence_handling_request_to_value(
+                &filler.get_evidence_handling_request(),
+            )
+        }
+        MessageType::Session => json_dump::dump_session_request_to_value(
+            &filler.get_session_request(),
+        ),
+    };
     let reqb = get_request_builder_from_method(args)?;
 
     let response = reqb
-        .json(&request)
+        .body(json_value.unwrap().to_string())
+        .header("Accept", "application/json")
         .timeout(Duration::from_millis(args.timeout))
         .send()
         .await?;
@@ -190,7 +210,7 @@ async fn send_attestation_request(
 struct Args {
     /// API version
     /// Default: "v3.0"
-    #[arg(long, default_value = DEFAULT_API_VERSION)]
+    #[arg(long, default_value = url_selector::DEFAULT_API_VERSION)]
     api_version: Option<String>,
     /// CA certificate file
     #[arg(long, default_value = "/var/lib/keylime/cv_ca/cacert.crt")]
@@ -215,18 +235,26 @@ struct Args {
     /// identifier
     /// Default: 12345678
     #[arg(long, default_value = "12345678")]
-    identifier: String,
+    agent_identifier: String,
     /// index
     /// Default: 1
     #[arg(long, default_value = "1")]
-    index: Option<String>,
+    attestation_index: Option<String>,
     /// insecure
     #[arg(long, action, default_missing_value = "true")]
     insecure: Option<bool>,
+    /// Type of message
+    /// Default: "Attestation"
+    #[arg(long, default_value = DEFAULT_MESSAGE_TYPE_STR)]
+    message_type: Option<String>,
     /// Method
     /// Default: "POST"
-    #[arg(long, default_value = DEFAULT_METHOD)]
+    #[arg(long, default_missing_value = DEFAULT_METHOD)]
     method: Option<String>,
+    /// Session ID
+    /// Default: 1
+    #[arg(long, default_missing_value = "1", default_value = "1")]
+    session_index: Option<String>,
     /// Timeout in milliseconds
     /// Default: 5000
     #[arg(long, default_value = DEFAULT_TIMEOUT_MILLIS)]
@@ -238,12 +266,9 @@ struct Args {
 
 async fn run() -> Result<()> {
     let args = Args::parse();
-    info!("API version: {}", get_api_version(&args));
     info!("Verifier URL: {}", args.verifier_url);
     debug!("Timeout: {}", args.timeout);
     debug!("CA certificate file: {}", args.ca_certificate);
-    debug!("Identifier: {}", args.identifier);
-    debug!("Index: {}", get_index(&args));
     debug!(
         "Method: {}",
         args.method.clone().unwrap_or(DEFAULT_METHOD.to_string())
@@ -251,7 +276,7 @@ async fn run() -> Result<()> {
     debug!("Certificate file: {}", args.certificate);
     debug!("Key file: {}", args.key);
     debug!("Insecure: {}", args.insecure.unwrap_or(false));
-    let res = send_attestation_request(&args).await;
+    let res = send_push_model_request(&args).await;
     match res {
         Ok(_) => {
             info!("Request sent successfully");
@@ -278,48 +303,34 @@ mod tests {
     const TEST_TIMEOUT_MILLIS: u64 = 100;
 
     #[actix_rt::test]
-    async fn get_index_test() {
-        let index = get_index(&Args {
-            api_version: None,
-            verifier_url: "https://1.2.3.4:5678/".to_string(),
-            timeout: TEST_TIMEOUT_MILLIS,
-            ca_certificate: "/tmp/does_not_exist.pem".to_string(),
-            certificate: "/tmp/does_not_exist.pem".to_string(),
-            key: "/tmp/does_not_exist.pem".to_string(),
-            insecure: Some(false),
-            identifier: "024680".to_string(),
-            json_file: None,
-            method: None,
-            index: Some("2".to_string()),
-        });
-        assert_eq!(index, "2".to_string());
-    } // get_attestation_request_url_test
-
-    #[actix_rt::test]
     async fn send_attestation_request_test() {
-        if (send_attestation_request(&Args {
-            api_version: Some("v3.0".to_string()),
-            verifier_url: "http://1.2.3.4:5678".to_string(),
-            timeout: TEST_TIMEOUT_MILLIS,
-            ca_certificate: "/tmp/does_not_exist.pem".to_string(),
-            certificate: "/tmp/does_not_exist.pem".to_string(),
-            key: "/tmp/does_not_exist.pem".to_string(),
-            insecure: Some(false),
-            identifier: "12345678".to_string(),
-            json_file: None,
-            method: None,
-            index: None,
-        })
-        .await)
-            .is_ok()
-        {
-            unreachable!()
+        for att_idx in [None, Some("1".to_string())] {
+            if (send_push_model_request(&Args {
+                api_version: Some("v3.0".to_string()),
+                verifier_url: "http://1.2.3.4:5678".to_string(),
+                timeout: TEST_TIMEOUT_MILLIS,
+                ca_certificate: "/tmp/does_not_exist.pem".to_string(),
+                certificate: "/tmp/does_not_exist.pem".to_string(),
+                key: "/tmp/does_not_exist.pem".to_string(),
+                insecure: Some(false),
+                agent_identifier: "12345678".to_string(),
+                json_file: None,
+                message_type: Some("Attestation".to_string()),
+                method: None,
+                attestation_index: att_idx,
+                session_index: None,
+            })
+            .await)
+                .is_ok()
+            {
+                unreachable!()
+            }
         }
     }
 
     #[actix_rt::test]
     async fn send_attestation_request_test_no_cert_file() {
-        match send_attestation_request(&Args {
+        match send_push_model_request(&Args {
             api_version: Some("v3.0".to_string()),
             verifier_url: "https://1.2.3.4:5678".to_string(),
             timeout: TEST_TIMEOUT_MILLIS,
@@ -327,10 +338,12 @@ mod tests {
             certificate: "/tmp/unexisting_cert_file".to_string(),
             key: "/tmp/unexisting_key_file".to_string(),
             insecure: Some(false),
-            identifier: "12345678".to_string(),
+            agent_identifier: "12345678".to_string(),
             json_file: None,
             method: None,
-            index: None,
+            message_type: Some("Attestation".to_string()),
+            attestation_index: None,
+            session_index: None,
         })
         .await
         {
@@ -359,7 +372,7 @@ mod tests {
         let _key_file =
             File::create(&key_file_path).expect("Failed to create key file");
 
-        match send_attestation_request(&Args {
+        match send_push_model_request(&Args {
             api_version: Some("3.0".to_string()),
             verifier_url: "https://1.2.3.4:5678/".to_string(),
             timeout: TEST_TIMEOUT_MILLIS,
@@ -367,10 +380,12 @@ mod tests {
             certificate: cert_file_path.display().to_string(),
             key: key_file_path.display().to_string(),
             insecure: Some(false),
-            identifier: "12345678".to_string(),
+            agent_identifier: "12345678".to_string(),
             json_file: None,
+            message_type: Some("Attestation".to_string()),
             method: None,
-            index: None,
+            attestation_index: None,
+            session_index: None,
         })
         .await
         {
@@ -385,7 +400,7 @@ mod tests {
                 )
             }
         }
-        match send_attestation_request(&Args {
+        match send_push_model_request(&Args {
             api_version: Some("3.0".to_string()),
             verifier_url: "https://1.2.3.4:5678/".to_string(),
             timeout: TEST_TIMEOUT_MILLIS,
@@ -393,10 +408,12 @@ mod tests {
             certificate: cert_file_path.display().to_string(),
             key: key_file_path.display().to_string(),
             insecure: Some(true),
-            identifier: "12345678".to_string(),
-            index: None,
+            agent_identifier: "12345678".to_string(),
+            attestation_index: None,
             json_file: None,
+            message_type: Some("Attestation".to_string()),
             method: None,
+            session_index: None,
         })
         .await
         {
@@ -407,7 +424,7 @@ mod tests {
                     .contains("error sending request for url (https://1.2.3.4:5678/3.0/agents/12345678/attestations)"))
             }
         }
-        match send_attestation_request(&Args {
+        match send_push_model_request(&Args {
             api_version: Some("3.0".to_string()),
             verifier_url: "https://1.2.3.4:5678/".to_string(),
             timeout: TEST_TIMEOUT_MILLIS,
@@ -415,13 +432,15 @@ mod tests {
             certificate: cert_file_path.display().to_string(),
             key: key_file_path.display().to_string(),
             insecure: Some(true),
-            identifier: "12345678".to_string(),
+            agent_identifier: "12345678".to_string(),
             json_file: Some(
-                "./tests/evidence_supported_attestation_request.json"
+                "./test-data/evidence_supported_attestation_request.json"
                     .to_string(),
             ),
+            message_type: Some("Attestation".to_string()),
             method: None,
-            index: None,
+            attestation_index: None,
+            session_index: None,
         })
         .await
         {
@@ -435,59 +454,92 @@ mod tests {
     }
 
     #[actix_rt::test]
-    async fn different_methods_test() {
-        // array with the different methods:
-        let methods = vec!["DELETE", "GET", "POST", "PUT", "PATCH"];
-        for method in methods {
-            match send_attestation_request(&Args {
-                api_version: None,
-                verifier_url: "http://1.2.3.4:5678".to_string(),
+    async fn send_evidence_handling_request_test() {
+        for attestation_idx in [None, Some("3".to_string())] {
+            match send_push_model_request(&Args {
+                api_version: Some("3.0".to_string()),
+                verifier_url: "https://1.2.3.4:5678/".to_string(),
                 timeout: TEST_TIMEOUT_MILLIS,
                 ca_certificate: "/tmp/does_not_exists.pem".to_string(),
                 certificate: "/tmp/does_not_exists.pem".to_string(),
                 key: "/tmp/does_not_exists.pem".to_string(),
-                insecure: Some(false),
-                identifier: "12345678".to_string(),
+                insecure: Some(true),
+                agent_identifier: "12345678".to_string(),
                 json_file: None,
-                method: Some(method.to_string()),
-                index: None,
+                message_type: Some("EvidenceHandling".to_string()),
+                method: None,
+                attestation_index: attestation_idx,
+                session_index: None,
             })
             .await
             {
                 Ok(_) => unreachable!(),
                 Err(e) => {
-                    assert!(e.to_string().contains("error sending request for url (http://1.2.3.4:5678/v3.0/agents/12345678/attestations)") ||
-                    e.to_string().contains("error sending request for url (http://1.2.3.4:5678/v3.0/agents/12345678/attestations/1)"));
+                    assert!(e
+                        .to_string()
+                        .contains("error sending request for url (https://1.2.3.4:5678/3.0/agents/12345678/attestations"))
                 }
             }
         }
-    }
+    } // send_evidence_handling_request_test
 
     #[actix_rt::test]
-    async fn get_attestation_request_url_test() {
-        let url = get_attestation_request_url(&Args {
-            api_version: None,
+    async fn send_session_request_test() {
+        match send_push_model_request(&Args {
+            api_version: Some("3.0".to_string()),
             verifier_url: "https://1.2.3.4:5678/".to_string(),
             timeout: TEST_TIMEOUT_MILLIS,
             ca_certificate: "/tmp/does_not_exists.pem".to_string(),
             certificate: "/tmp/does_not_exists.pem".to_string(),
             key: "/tmp/does_not_exists.pem".to_string(),
-            insecure: Some(false),
-            identifier: "024680".to_string(),
+            insecure: Some(true),
+            agent_identifier: "12345678".to_string(),
             json_file: None,
+            message_type: Some("Session".to_string()),
+            method: Some("POST".to_string()),
+            attestation_index: None,
+            session_index: None,
+        })
+        .await
+        {
+            Ok(_) => unreachable!(),
+            Err(e) => {
+                assert!(e
+                    .to_string()
+                    .contains("error sending request for url (https://1.2.3.4:5678/3.0/sessions)"))
+            }
+        }
+        match send_push_model_request(&Args {
+            api_version: Some("3.0".to_string()),
+            verifier_url: "https://1.2.3.4:5678/".to_string(),
+            timeout: TEST_TIMEOUT_MILLIS,
+            ca_certificate: "/tmp/does_not_exists.pem".to_string(),
+            certificate: "/tmp/does_not_exists.pem".to_string(),
+            key: "/tmp/does_not_exists.pem".to_string(),
+            insecure: Some(true),
+            agent_identifier: "12345678".to_string(),
+            json_file: None,
+            message_type: Some("Session".to_string()),
             method: Some("PATCH".to_string()),
-            index: Some("2".to_string()),
-        });
-        assert_eq!(
-            url,
-            "https://1.2.3.4:5678/v3.0/agents/024680/attestations/2"
-        );
-    } // get_attestation_request_url_test
+            attestation_index: None,
+            session_index: Some("2244668800".to_string()),
+        })
+        .await
+        {
+            Ok(_) => unreachable!(),
+            Err(e) => {
+                assert_eq!(
+                    e.to_string(),
+                    "error sending request for url (https://1.2.3.4:5678/3.0/sessions/2244668800)"
+                );
+            }
+        }
+    } // send_session_request_test
 
     #[actix_rt::test]
     async fn mockoon_based_test() {
         if std::env::var("MOCKOON").is_ok() {
-            match send_attestation_request(&Args {
+            match send_push_model_request(&Args {
                 api_version: None,
                 verifier_url: "http://localhost:3000".to_string(),
                 timeout: TEST_TIMEOUT_MILLIS,
@@ -495,10 +547,12 @@ mod tests {
                 certificate: "/tmp/does_not_exist.pem".to_string(),
                 key: "/tmp/does_not_exist.pem".to_string(),
                 insecure: Some(false),
-                identifier: "12345678".to_string(),
+                agent_identifier: "12345678".to_string(),
                 json_file: None,
+                message_type: Some("Attestation".to_string()),
                 method: Some("POST".to_string()),
-                index: None,
+                attestation_index: None,
+                session_index: None,
             })
             .await
             {
@@ -509,7 +563,7 @@ mod tests {
                     unreachable!()
                 }
             }
-            match send_attestation_request(&Args {
+            match send_push_model_request(&Args {
                 api_version: Some("-1.2.3".to_string()),
                 verifier_url: "http://localhost:3000".to_string(),
                 timeout: TEST_TIMEOUT_MILLIS,
@@ -517,10 +571,12 @@ mod tests {
                 certificate: "/tmp/does_not_exist.pem".to_string(),
                 key: "/tmp/does_not_exist.pem".to_string(),
                 insecure: Some(false),
-                identifier: "12345678".to_string(),
+                agent_identifier: "12345678".to_string(),
                 json_file: None,
+                message_type: Some("Attestation".to_string()),
                 method: Some("POST".to_string()),
-                index: None,
+                attestation_index: None,
+                session_index: None,
             })
             .await
             {
@@ -531,8 +587,119 @@ mod tests {
                     unreachable!()
                 }
             }
-        }
+            match send_push_model_request(&Args {
+                api_version: None,
+                verifier_url: "http://localhost:3000".to_string(),
+                timeout: TEST_TIMEOUT_MILLIS,
+                ca_certificate: "/tmp/does_not_exist.pem".to_string(),
+                certificate: "/tmp/does_not_exist.pem".to_string(),
+                key: "/tmp/does_not_exist.pem".to_string(),
+                insecure: Some(false),
+                agent_identifier: "".to_string(),
+                json_file: None,
+                message_type: Some("Session".to_string()),
+                method: Some("POST".to_string()),
+                attestation_index: None,
+                session_index: None,
+            })
+            .await
+            {
+                Ok(r) => {
+                    assert!(r.status_code == reqwest::StatusCode::OK);
+                }
+                Err(_) => {
+                    unreachable!()
+                }
+            }
+            match send_push_model_request(&Args {
+                api_version: None,
+                verifier_url: "http://localhost:3000".to_string(),
+                timeout: TEST_TIMEOUT_MILLIS,
+                ca_certificate: "/tmp/does_not_exist.pem".to_string(),
+                certificate: "/tmp/does_not_exist.pem".to_string(),
+                key: "/tmp/does_not_exist.pem".to_string(),
+                insecure: Some(false),
+                agent_identifier: "".to_string(),
+                json_file: None,
+                message_type: Some("Session".to_string()),
+                method: Some("PATCH".to_string()),
+                attestation_index: None,
+                session_index: Some("12345678".to_string()),
+            })
+            .await
+            {
+                Ok(r) => {
+                    assert!(r.status_code == reqwest::StatusCode::OK);
+                }
+                Err(_) => {
+                    unreachable!()
+                }
+            }
+        } // MOCKOON enabled
     } // mockoon_based_test
+
+    #[actix_rt::test]
+    async fn get_message_type_test() {
+        for mtype in [
+            "Attestation".to_string(),
+            "EvidenceHandling".to_string(),
+            "Session".to_string(),
+        ] {
+            let args = Args {
+                api_version: None,
+                verifier_url: "".to_string(),
+                timeout: 0,
+                ca_certificate: "".to_string(),
+                certificate: "".to_string(),
+                key: "".to_string(),
+                insecure: None,
+                agent_identifier: "".to_string(),
+                json_file: None,
+                message_type: Some(mtype.to_string()),
+                method: None,
+                attestation_index: None,
+                session_index: None,
+            };
+            let msg_type = get_message_type(&args);
+            match mtype.as_str() {
+                "Attestation" => matches!(msg_type, MessageType::Attestation),
+                "EvidenceHandling" => {
+                    matches!(msg_type, MessageType::EvidenceHandling)
+                }
+                "Session" => matches!(msg_type, MessageType::Session),
+                _ => unreachable!(),
+            };
+        }
+    } // get_message_type_test
+
+    #[actix_rt::test]
+    async fn create_request_builder_test() {
+        for method in [
+            "POST".to_string(),
+            "PUT".to_string(),
+            "DELETE".to_string(),
+            "GET".to_string(),
+            "PATCH".to_string(),
+        ] {
+            let args = Args {
+                api_version: None,
+                verifier_url: "".to_string(),
+                timeout: 0,
+                ca_certificate: "".to_string(),
+                certificate: "".to_string(),
+                key: "".to_string(),
+                insecure: None,
+                agent_identifier: "".to_string(),
+                json_file: None,
+                message_type: None,
+                method: Some(method),
+                attestation_index: None,
+                session_index: None,
+            };
+            let reqb = get_request_builder_from_method(&args);
+            assert!(reqb.is_ok());
+        }
+    }
 
     #[actix_rt::test]
     async fn run_test() {

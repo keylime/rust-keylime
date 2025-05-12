@@ -30,7 +30,13 @@ mod tests {
         cmd.arg("-v")
             .arg("http://1.2.3.4:5678")
             .arg("--timeout")
-            .arg("10");
+            .arg("10")
+            .arg("--agent-identifier")
+            .arg("12345678")
+            .arg("--message-type")
+            .arg("attestation")
+            .arg("--method")
+            .arg("POST");
         cmd.assert()
             .success()
             .stderr(predicate::str::contains(ERROR_SENDING_REQUEST));
