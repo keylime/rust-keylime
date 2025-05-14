@@ -2,6 +2,7 @@
 // Copyright 2025 Keylime Authors
 pub const DEFAULT_API_VERSION: &str = "v3.0";
 const DEFAULT_INDEX: &str = "1";
+use crate::MessageType;
 
 pub struct UrlArgs {
     pub verifier_url: String,
@@ -11,6 +12,13 @@ pub struct UrlArgs {
     pub session_index: Option<String>,
 }
 
+pub fn get_attestation_index(args: &UrlArgs) -> String {
+    if args.attestation_index.is_some() {
+        return args.attestation_index.clone().unwrap();
+    }
+    DEFAULT_INDEX.to_string()
+}
+
 fn get_api_version(args: &UrlArgs) -> String {
     if args.api_version.is_some() {
         return args.api_version.clone().unwrap();
@@ -18,11 +26,21 @@ fn get_api_version(args: &UrlArgs) -> String {
     DEFAULT_API_VERSION.to_string()
 }
 
-pub fn get_attestation_index(args: &UrlArgs) -> String {
-    if args.attestation_index.is_some() {
-        return args.attestation_index.clone().unwrap();
+pub fn get_url_from_message_type(
+    url_args: &UrlArgs,
+    message_type: &MessageType,
+) -> String {
+    match message_type {
+        MessageType::Attestation => get_attestation_request_url(url_args),
+        MessageType::EvidenceHandling => {
+            if url_args.attestation_index.is_some() {
+                get_evidence_handling_request_url_with_index(url_args)
+            } else {
+                get_evidence_handling_request_url(url_args)
+            }
+        }
+        MessageType::Session => get_session_request_url(url_args),
     }
-    DEFAULT_INDEX.to_string()
 }
 
 fn get_index_suffix(args: &UrlArgs) -> String {
@@ -33,7 +51,7 @@ fn get_index_suffix(args: &UrlArgs) -> String {
     "".to_string()
 }
 
-pub fn get_attestation_request_url(args: &UrlArgs) -> String {
+fn get_attestation_request_url(args: &UrlArgs) -> String {
     let id = args.agent_identifier.clone().unwrap();
     let verifier_url = args.verifier_url.clone();
     let api_version = get_api_version(args);
@@ -45,7 +63,7 @@ pub fn get_attestation_request_url(args: &UrlArgs) -> String {
     format!("{verifier_url}/{api_version}/agents/{id}/attestations")
 }
 
-pub fn get_evidence_handling_request_url(args: &UrlArgs) -> String {
+fn get_evidence_handling_request_url(args: &UrlArgs) -> String {
     let id = args.agent_identifier.clone().unwrap();
     let verifier_url = args.verifier_url.clone();
     let api_version = get_api_version(args);
@@ -57,9 +75,7 @@ pub fn get_evidence_handling_request_url(args: &UrlArgs) -> String {
     format!("{verifier_url}/{api_version}/agents/{id}/attestations")
 }
 
-pub fn get_evidence_handling_request_url_with_index(
-    args: &UrlArgs,
-) -> String {
+fn get_evidence_handling_request_url_with_index(args: &UrlArgs) -> String {
     let id = args.agent_identifier.clone().unwrap();
     let verifier_url = args.verifier_url.clone();
     let api_version = get_api_version(args);

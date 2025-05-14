@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2025 Keylime Authors
-use crate::struct_filler::StructureFiller;
 use anyhow::{Context, Result};
 use clap::Parser;
 use log::{debug, error, info};
@@ -16,18 +15,77 @@ mod url_selector;
 const DEFAULT_TIMEOUT_MILLIS: &str = "5000";
 const HTTPS_PREFIX: &str = "https://";
 const DEFAULT_METHOD: &str = "POST";
+const DEFAULT_MESSAGE_TYPE: MessageType = MessageType::Attestation;
+const DEFAULT_MESSAGE_TYPE_STR: &str = "Attestation";
 
-enum MessageType {
+pub enum MessageType {
     Attestation,
     EvidenceHandling,
     Session,
 }
-const DEFAULT_MESSAGE_TYPE: MessageType = MessageType::Attestation;
-const DEFAULT_MESSAGE_TYPE_STR: &str = "Attestation";
 
 pub struct ResponseInformation {
     pub status_code: reqwest::StatusCode,
     pub body: String,
+}
+
+#[derive(Parser, Debug)]
+#[command(author, version, about, long_about = None, ignore_errors = true)]
+struct Args {
+    /// API version
+    /// Default: "v3.0"
+    #[arg(long, default_value = url_selector::DEFAULT_API_VERSION)]
+    api_version: Option<String>,
+    /// CA certificate file
+    #[arg(long, default_value = "/var/lib/keylime/cv_ca/cacert.crt")]
+    ca_certificate: String,
+    /// Client certificate file
+    #[arg(
+        short,
+        long,
+        default_value = "/var/lib/keylime/cv_ca/client-cert.crt"
+    )]
+    certificate: String,
+    /// Client private key file
+    #[arg(
+        short,
+        long,
+        default_value = "/var/lib/keylime/cv_ca/client-private.pem"
+    )]
+    key: String,
+    /// json file
+    #[arg(short, long, default_missing_value = "")]
+    json_file: Option<String>,
+    /// identifier
+    /// Default: 12345678
+    #[arg(long, default_value = "12345678")]
+    agent_identifier: String,
+    /// index
+    /// Default: 1
+    #[arg(long, default_value = "1")]
+    attestation_index: Option<String>,
+    /// insecure
+    #[arg(long, action, default_missing_value = "true")]
+    insecure: Option<bool>,
+    /// Type of message
+    /// Default: "Attestation"
+    #[arg(long, default_value = DEFAULT_MESSAGE_TYPE_STR)]
+    message_type: Option<String>,
+    /// Method
+    /// Default: "POST"
+    #[arg(long, default_missing_value = DEFAULT_METHOD)]
+    method: Option<String>,
+    /// Session ID
+    /// Default: 1
+    #[arg(long, default_missing_value = "1", default_value = "1")]
+    session_index: Option<String>,
+    /// Timeout in milliseconds
+    /// Default: 5000
+    #[arg(long, default_value = DEFAULT_TIMEOUT_MILLIS)]
+    timeout: u64,
+    /// Verifier URL
+    #[arg(short, long, default_value = "https://127.0.0.1:8881")]
+    verifier_url: String,
 }
 
 fn get_message_type(args: &Args) -> MessageType {
@@ -105,16 +163,10 @@ fn get_client(args: &Args) -> Result<reqwest::Client> {
         .context("Failed to build plain HTTP client")
 }
 
-fn get_filler_request(args: &Args) -> Box<dyn StructureFiller> {
-    if args.json_file.is_none() {
-        return Box::new(struct_filler::FillerFromCode {});
-    }
-    Box::new(struct_filler::FillerFromFile {
-        file_path: args.json_file.clone().unwrap(),
-    })
-}
-
-fn get_url_from_message_type(args: &Args) -> String {
+fn get_request_builder_from_method(
+    args: &Args,
+) -> Result<reqwest::RequestBuilder> {
+    let client = get_client(args)?;
     let url_args = url_selector::UrlArgs {
         verifier_url: args.verifier_url.clone(),
         api_version: args.api_version.clone(),
@@ -122,53 +174,24 @@ fn get_url_from_message_type(args: &Args) -> String {
         agent_identifier: Some(args.agent_identifier.clone()),
         attestation_index: args.attestation_index.clone(),
     };
-    match get_message_type(args) {
-        MessageType::Attestation => {
-            url_selector::get_attestation_request_url(&url_args)
-        }
-        MessageType::EvidenceHandling => {
-            if args.attestation_index.is_some() {
-                url_selector::get_evidence_handling_request_url_with_index(
-                    &url_args,
-                )
-            } else {
-                url_selector::get_evidence_handling_request_url(&url_args)
-            }
-        }
-        MessageType::Session => {
-            url_selector::get_session_request_url(&url_args)
-        }
-    }
-}
-
-fn get_request_builder_from_method(
-    args: &Args,
-) -> Result<reqwest::RequestBuilder> {
-    let client = get_client(args)?;
+    let url = url_selector::get_url_from_message_type(
+        &url_args,
+        &get_message_type(args),
+    );
     match args.method.as_deref() {
-        Some("POST") => {
-            Ok(client.post(get_url_from_message_type(args).as_str()))
-        }
-        Some("PUT") => {
-            Ok(client.put(get_url_from_message_type(args).as_str()))
-        }
-        Some("DELETE") => {
-            Ok(client.delete(get_url_from_message_type(args).as_str()))
-        }
-        Some("GET") => {
-            Ok(client.get(get_url_from_message_type(args).as_str()))
-        }
-        Some("PATCH") => {
-            Ok(client.patch(get_url_from_message_type(args).as_str()))
-        }
-        _ => Ok(client.post(get_url_from_message_type(args).as_str())),
+        Some("POST") => Ok(client.post(url)),
+        Some("PUT") => Ok(client.put(url)),
+        Some("DELETE") => Ok(client.delete(url)),
+        Some("GET") => Ok(client.get(url)),
+        Some("PATCH") => Ok(client.patch(url)),
+        _ => Ok(client.post(url)),
     }
 }
 
 async fn send_push_model_request(args: &Args) -> Result<ResponseInformation> {
-    let filler = get_filler_request(args);
-
-    let json_value = match get_message_type(args) {
+    let filler = struct_filler::get_filler_request(args.json_file.clone());
+    let message_type = get_message_type(args);
+    let json_value = match message_type {
         MessageType::Attestation => {
             json_dump::dump_attestation_request_to_value(
                 &filler.get_attestation_request(),
@@ -203,65 +226,6 @@ async fn send_push_model_request(args: &Args) -> Result<ResponseInformation> {
         body: response_body,
     };
     Ok(rsp)
-}
-
-#[derive(Parser, Debug)]
-#[command(author, version, about, long_about = None, ignore_errors = true)]
-struct Args {
-    /// API version
-    /// Default: "v3.0"
-    #[arg(long, default_value = url_selector::DEFAULT_API_VERSION)]
-    api_version: Option<String>,
-    /// CA certificate file
-    #[arg(long, default_value = "/var/lib/keylime/cv_ca/cacert.crt")]
-    ca_certificate: String,
-    /// Client certificate file
-    #[arg(
-        short,
-        long,
-        default_value = "/var/lib/keylime/cv_ca/client-cert.crt"
-    )]
-    certificate: String,
-    /// Client private key file
-    #[arg(
-        short,
-        long,
-        default_value = "/var/lib/keylime/cv_ca/client-private.pem"
-    )]
-    key: String,
-    /// json file
-    #[arg(short, long, default_missing_value = "")]
-    json_file: Option<String>,
-    /// identifier
-    /// Default: 12345678
-    #[arg(long, default_value = "12345678")]
-    agent_identifier: String,
-    /// index
-    /// Default: 1
-    #[arg(long, default_value = "1")]
-    attestation_index: Option<String>,
-    /// insecure
-    #[arg(long, action, default_missing_value = "true")]
-    insecure: Option<bool>,
-    /// Type of message
-    /// Default: "Attestation"
-    #[arg(long, default_value = DEFAULT_MESSAGE_TYPE_STR)]
-    message_type: Option<String>,
-    /// Method
-    /// Default: "POST"
-    #[arg(long, default_missing_value = DEFAULT_METHOD)]
-    method: Option<String>,
-    /// Session ID
-    /// Default: 1
-    #[arg(long, default_missing_value = "1", default_value = "1")]
-    session_index: Option<String>,
-    /// Timeout in milliseconds
-    /// Default: 5000
-    #[arg(long, default_value = DEFAULT_TIMEOUT_MILLIS)]
-    timeout: u64,
-    /// Verifier URL
-    #[arg(short, long, default_value = "https://127.0.0.1:8881")]
-    verifier_url: String,
 }
 
 async fn run() -> Result<()> {
