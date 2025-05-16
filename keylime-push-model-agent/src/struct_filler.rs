@@ -17,6 +17,17 @@ pub trait StructureFiller {
     ) -> structures::EvidenceHandlingRequest;
 }
 
+pub fn get_filler_request(
+    json_file: Option<String>,
+) -> Box<dyn StructureFiller> {
+    if json_file.is_none() {
+        return Box::new(FillerFromCode {});
+    }
+    Box::new(FillerFromFile {
+        file_path: json_file.clone().unwrap(),
+    })
+}
+
 pub struct FillerFromCode;
 impl StructureFiller for FillerFromCode {
     fn get_attestation_request(&self) -> structures::AttestationRequest {
