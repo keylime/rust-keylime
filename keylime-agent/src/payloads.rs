@@ -15,6 +15,7 @@ use keylime::crypto::{
     encrypted_data::EncryptedData,
     symmkey::{KeySet, SymmKey},
 };
+use keylime::global_config;
 use log::*;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -80,14 +81,14 @@ fn setup_unzipped(
     }
 
     match config.agent.dec_payload_file.as_ref() {
-        "" => Err(config::KeylimeConfigError::RequiredOption(
+        "" => Err(global_config::KeylimeConfigError::RequiredOption(
             "dec_payload_path".to_string(),
         )
         .into()),
         p => {
             let dec_payload_path = unzipped.join(p);
             match config.agent.enc_keyname.as_ref() {
-                "" => Err(config::KeylimeConfigError::RequiredOption(
+                "" => Err(global_config::KeylimeConfigError::RequiredOption(
                     "enc_keyname".to_string(),
                 )
                 .into()),

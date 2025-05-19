@@ -32,11 +32,9 @@
 #![allow(unused, missing_docs)]
 
 mod agent_handler;
-mod agent_registration;
 mod api;
 mod common;
 mod config;
-mod error;
 mod errors_handler;
 mod keys_handler;
 mod notifications_handler;
@@ -47,16 +45,18 @@ mod revocation;
 mod secure_mount;
 
 use actix_web::{dev::Service, http, middleware, rt, web, App, HttpServer};
-use agent_registration::AgentRegistration;
 use base64::{engine::general_purpose, Engine as _};
 use clap::{Arg, Command as ClapApp};
 use common::*;
-use error::{Error, Result};
 use futures::{
     future::{ok, TryFutureExt},
     try_join,
 };
+use keylime::agent_registration::AgentRegistrationConfig;
+use keylime::error::{Error, Result};
+use keylime::global_config;
 use keylime::{
+    agent_registration::AgentRegistration,
     crypto::{self, x509::CertificateBuilder},
     device_id::{DeviceID, DeviceIDBuilder},
     ima::MeasurementList,
@@ -236,7 +236,7 @@ async fn main() -> Result<()> {
 
         error!("Configuration error: {}", &message);
         return Err(Error::Configuration(
-            config::KeylimeConfigError::Generic(message),
+            global_config::KeylimeConfigError::Generic(message),
         ));
     }
 
@@ -266,7 +266,7 @@ async fn main() -> Result<()> {
 
             error!("Configuration error: {}", &message);
             return Err(Error::Configuration(
-                config::KeylimeConfigError::Generic(message),
+                global_config::KeylimeConfigError::Generic(message),
             ));
         }
         info!("Running the service as {}...", user_group);
@@ -295,7 +295,7 @@ async fn main() -> Result<()> {
             if !python_shim.exists() {
                 error!("Could not find python shim at {}", python_shim.display());
                 return Err(Error::Configuration(
-                    config::KeylimeConfigError::Generic(format!(
+                    global_config::KeylimeConfigError::Generic(format!(
                     "Could not find python shim at {}",
                     python_shim.display()
                 ))));
@@ -319,7 +319,7 @@ async fn main() -> Result<()> {
         };
         ctx.tr_set_auth(Hierarchy::Endorsement.into(), auth)
             .map_err(|e| {
-                Error::Configuration(config::KeylimeConfigError::Generic(format!(
+                Error::Configuration(global_config::KeylimeConfigError::Generic(format!(
                     "Failed to set TPM context password for Endorsement Hierarchy: {e}"
                 )))
             })?;
@@ -573,7 +573,7 @@ async fn main() -> Result<()> {
         {
             "" => {
                 error!("Agent mTLS is enabled, but trusted_client_ca option was not provided");
-                return Err(Error::Configuration(config::KeylimeConfigError::Generic("Agent mTLS is enabled, but trusted_client_ca option was not provided".to_string())));
+                return Err(Error::Configuration(global_config::KeylimeConfigError::Generic("Agent mTLS is enabled, but trusted_client_ca option was not provided".to_string())));
             }
             l => l,
         };
@@ -584,7 +584,7 @@ async fn main() -> Result<()> {
             error!(
                 "Trusted client CA certificate list is empty: could not load any certificate"
             );
-            return Err(Error::Configuration(config::KeylimeConfigError::Generic(
+            return Err(Error::Configuration(global_config::KeylimeConfigError::Generic(
                 "Trusted client CA certificate list is empty: could not load any certificate".to_string()
             )));
         }
@@ -611,11 +611,20 @@ async fn main() -> Result<()> {
         warn!("mTLS disabled, Tenant and Verifier will reach out to agent via HTTP");
     }
 
+    let ac = AgentRegistrationConfig {
+        contact_ip: config.agent.contact_ip.clone(),
+        contact_port: config.agent.contact_port,
+        registrar_ip: config.agent.registrar_ip.clone(),
+        registrar_port: config.agent.registrar_port,
+        enable_iak_idevid: config.agent.enable_iak_idevid,
+        ek_handle: config.agent.ek_handle.clone(),
+    };
+
     let aa = AgentRegistration {
         ak,
         ek_result,
         api_versions: api_versions.clone(),
-        agent: config.agent.clone(),
+        agent: ac,
         agent_uuid: agent_uuid.clone(),
         mtls_cert,
         device_id,
@@ -623,7 +632,7 @@ async fn main() -> Result<()> {
         signature,
         ak_handle,
     };
-    match agent_registration::register_agent(aa, &mut ctx).await {
+    match keylime::agent_registration::register_agent(aa, &mut ctx).await {
         Ok(()) => (),
         Err(e) => {
             error!("Failed to register agent: {}", e);
@@ -647,7 +656,7 @@ async fn main() -> Result<()> {
             error!(
                 "No revocation certificate set in 'revocation_cert' option"
             );
-            return Err(Error::Configuration(config::KeylimeConfigError::Generic(
+            return Err(Error::Configuration(global_config::KeylimeConfigError::Generic(
                 "No revocation certificate set in 'revocation_cert' option"
                     .to_string(),
             )));

@@ -1,36 +1,46 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2025 Keylime Authors
-use crate::config;
 use crate::error::{Error, Result};
 use base64::{engine::general_purpose, Engine as _};
-use keylime::{
-    crypto::{self, x509::CertificateBuilder},
-    registrar_client::RegistrarClientBuilder,
-    tpm::{self, IAKResult, IDevIDResult},
-};
 use log::{error, info};
 use openssl::x509::X509;
 use tss_esapi::handles::KeyHandle;
 use tss_esapi::structures::PublicBuffer;
 use tss_esapi::traits::Marshall;
+use {
+    crate::crypto::{self},
+    crate::device_id,
+    crate::registrar_client::RegistrarClientBuilder,
+    crate::tpm::{self},
+};
+
+#[derive(Debug)]
+pub struct AgentRegistrationConfig {
+    pub contact_ip: String,
+    pub contact_port: u32,
+    pub ek_handle: String,
+    pub enable_iak_idevid: bool,
+    pub registrar_ip: String,
+    pub registrar_port: u32,
+}
 
 #[derive(Debug)]
 pub struct AgentRegistration {
     pub ak: tpm::AKResult,
     pub ek_result: tpm::EKResult,
     pub api_versions: Vec<String>,
-    pub agent: config::AgentConfig,
+    pub agent: AgentRegistrationConfig,
     pub agent_uuid: String,
     pub mtls_cert: Option<X509>,
-    pub device_id: Option<keylime::device_id::DeviceID>,
+    pub device_id: Option<device_id::DeviceID>,
     pub attest: Option<tss_esapi::structures::Attest>,
     pub signature: Option<tss_esapi::structures::Signature>,
     pub ak_handle: KeyHandle,
 }
 
 pub async fn register_agent(
-    mut aa: AgentRegistration,
-    mut ctx: &mut tpm::Context<'_>,
+    aa: AgentRegistration,
+    ctx: &mut tpm::Context<'_>,
 ) -> Result<()> {
     let iak_pub;
     let idevid_pub;
@@ -66,11 +76,9 @@ pub async fn register_agent(
             (&aa.device_id, aa.attest, aa.signature)
         else {
             error!("IDevID and IAK are enabled but could not be generated");
-            return Err(Error::Configuration(
-                config::KeylimeConfigError::Generic(
-                    "IDevID and IAK are enabled but could not be generated"
-                        .to_string(),
-                ),
+            return Err(Error::ConfigurationGenericError(
+                "IDevID and IAK are enabled but could not be generated"
+                    .to_string(),
             ));
         };
 

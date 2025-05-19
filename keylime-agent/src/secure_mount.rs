@@ -3,7 +3,7 @@
 
 use super::*;
 
-use crate::error::{Error, Result};
+use keylime::error::{Error, Result};
 use std::fs;
 use std::io::BufRead;
 use std::os::unix::fs::PermissionsExt;
