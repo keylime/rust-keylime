@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2022 Keylime Authors
-
 use crate::{api::SUPPORTED_API_VERSIONS, permissions, tpm};
 use config::{
     builder::DefaultState, Config, ConfigBuilder, ConfigError, Environment,
@@ -9,6 +8,7 @@ use config::{
 use glob::glob;
 use keylime::{
     algorithms::{EncryptionAlgorithm, HashAlgorithm, SignAlgorithm},
+    global_config::KeylimeConfigError,
     hostname_parser::{parse_hostname, HostnameParsingError},
     ip_parser::{parse_ip, IpParsingError},
     list_parser::{parse_list, ListParsingError},
@@ -81,72 +81,6 @@ pub static DEFAULT_MEASUREDBOOT_ML_PATH: &str =
     "/sys/kernel/security/tpm0/binary_bios_measurements";
 pub static DEFAULT_CONFIG: &str = "/etc/keylime/agent.conf";
 pub static DEFAULT_CONFIG_SYS: &str = "/usr/etc/keylime/agent.conf";
-
-#[derive(Error, Debug)]
-pub enum KeylimeConfigError {
-    // Error from config crate
-    #[error("Error from the config crate")]
-    Config(#[from] ConfigError),
-
-    // Generic configuration error
-    #[error("Configuration error: {0}")]
-    Generic(String),
-
-    // Glob error
-    #[error("Glob pattern error")]
-    GlobPattern(#[from] glob::PatternError),
-
-    // Host name parsing error
-    #[error("Host name parsing error")]
-    HostnameParsing(#[from] HostnameParsingError),
-
-    // Incompatible options error
-    #[error("Incompatible configuration options '{option_a}' set as '{value_a}', but '{option_b}' is set as '{value_b}'")]
-    IncompatibleOptions {
-        option_a: String,
-        value_a: String,
-        option_b: String,
-        value_b: String,
-    },
-
-    // Infallible
-    #[error("Infallible")]
-    Infallible(#[from] std::convert::Infallible),
-
-    // IP parsing error
-    #[error("IP parsing error")]
-    IpParsing(#[from] IpParsingError),
-
-    // Unsupported type in configuration
-    #[error(
-        "Unsupported type conversion from serde_json::Value to config::Value"
-    )]
-    JsonConversion,
-
-    // List parsing error
-    #[error("List parsing error")]
-    ListParsing(#[from] ListParsingError),
-
-    // Missing configuration file set in KEYLIME_AGENT_CONFIG
-    #[error("Missing file {file} set in 'KEYLIME_AGENT_CONFIG' environment variable")]
-    MissingEnvConfigFile { file: String },
-
-    // Missing directory set in keylime_dir configuration option
-    #[error(
-        "Missing directory {path} set in 'keylime_dir' configuration option"
-    )]
-    MissingKeylimeDir {
-        path: String,
-        source: std::io::Error,
-    },
-
-    #[error("Required option {0} not set in configuration")]
-    RequiredOption(String),
-
-    // Error from serde crate
-    #[error("Serde error")]
-    Serde(#[from] serde_json::Error),
-}
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 pub(crate) struct AgentConfig {

@@ -5,8 +5,8 @@
 use actix_web::rt;
 use crate::config::{AgentConfig, KeylimeConfig};
 use crate::crypto;
-use crate::error::*;
 use crate::secure_mount;
+use keylime::error::*;
 use keylime::list_parser::parse_list;
 use log::*;
 use serde::{Deserialize, Serialize};

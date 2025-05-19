@@ -1,10 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2021 Keylime Authors
 
-use crate::{
-    error::{Error, Result},
-    permissions,
-};
+use keylime::error::{Error, Result};
+
+use crate::permissions;
 
 use keylime::algorithms::{
     EncryptionAlgorithm, HashAlgorithm, SignAlgorithm,

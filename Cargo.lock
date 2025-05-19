@@ -1375,8 +1375,11 @@ name = "keylime"
 version = "0.2.7"
 dependencies = [
  "actix-rt",
+ "actix-web",
  "base64 0.22.1",
  "chrono",
+ "config",
+ "glob",
  "hex",
  "log",
  "openssl",
@@ -1393,7 +1396,10 @@ dependencies = [
  "thiserror",
  "tokio",
  "tss-esapi",
+ "uuid",
  "wiremock",
+ "zip",
+ "zmq",
 ]
 
 [[package]]
