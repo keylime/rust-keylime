@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2021 Keylime Authors
 
-use keylime::error::{Error, Result};
+use keylime::keylime_error::{Error, Result};
 use libc::{c_char, c_int, gid_t, uid_t};
 use log::*;
 use std::os::unix::ffi::OsStrExt;

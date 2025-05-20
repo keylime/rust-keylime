@@ -53,12 +53,14 @@ use futures::{
     try_join,
 };
 use keylime::agent_registration::AgentRegistrationConfig;
-use keylime::error::{Error, Result};
 use keylime::global_config;
+use keylime::keylime_error::{Error, Result};
 use keylime::{
+    agent_data::AgentData,
     agent_registration::AgentRegistration,
     crypto::{self, x509::CertificateBuilder},
     device_id::{DeviceID, DeviceIDBuilder},
+    hash_ek,
     ima::MeasurementList,
     list_parser::parse_list,
     registrar_client::RegistrarClientBuilder,
@@ -343,7 +345,7 @@ async fn main() -> Result<()> {
     };
 
     // Calculate the SHA-256 hash of the public key in PEM format
-    let ek_hash = hash_ek_pubkey(ek_result.public.clone())?;
+    let ek_hash = hash_ek::hash_ek_pubkey(ek_result.public.clone())?;
 
     // Replace the uuid with the actual EK hash if the option was set.
     // We cannot do that when the configuration is loaded initially,
@@ -624,7 +626,7 @@ async fn main() -> Result<()> {
         ak,
         ek_result,
         api_versions: api_versions.clone(),
-        agent: ac,
+        agent_registration_config: ac,
         agent_uuid: agent_uuid.clone(),
         mtls_cert,
         device_id,

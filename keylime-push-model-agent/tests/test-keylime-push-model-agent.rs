@@ -36,6 +36,8 @@ mod tests {
             .arg("--message-type")
             .arg("attestation")
             .arg("--method")
+            .arg("--avoid-registration")
+            .arg("true")
             .arg("POST");
         cmd.assert()
             .success()
@@ -47,6 +49,8 @@ mod tests {
         let mut cmd = Command::cargo_bin(KEYLIME_PUSH_MODEL_AGENT_BINARY)?;
         cmd.arg("-v")
             .arg("http://localhost:3000")
+            .arg("--avoid-registration")
+            .arg("true")
             .arg("--timeout")
             .arg("1000");
         // Check if MOCKOON environment variable is set and, if so, assume

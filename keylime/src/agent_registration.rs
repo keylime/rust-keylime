@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2025 Keylime Authors
-use crate::error::{Error, Result};
+use crate::keylime_error::{Error, Result};
 use base64::{engine::general_purpose, Engine as _};
 use log::{error, info};
 use openssl::x509::X509;
@@ -29,7 +29,7 @@ pub struct AgentRegistration {
     pub ak: tpm::AKResult,
     pub ek_result: tpm::EKResult,
     pub api_versions: Vec<String>,
-    pub agent: AgentRegistrationConfig,
+    pub agent_registration_config: AgentRegistrationConfig,
     pub agent_uuid: String,
     pub mtls_cert: Option<X509>,
     pub device_id: Option<device_id::DeviceID>,
@@ -55,11 +55,11 @@ pub async fn register_agent(
         .enabled_api_versions(
             aa.api_versions.iter().map(|ver| ver.as_ref()).collect(),
         )
-        .registrar_ip(aa.agent.registrar_ip.clone())
-        .registrar_port(aa.agent.registrar_port)
+        .registrar_ip(aa.agent_registration_config.registrar_ip.clone())
+        .registrar_port(aa.agent_registration_config.registrar_port)
         .uuid(&aa.agent_uuid)
-        .ip(aa.agent.contact_ip.clone())
-        .port(aa.agent.contact_port);
+        .ip(aa.agent_registration_config.contact_ip.clone())
+        .port(aa.agent_registration_config.contact_port);
 
     if let Some(mtls_cert) = aa.mtls_cert {
         builder = builder.mtls_cert(mtls_cert);
@@ -71,7 +71,7 @@ pub async fn register_agent(
     }
 
     // Set the IAK/IDevID related fields, if enabled
-    if aa.agent.enable_iak_idevid {
+    if aa.agent_registration_config.enable_iak_idevid {
         let (Some(dev_id), Some(attest), Some(signature)) =
             (&aa.device_id, aa.attest, aa.signature)
         else {
@@ -118,7 +118,7 @@ pub async fn register_agent(
     )?;
 
     // Flush EK if we created it
-    if aa.agent.ek_handle.is_empty() {
+    if aa.agent_registration_config.ek_handle.is_empty() {
         ctx.flush_context(aa.ek_result.key_handle.into())?;
     }
 
