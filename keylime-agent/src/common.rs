@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2021 Keylime Authors
 
-use keylime::error::{Error, Result};
+use keylime::keylime_error::{Error, Result};
 
 use crate::permissions;
 
@@ -10,7 +10,7 @@ use keylime::algorithms::{
 };
 use keylime::{
     crypto::{hash, tss_pubkey_to_pem},
-    tpm,
+    hash_ek, tpm,
 };
 use log::*;
 use openssl::hash::MessageDigest;
@@ -77,83 +77,15 @@ where
     }
 }
 
-// TPM data and agent related that can be persisted and loaded on agent startup.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub(crate) struct AgentData {
-    pub ak_hash_alg: HashAlgorithm,
-    pub ak_sign_alg: SignAlgorithm,
-    ak_public: Vec<u8>,
-    ak_private: Vec<u8>,
-    ek_hash: Vec<u8>,
-}
-
-impl AgentData {
-    pub(crate) fn create(
-        ak_hash_alg: HashAlgorithm,
-        ak_sign_alg: SignAlgorithm,
-        ak: &tpm::AKResult,
-        ek_hash: &[u8],
-    ) -> Result<Self> {
-        let ak_public = ak.public.marshall()?;
-        let ak_private: Vec<u8> = ak.private.to_vec();
-        let ek_hash: Vec<u8> = ek_hash.to_vec();
-        Ok(Self {
-            ak_hash_alg,
-            ak_sign_alg,
-            ak_public,
-            ak_private,
-            ek_hash,
-        })
-    }
-
-    pub(crate) fn load(path: &Path) -> Result<Self> {
-        let file = File::open(path)?;
-        let data: Self = serde_json::from_reader(file)?;
-        Ok(data)
-    }
-
-    pub(crate) fn store(&self, path: &Path) -> Result<()> {
-        let file = File::create(path)?;
-        serde_json::to_writer_pretty(file, self)?;
-        Ok(())
-    }
-
-    pub(crate) fn get_ak(&self) -> Result<tpm::AKResult> {
-        let public = Public::unmarshall(&self.ak_public)?;
-        let private = Private::try_from(self.ak_private.clone())?;
-
-        Ok(tpm::AKResult { public, private })
-    }
-
-    pub(crate) fn valid(
-        &self,
-        hash_alg: HashAlgorithm,
-        sign_alg: SignAlgorithm,
-        ek_hash: &[u8],
-    ) -> bool {
-        hash_alg == self.ak_hash_alg
-            && sign_alg == self.ak_sign_alg
-            && ek_hash.to_vec() == self.ek_hash
-    }
-}
-
-/// Calculate the SHA-256 hash of the TPM public key in PEM format
-///
-/// This is used as the agent UUID when the configuration option 'uuid' is set as 'hash_ek'
-pub(crate) fn hash_ek_pubkey(ek_pub: Public) -> Result<String> {
-    // Calculate the SHA-256 hash of the public key in PEM format
-    let pem = tss_pubkey_to_pem(ek_pub)?;
-    let hash = hash(&pem, MessageDigest::sha256())?;
-    Ok(hex::encode(hash))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::config::KeylimeConfig;
+    use keylime::agent_data::AgentData;
     use keylime::algorithms::{
         EncryptionAlgorithm, HashAlgorithm, SignAlgorithm,
     };
+    use keylime::hash_ek;
     use std::convert::TryFrom;
     use tss_esapi::{
         handles::KeyHandle,
@@ -188,8 +120,8 @@ mod tests {
             .create_ek(tpm_encryption_alg, None)
             .expect("Failed to create EK");
 
-        let ek_hash =
-            hash_ek_pubkey(ek_result.public).expect("Failed to get pubkey");
+        let ek_hash = hash_ek::hash_ek_pubkey(ek_result.public)
+            .expect("Failed to get pubkey");
 
         let ak = ctx.create_ak(
             ek_result.key_handle,
@@ -224,6 +156,9 @@ mod tests {
     #[tokio::test]
     #[cfg(feature = "testing")]
     async fn test_hash() -> Result<()> {
+        use keylime::agent_data;
+        use keylime::hash_ek;
+
         let _mutex = tpm::testing::lock_tests().await;
         let mut config = KeylimeConfig::default();
 
@@ -238,7 +173,7 @@ mod tests {
             .create_ek(tpm_encryption_alg, None)
             .expect("Failed to create EK");
 
-        let result = hash_ek_pubkey(ek_result.public);
+        let result = hash_ek::hash_ek_pubkey(ek_result.public);
 
         assert!(result.is_ok());
 
