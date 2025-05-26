@@ -17,6 +17,7 @@ pub async fn check_registration(avoid_registration: &bool) -> Result<()> {
     }
     Ok(())
 }
+
 pub async fn register_agent<T: PushModelConfigTrait>(
     config: &T,
 ) -> Result<()> {
@@ -43,7 +44,6 @@ pub async fn register_agent<T: PushModelConfigTrait>(
         &ak,
         ek_hash.as_bytes(),
     )?;
-    ctx.create_ek(tpm_encryption_alg, None)?;
 
     let ac = AgentRegistrationConfig {
         contact_ip: config.get_contact_ip(),
