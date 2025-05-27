@@ -548,8 +548,10 @@ fn config_translate_keywords(
             .collect::<Vec<String>>()
             .join(", "),
         "latest" => {
-            if let Some(version) =
-                SUPPORTED_API_VERSIONS.iter().map(|&s| s.to_string()).last()
+            if let Some(version) = SUPPORTED_API_VERSIONS
+                .iter()
+                .map(|&s| s.to_string())
+                .next_back()
             {
                 version
             } else {
@@ -914,7 +916,7 @@ mod tests {
         let expected = SUPPORTED_API_VERSIONS
             .iter()
             .map(|e| e.to_string())
-            .last()
+            .next_back()
             .unwrap(); //#[allow_ci]
         assert_eq!(version, expected);
     }
