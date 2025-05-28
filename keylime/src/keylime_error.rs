@@ -112,6 +112,8 @@ pub enum Error {
     CertificateGeneration(
         #[from] crate::crypto::x509::CertificateBuilderError,
     ),
+    #[error("Name creation error")]
+    NameCreation(String),
     #[error("{0}")]
     Other(String),
 }

@@ -11,6 +11,7 @@ version.workspace = true
 actix-web.workspace = true
 anyhow.workspace = true
 assert_cmd.workspace = true
+chrono.workspace = true
 clap.workspace = true
 keylime.workspace = true
 log.workspace = true
