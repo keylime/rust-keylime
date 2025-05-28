@@ -2,6 +2,7 @@
 // Copyright 2025 Keylime Authors
 use anyhow::{Context, Result};
 use clap::Parser;
+use keylime::tpm;
 use log::{debug, error, info};
 use std::time::Duration;
 mod json_dump;
@@ -87,10 +88,10 @@ struct Args {
     /// Verifier URL
     #[arg(short, long, default_value = "https://127.0.0.1:8881")]
     verifier_url: String,
-    /// avoid registration
+    /// avoid tpm
     /// Default: false
     #[arg(long, action, default_missing_value = "false")]
-    avoid_registration: Option<bool>,
+    avoid_tpm: Option<bool>,
 }
 
 fn get_message_type(args: &Args) -> MessageType {
@@ -150,7 +151,9 @@ fn get_request_builder_from_method(
 }
 
 async fn send_push_model_request(args: &Args) -> Result<ResponseInformation> {
-    let filler = struct_filler::get_filler_request(args.json_file.clone());
+    let context = get_context(args)?;
+    let mut filler =
+        struct_filler::get_filler_request(args.json_file.clone(), context);
     let message_type = get_message_type(args);
     let json_value = match message_type {
         MessageType::Attestation => {
@@ -189,6 +192,15 @@ async fn send_push_model_request(args: &Args) -> Result<ResponseInformation> {
     Ok(rsp)
 }
 
+fn get_context(args: &Args) -> Result<Option<tpm::Context<'static>>> {
+    if args.avoid_tpm.unwrap_or(false) {
+        return Ok(None);
+    }
+    tpm::Context::new()
+        .map(Some)
+        .context("Failed to create TPM context")
+}
+
 async fn run(args: &Args) -> Result<()> {
     info!("Verifier URL: {}", args.verifier_url);
     info!("Registrar URL: {}", args.registrar_url);
@@ -201,14 +213,10 @@ async fn run(args: &Args) -> Result<()> {
     debug!("Certificate file: {}", args.certificate);
     debug!("Key file: {}", args.key);
     debug!("Insecure: {}", args.insecure.unwrap_or(false));
-    debug!(
-        "Avoid registration: {}",
-        args.avoid_registration.unwrap_or(false)
-    );
-    let res = crate::registration::check_registration(
-        &args.avoid_registration.unwrap_or(false),
-    )
-    .await;
+    debug!("Avoid TPM: {}", args.avoid_tpm.unwrap_or(false));
+
+    let mut ctx = get_context(args)?;
+    let res = crate::registration::check_registration(&mut ctx).await;
     match res {
         Ok(_) => {}
         Err(ref e) => error!("Could not register appropriately: {}", e),
@@ -245,7 +253,7 @@ mod tests {
         for att_idx in [None, Some("1".to_string())] {
             if (send_push_model_request(&Args {
                 api_version: Some("v3.0".to_string()),
-                avoid_registration: Some(true),
+                avoid_tpm: Some(true),
                 verifier_url: "http://1.2.3.4:5678".to_string(),
                 registrar_url: "http://1.2.3.4:8888".to_string(),
                 timeout: TEST_TIMEOUT_MILLIS,
@@ -272,7 +280,7 @@ mod tests {
     async fn send_attestation_request_test_no_cert_file() {
         match send_push_model_request(&Args {
             api_version: Some("v3.0".to_string()),
-            avoid_registration: Some(true),
+            avoid_tpm: Some(true),
             registrar_url: "http://1.2.3.4:8888".to_string(),
             verifier_url: "https://1.2.3.4:5678".to_string(),
             timeout: TEST_TIMEOUT_MILLIS,
@@ -317,7 +325,7 @@ mod tests {
 
         match send_push_model_request(&Args {
             api_version: Some("3.0".to_string()),
-            avoid_registration: Some(true),
+            avoid_tpm: Some(true),
             registrar_url: "http://1.2.3.4:8888".to_string(),
             verifier_url: "https://1.2.3.4:5678/".to_string(),
             timeout: TEST_TIMEOUT_MILLIS,
@@ -347,7 +355,7 @@ mod tests {
         }
         match send_push_model_request(&Args {
             api_version: Some("3.0".to_string()),
-            avoid_registration: Some(true),
+            avoid_tpm: Some(true),
             registrar_url: "http://1.2.3.4:8888".to_string(),
             verifier_url: "https://1.2.3.4:5678/".to_string(),
             timeout: TEST_TIMEOUT_MILLIS,
@@ -373,7 +381,7 @@ mod tests {
         }
         match send_push_model_request(&Args {
             api_version: Some("3.0".to_string()),
-            avoid_registration: Some(true),
+            avoid_tpm: Some(true),
             registrar_url: "http://1.2.3.4:8888".to_string(),
             verifier_url: "https://1.2.3.4:5678/".to_string(),
             timeout: TEST_TIMEOUT_MILLIS,
@@ -407,7 +415,7 @@ mod tests {
         for attestation_idx in [None, Some("3".to_string())] {
             match send_push_model_request(&Args {
                 api_version: Some("3.0".to_string()),
-                avoid_registration: Some(true),
+                avoid_tpm: Some(true),
                 registrar_url: "http://1.2.3.4:8888".to_string(),
                 verifier_url: "https://1.2.3.4:5678/".to_string(),
                 timeout: TEST_TIMEOUT_MILLIS,
@@ -438,7 +446,7 @@ mod tests {
     async fn send_session_request_test() {
         match send_push_model_request(&Args {
             api_version: Some("3.0".to_string()),
-            avoid_registration: Some(true),
+            avoid_tpm: Some(true),
             registrar_url: "http://1.2.3.4:8888".to_string(),
             verifier_url: "https://1.2.3.4:5678/".to_string(),
             timeout: TEST_TIMEOUT_MILLIS,
@@ -464,7 +472,7 @@ mod tests {
         }
         match send_push_model_request(&Args {
             api_version: Some("3.0".to_string()),
-            avoid_registration: Some(true),
+            avoid_tpm: Some(true),
             registrar_url: "http://1.2.3.4:8888".to_string(),
             verifier_url: "https://1.2.3.4:5678/".to_string(),
             timeout: TEST_TIMEOUT_MILLIS,
@@ -496,7 +504,7 @@ mod tests {
         if std::env::var("MOCKOON").is_ok() {
             match send_push_model_request(&Args {
                 api_version: None,
-                avoid_registration: Some(true),
+                avoid_tpm: Some(true),
                 registrar_url: "http://1.2.3.4:8888".to_string(),
                 verifier_url: "http://localhost:3000".to_string(),
                 timeout: TEST_TIMEOUT_MILLIS,
@@ -522,7 +530,7 @@ mod tests {
             }
             match send_push_model_request(&Args {
                 api_version: Some("-1.2.3".to_string()),
-                avoid_registration: Some(true),
+                avoid_tpm: Some(true),
                 registrar_url: "http://1.2.3.4:8888".to_string(),
                 verifier_url: "http://localhost:3000".to_string(),
                 timeout: TEST_TIMEOUT_MILLIS,
@@ -548,7 +556,7 @@ mod tests {
             }
             match send_push_model_request(&Args {
                 api_version: None,
-                avoid_registration: Some(true),
+                avoid_tpm: Some(true),
                 registrar_url: "http://1.2.3.4:8888".to_string(),
                 verifier_url: "http://localhost:3000".to_string(),
                 timeout: TEST_TIMEOUT_MILLIS,
@@ -574,7 +582,7 @@ mod tests {
             }
             match send_push_model_request(&Args {
                 api_version: None,
-                avoid_registration: Some(true),
+                avoid_tpm: Some(true),
                 registrar_url: "http://1.2.3.4:8888".to_string(),
                 verifier_url: "http://localhost:3000".to_string(),
                 timeout: TEST_TIMEOUT_MILLIS,
@@ -610,7 +618,7 @@ mod tests {
         ] {
             let args = Args {
                 api_version: None,
-                avoid_registration: Some(true),
+                avoid_tpm: Some(true),
                 registrar_url: "".to_string(),
                 verifier_url: "".to_string(),
                 timeout: 0,
@@ -648,7 +656,7 @@ mod tests {
         ] {
             let args = Args {
                 api_version: None,
-                avoid_registration: Some(true),
+                avoid_tpm: Some(true),
                 registrar_url: "".to_string(),
                 verifier_url: "".to_string(),
                 timeout: 0,
@@ -673,7 +681,7 @@ mod tests {
         // Set arguments to avoid registration
         let args = Args {
             api_version: None,
-            avoid_registration: Some(true),
+            avoid_tpm: Some(true),
             registrar_url: "".to_string(),
             verifier_url: "".to_string(),
             timeout: 0,

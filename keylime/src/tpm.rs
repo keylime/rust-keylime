@@ -15,6 +15,7 @@ use std::{
     str::FromStr,
     sync::{Arc, Mutex, OnceLock},
 };
+
 use thiserror::Error;
 use tss_esapi::handles::SessionHandle;
 use tss_esapi::interface_types::session_handles::PolicySession;
@@ -467,6 +468,10 @@ pub enum TpmError {
     /// Generic catch-all error
     #[error("{0}")]
     Other(String),
+
+    /// Unsupported Hash algorithm error
+    #[error("Unsupported hash algorithm: {0}")]
+    UnsupportedHashAlgorithm(String),
 }
 
 impl From<tss_esapi::Error> for TpmError {
@@ -881,24 +886,8 @@ impl Context<'_> {
             asym_alg, name_alg,
         )?;
 
-        let pcr_selection_list = PcrSelectionListBuilder::new()
-            .with_selection(
-                HashingAlgorithm::Sha256,
-                &[
-                    PcrSlot::Slot0,
-                    PcrSlot::Slot1,
-                    PcrSlot::Slot2,
-                    PcrSlot::Slot3,
-                    PcrSlot::Slot4,
-                    PcrSlot::Slot5,
-                    PcrSlot::Slot6,
-                    PcrSlot::Slot7,
-                ],
-            )
-            .build()
-            .map_err(|source| TpmError::TSSPCRSelectionBuildError {
-                source,
-            })?;
+        let pcr_selection_list =
+            self.get_pcr_selection_list(HashingAlgorithm::Sha256)?;
 
         let primary_key = self
             .inner
@@ -1634,6 +1623,66 @@ impl Context<'_> {
             .verify_signature(key_handle, digest, signature)
             .map_err(|source| TpmError::TSSVerifySign { source })
     }
+
+    /// Get the PCR selection list
+    pub fn get_pcr_selection_list(
+        &mut self,
+        hash_algorithm: HashingAlgorithm,
+    ) -> Result<PcrSelectionList> {
+        let pcr_selection_list = PcrSelectionListBuilder::new()
+            .with_selection(
+                hash_algorithm,
+                &[
+                    PcrSlot::Slot0,
+                    PcrSlot::Slot1,
+                    PcrSlot::Slot2,
+                    PcrSlot::Slot3,
+                    PcrSlot::Slot4,
+                    PcrSlot::Slot5,
+                    PcrSlot::Slot6,
+                    PcrSlot::Slot7,
+                ],
+            )
+            .build()
+            .map_err(|source| TpmError::TSSPCRSelectionBuildError {
+                source,
+            })?;
+        Ok(pcr_selection_list)
+    }
+
+    /// Helper function to extract selected PCR banks from a PcrSelectionList.
+    pub fn pcr_banks(
+        &mut self,
+        expected_hash_algorithm: HashAlgorithm,
+    ) -> Result<Vec<u32>> {
+        let mut selected_pcr_numbers: Vec<u32> = Vec::new();
+        let hashing_algorithm = crate::algorithms::hash_to_hashing_algorithm(
+            expected_hash_algorithm,
+        );
+        let pcr_selection_list =
+            self.get_pcr_selection_list(hashing_algorithm)?;
+        for selection in pcr_selection_list.get_selections() {
+            if selection.hashing_algorithm() == hashing_algorithm {
+                let selected_slots = selection.selected();
+                for pcr_slot in selected_slots {
+                    let pcr_mask_value: u32 = pcr_slot.into();
+                    if pcr_mask_value > 0 {
+                        let pcr_index = pcr_mask_value.trailing_zeros();
+                        selected_pcr_numbers.push(pcr_index);
+                    }
+                }
+                let mut sorted_pcr_numbers: Vec<u32> =
+                    selected_pcr_numbers.into_iter().collect();
+                sorted_pcr_numbers.sort_unstable();
+                return Ok(sorted_pcr_numbers);
+            }
+        }
+        Err(TpmError::TSSPCRSelectionBuildError {
+            source: tss_esapi::Error::WrapperError(
+                tss_esapi::WrapperErrorKind::InvalidParam,
+            ),
+        })
+    }
 }
 
 // Ensure that TPML_PCR_SELECTION and TPML_DIGEST have known sizes
@@ -2196,6 +2245,7 @@ pub fn read_ek_ca_chain(
 }
 
 pub mod testing {
+
     use super::*;
     #[cfg(feature = "testing")]
     use tokio::sync::{Mutex as AsyncMutex, MutexGuard as AsyncMutexGuard};
@@ -2912,4 +2962,14 @@ pub mod tests {
         let r = ctx.flush_context(iak_handle.into());
         assert!(r.is_ok(), "Result: {r:?}");
     }
+
+    #[tokio::test]
+    #[cfg(feature = "testing")]
+    async fn test_pcr_banks() {
+        let _mutex = testing::lock_tests().await;
+        let mut ctx = Context::new().unwrap(); //#[allow_ci]
+        let banks = ctx.pcr_banks(HashAlgorithm::Sha256);
+        assert!(banks.is_ok(), "Result: {banks:?}");
+        assert!(!banks.unwrap().is_empty(), "No PCR banks found"); //#[allow_ci]
+    } // test_pcr_banks
 }

@@ -1,6 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2025 Keylime Authors
+use keylime::algorithms::{
+    supported_hash_algorithms, supported_sign_algorithms, HashAlgorithm,
+};
 use keylime::structures;
+use keylime::tpm;
+use log::error;
 
 // Implement a structure filler for the attestation request
 // by using polimorphism and traits, with next options:
@@ -10,34 +15,184 @@ use keylime::structures;
 // 4. Use the trait to fill the structure with data from a file
 // 5. Use the trait to fill the structure with data from real TPM quote
 pub trait StructureFiller {
-    fn get_attestation_request(&self) -> structures::AttestationRequest;
-    fn get_session_request(&self) -> structures::SessionRequest;
+    fn get_attestation_request(&mut self) -> structures::AttestationRequest;
+    fn get_session_request(&mut self) -> structures::SessionRequest;
     fn get_evidence_handling_request(
-        &self,
+        &mut self,
     ) -> structures::EvidenceHandlingRequest;
 }
 
 pub fn get_filler_request(
     json_file: Option<String>,
+    tpm_context: Option<tpm::Context<'static>>,
 ) -> Box<dyn StructureFiller> {
     if json_file.is_none() {
-        return Box::new(FillerFromCode {});
+        if tpm_context.is_none() {
+            return Box::new(FillerFromCode);
+        }
+        return Box::new(FillerFromHardware::new(tpm_context.unwrap()));
     }
     Box::new(FillerFromFile {
         file_path: json_file.clone().unwrap(),
     })
 }
 
+impl StructureFiller for FillerFromHardware {
+    fn get_attestation_request(&mut self) -> structures::AttestationRequest {
+        self.get_attestation_request_final()
+    }
+    fn get_session_request(&mut self) -> structures::SessionRequest {
+        self.get_session_request_final()
+    }
+    fn get_evidence_handling_request(
+        &mut self,
+    ) -> structures::EvidenceHandlingRequest {
+        self.get_evidence_handling_request_final()
+    }
+}
+
+pub struct FillerFromHardware {
+    pub tpm_context: tpm::Context<'static>,
+}
+
+impl FillerFromHardware {
+    pub fn new(tpm_context: tpm::Context<'static>) -> Self {
+        FillerFromHardware { tpm_context }
+    }
+    // TODO: Change this function to use the attestation request appropriately
+    // Add self to the function signature to use the tpm_context
+    fn get_attestation_request_final(
+        &mut self,
+    ) -> structures::AttestationRequest {
+        // Get the PCR banks for SHA1 from the TPM context as a vector of u8
+        let tpm_banks_sha1 = self
+            .tpm_context
+            .pcr_banks(HashAlgorithm::Sha1)
+            .unwrap_or_else(|_| {
+                error!("Failed to get PCR banks for SHA1");
+                vec![]
+            });
+        // Get the PCR banks for SHA256 from the TPM context as a vector of u8
+        let tpm_banks_sha256 = self
+            .tpm_context
+            .pcr_banks(HashAlgorithm::Sha256)
+            .unwrap_or_else(|_| {
+                error!("Failed to get PCR banks for SHA256");
+                vec![]
+            });
+        structures::AttestationRequest {
+            data: structures::RequestData {
+                type_: "attestation".to_string(),
+                attributes: structures::Attributes {
+                    evidence_supported: vec![
+                        structures::EvidenceSupported::Certification {
+                            evidence_type: "tpm_quote".to_string(),
+                            capabilities: structures::Capabilities {
+                                component_version: "2.0".to_string(),
+                                hash_algorithms: supported_hash_algorithms(),
+                                signature_schemes: supported_sign_algorithms(),
+                                available_subjects: structures::ShaValues {
+                                    sha1: tpm_banks_sha1,
+                                    sha256: tpm_banks_sha256,
+                                },
+                                certification_keys: vec![
+                                    structures::CertificationKey {
+                                        local_identifier: "localid".to_string(),
+                                        key_algorithm: "rsa".to_string(),
+                                        key_class: "asymmetric".to_string(),
+                                        key_size: 2048,
+                                        server_identifier: "ak".to_string(),
+                                        public: "VGhpcyBpcyBhIHRlc3QgZm9yIGEgYmFzZTY0IGVuY29kZWQgZm9ybWF0IHN0cmluZw==".to_string(),
+                                    },
+                                ],
+                            },
+                        },
+                    ],
+                    system_info: structures::SystemInfo {
+                        boot_time: chrono::Utc::now(),
+                    },
+                },
+            },
+        }
+    }
+
+    // TODO: Change this function to use the session request appropriately
+    pub fn get_session_request_final(
+        &mut self,
+    ) -> structures::SessionRequest {
+        structures::SessionRequest {
+            data: structures::SessionRequestData {
+                data_type: "session".to_string(),
+                attributes: structures::SessionRequestAttributes {
+                    agent_id: "example-agent".to_string(),
+                    auth_supported: vec![
+                        structures::SessionRequestAuthSupported {
+                            auth_class: "pop".to_string(),
+                            auth_type: "tpm_pop".to_string(),
+                        },
+                    ],
+                },
+            },
+        }
+    }
+
+    // TODO: Change this function to use the evidence handling request appropriately
+    pub fn get_evidence_handling_request_final(
+        &mut self,
+    ) -> structures::EvidenceHandlingRequest {
+        let tpm_evidence_data = structures::EvidenceData::TpmQuoteData {
+            subject_data: "subject_data".to_string(),
+            message: "message".to_string(),
+            signature: "signature".to_string(),
+        };
+
+        let tpm_evidence_collected = structures::EvidenceCollected {
+            evidence_class: "certification".to_string(),
+            evidence_type: "tpm_quote".to_string(),
+            data: tpm_evidence_data,
+        };
+        let uefi_evidence_data = structures::EvidenceData::UefiLog {
+            entries: "uefi_log_entries".to_string(),
+        };
+        let uefi_evidence_collected = structures::EvidenceCollected {
+            evidence_class: "log".to_string(),
+            evidence_type: "uefi_log".to_string(),
+            data: uefi_evidence_data,
+        };
+        let ima_evidence_data = structures::EvidenceData::ImaLog {
+            entry_count: 95,
+            entries: "ima_log_entries".to_string(),
+        };
+        let ima_evidence_collected = structures::EvidenceCollected {
+            evidence_class: "log".to_string(),
+            evidence_type: "ima_log".to_string(),
+            data: ima_evidence_data,
+        };
+        let attributes = structures::EvidenceHandlingRequestAttributes {
+            evidence_collected: vec![
+                tpm_evidence_collected,
+                uefi_evidence_collected,
+                ima_evidence_collected,
+            ],
+        };
+        let data = structures::EvidenceHandlingRequestData {
+            data_type: "attestation".to_string(),
+            attributes,
+        };
+        structures::EvidenceHandlingRequest { data }
+    }
+}
+
 pub struct FillerFromCode;
 impl StructureFiller for FillerFromCode {
-    fn get_attestation_request(&self) -> structures::AttestationRequest {
+    fn get_attestation_request(&mut self) -> structures::AttestationRequest {
         get_attestation_request_from_code()
     }
-    fn get_session_request(&self) -> structures::SessionRequest {
+    fn get_session_request(&mut self) -> structures::SessionRequest {
         get_session_request_from_code()
     }
     fn get_evidence_handling_request(
-        &self,
+        &mut self,
     ) -> structures::EvidenceHandlingRequest {
         get_evidence_handling_request_from_code()
     }
@@ -48,14 +203,14 @@ pub struct FillerFromFile {
 }
 
 impl StructureFiller for FillerFromFile {
-    fn get_attestation_request(&self) -> structures::AttestationRequest {
+    fn get_attestation_request(&mut self) -> structures::AttestationRequest {
         get_attestation_request_from_file(self.file_path.clone())
     }
-    fn get_session_request(&self) -> structures::SessionRequest {
+    fn get_session_request(&mut self) -> structures::SessionRequest {
         get_session_request_from_file(self.file_path.clone())
     }
     fn get_evidence_handling_request(
-        &self,
+        &mut self,
     ) -> structures::EvidenceHandlingRequest {
         get_evidence_handling_request_from_file(self.file_path.clone())
     }
@@ -187,6 +342,9 @@ fn get_evidence_handling_request_from_code(
 mod tests {
 
     use super::*;
+
+    #[cfg(feature = "testing")]
+    use keylime::tpm::testing;
 
     #[test]
     fn get_attestation_request_test() {
@@ -447,4 +605,16 @@ mod tests {
             "tpm_pop"
         );
     } // get_authentication_request_from_file_test
+
+    #[tokio::test]
+    #[cfg(feature = "testing")]
+    async fn test_attestation_request_final() {
+        let _mutex = testing::lock_tests().await;
+        let ctx = tpm::Context::new().unwrap(); //#[allow_ci]
+        let mut filler = FillerFromHardware::new(ctx);
+        let attestation_request = filler.get_attestation_request_final();
+        assert_eq!(attestation_request.data.type_, "attestation");
+        let serialized = serde_json::to_string(&attestation_request).unwrap();
+        assert!(!serialized.is_empty());
+    } // test_pcr_banks
 }

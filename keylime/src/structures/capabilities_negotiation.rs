@@ -64,8 +64,8 @@ pub struct Capabilities {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 // Do not serialize the struct name, only the fields
 pub struct ShaValues {
-    pub sha1: Vec<u8>,
-    pub sha256: Vec<u8>,
+    pub sha1: Vec<u32>,
+    pub sha256: Vec<u32>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
