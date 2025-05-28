@@ -7,6 +7,7 @@ use crate::serialization::serialize_maybe_base64;
 use crate::{tpm, Error as KeylimeError, QuoteData};
 use actix_web::{http, web, HttpRequest, HttpResponse, Responder};
 use base64::{engine::general_purpose, Engine as _};
+use keylime::quote::{Integ, KeylimeQuote};
 use log::*;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -18,30 +19,6 @@ use tss_esapi::structures::PcrSlot;
 #[derive(Deserialize)]
 pub struct Ident {
     nonce: String,
-}
-
-#[derive(Deserialize)]
-pub struct Integ {
-    nonce: String,
-    mask: String,
-    partial: String,
-    ima_ml_entry: Option<String>,
-}
-
-#[derive(Serialize, Deserialize, Debug, Default)]
-pub(crate) struct KeylimeQuote {
-    pub quote: String, // 'r' + quote + sig + pcrblob
-    pub hash_alg: String,
-    pub enc_alg: String,
-    pub sign_alg: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub pubkey: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub ima_measurement_list: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub mb_measurement_list: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub ima_measurement_list_entry: Option<u64>,
 }
 
 // This is a Quote request from the tenant, which does not check
