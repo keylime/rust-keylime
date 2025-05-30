@@ -11,6 +11,10 @@ use tss_esapi::{
 pub enum Error {
     #[error("HttpServer error: {0}")]
     ActixWeb(#[from] actix_web::Error),
+    #[error("Failed to build Agent Identity")]
+    AgentIdentityBuilder(
+        #[from] crate::agent_identity::AgentIdentityBuilderError,
+    ),
     #[error("TSS2 Error: {err:?}, kind: {kind:?}, {message}")]
     Tss2 {
         err: tss_esapi::Error,
