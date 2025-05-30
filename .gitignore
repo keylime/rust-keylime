@@ -7,3 +7,5 @@ tests/actions/__pycache__
 tests/unzipped/__pycache__
 **/tarpaulin-report.*
 **/__pycache__
+*.swp
+*.orig
