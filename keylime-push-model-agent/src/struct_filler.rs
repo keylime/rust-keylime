@@ -115,7 +115,7 @@ fn get_attestation_request_from_code() -> structures::AttestationRequest {
                     },
                 ],
                 system_info: structures::SystemInfo {
-                    boot_time: "2024-11-12T16:21:17Z".to_string(),
+                    boot_time: "2024-11-12T16:21:17Z".parse().unwrap(),
                 },
             },
         },
@@ -360,8 +360,8 @@ mod tests {
             _ => panic!("Expected Log"), //#[allow_ci]
         }
         assert_eq!(
-            req.data.attributes.system_info.boot_time,
-            "2025-04-02T12:12:51Z"
+            req.data.attributes.system_info.boot_time.to_string(),
+            "2025-04-02 12:12:51 UTC"
         );
     }
 

@@ -1,3 +1,4 @@
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::{from_value, to_value, Value as JsonValue};
 use std::convert::TryFrom;
@@ -99,7 +100,7 @@ pub struct ResponseAttributes {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct SystemInfo {
-    pub boot_time: String,
+    pub boot_time: DateTime<Utc>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -207,7 +208,9 @@ mod tests {
                         },
                     ],
                     system_info: SystemInfo {
-                        boot_time: "2024-11-12T16:21:17Z".to_string(),
+                        boot_time: "2025-05-29T11:39:02Z"
+                        .parse()
+                        .unwrap() //#[allow_ci]
                     },
                 },
             },
@@ -257,7 +260,7 @@ mod tests {
         }
       ],
       "system_info": {
-        "boot_time": "2024-11-12T16:21:17Z"
+        "boot_time": "2025-05-29T11:39:02Z"
       }
     }
   }
@@ -292,7 +295,7 @@ mod tests {
                         },
                     ],
                     system_info: SystemInfo {
-                        boot_time: "2024-11-12T16:21:17Z".to_string(),
+                        boot_time: "2025-05-08T15:39:01Z".parse().unwrap(), //#[allow_ci]
                     },
                 },
             },
@@ -332,7 +335,7 @@ mod tests {
         }
       ],
       "system_info": {
-        "boot_time": "2024-11-12T16:21:17Z"
+        "boot_time": "2025-05-08T15:39:01Z"
       }
     }
   }
@@ -387,7 +390,7 @@ mod tests {
                         },
                     ],
                     system_info: SystemInfo {
-                        boot_time: "2025-02-26T:12:32:41".to_string(),
+                        boot_time: "2025-05-30T11:39:01Z".parse().unwrap(), //#[allow_ci]
                     },
                 },
             },
@@ -462,7 +465,7 @@ mod tests {
         }
       ],
       "system_info": {
-        "boot_time": "2025-02-26T:12:32:41"
+        "boot_time": "2025-05-30T11:39:01Z"
       }
     }
   }
@@ -505,7 +508,7 @@ mod tests {
                                                             "appendable": true,
                                                             "formats": ["text/plain"]}
                                            }],
-                    "system_info":{"boot_time":"2024-11-12T16:21:17Z"}
+                    "system_info":{"boot_time":"2025-05-30 11:39:01 UTC"}
                 }
             }
         }"#;
@@ -593,8 +596,8 @@ mod tests {
             _ => panic!("Expected Log"), //#[allow_ci]
         }
         assert_eq!(
-            request.data.attributes.system_info.boot_time,
-            "2024-11-12T16:21:17Z"
+            request.data.attributes.system_info.boot_time.to_string(),
+            "2025-05-30 11:39:01 UTC".to_string()
         );
     }
 
@@ -607,7 +610,7 @@ mod tests {
                 "type":"attestation",
                 "attributes": {
                     "evidence_supported":[],
-                    "system_info":{"boot_time":"2024-11-12T16:21:17Z"}
+                    "system_info":{"boot_time":"2024-11-12 16:21:17 UTC"}
                 }
             }
         }"#;
@@ -618,8 +621,8 @@ mod tests {
             attestation_data.evidence_supported.first();
         assert!(some_evidence_supported.is_none());
         assert_eq!(
-            request.data.attributes.system_info.boot_time,
-            "2024-11-12T16:21:17Z"
+            request.data.attributes.system_info.boot_time.to_string(),
+            "2024-11-12 16:21:17 UTC".to_string()
         );
     }
 
@@ -632,7 +635,7 @@ mod tests {
                 "type":"attestation",
                 "attributes": {
                     "unexpected_evidence_supported":[],
-                    "system_info"{"boot_time":"2024-11-12T16:21:17Z"}
+                    "system_info"{"boot_time":"2024-11-12 16:21:17 UTC"}
                 }
             }
         }"#;
