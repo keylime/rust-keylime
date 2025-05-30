@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2022 Keylime Authors
-use crate::{api::SUPPORTED_API_VERSIONS, permissions, tpm};
+use crate::api::SUPPORTED_API_VERSIONS;
 use config::{
     builder::DefaultState, Config, ConfigBuilder, ConfigError, Environment,
     File, FileFormat, Map, Source, Value, ValueKind::Table,
@@ -12,6 +12,7 @@ use keylime::{
     hostname_parser::{parse_hostname, HostnameParsingError},
     ip_parser::{parse_ip, IpParsingError},
     list_parser::{parse_list, ListParsingError},
+    permissions, tpm,
     version::{self, GetErrorInput},
 };
 use log::*;

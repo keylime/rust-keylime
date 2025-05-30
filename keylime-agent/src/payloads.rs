@@ -10,12 +10,15 @@ use crate::{
 #[cfg(feature = "with-zmq")]
 use crate::revocation::ZmqMessage;
 
-use keylime::crypto::{
-    self,
-    encrypted_data::EncryptedData,
-    symmkey::{KeySet, SymmKey},
-};
 use keylime::global_config;
+use keylime::{
+    crypto::{
+        self,
+        encrypted_data::EncryptedData,
+        symmkey::{KeySet, SymmKey},
+    },
+    permissions,
+};
 use log::*;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -239,20 +242,21 @@ async fn run_encrypted_payload(
             .map(|script| unzipped.join(script))
             .filter(|script| script.exists())
             .try_for_each(|script| {
-                if fs::set_permissions(
-                    &script,
-                    fs::Permissions::from_mode(0o700),
-                )
-                .is_err()
-                {
-                    error!(
-                        "Could not set permission for action {}",
-                        script.display()
-                    );
-                    Err(Error::Permission)
-                } else {
-                    info!("Permission set for action: {}", script.display());
-                    Ok(())
+                match permissions::set_mode(&script, 0o700) {
+                    Ok(()) => {
+                        info!(
+                            "Permission set for action: {}",
+                            script.display()
+                        );
+                        Ok(())
+                    }
+                    Err(e) => {
+                        error!(
+                            "Could not set permission for action {}",
+                            script.display()
+                        );
+                        Err(e)
+                    }
                 }
             })?
     }

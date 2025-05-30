@@ -49,7 +49,7 @@ pub enum Error {
     #[error("Serialization/deserialization error: {0}")]
     Serde(#[from] serde_json::Error),
     #[error("Permission error")]
-    Permission,
+    Permission(#[from] crate::permissions::PermissionError),
     #[error("Glob error")]
     Glob(#[from] glob::GlobError),
     #[error("Glob pattern error")]
@@ -315,7 +315,9 @@ mod tests {
 
     #[test]
     fn test_display_permission() {
-        let err = Error::Permission;
+        let err: Error =
+            crate::permissions::PermissionError::NotRoot("file".to_string())
+                .into();
         assert_eq!(format!("{err}"), "Permission error");
     }
 
