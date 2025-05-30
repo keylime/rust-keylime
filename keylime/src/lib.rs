@@ -14,6 +14,7 @@ pub mod ima;
 pub mod ip_parser;
 pub mod keylime_error;
 pub mod list_parser;
+pub mod permissions;
 pub mod quote;
 pub mod registrar_client;
 pub mod serialization;

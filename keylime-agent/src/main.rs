@@ -39,7 +39,6 @@ mod errors_handler;
 mod keys_handler;
 mod notifications_handler;
 mod payloads;
-mod permissions;
 mod quotes_handler;
 mod revocation;
 mod secure_mount;
@@ -52,17 +51,16 @@ use futures::{
     future::{ok, TryFutureExt},
     try_join,
 };
-use keylime::agent_registration::AgentRegistrationConfig;
-use keylime::global_config;
-use keylime::keylime_error::{Error, Result};
 use keylime::{
     agent_data::AgentData,
-    agent_registration::AgentRegistration,
+    agent_registration::{AgentRegistration, AgentRegistrationConfig},
     crypto::{self, x509::CertificateBuilder},
     device_id::{DeviceID, DeviceIDBuilder},
-    hash_ek,
+    global_config, hash_ek,
     ima::MeasurementList,
+    keylime_error::{Error, Result},
     list_parser::parse_list,
+    permissions,
     registrar_client::RegistrarClientBuilder,
     serialization,
     tpm::{self, IAKResult, IDevIDResult},
