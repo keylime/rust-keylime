@@ -1,4 +1,5 @@
 pub mod agent_data;
+pub mod agent_identity;
 pub mod agent_registration;
 pub mod algorithms;
 pub mod cert;

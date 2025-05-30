@@ -1,17 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2025 Keylime Authors
 use crate::keylime_error::{Error, Result};
+use crate::{
+    agent_identity::AgentIdentityBuilder,
+    crypto::{self},
+    device_id,
+    registrar_client::RegistrarClientBuilder,
+    tpm::{self},
+};
 use base64::{engine::general_purpose, Engine as _};
 use log::{error, info};
 use openssl::x509::X509;
-use tss_esapi::handles::KeyHandle;
-use tss_esapi::structures::PublicBuffer;
-use tss_esapi::traits::Marshall;
-use {
-    crate::crypto::{self},
-    crate::device_id,
-    crate::registrar_client::RegistrarClientBuilder,
-    crate::tpm::{self},
+use tss_esapi::{
+    handles::KeyHandle, structures::PublicBuffer, traits::Marshall,
 };
 
 #[derive(Debug)]
@@ -48,26 +49,23 @@ pub async fn register_agent(
     let ek_pub =
         &PublicBuffer::try_from(aa.ek_result.public.clone())?.marshall()?;
 
-    // Create a RegistrarClientBuilder and set the parameters
-    let mut builder = RegistrarClientBuilder::new()
+    let mut ai_builder = AgentIdentityBuilder::new()
         .ak_pub(ak_pub)
         .ek_pub(ek_pub)
         .enabled_api_versions(
             aa.api_versions.iter().map(|ver| ver.as_ref()).collect(),
         )
-        .registrar_ip(aa.agent_registration_config.registrar_ip.clone())
-        .registrar_port(aa.agent_registration_config.registrar_port)
         .uuid(&aa.agent_uuid)
         .ip(aa.agent_registration_config.contact_ip.clone())
         .port(aa.agent_registration_config.contact_port);
 
     if let Some(mtls_cert) = aa.mtls_cert {
-        builder = builder.mtls_cert(mtls_cert);
+        ai_builder = ai_builder.mtls_cert(mtls_cert);
     }
 
     // If the certificate is not None add it to the builder
     if let Some(ekchain) = aa.ek_result.to_pem() {
-        builder = builder.ek_cert(ekchain);
+        ai_builder = ai_builder.ek_cert(ekchain);
     }
 
     // Set the IAK/IDevID related fields, if enabled
@@ -86,7 +84,7 @@ pub async fn register_agent(
             PublicBuffer::try_from(dev_id.iak_pubkey.clone())?.marshall()?;
         idevid_pub = PublicBuffer::try_from(dev_id.idevid_pubkey.clone())?
             .marshall()?;
-        builder = builder
+        ai_builder = ai_builder
             .iak_attest(attest.marshall()?)
             .iak_sign(signature.marshall()?)
             .iak_pub(&iak_pub)
@@ -94,20 +92,29 @@ pub async fn register_agent(
 
         // If the IAK certificate was provided, set it
         if let Some(iak_cert) = dev_id.iak_cert.clone() {
-            builder = builder.iak_cert(iak_cert);
+            ai_builder = ai_builder.iak_cert(iak_cert);
         }
 
         // If the IDevID certificate was provided, set it
         if let Some(idevid_cert) = dev_id.idevid_cert.clone() {
-            builder = builder.idevid_cert(idevid_cert);
+            ai_builder = ai_builder.idevid_cert(idevid_cert);
         }
     }
 
+    // Build the Agent Identity
+    let ai = ai_builder.build().await?;
+
+    let ac = &aa.agent_registration_config;
     // Build the registrar client
-    let mut registrar_client = builder.build().await?;
+    // Create a RegistrarClientBuilder and set the parameters
+    let mut registrar_client = RegistrarClientBuilder::new()
+        .registrar_address(ac.registrar_ip.clone())
+        .registrar_port(ac.registrar_port)
+        .build()
+        .await?;
 
     // Request keyblob material
-    let keyblob = registrar_client.register_agent().await?;
+    let keyblob = registrar_client.register_agent(&ai).await?;
 
     info!("SUCCESS: Agent {} registered", &aa.agent_uuid);
 
@@ -127,7 +134,7 @@ pub async fn register_agent(
         crypto::compute_hmac(mackey.as_bytes(), aa.agent_uuid.as_bytes())?;
     let auth_tag = hex::encode(&auth_tag);
 
-    registrar_client.activate_agent(&auth_tag).await?;
+    registrar_client.activate_agent(&ai, &auth_tag).await?;
 
     info!("SUCCESS: Agent {} activated", &aa.agent_uuid);
     Ok(())
