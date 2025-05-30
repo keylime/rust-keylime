@@ -9,17 +9,24 @@ use keylime::keylime_error::Result;
 use keylime::tpm;
 use log::debug;
 
-pub async fn check_registration(avoid_registration: &bool) -> Result<()> {
-    if !*avoid_registration {
+pub async fn check_registration(
+    context: &mut Option<tpm::Context<'_>>,
+) -> Result<()> {
+    if context.is_some() {
         let reg_config = keylime::config::PushModelConfig::default();
         debug!("Registering agent with config: {}", reg_config.display());
-        crate::registration::register_agent(&reg_config).await?;
+        crate::registration::register_agent(
+            &reg_config,
+            context.as_mut().unwrap(),
+        )
+        .await?;
     }
     Ok(())
 }
 
 pub async fn register_agent<T: PushModelConfigTrait>(
     config: &T,
+    ctx: &mut tpm::Context<'_>,
 ) -> Result<()> {
     let tpm_encryption_alg =
         keylime::algorithms::EncryptionAlgorithm::try_from(
@@ -31,7 +38,6 @@ pub async fn register_agent<T: PushModelConfigTrait>(
     let tpm_signing_alg = keylime::algorithms::SignAlgorithm::try_from(
         config.get_tpm_signing_alg().as_ref(),
     )?;
-    let mut ctx = tpm::Context::new()?;
     let ek_result = ctx.create_ek(tpm_encryption_alg, None)?;
     let ek_hash = hash_ek::hash_ek_pubkey(ek_result.public.clone())?;
     let ak = ctx.create_ak(
@@ -81,7 +87,7 @@ pub async fn register_agent<T: PushModelConfigTrait>(
         signature: None, // TODO: Normally, no device ID means no signature
         ak_handle,
     };
-    match keylime::agent_registration::register_agent(aa, &mut ctx).await {
+    match keylime::agent_registration::register_agent(aa, ctx).await {
         Ok(_) => Ok(()),
         Err(e) => Err(e),
     }
@@ -93,8 +99,7 @@ mod tests {
 
     #[actix_rt::test]
     async fn test_avoid_registration() {
-        let avoid_registration = true;
-        let result = check_registration(&avoid_registration).await;
+        let result = check_registration(&mut None).await;
         assert!(result.is_ok());
     }
 }
