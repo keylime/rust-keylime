@@ -735,7 +735,7 @@ mod tests {
                         },
                     ],
                     system_info: SystemInfo {
-                        boot_time: "2025-04-08T12:00:17Z".to_string(),
+                        boot_time: "2025-04-08T12:00:17Z".parse().unwrap(), //#[allow_ci]
                     },
                 },
             },
