@@ -1,3 +1,3 @@
-mod push_model_config;
+mod push_model;
 
-pub use push_model_config::*;
+pub use push_model::*;
