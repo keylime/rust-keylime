@@ -8,7 +8,6 @@ pub mod context_info;
 pub mod crypto;
 pub mod device_id;
 pub mod file_ops;
-pub mod global_config;
 pub mod hash_ek;
 pub mod hostname_parser;
 pub mod https_client;
