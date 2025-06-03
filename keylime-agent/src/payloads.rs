@@ -2,7 +2,6 @@
 // Copyright 2021 Keylime Authors
 
 use crate::{
-    config,
     revocation::{Revocation, RevocationMessage},
     Error, Result,
 };
@@ -10,8 +9,8 @@ use crate::{
 #[cfg(feature = "with-zmq")]
 use crate::revocation::ZmqMessage;
 
-use keylime::global_config;
 use keylime::{
+    config,
     crypto::{
         self,
         encrypted_data::EncryptedData,
@@ -84,14 +83,14 @@ fn setup_unzipped(
     }
 
     match config.agent.dec_payload_file.as_ref() {
-        "" => Err(global_config::KeylimeConfigError::RequiredOption(
+        "" => Err(config::KeylimeConfigError::RequiredOption(
             "dec_payload_path".to_string(),
         )
         .into()),
         p => {
             let dec_payload_path = unzipped.join(p);
             match config.agent.enc_keyname.as_ref() {
-                "" => Err(global_config::KeylimeConfigError::RequiredOption(
+                "" => Err(config::KeylimeConfigError::RequiredOption(
                     "enc_keyname".to_string(),
                 )
                 .into()),

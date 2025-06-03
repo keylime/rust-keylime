@@ -2,42 +2,30 @@ use core::fmt;
 // Use LazyCell for lazy initialization of count file paths
 use once_cell::sync::Lazy;
 
-pub const DEFAULT_API_VERSIONS: &[&str] = &["3.0"];
+use crate::config::*;
+
+// TODO This should be temporary
 pub const DEFAULT_CERTIFICATION_KEYS_SERVER_IDENTIFIER: &str = "ak";
-pub const DEFAULT_CONTACT_IP: &str = "127.0.0.1";
-pub const DEFAULT_CONTACT_PORT: u32 = 9002;
-pub const DEFAULT_IMA_ML_DIRECTORY_PATH: &str = "/sys/kernel/security/ima";
-pub static DEFAULT_IMA_ML_COUNT_FILE: Lazy<String> =
-    Lazy::new(|| format!("{}/measurements", DEFAULT_IMA_ML_DIRECTORY_PATH));
-pub const DEFAULT_MEASUREDBOOT_ML_DIRECTORY_PATH: &str =
-    "/sys/kernel/security/tpm0";
-pub static DEFAULT_MEASUREDBOOT_ML_COUNT_FILE: Lazy<String> =
-    Lazy::new(|| format!("{}/count", DEFAULT_MEASUREDBOOT_ML_DIRECTORY_PATH));
-pub const DEFAULT_EK_HANDLE: &str = "";
-pub const DEFAULT_ENABLE_IAK_IDEVID: bool = false;
-pub const DEFAULT_IP: &str = "127.0.0.1";
-pub const DEFAULT_PORT: u32 = 9002;
-pub const DEFAULT_REGISTRAR_API_VERSIONS: &[&str] = &["2.3"];
-pub const DEFAULT_REGISTRAR_IP: &str = "127.0.0.1";
-pub const DEFAULT_REGISTRAR_PORT: u32 = 8890;
-pub const DEFAULT_SERVER_CERT: &str = "server-cert.crt";
-pub const DEFAULT_SERVER_KEY: &str = "server-private.pem";
-pub const DEFAULT_SERVER_KEY_PASSWORD: &str = "";
-pub const DEFAULT_TPM_HASH_ALG: &str = "sha256";
-pub const DEFAULT_TPM_ENCRYPTION_ALG: &str = "rsa";
-pub const DEFAULT_TPM_SIGNING_ALG: &str = "rsassa";
-pub const DEFAULT_UUID: &str = "b0acd25f-2205-4c37-932d-e8f99a8d39ef";
+pub static DEFAULT_PUSH_API_VERSIONS: &[&str] = &["3.0"];
+pub static DEFAULT_PUSH_EK_HANDLE: &str = "";
 
 // IMA logs specific defaults
 pub const DEFAULT_IMA_LOGS_APPENDABLE: bool = true;
 pub const DEFAULT_IMA_LOGS_FORMATS: &[&str] = &["text/plain"];
 pub const DEFAULT_IMA_LOGS_SUPPORTS_PARTIAL_ACCESS: bool = true;
+pub const DEFAULT_IMA_ML_DIRECTORY_PATH: &str = "/sys/kernel/security/ima";
+pub static DEFAULT_IMA_ML_COUNT_FILE: Lazy<String> =
+    Lazy::new(|| format!("{}/measurements", DEFAULT_IMA_ML_DIRECTORY_PATH));
 
 //UEFI logs specific defaults
 pub const DEFAULT_UEFI_LOGS_APPENDABLE: bool = true;
 pub const DEFAULT_UEFI_LOGS_EVIDENCE_VERSION: &str = "2.1";
 pub const DEFAULT_UEFI_LOGS_FORMATS: &[&str] = &["application/octet-stream"];
 pub const DEFAULT_UEFI_LOGS_SUPPORTS_PARTIAL_ACCESS: bool = true;
+pub const DEFAULT_MEASUREDBOOT_ML_DIRECTORY_PATH: &str =
+    "/sys/kernel/security/tpm0";
+pub static DEFAULT_MEASUREDBOOT_ML_COUNT_FILE: Lazy<String> =
+    Lazy::new(|| format!("{}/count", DEFAULT_MEASUREDBOOT_ML_DIRECTORY_PATH));
 
 pub trait PushModelConfigTrait {
     fn get_certification_keys_server_identifier(&self) -> String;
@@ -72,48 +60,12 @@ pub trait PushModelConfigTrait {
 
 impl Default for PushModelConfig {
     fn default() -> Self {
-        PushModelConfig::new()
-    }
-}
-
-pub struct PushModelConfig {
-    api_versions: Vec<String>,
-    certification_keys_server_identifier: String,
-    contact_ip: String,
-    contact_port: u32,
-    enable_iak_idevid: bool,
-    ek_handle: String,
-    ima_logs_appendable: bool,
-    ima_logs_formats: Vec<String>,
-    ima_logs_supports_partial_access: bool,
-    ima_ml_directory_path: String,
-    ima_ml_count_file: String,
-    measuredboot_ml_directory_path: String,
-    measuredboot_ml_count_file: String,
-    registrar_api_versions: Vec<String>,
-    registrar_ip: String,
-    registrar_port: u32,
-    server_cert: String,
-    server_key: String,
-    server_key_password: String,
-    tpm_encryption_alg: String,
-    tpm_hash_alg: String,
-    tpm_signing_alg: String,
-    uefi_logs_evidence_version: String,
-    uefi_logs_supports_partial_access: bool,
-    uefi_logs_appendable: bool,
-    uefi_logs_formats: Vec<String>,
-    uuid: String,
-}
-
-impl PushModelConfig {
-    pub fn new() -> Self {
         PushModelConfig {
             certification_keys_server_identifier:
                 DEFAULT_CERTIFICATION_KEYS_SERVER_IDENTIFIER.to_string(),
             contact_ip: DEFAULT_CONTACT_IP.to_string(),
             contact_port: DEFAULT_CONTACT_PORT,
-            ek_handle: DEFAULT_EK_HANDLE.to_string(),
+            ek_handle: DEFAULT_PUSH_EK_HANDLE.to_string(),
             enable_iak_idevid: DEFAULT_ENABLE_IAK_IDEVID,
             ima_logs_appendable: DEFAULT_IMA_LOGS_APPENDABLE,
             ima_logs_formats: DEFAULT_IMA_LOGS_FORMATS
@@ -152,12 +104,48 @@ impl PushModelConfig {
             tpm_encryption_alg: DEFAULT_TPM_ENCRYPTION_ALG.to_string(),
             tpm_hash_alg: DEFAULT_TPM_HASH_ALG.to_string(),
             tpm_signing_alg: DEFAULT_TPM_SIGNING_ALG.to_string(),
-            api_versions: DEFAULT_API_VERSIONS
+            api_versions: DEFAULT_PUSH_API_VERSIONS
                 .iter()
                 .map(|&s| s.to_string())
                 .collect(),
             uuid: DEFAULT_UUID.to_string(),
         }
+    }
+}
+
+pub struct PushModelConfig {
+    api_versions: Vec<String>,
+    certification_keys_server_identifier: String,
+    contact_ip: String,
+    contact_port: u32,
+    enable_iak_idevid: bool,
+    ek_handle: String,
+    ima_logs_appendable: bool,
+    ima_logs_formats: Vec<String>,
+    ima_logs_supports_partial_access: bool,
+    ima_ml_directory_path: String,
+    ima_ml_count_file: String,
+    measuredboot_ml_directory_path: String,
+    measuredboot_ml_count_file: String,
+    registrar_api_versions: Vec<String>,
+    registrar_ip: String,
+    registrar_port: u32,
+    server_cert: String,
+    server_key: String,
+    server_key_password: String,
+    tpm_encryption_alg: String,
+    tpm_hash_alg: String,
+    tpm_signing_alg: String,
+    uefi_logs_evidence_version: String,
+    uefi_logs_supports_partial_access: bool,
+    uefi_logs_appendable: bool,
+    uefi_logs_formats: Vec<String>,
+    uuid: String,
+}
+
+impl PushModelConfig {
+    pub fn new() -> Self {
+        PushModelConfig::default()
     }
 }
 
@@ -334,7 +322,7 @@ mod tests {
         );
         assert!(pmc.get_contact_ip() == DEFAULT_CONTACT_IP);
         assert!(pmc.get_contact_port() == DEFAULT_CONTACT_PORT);
-        assert!(pmc.get_ek_handle() == DEFAULT_EK_HANDLE);
+        assert!(pmc.get_ek_handle() == DEFAULT_PUSH_EK_HANDLE);
         assert!(pmc.get_enable_iak_idevid() == DEFAULT_ENABLE_IAK_IDEVID);
         assert!(pmc.get_ima_logs_appendable() == DEFAULT_IMA_LOGS_APPENDABLE);
         assert!(
@@ -386,7 +374,7 @@ mod tests {
         assert!(pmc.get_tpm_encryption_alg() == DEFAULT_TPM_ENCRYPTION_ALG);
         assert!(pmc.get_tpm_hash_alg() == DEFAULT_TPM_HASH_ALG);
         assert!(pmc.get_tpm_signing_alg() == DEFAULT_TPM_SIGNING_ALG);
-        assert!(pmc.get_api_versions() == DEFAULT_API_VERSIONS);
+        assert!(pmc.get_api_versions() == DEFAULT_PUSH_API_VERSIONS);
         assert!(
             pmc.get_registrar_api_versions()
                 == DEFAULT_REGISTRAR_API_VERSIONS
