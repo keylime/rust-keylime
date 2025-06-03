@@ -40,7 +40,6 @@ mod notifications_handler;
 mod payloads;
 mod quotes_handler;
 mod revocation;
-mod secure_mount;
 
 use actix_web::{dev::Service, http, middleware, rt, web, App, HttpServer};
 use base64::{engine::general_purpose, Engine as _};
@@ -62,7 +61,7 @@ use keylime::{
     list_parser::parse_list,
     permissions,
     registrar_client::RegistrarClientBuilder,
-    serialization,
+    secure_mount, serialization,
     tpm::{self, IAKResult, IDevIDResult},
 };
 use log::*;
