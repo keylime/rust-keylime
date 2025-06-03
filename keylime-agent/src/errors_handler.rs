@@ -1,10 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2021 Keylime Authors
 
-use crate::{
-    common::{APIVersion, JsonWrapper},
-    QuoteData,
-};
+use crate::{common::JsonWrapper, QuoteData};
 use actix_web::{
     body, dev,
     error::{InternalError, JsonPayloadError, PathError, QueryPayloadError},
@@ -12,6 +9,7 @@ use actix_web::{
     middleware::{ErrorHandlerResponse, ErrorHandlers},
     web, Error, HttpRequest, HttpResponse, Responder, Result,
 };
+use keylime::version::Version;
 use log::*;
 
 pub(crate) async fn app_default(
@@ -70,9 +68,9 @@ pub(crate) async fn app_default(
 
 pub(crate) async fn version_not_supported(
     req: HttpRequest,
-    version: web::Path<APIVersion>,
+    version: web::Path<Version>,
 ) -> impl Responder {
-    let message = format!("API version not supported: {version}");
+    let message = format!("API version not supported: v{version}");
 
     warn!("{} returning 400 response. {}", req.head().method, message);
 

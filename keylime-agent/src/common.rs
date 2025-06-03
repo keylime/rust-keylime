@@ -30,18 +30,6 @@ use tss_esapi::{
 };
 
 #[derive(Serialize, Deserialize, Debug)]
-pub(crate) struct APIVersion {
-    major: u32,
-    minor: u32,
-}
-
-impl Display for APIVersion {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "v{}.{}", self.major, self.minor)
-    }
-}
-
-#[derive(Serialize, Deserialize, Debug)]
 pub(crate) struct JsonWrapper<A> {
     pub code: u16,
     pub status: String,
