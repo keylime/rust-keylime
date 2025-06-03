@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2025 Keylime Authors
-use crate::keylime_error::{Error, Result};
 use crate::{
     agent_identity::AgentIdentityBuilder,
     crypto::{self},
     device_id,
+    error::{Error, Result},
     registrar_client::RegistrarClientBuilder,
     tpm::{self},
 };

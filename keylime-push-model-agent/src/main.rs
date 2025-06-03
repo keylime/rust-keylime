@@ -214,7 +214,7 @@ fn get_context(args: &Args) -> Result<Option<context_info::ContextInfo>> {
             tpm_hash_alg: config.get_tpm_hash_alg(),
             tpm_signing_alg: config.get_tpm_signing_alg(),
         },
-    );
+    )?;
     Ok(Some(context_info))
 }
 

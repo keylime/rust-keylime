@@ -648,7 +648,8 @@ mod tests {
                 tpm_hash_alg: config.get_tpm_hash_alg(),
                 tpm_signing_alg: config.get_tpm_signing_alg(),
             },
-        );
+        )
+        .expect("Failed to create context info from string");
         let mut filler = FillerFromHardware::new(&mut context_info);
         let attestation_request = filler.get_attestation_request_final();
         assert_eq!(attestation_request.data.type_, "attestation");
@@ -669,7 +670,8 @@ mod tests {
                 tpm_hash_alg: config.get_tpm_hash_alg(),
                 tpm_signing_alg: config.get_tpm_signing_alg(),
             },
-        );
+        )
+        .expect("Failed to create context info from string");
         let mut filler = FillerFromHardware::new(&mut context_info);
         let session_request = filler.get_session_request();
         assert_eq!(session_request.data.data_type, "session");
@@ -690,7 +692,8 @@ mod tests {
                 tpm_hash_alg: config.get_tpm_hash_alg(),
                 tpm_signing_alg: config.get_tpm_signing_alg(),
             },
-        );
+        )
+        .expect("Failed to create context info from string");
         let mut filler = FillerFromHardware::new(&mut context_info);
         let evidence_handling_request =
             filler.get_evidence_handling_request();
