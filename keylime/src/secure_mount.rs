@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2021 Keylime Authors
-
-use super::*;
-
-use keylime::error::{Error, Result};
-use std::fs;
-use std::io::BufRead;
-use std::os::unix::fs::PermissionsExt;
-use std::path::PathBuf;
-use std::process::Command;
+use crate::error::{Error, Result};
+use log::*;
+use std::{
+    fs,
+    io::{BufRead, BufReader},
+    os::unix::fs::PermissionsExt,
+    path::{Path, PathBuf},
+    process::Command,
+};
 
 pub static MOUNTINFO: &str = "/proc/self/mountinfo";
 
@@ -27,7 +27,7 @@ pub static MOUNTINFO: &str = "/proc/self/mountinfo";
  *         - false if not mounted
  *
  */
-fn check_mount(secure_dir: &Path) -> Result<bool> {
+pub fn check_mount(secure_dir: &Path) -> Result<bool> {
     let f = fs::File::open(MOUNTINFO)?;
     let f = BufReader::new(f);
     let lines = f.lines();
@@ -39,7 +39,7 @@ fn check_mount(secure_dir: &Path) -> Result<bool> {
                 // Skip all fields up to the separator
                 let mut iter = iter.skip_while(|&x| x != "-");
 
-                if let Some(separator) = iter.next() {
+                if let Some(_separator) = iter.next() {
                     // The file system type is the first element after the separator
                     if let Some(fs_type) = iter.next() {
                         if fs_type == "tmpfs" {
@@ -80,7 +80,7 @@ fn check_mount(secure_dir: &Path) -> Result<bool> {
  * implementation as the original python version, but the chown/geteuid
  * functions are unsafe function in Rust to use.
  */
-pub(crate) fn mount(work_dir: &Path, secure_size: &str) -> Result<PathBuf> {
+pub fn mount(work_dir: &Path, secure_size: &str) -> Result<PathBuf> {
     // Mount the directory to file system
     let secure_dir_path = Path::new(work_dir).join("secure");
 
@@ -140,6 +140,7 @@ pub(crate) fn mount(work_dir: &Path, secure_size: &str) -> Result<PathBuf> {
 
     Ok(secure_dir_path)
 }
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -148,7 +149,7 @@ mod tests {
     fn test_secure_mount() {
         let temp_workdir = tempfile::tempdir().unwrap(); //#[allow_ci]
         let secure_size = "1m";
-        let test_mount = mount(temp_workdir.path(), secure_size);
+        let _test_mount = mount(temp_workdir.path(), secure_size);
         assert!(check_mount(temp_workdir.path()).is_ok());
     }
 }
