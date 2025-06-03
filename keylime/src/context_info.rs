@@ -1,20 +1,46 @@
-use crate::algorithms::HashAlgorithm as KeylimeInternalHashAlgorithm;
-use crate::config::{PushModelConfig, PushModelConfigTrait};
-use crate::keylime_error::Error as KeylimeError;
-use crate::keylime_error::Error as KeylimeErrorEnum;
-use crate::keylime_error::Result;
-use crate::structures::CertificationKey;
-use crate::{agent_data::AgentData, algorithms, hash_ek, tpm};
+use crate::{
+    agent_data::AgentData,
+    algorithms::{self, HashAlgorithm as KeylimeInternalHashAlgorithm},
+    config::{PushModelConfig, PushModelConfigTrait},
+    hash_ek,
+    structures::CertificationKey,
+    tpm,
+};
 use base64::{
     engine::general_purpose::STANDARD as base64_standard, Engine as _,
 };
 use hex;
 use openssl::hash::{Hasher, MessageDigest};
-use tss_esapi::handles::KeyHandle;
-use tss_esapi::interface_types::algorithm::HashingAlgorithm as TssEsapiInterfaceHashingAlgorithm;
-use tss_esapi::structures::Name;
-use tss_esapi::structures::Public as TssPublic;
-use tss_esapi::traits::Marshall;
+use thiserror::Error;
+use tss_esapi::{
+    handles::KeyHandle,
+    interface_types::algorithm::HashingAlgorithm as TssEsapiInterfaceHashingAlgorithm,
+    structures::{Name, Public as TssPublic},
+    traits::Marshall,
+};
+
+#[derive(Debug, Error)]
+pub enum ContextInfoError {
+    /// Invalid algorithm
+    #[error("Invalid Algorithm")]
+    InvalidAlgorithm(#[from] algorithms::AlgorithmError),
+
+    /// OpenSSL error
+    #[error("OpenSSL error")]
+    OpenSSL(#[from] openssl::error::ErrorStack),
+
+    /// TPM Error
+    #[error("TPM error")]
+    Tpm(#[from] tpm::TpmError),
+
+    /// TSS esapi error
+    #[error("TSS esapi  error")]
+    TssEsapi(#[from] tss_esapi::Error),
+
+    /// Unsupported AK type
+    #[error("Unsupported AK type")]
+    UnsupportedAKType,
+}
 
 pub struct AlgorithmConfiguration {
     pub tpm_encryption_alg: algorithms::EncryptionAlgorithm,
@@ -41,24 +67,25 @@ pub struct ContextInfo {
 }
 
 impl ContextInfo {
-    pub fn new_from_str(config: AlgorithmConfigurationString) -> Self {
+    pub fn new_from_str(
+        config: AlgorithmConfigurationString,
+    ) -> Result<Self, ContextInfoError> {
         let tpm_encryption_alg = algorithms::EncryptionAlgorithm::try_from(
             config.tpm_encryption_alg.as_str(),
-        )
-        .expect("Invalid TPM encryption algorithm");
-        let tpm_hash_alg =
-            algorithms::HashAlgorithm::try_from(config.tpm_hash_alg.as_str())
-                .expect("Invalid TPM hash algorithm");
+        )?;
+        let tpm_hash_alg = algorithms::HashAlgorithm::try_from(
+            config.tpm_hash_alg.as_str(),
+        )?;
         let tpm_signing_alg = algorithms::SignAlgorithm::try_from(
             config.tpm_signing_alg.as_str(),
-        )
-        .expect("Invalid TPM signing algorithm");
-        Self::new(AlgorithmConfiguration {
+        )?;
+        Ok(Self::new(AlgorithmConfiguration {
             tpm_encryption_alg,
             tpm_hash_alg,
             tpm_signing_alg,
-        })
+        }))
     }
+
     pub fn new(config: AlgorithmConfiguration) -> Self {
         let mut tpm_context =
             tpm::Context::new().expect("Failed to create TPM context");
@@ -110,7 +137,7 @@ impl ContextInfo {
         &self.tpm_context
     }
 
-    pub fn flush_context(&mut self) -> Result<()> {
+    pub fn flush_context(&mut self) -> Result<(), ContextInfoError> {
         self.tpm_context.flush_context(self.ek_handle.into())?;
         self.tpm_context.flush_context(self.ak_handle.into())?;
         Ok(())
@@ -124,23 +151,29 @@ impl ContextInfo {
         algorithms::get_key_size(&self.tpm_encryption_alg)
     }
 
-    pub fn get_public_key_as_base64(&self) -> Result<String> {
+    pub fn get_public_key_as_base64(
+        &self,
+    ) -> Result<String, ContextInfoError> {
         let public_key_bytes: Vec<u8> = self.ek_result.public.marshall()?;
         let base64_encoded_key: String =
             base64_standard.encode(&public_key_bytes);
         Ok(base64_encoded_key)
     }
 
-    pub fn get_supported_hash_algorithms(&mut self) -> Result<Vec<String>> {
-        self.tpm_context
-            .get_supported_hash_algorithms_as_strings()
-            .map_err(KeylimeErrorEnum::Tpm)
+    pub fn get_supported_hash_algorithms(
+        &mut self,
+    ) -> Result<Vec<String>, ContextInfoError> {
+        Ok(self
+            .tpm_context
+            .get_supported_hash_algorithms_as_strings()?)
     }
 
-    pub fn get_supported_signing_schemes(&mut self) -> Result<Vec<String>> {
-        self.tpm_context
-            .get_supported_signing_algorithms_as_strings()
-            .map_err(KeylimeErrorEnum::Tpm)
+    pub fn get_supported_signing_schemes(
+        &mut self,
+    ) -> Result<Vec<String>, ContextInfoError> {
+        Ok(self
+            .tpm_context
+            .get_supported_signing_algorithms_as_strings()?)
     }
 
     pub fn get_key_algorithm(&self) -> String {
@@ -155,8 +188,8 @@ impl ContextInfo {
         self.ak_handle
     }
 
-    fn get_ak_public_ref(&self) -> Result<&TssPublic> {
-        Ok(&self.ak.public)
+    fn get_ak_public_ref(&self) -> &TssPublic {
+        &self.ak.public
     }
 
     pub fn get_ak_key_class_str(&self) -> String {
@@ -167,12 +200,12 @@ impl ContextInfo {
         self.tpm_signing_alg.to_string()
     }
 
-    pub fn get_ak_public_enum_ref(&self) -> Result<&TssPublic> {
-        Ok(&self.ak.public)
+    pub fn get_ak_public_enum_ref(&self) -> &TssPublic {
+        &self.ak.public
     }
 
-    pub fn get_ak_key_size(&self) -> Result<u16> {
-        let ak_public_info = self.get_ak_public_ref()?;
+    pub fn get_ak_key_size(&self) -> Result<u16, ContextInfoError> {
+        let ak_public_info = self.get_ak_public_ref();
         match ak_public_info {
             TssPublic::Rsa { parameters, .. } => {
                 Ok(parameters.key_bits().into())
@@ -180,45 +213,24 @@ impl ContextInfo {
             TssPublic::Ecc { parameters, .. } => {
                 Ok(algorithms::get_ecc_curve_key_size(parameters.ecc_curve()))
             }
-            _ => Err(KeylimeError::Tpm(
-                tpm::TpmError::PublicKeyCertificateMismatch(
-                    "Unsupported AK public key type".to_string(),
-                ),
-            )),
+            _ => Err(ContextInfoError::UnsupportedAKType),
         }
     }
 
-    pub fn get_ak_local_identifier_str(&self) -> Result<String> {
-        let ak_public_info: &TssPublic = self.get_ak_public_ref()?;
+    pub fn get_ak_local_identifier_str(
+        &self,
+    ) -> Result<String, ContextInfoError> {
+        let ak_public_info: &TssPublic = self.get_ak_public_ref();
         let marshalled_tpmt_public = ak_public_info.marshall()?;
         let name_h_alg_tss: TssEsapiInterfaceHashingAlgorithm =
             ak_public_info.name_hashing_algorithm();
-        let keylime_hash_alg: KeylimeInternalHashAlgorithm = name_h_alg_tss
-            .try_into()
-            .map_err(|e: crate::algorithms::AlgorithmError| {
-                KeylimeErrorEnum::Algorithm(e)
-            })?;
+        let keylime_hash_alg: KeylimeInternalHashAlgorithm =
+            name_h_alg_tss.try_into()?;
         let name_alg_id_value: u16 = name_h_alg_tss.into();
         let openssl_message_digest: MessageDigest = keylime_hash_alg.into();
-        let mut hasher =
-            Hasher::new(openssl_message_digest).map_err(|e| {
-                KeylimeErrorEnum::Other(format!(
-                    "Error on OpenSSL hasher {}",
-                    e
-                ))
-            })?;
-        hasher.update(&marshalled_tpmt_public).map_err(|e| {
-            KeylimeErrorEnum::Other(format!(
-                "Error on OpenSSL hasher update: {}",
-                e
-            ))
-        })?;
-        let digest_bytes_vec = hasher.finish().map_err(|e| {
-            KeylimeErrorEnum::Other(format!(
-                "Error on OpenSSL hasher finalizer: {}",
-                e
-            ))
-        })?;
+        let mut hasher = Hasher::new(openssl_message_digest)?;
+        hasher.update(&marshalled_tpmt_public)?;
+        let digest_bytes_vec = hasher.finish()?;
         let digest_bytes: &[u8] = &digest_bytes_vec;
         let mut name_content_buffer: Vec<u8> = Vec::new();
         name_content_buffer
@@ -226,21 +238,26 @@ impl ContextInfo {
         name_content_buffer.extend_from_slice(digest_bytes);
         let ak_name_obj: Name =
             Name::try_from(name_content_buffer).map_err(|e| {
-                KeylimeErrorEnum::Tpm(tpm::TpmError::NameFromBytesError(
-                    format!("Failed to create Name object: {}", e),
+                tpm::TpmError::NameFromBytesError(format!(
+                    "Failed to create Name object: {}",
+                    e
                 ))
             })?;
         Ok(hex::encode(ak_name_obj.value()))
     }
 
-    pub fn get_ak_public_key_as_base64(&self) -> Result<String> {
-        let ak_public_info = self.get_ak_public_ref()?;
+    pub fn get_ak_public_key_as_base64(
+        &self,
+    ) -> Result<String, ContextInfoError> {
+        let ak_public_info = self.get_ak_public_ref();
         let public_key_bytes: Vec<u8> = ak_public_info.marshall()?;
         Ok(base64_standard.encode(&public_key_bytes))
     }
 
     /// Gathers all information for a single AK entry in the "certification_keys" array.
-    pub fn get_ak_certification_data(&self) -> Result<CertificationKey> {
+    pub fn get_ak_certification_data(
+        &self,
+    ) -> Result<CertificationKey, ContextInfoError> {
         let config = PushModelConfig::default();
         Ok(CertificationKey {
             key_class: self.get_ak_key_class_str(),
@@ -271,7 +288,8 @@ mod tests {
             tpm_hash_alg: "sha256".to_string(),
             tpm_signing_alg: "rsassa".to_string(),
         };
-        let mut context_info = ContextInfo::new_from_str(config);
+        let mut context_info = ContextInfo::new_from_str(config)
+            .expect("Failed to create context from string");
         assert!(!context_info.ek_hash.is_empty());
         assert!(context_info.flush_context().is_ok());
     }
@@ -286,7 +304,8 @@ mod tests {
             tpm_hash_alg: "sha256".to_string(),
             tpm_signing_alg: "rsassa".to_string(),
         };
-        let mut context_info = ContextInfo::new_from_str(config);
+        let mut context_info = ContextInfo::new_from_str(config)
+            .expect("Failed to create context from string");
         assert!(!context_info.ek_hash.is_empty());
         assert!(!context_info.get_public_key_as_base64().unwrap().is_empty()); //#[allow_ci]
         assert_eq!(context_info.get_key_class(), "asymmetric");
@@ -306,41 +325,41 @@ mod tests {
 
     #[tokio::test]
     #[cfg(feature = "testing")]
-    #[should_panic(expected = "Invalid TPM encryption algorithm")]
-    async fn test_new_from_str_panics_on_bad_enc_alg() {
+    async fn test_new_from_str_errors_on_bad_enc_alg() {
         let _mutex = crate::tpm::testing::lock_tests().await;
         let config = AlgorithmConfigurationString {
             tpm_encryption_alg: "bad-algorithm".to_string(),
             tpm_hash_alg: "sha256".to_string(),
             tpm_signing_alg: "rsassa".to_string(),
         };
-        ContextInfo::new_from_str(config);
+        let r = ContextInfo::new_from_str(config);
+        assert!(r.is_err());
     }
 
     #[tokio::test]
     #[cfg(feature = "testing")]
-    #[should_panic(expected = "Invalid TPM hash algorithm")]
-    async fn test_new_from_str_panics_on_bad_hash_alg() {
+    async fn test_new_from_str_errors_on_bad_hash_alg() {
         let _mutex = crate::tpm::testing::lock_tests().await;
         let config = AlgorithmConfigurationString {
             tpm_encryption_alg: "rsa".to_string(),
             tpm_hash_alg: "bad-hash".to_string(),
             tpm_signing_alg: "rsassa".to_string(),
         };
-        ContextInfo::new_from_str(config);
+        let r = ContextInfo::new_from_str(config);
+        assert!(r.is_err());
     }
 
     #[tokio::test]
     #[cfg(feature = "testing")]
-    #[should_panic(expected = "Invalid TPM signing algorithm")]
-    async fn test_new_from_str_panics_on_bad_sign_alg() {
+    async fn test_new_from_str_errors_on_bad_sign_alg() {
         let _mutex = crate::tpm::testing::lock_tests().await;
         let config = AlgorithmConfigurationString {
             tpm_encryption_alg: "rsa".to_string(),
             tpm_hash_alg: "sha256".to_string(),
             tpm_signing_alg: "bad-signing-alg".to_string(),
         };
-        ContextInfo::new_from_str(config);
+        let r = ContextInfo::new_from_str(config);
+        assert!(r.is_err());
     }
 
     #[tokio::test]
@@ -354,7 +373,8 @@ mod tests {
             tpm_hash_alg: "sha256".to_string(),
             tpm_signing_alg: "rsassa".to_string(),
         };
-        let mut context_info = ContextInfo::new_from_str(config);
+        let mut context_info = ContextInfo::new_from_str(config)
+            .expect("Failed to create context from string");
         assert!(!context_info.ek_hash.is_empty());
         assert!(!context_info.get_public_key_as_base64().unwrap().is_empty()); //#[allow_ci]
         assert_eq!(context_info.get_key_class(), "asymmetric");
