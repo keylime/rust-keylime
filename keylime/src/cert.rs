@@ -1,5 +1,4 @@
-use crate::crypto;
-use crate::keylime_error::Result;
+use crate::{crypto, error::Result};
 use log::debug;
 use openssl::pkey::{PKey, Public};
 use openssl::x509::X509;

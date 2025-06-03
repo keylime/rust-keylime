@@ -1,5 +1,5 @@
 use crate::algorithms::{HashAlgorithm, SignAlgorithm};
-use crate::keylime_error::Result;
+use crate::error::Result;
 use crate::tpm;
 use serde::{Deserialize, Serialize};
 use std::fs::File;
