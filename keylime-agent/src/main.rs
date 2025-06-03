@@ -34,7 +34,6 @@
 mod agent_handler;
 mod api;
 mod common;
-mod config;
 mod errors_handler;
 mod keys_handler;
 mod notifications_handler;
@@ -54,9 +53,10 @@ use futures::{
 use keylime::{
     agent_data::AgentData,
     agent_registration::{AgentRegistration, AgentRegistrationConfig},
+    config,
     crypto::{self, x509::CertificateBuilder},
     device_id::{DeviceID, DeviceIDBuilder},
-    global_config, hash_ek,
+    hash_ek,
     ima::MeasurementList,
     keylime_error::{Error, Result},
     list_parser::parse_list,
@@ -236,7 +236,7 @@ async fn main() -> Result<()> {
 
         error!("Configuration error: {}", &message);
         return Err(Error::Configuration(
-            global_config::KeylimeConfigError::Generic(message),
+            config::KeylimeConfigError::Generic(message),
         ));
     }
 
@@ -266,7 +266,7 @@ async fn main() -> Result<()> {
 
             error!("Configuration error: {}", &message);
             return Err(Error::Configuration(
-                global_config::KeylimeConfigError::Generic(message),
+                config::KeylimeConfigError::Generic(message),
             ));
         }
         info!("Running the service as {}...", user_group);
@@ -295,7 +295,7 @@ async fn main() -> Result<()> {
             if !python_shim.exists() {
                 error!("Could not find python shim at {}", python_shim.display());
                 return Err(Error::Configuration(
-                    global_config::KeylimeConfigError::Generic(format!(
+                    config::KeylimeConfigError::Generic(format!(
                     "Could not find python shim at {}",
                     python_shim.display()
                 ))));
@@ -319,7 +319,7 @@ async fn main() -> Result<()> {
         };
         ctx.tr_set_auth(Hierarchy::Endorsement.into(), auth)
             .map_err(|e| {
-                Error::Configuration(global_config::KeylimeConfigError::Generic(format!(
+                Error::Configuration(config::KeylimeConfigError::Generic(format!(
                     "Failed to set TPM context password for Endorsement Hierarchy: {e}"
                 )))
             })?;
@@ -574,7 +574,7 @@ async fn main() -> Result<()> {
         {
             "" => {
                 error!("Agent mTLS is enabled, but trusted_client_ca option was not provided");
-                return Err(Error::Configuration(global_config::KeylimeConfigError::Generic("Agent mTLS is enabled, but trusted_client_ca option was not provided".to_string())));
+                return Err(Error::Configuration(config::KeylimeConfigError::Generic("Agent mTLS is enabled, but trusted_client_ca option was not provided".to_string())));
             }
             l => l,
         };
@@ -585,7 +585,7 @@ async fn main() -> Result<()> {
             error!(
                 "Trusted client CA certificate list is empty: could not load any certificate"
             );
-            return Err(Error::Configuration(global_config::KeylimeConfigError::Generic(
+            return Err(Error::Configuration(config::KeylimeConfigError::Generic(
                 "Trusted client CA certificate list is empty: could not load any certificate".to_string()
             )));
         }
@@ -657,7 +657,7 @@ async fn main() -> Result<()> {
             error!(
                 "No revocation certificate set in 'revocation_cert' option"
             );
-            return Err(Error::Configuration(global_config::KeylimeConfigError::Generic(
+            return Err(Error::Configuration(config::KeylimeConfigError::Generic(
                 "No revocation certificate set in 'revocation_cert' option"
                     .to_string(),
             )));
@@ -1041,7 +1041,7 @@ mod testing {
                     Err(err) => None,
                 };
 
-            let api_versions = api::SUPPORTED_API_VERSIONS
+            let api_versions = config::SUPPORTED_API_VERSIONS
                 .iter()
                 .map(|&s| s.to_string())
                 .collect::<Vec<String>>();

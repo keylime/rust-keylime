@@ -1,20 +1,8 @@
-pub static DEFAULT_REGISTRAR_API_VERSIONS: &[&str] = &["2.3"];
-pub static DEFAULT_API_VERSIONS: &[&str] = &["3.0"];
-pub static DEFAULT_CONTACT_IP: &str = "127.0.0.1";
-pub static DEFAULT_CONTACT_PORT: u32 = 9002;
-pub static DEFAULT_EK_HANDLE: &str = "";
-pub static DEFAULT_ENABLE_IAK_IDEVID: bool = false;
-pub static DEFAULT_IP: &str = "127.0.0.1";
-pub static DEFAULT_PORT: u32 = 9002;
-pub static DEFAULT_REGISTRAR_IP: &str = "127.0.0.1";
-pub static DEFAULT_REGISTRAR_PORT: u32 = 8890;
-pub static DEFAULT_SERVER_CERT: &str = "server-cert.crt";
-pub static DEFAULT_SERVER_KEY: &str = "server-private.pem";
-pub static DEFAULT_SERVER_KEY_PASSWORD: &str = "";
-pub static DEFAULT_TPM_HASH_ALG: &str = "sha256";
-pub static DEFAULT_TPM_ENCRYPTION_ALG: &str = "rsa";
-pub static DEFAULT_TPM_SIGNING_ALG: &str = "rsassa";
-pub static DEFAULT_UUID: &str = "b0acd25f-2205-4c37-932d-e8f99a8d39ef";
+use crate::config::*;
+
+// TODO This should be temporary
+pub static DEFAULT_PUSH_API_VERSIONS: &[&str] = &["3.0"];
+pub static DEFAULT_PUSH_EK_HANDLE: &str = "";
 
 pub trait PushModelConfigTrait {
     fn get_contact_ip(&self) -> String;
@@ -37,7 +25,29 @@ pub trait PushModelConfigTrait {
 
 impl Default for PushModelConfig {
     fn default() -> Self {
-        PushModelConfig::new()
+        PushModelConfig {
+            contact_ip: DEFAULT_CONTACT_IP.to_string(),
+            contact_port: DEFAULT_CONTACT_PORT,
+            ek_handle: DEFAULT_PUSH_EK_HANDLE.to_string(),
+            enable_iak_idevid: DEFAULT_ENABLE_IAK_IDEVID,
+            registrar_ip: DEFAULT_REGISTRAR_IP.to_string(),
+            registrar_port: DEFAULT_REGISTRAR_PORT,
+            registrar_api_versions: DEFAULT_REGISTRAR_API_VERSIONS
+                .iter()
+                .map(|&s| s.to_string())
+                .collect(),
+            server_cert: DEFAULT_SERVER_CERT.to_string(),
+            server_key: DEFAULT_SERVER_KEY.to_string(),
+            server_key_password: DEFAULT_SERVER_KEY_PASSWORD.to_string(),
+            tpm_encryption_alg: DEFAULT_TPM_ENCRYPTION_ALG.to_string(),
+            tpm_hash_alg: DEFAULT_TPM_HASH_ALG.to_string(),
+            tpm_signing_alg: DEFAULT_TPM_SIGNING_ALG.to_string(),
+            api_versions: DEFAULT_PUSH_API_VERSIONS
+                .iter()
+                .map(|&s| s.to_string())
+                .collect(),
+            uuid: DEFAULT_UUID.to_string(),
+        }
     }
 }
 
@@ -61,29 +71,7 @@ pub struct PushModelConfig {
 
 impl PushModelConfig {
     pub fn new() -> Self {
-        PushModelConfig {
-            contact_ip: DEFAULT_CONTACT_IP.to_string(),
-            contact_port: DEFAULT_CONTACT_PORT,
-            ek_handle: DEFAULT_EK_HANDLE.to_string(),
-            enable_iak_idevid: DEFAULT_ENABLE_IAK_IDEVID,
-            registrar_ip: DEFAULT_REGISTRAR_IP.to_string(),
-            registrar_port: DEFAULT_REGISTRAR_PORT,
-            registrar_api_versions: DEFAULT_REGISTRAR_API_VERSIONS
-                .iter()
-                .map(|&s| s.to_string())
-                .collect(),
-            server_cert: DEFAULT_SERVER_CERT.to_string(),
-            server_key: DEFAULT_SERVER_KEY.to_string(),
-            server_key_password: DEFAULT_SERVER_KEY_PASSWORD.to_string(),
-            tpm_encryption_alg: DEFAULT_TPM_ENCRYPTION_ALG.to_string(),
-            tpm_hash_alg: DEFAULT_TPM_HASH_ALG.to_string(),
-            tpm_signing_alg: DEFAULT_TPM_SIGNING_ALG.to_string(),
-            api_versions: DEFAULT_API_VERSIONS
-                .iter()
-                .map(|&s| s.to_string())
-                .collect(),
-            uuid: DEFAULT_UUID.to_string(),
-        }
+        PushModelConfig::default()
     }
 }
 
@@ -183,7 +171,7 @@ mod tests {
         let pmc = PushModelConfig::default();
         assert!(pmc.get_contact_ip() == DEFAULT_CONTACT_IP);
         assert!(pmc.get_contact_port() == DEFAULT_CONTACT_PORT);
-        assert!(pmc.get_ek_handle() == DEFAULT_EK_HANDLE);
+        assert!(pmc.get_ek_handle() == DEFAULT_PUSH_EK_HANDLE);
         assert!(pmc.get_enable_iak_idevid() == DEFAULT_ENABLE_IAK_IDEVID);
         assert!(pmc.get_registrar_ip() == DEFAULT_REGISTRAR_IP);
         assert!(pmc.get_registrar_port() == DEFAULT_REGISTRAR_PORT);
@@ -193,7 +181,7 @@ mod tests {
         assert!(pmc.get_tpm_encryption_alg() == DEFAULT_TPM_ENCRYPTION_ALG);
         assert!(pmc.get_tpm_hash_alg() == DEFAULT_TPM_HASH_ALG);
         assert!(pmc.get_tpm_signing_alg() == DEFAULT_TPM_SIGNING_ALG);
-        assert!(pmc.get_api_versions() == DEFAULT_API_VERSIONS);
+        assert!(pmc.get_api_versions() == DEFAULT_PUSH_API_VERSIONS);
         assert!(
             pmc.get_registrar_api_versions()
                 == DEFAULT_REGISTRAR_API_VERSIONS

@@ -1,31 +1,26 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2022 Keylime Authors
-use crate::api::SUPPORTED_API_VERSIONS;
-use config::{
-    builder::DefaultState, Config, ConfigBuilder, ConfigError, Environment,
-    File, FileFormat, Map, Source, Value, ValueKind::Table,
-};
-use glob::glob;
-use keylime::{
-    algorithms::{EncryptionAlgorithm, HashAlgorithm, SignAlgorithm},
-    global_config::KeylimeConfigError,
-    hostname_parser::{parse_hostname, HostnameParsingError},
-    ip_parser::{parse_ip, IpParsingError},
-    list_parser::{parse_list, ListParsingError},
-    permissions, tpm,
+use crate::{
+    config::{EnvConfig, KeylimeConfigError},
+    hostname_parser::parse_hostname,
+    ip_parser::parse_ip,
+    list_parser::parse_list,
+    permissions,
     version::{self, GetErrorInput},
 };
-use log::*;
-use serde::{Deserialize, Serialize, Serializer};
-use serde_json::Value as JsonValue;
-use std::{
-    collections::HashMap,
-    env,
-    path::{Path, PathBuf},
-    str::FromStr,
+use config::{
+    builder::DefaultState, Config, ConfigBuilder, ConfigError, File,
+    FileFormat, Map, Source, Value,
 };
-use thiserror::Error;
+use glob::glob;
+use log::*;
+use serde::{Deserialize, Serialize};
+use serde_json::Value as JsonValue;
+use std::{env, path::Path, str::FromStr};
 use uuid::Uuid;
+
+pub static SUPPORTED_API_VERSIONS: &[&str] = &["2.1", "2.2"];
+pub static DEFAULT_REGISTRAR_API_VERSIONS: &[&str] = &["2.3"];
 
 pub static CONFIG_VERSION: &str = "2.0";
 pub static DEFAULT_API_VERSIONS: &str = "default";
@@ -84,7 +79,7 @@ pub static DEFAULT_CONFIG: &str = "/etc/keylime/agent.conf";
 pub static DEFAULT_CONFIG_SYS: &str = "/usr/etc/keylime/agent.conf";
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
-pub(crate) struct AgentConfig {
+pub struct AgentConfig {
     pub agent_data_path: String,
     pub allow_payload_revocation_actions: bool,
     pub api_versions: String,
@@ -134,46 +129,8 @@ pub(crate) struct AgentConfig {
     pub version: String,
 }
 
-#[derive(Clone, Debug)]
-struct EnvConfig {
-    map: HashMap<String, Value>,
-}
-
-impl EnvConfig {
-    pub fn new() -> Result<Self, KeylimeConfigError> {
-        let env_source = Environment::with_prefix("KEYLIME_AGENT")
-            .separator(".")
-            .prefix_separator("_");
-
-        // Log debug message for configuration obtained from environment
-        env_source
-            .collect()?
-            .iter()
-            .for_each(|(c, v)| debug!("Environment configuration {c}={v}"));
-
-        // Return an EnvConfig containing the collected environment variables in a format that
-        // allows it to be used as a Source for KeylimeConfig
-        Ok(EnvConfig {
-            map: Map::from([(
-                "agent".to_string(),
-                Value::from(env_source.collect()?),
-            )]),
-        })
-    }
-}
-
-impl Source for EnvConfig {
-    fn collect(&self) -> Result<Map<String, Value>, ConfigError> {
-        Ok(self.map.clone())
-    }
-
-    fn clone_into_box(&self) -> Box<dyn Source + Send + Sync> {
-        Box::new(self.clone())
-    }
-}
-
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
-pub(crate) struct KeylimeConfig {
+pub struct KeylimeConfig {
     pub agent: AgentConfig,
 }
 
@@ -339,7 +296,7 @@ fn config_get_setting(
     if let Ok(env_cfg) = env::var("KEYLIME_AGENT_CONFIG") {
         if !env_cfg.is_empty() {
             let path = Path::new(&env_cfg);
-            if (path.exists()) {
+            if path.exists() {
                 builder = builder.add_source(
                     File::new(&env_cfg, FileFormat::Toml).required(true),
                 )
@@ -408,21 +365,19 @@ fn config_translate_keywords(
     let uuid = get_uuid(&config.agent.uuid);
 
     let env_keylime_dir = env::var("KEYLIME_DIR").ok();
-    let keylime_dir = match env_keylime_dir {
-        Some(ref dir) => {
-            if dir.is_empty() {
-                match &config.agent.keylime_dir {
-                    s => Path::new(s),
-                    _ => Path::new(DEFAULT_KEYLIME_DIR),
-                }
-            } else {
-                Path::new(dir)
-            }
+
+    let keylime_dir = if let Some(ref dir) = env_keylime_dir {
+        if !dir.is_empty() {
+            Path::new(dir)
+        } else if config.agent.keylime_dir.is_empty() {
+            Path::new(DEFAULT_KEYLIME_DIR)
+        } else {
+            Path::new(&config.agent.keylime_dir)
         }
-        None => match &config.agent.keylime_dir {
-            s => Path::new(s),
-            _ => Path::new(DEFAULT_KEYLIME_DIR),
-        },
+    } else if config.agent.keylime_dir.is_empty() {
+        Path::new(DEFAULT_KEYLIME_DIR)
+    } else {
+        Path::new(&config.agent.keylime_dir)
     };
 
     // Validate that keylime_dir exists
@@ -436,7 +391,7 @@ fn config_translate_keywords(
 
     let root_path = Path::new("/");
 
-    let mut agent_data_path = config_get_file_path(
+    let agent_data_path = config_get_file_path(
         "agent_data_path",
         &config.agent.agent_data_path,
         keylime_dir,
@@ -444,7 +399,7 @@ fn config_translate_keywords(
         false,
     );
 
-    let mut ima_ml_path = config_get_file_path(
+    let ima_ml_path = config_get_file_path(
         "ima_ml_path",
         &config.agent.ima_ml_path,
         root_path,
@@ -452,7 +407,7 @@ fn config_translate_keywords(
         false,
     );
 
-    let mut measuredboot_ml_path = config_get_file_path(
+    let measuredboot_ml_path = config_get_file_path(
         "measuredboot_ml_path",
         &config.agent.measuredboot_ml_path,
         root_path,
@@ -460,7 +415,7 @@ fn config_translate_keywords(
         false,
     );
 
-    let mut server_key = config_get_file_path(
+    let server_key = config_get_file_path(
         "server_key",
         &config.agent.server_key,
         keylime_dir,
@@ -468,7 +423,7 @@ fn config_translate_keywords(
         false,
     );
 
-    let mut server_cert = config_get_file_path(
+    let server_cert = config_get_file_path(
         "server_cert",
         &config.agent.server_cert,
         keylime_dir,
@@ -491,7 +446,7 @@ fn config_translate_keywords(
             .collect::<Vec<_>>()
             .join(", ");
 
-    let mut iak_cert = config_get_file_path(
+    let iak_cert = config_get_file_path(
         "iak_cert",
         &config.agent.iak_cert,
         keylime_dir,
@@ -499,7 +454,7 @@ fn config_translate_keywords(
         true,
     );
 
-    let mut idevid_cert = config_get_file_path(
+    let idevid_cert = config_get_file_path(
         "idevid_cert",
         &config.agent.idevid_cert,
         keylime_dir,
@@ -560,9 +515,7 @@ fn config_translate_keywords(
             }
         }
         versions => {
-            let parsed: Vec<String> = match parse_list(
-                &config.agent.api_versions,
-            ) {
+            let parsed: Vec<String> = match parse_list(versions) {
                 Ok(list) => {
                     let mut filtered_versions = list
                     .iter()
@@ -588,7 +541,7 @@ fn config_translate_keywords(
                         .map(|v| v.to_string())
                         .collect::<Vec<String>>()
                 }
-                Err(e) => {
+                Err(_) => {
                     warn!("Failed to parse list from 'api_versions' configuration option; using default supported versions");
                     SUPPORTED_API_VERSIONS.iter().map(|&s| s.into()).collect()
                 }
@@ -629,6 +582,7 @@ fn config_translate_keywords(
                 value_b: "empty".into(),
             });
         }
+
         let actions_dir = match config.agent.revocation_actions_dir.as_ref() {
             "" => {
                 error!("The option 'enable_revocation_notifications' is set as 'true' but the revocation actions directory was set as empty in 'revocation_actions_dir'");
@@ -639,11 +593,20 @@ fn config_translate_keywords(
                     value_b: "empty".into(),
                 });
             }
-            dir => dir.to_string(),
+            dir => Path::new(dir),
         };
+
+        // Validate that the revocation actions directory exists
+        let _revocation_actions_dir =
+            &actions_dir.canonicalize().map_err(|e| {
+                KeylimeConfigError::MissingActionsDir {
+                    path: keylime_dir.display().to_string(),
+                    source: e,
+                }
+            })?;
     }
 
-    let mut revocation_cert = config_get_file_path(
+    let revocation_cert = config_get_file_path(
         "revocation_cert",
         &config.agent.revocation_cert,
         keylime_dir,
@@ -779,7 +742,7 @@ mod tests {
     fn get_revocation_cert_path_default() {
         let test_config = KeylimeConfig::default();
         let revocation_cert_path = test_config.agent.revocation_cert.clone();
-        let mut expected = Path::new(&test_config.agent.keylime_dir)
+        let expected = Path::new(&test_config.agent.keylime_dir)
             .join("secure/unzipped")
             .join(DEFAULT_REVOCATION_CERT)
             .display()
@@ -789,7 +752,7 @@ mod tests {
 
     #[test]
     fn get_revocation_cert_path_absolute() {
-        let mut test_config = KeylimeConfig {
+        let test_config = KeylimeConfig {
             agent: AgentConfig {
                 revocation_cert: "/test/cert.crt".to_string(),
                 ..Default::default()
@@ -799,13 +762,13 @@ mod tests {
         assert!(result.is_ok());
         let test_config = result.unwrap(); //#[allow_ci]
         let revocation_cert_path = test_config.agent.revocation_cert;
-        let mut expected = Path::new("/test/cert.crt").display().to_string();
+        let expected = Path::new("/test/cert.crt").display().to_string();
         assert_eq!(revocation_cert_path, expected);
     }
 
     #[test]
     fn get_revocation_cert_path_relative() {
-        let mut test_config = KeylimeConfig {
+        let test_config = KeylimeConfig {
             agent: AgentConfig {
                 revocation_cert: "cert.crt".to_string(),
                 ..Default::default()
@@ -815,7 +778,7 @@ mod tests {
         assert!(result.is_ok());
         let test_config = result.unwrap(); //#[allow_ci]
         let revocation_cert_path = test_config.agent.revocation_cert.clone();
-        let mut expected = Path::new(&test_config.agent.keylime_dir)
+        let expected = Path::new(&test_config.agent.keylime_dir)
             .join("cert.crt")
             .display()
             .to_string();
@@ -824,7 +787,7 @@ mod tests {
 
     #[test]
     fn get_revocation_notification_ip_empty() {
-        let mut test_config = KeylimeConfig {
+        let test_config = KeylimeConfig {
             agent: AgentConfig {
                 enable_revocation_notifications: true,
                 revocation_notification_ip: "".to_string(),
@@ -834,7 +797,7 @@ mod tests {
         let result = config_translate_keywords(&test_config);
         // Due to enable_revocation_notifications being set
         assert!(result.is_err());
-        let mut test_config = KeylimeConfig {
+        let test_config = KeylimeConfig {
             agent: AgentConfig {
                 enable_revocation_notifications: false,
                 revocation_notification_ip: "".to_string(),
@@ -854,7 +817,7 @@ mod tests {
 
     #[test]
     fn get_revocation_cert_empty() {
-        let mut test_config = KeylimeConfig {
+        let test_config = KeylimeConfig {
             agent: AgentConfig {
                 enable_revocation_notifications: true,
                 revocation_cert: "".to_string(),
@@ -864,7 +827,7 @@ mod tests {
         let result = config_translate_keywords(&test_config);
         // Due to enable_revocation_notifications being set
         assert!(result.is_err());
-        let mut test_config = KeylimeConfig {
+        let test_config = KeylimeConfig {
             agent: AgentConfig {
                 enable_revocation_notifications: false,
                 revocation_cert: "".to_string(),
@@ -879,7 +842,7 @@ mod tests {
 
     #[test]
     fn get_revocation_actions_dir_empty() {
-        let mut test_config = KeylimeConfig {
+        let test_config = KeylimeConfig {
             agent: AgentConfig {
                 enable_revocation_notifications: true,
                 revocation_actions_dir: "".to_string(),
@@ -889,7 +852,7 @@ mod tests {
         let result = config_translate_keywords(&test_config);
         // Due to enable_revocation_notifications being set
         assert!(result.is_err());
-        let mut test_config = KeylimeConfig {
+        let test_config = KeylimeConfig {
             agent: AgentConfig {
                 enable_revocation_notifications: false,
                 revocation_actions_dir: "".to_string(),
@@ -904,7 +867,7 @@ mod tests {
 
     #[test]
     fn test_translate_api_versions_latest_keyword() {
-        let mut test_config = KeylimeConfig {
+        let test_config = KeylimeConfig {
             agent: AgentConfig {
                 api_versions: "latest".to_string(),
                 ..Default::default()
@@ -941,7 +904,7 @@ mod tests {
     fn test_translate_api_versions_old_supported() {
         let old = SUPPORTED_API_VERSIONS[0];
 
-        let mut test_config = KeylimeConfig {
+        let test_config = KeylimeConfig {
             agent: AgentConfig {
                 api_versions: old.to_string(),
                 ..Default::default()
@@ -958,7 +921,7 @@ mod tests {
     fn test_translate_invalid_api_versions_filtered() {
         let old = SUPPORTED_API_VERSIONS[0];
 
-        let mut test_config = KeylimeConfig {
+        let test_config = KeylimeConfig {
             agent: AgentConfig {
                 api_versions: format!("a.b, {old}, c.d"),
                 ..Default::default()
@@ -975,7 +938,7 @@ mod tests {
     fn test_translate_invalid_api_versions_fallback_default() {
         let old = SUPPORTED_API_VERSIONS;
 
-        let mut test_config = KeylimeConfig {
+        let test_config = KeylimeConfig {
             agent: AgentConfig {
                 api_versions: "a.b, c.d".to_string(),
                 ..Default::default()
@@ -998,7 +961,7 @@ mod tests {
             .collect::<Vec<_>>()
             .join(", ");
 
-        let mut test_config = KeylimeConfig {
+        let test_config = KeylimeConfig {
             agent: AgentConfig {
                 api_versions: reversed,
                 ..Default::default()
@@ -1034,7 +997,7 @@ mod tests {
         let default = AgentConfig::default();
 
         // Test that the AgentConfig can be used as a source for KeylimeConfig
-        let config: KeylimeConfig = Config::builder()
+        let _config: KeylimeConfig = Config::builder()
             .add_source(default)
             .build()
             .unwrap() //#[allow_ci]
@@ -1047,23 +1010,8 @@ mod tests {
         let default = KeylimeConfig::default();
 
         // Test that the KeylimeConfig can be used as a source for KeylimeConfig
-        let config: KeylimeConfig = Config::builder()
+        let _config: KeylimeConfig = Config::builder()
             .add_source(default)
-            .build()
-            .unwrap() //#[allow_ci]
-            .try_deserialize()
-            .unwrap(); //#[allow_ci]
-    }
-
-    #[test]
-    fn test_env_config_as_source() {
-        let default = KeylimeConfig::default();
-        let env_config = EnvConfig::new().unwrap(); //#[allow_ci]
-
-        // Test that the EnvConfig can be used as a source for KeylimeConfig
-        let config: KeylimeConfig = Config::builder()
-            .add_source(default)
-            .add_source(env_config)
             .build()
             .unwrap() //#[allow_ci]
             .try_deserialize()
@@ -1072,151 +1020,8 @@ mod tests {
 
     #[test]
     fn test_config_get_setting() {
-        let env_config = config_get_setting().unwrap(); //#[allow_ci]
-    }
-
-    #[test]
-    fn test_env_var() {
-        let override_map: Map<&str, &str> = Map::from([
-            ("KEYLIME_AGENT_AGENT_DATA_PATH", "override_agent_data_path"),
-            ("KEYLIME_AGENT_ALLOW_PAYLOAD_REVOCATION_ACTIONS", "false"),
-            ("KEYLIME_AGENT_API_VERSIONS", "latest"),
-            ("KEYLIME_AGENT_CONTACT_IP", "override_contact_ip"),
-            ("KEYLIME_AGENT_CONTACT_PORT", "9999"),
-            (
-                "KEYLIME_AGENT_DEC_PAYLOAD_FILE",
-                "override_dec_payload_file",
-            ),
-            ("KEYLIME_AGENT_EK_HANDLE", "override_ek_handle"),
-            ("KEYLIME_AGENT_ENABLE_AGENT_MTLS", "false"),
-            ("KEYLIME_AGENT_ENABLE_IAK_IDEVID", "true"),
-            ("KEYLIME_AGENT_ENABLE_INSECURE_PAYLOAD", "true"),
-            ("KEYLIME_AGENT_ENABLE_REVOCATION_NOTIFICATIONS", "false"),
-            ("KEYLIME_AGENT_ENC_KEYNAME", "override_enc_keyname"),
-            ("KEYLIME_AGENT_EXTRACT_PAYLOAD_ZIP", "false"),
-            ("KEYLIME_AGENT_IAK_CERT", "override_iak_cert"),
-            ("KEYLIME_AGENT_IAK_HANDLE", "override_iak_handle"),
-            (
-                "KEYLIME_AGENT_IAK_IDEVID_ASYMMETRIC_ALG",
-                "override_iak_idevid_asymmetric_alg",
-            ),
-            (
-                "KEYLIME_AGENT_IAK_IDEVID_NAME_ALG",
-                "override_iak_idevid_name_alg",
-            ),
-            (
-                "KEYLIME_AGENT_IAK_IDEVID_TEMPLATE",
-                "override_iak_idevid_template",
-            ),
-            ("KEYLIME_AGENT_IAK_PASSWORD", "override_iak_password"),
-            ("KEYLIME_AGENT_IDEVID_CERT", "override_idevid_cert"),
-            ("KEYLIME_AGENT_IDEVID_HANDLE", "override_idevid_handle"),
-            ("KEYLIME_AGENT_IDEVID_PASSWORD", "override_idevid_password"),
-            ("KEYLIME_AGENT_IMA_ML_PATH", "override_ima_ml_path"),
-            ("KEYLIME_AGENT_IP", "override_ip"),
-            ("KEYLIME_AGENT_KEYLIME_DIR", "override_keylime_dir"),
-            (
-                "KEYLIME_AGENT_MEASUREDBOOT_ML_PATH",
-                "override_measuredboot_ml_path",
-            ),
-            ("KEYLIME_AGENT_PAYLOAD_SCRIPT", "override_payload_script"),
-            ("KEYLIME_AGENT_PORT", "9999"),
-            ("KEYLIME_AGENT_REGISTRAR_IP", "override_registrar_ip"),
-            ("KEYLIME_AGENT_REGISTRAR_PORT", "9999"),
-            (
-                "KEYLIME_AGENT_REVOCATION_ACTIONS",
-                "override_revocation_actions",
-            ),
-            (
-                "KEYLIME_AGENT_REVOCATION_ACTIONS_DIR",
-                "override_revocation_actions_dir",
-            ),
-            ("KEYLIME_AGENT_REVOCATION_CERT", "override_revocation_cert"),
-            (
-                "KEYLIME_AGENT_REVOCATION_NOTIFICATION_IP",
-                "override_revocation_notification_ip",
-            ),
-            ("KEYLIME_AGENT_REVOCATION_NOTIFICATION_PORT", "9999"),
-            ("KEYLIME_AGENT_RUN_AS", "override_run_as"),
-            ("KEYLIME_AGENT_SECURE_SIZE", "override_secure_size"),
-            ("KEYLIME_AGENT_SERVER_CERT", "override_server_cert"),
-            ("KEYLIME_AGENT_SERVER_KEY", "override_server_key"),
-            (
-                "KEYLIME_AGENT_SERVER_KEY_PASSWORD",
-                "override_server_key_password",
-            ),
-            (
-                "KEYLIME_AGENT_TPM_ENCRYPTION_ALG",
-                "override_tpm_encryption_alg",
-            ),
-            ("KEYLIME_AGENT_TPM_HASH_ALG", "override_tpm_hash_alg"),
-            (
-                "KEYLIME_AGENT_TPM_OWNERPASSWORD",
-                "override_tpm_ownerpassword",
-            ),
-            ("KEYLIME_AGENT_TPM_SIGNING_ALG", "override_tpm_signing_alg"),
-            (
-                "KEYLIME_AGENT_TRUSTED_CLIENT_CA",
-                "override_trusted_client_ca",
-            ),
-            ("KEYLIME_AGENT_UUID", "override_uuid"),
-            ("KEYLIME_AGENT_VERSION", "override_version"),
-        ]);
-
-        // For possible variable
-        for (c, v) in override_map.into_iter() {
-            let default = KeylimeConfig::default();
-
-            // Create a source emulating the environment with a variable set
-            let env_source = Environment::with_prefix("KEYLIME_AGENT")
-                .separator(".")
-                .prefix_separator("_")
-                .source(Some(Map::from([(c.into(), v.into())])));
-
-            let env_config = EnvConfig {
-                map: Map::from([(
-                    "agent".to_string(),
-                    Value::from(env_source.collect().unwrap()), //#[allow_ci]
-                )]),
-            };
-
-            // Create the resulting configuration with a variable overriden
-            let overriden: KeylimeConfig = Config::builder()
-                .add_source(default)
-                .add_source(env_config)
-                .build()
-                .unwrap() //#[allow_ci]
-                .try_deserialize()
-                .unwrap(); //#[allow_ci]
-
-            let m = overriden.collect().unwrap(); //#[allow_ci]
-            let internal = m.get("agent").unwrap(); //#[allow_ci]
-            let obtained = internal.to_owned().into_table().unwrap(); //#[allow_ci]
-
-            // Create the expected result by manually replacing the value
-            let d = KeylimeConfig::default().collect().unwrap(); //#[allow_ci]
-            let i = d.get("agent").unwrap(); //#[allow_ci]
-            let mut expected = i.to_owned().into_table().unwrap(); //#[allow_ci]
-            _ = expected.insert(
-                c.to_lowercase()
-                    .strip_prefix("keylime_agent_")
-                    .unwrap() //#[allow_ci]
-                    .into(),
-                v.into(),
-            );
-
-            // Check that the obtained configuration matches the expected one
-            for (i, e) in expected.iter() {
-                let j = obtained.get(i).unwrap(); //#[allow_ci]
-                assert!(
-                    e.to_string() == j.to_string(),
-                    "Option {} mismatch: expected == '{}', obtained == '{}'",
-                    i,
-                    e,
-                    j
-                );
-            }
-        }
+        let _env_config =
+            config_get_setting().expect("failed to get settings");
     }
 
     #[test]

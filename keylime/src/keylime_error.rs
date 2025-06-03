@@ -31,7 +31,7 @@ pub enum Error {
     #[error("Conversion error: {0}")]
     Conversion(String),
     #[error("Configuration error")]
-    Configuration(#[from] crate::global_config::KeylimeConfigError),
+    Configuration(#[from] crate::config::KeylimeConfigError),
     #[error("Configuration builder error")]
     ConfigurationGenericError(String),
     #[error("Device ID error")]
@@ -487,10 +487,9 @@ mod tests {
 
     #[test]
     fn test_display_configuration_error() {
-        use crate::global_config;
-        let cfg_err = global_config::KeylimeConfigError::Generic(
-            "Generic config test".to_string(),
-        );
+        use crate::config::KeylimeConfigError;
+        let cfg_err =
+            KeylimeConfigError::Generic("Generic config test".to_string());
         let err = Error::Configuration(cfg_err);
         assert_eq!(format!("{err}"), "Configuration error");
     }
@@ -525,8 +524,8 @@ mod tests {
 
     #[test]
     fn test_from_configuration_error() {
-        use crate::global_config;
-        let cfg_err = global_config::KeylimeConfigError::Generic(
+        use crate::config;
+        let cfg_err = config::KeylimeConfigError::Generic(
             "Another config test".to_string(),
         );
         let err: Error = cfg_err.into();

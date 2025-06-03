@@ -6,7 +6,6 @@ pub mod cert;
 pub mod config;
 pub mod crypto;
 pub mod device_id;
-pub mod global_config;
 pub mod hash_ek;
 pub mod hostname_parser;
 pub mod https_client;
