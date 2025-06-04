@@ -33,7 +33,6 @@
 
 mod agent_handler;
 mod api;
-mod common;
 mod errors_handler;
 mod keys_handler;
 mod notifications_handler;
@@ -44,7 +43,6 @@ mod revocation;
 use actix_web::{dev::Service, http, middleware, rt, web, App, HttpServer};
 use base64::{engine::general_purpose, Engine as _};
 use clap::{Arg, Command as ClapApp};
-use common::*;
 use futures::{
     future::{ok, TryFutureExt},
     try_join,

@@ -1,11 +1,11 @@
 use crate::{
-    agent_handler, common::JsonWrapper, config, errors_handler, keys_handler,
+    agent_handler, config, errors_handler, keys_handler,
     notifications_handler, quotes_handler, QuoteData,
 };
 use actix_web::{http, web, HttpRequest, HttpResponse, Responder, Scope};
 use keylime::{
-    config::SUPPORTED_API_VERSIONS, list_parser::parse_list,
-    version::KeylimeVersion,
+    config::SUPPORTED_API_VERSIONS, json_wrapper::JsonWrapper,
+    list_parser::parse_list, version::KeylimeVersion,
 };
 use log::*;
 use serde::{Deserialize, Serialize};
