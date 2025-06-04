@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2021 Keylime Authors
 
-use crate::{common::JsonWrapper, QuoteData};
+use crate::QuoteData;
 use actix_web::{
     body, dev,
     error::{InternalError, JsonPayloadError, PathError, QueryPayloadError},
@@ -9,7 +9,7 @@ use actix_web::{
     middleware::{ErrorHandlerResponse, ErrorHandlers},
     web, Error, HttpRequest, HttpResponse, Responder, Result,
 };
-use keylime::version::Version;
+use keylime::{json_wrapper::JsonWrapper, version::Version};
 use log::*;
 
 pub(crate) async fn app_default(
