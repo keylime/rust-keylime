@@ -14,6 +14,7 @@ pub mod hostname_parser;
 pub mod https_client;
 pub mod ima;
 pub mod ip_parser;
+pub mod json_wrapper;
 pub mod list_parser;
 pub mod permissions;
 pub mod quote;

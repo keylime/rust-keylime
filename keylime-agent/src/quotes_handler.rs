@@ -1,13 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2021 Keylime Authors
 
-use crate::common::JsonWrapper;
 use crate::crypto;
 use crate::serialization::serialize_maybe_base64;
 use crate::{tpm, Error as KeylimeError, QuoteData};
 use actix_web::{http, web, HttpRequest, HttpResponse, Responder};
 use base64::{engine::general_purpose, Engine as _};
-use keylime::quote::{Integ, KeylimeQuote};
+use keylime::{
+    json_wrapper::JsonWrapper,
+    quote::{Integ, KeylimeQuote},
+};
 use log::*;
 use serde::{Deserialize, Serialize};
 use std::{
