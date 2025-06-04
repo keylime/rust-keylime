@@ -66,3 +66,96 @@ impl AgentData {
             && ek_hash.to_vec() == self.ek_hash
     }
 }
+
+#[cfg(feature = "testing")]
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::{
+        algorithms::EncryptionAlgorithm, config::KeylimeConfig, hash_ek,
+    };
+
+    #[tokio::test]
+    #[cfg(feature = "testing")]
+    async fn test_agent_data() -> Result<()> {
+        let _mutex = tpm::testing::lock_tests().await;
+        let config = KeylimeConfig::default();
+
+        let mut ctx = tpm::Context::new().unwrap(); //#[allow_ci]
+
+        let tpm_encryption_alg = EncryptionAlgorithm::try_from(
+            config.agent.tpm_encryption_alg.as_str(),
+        )?;
+
+        let tpm_hash_alg =
+            HashAlgorithm::try_from(config.agent.tpm_hash_alg.as_str())
+                .expect("Failed to get hash algorithm");
+
+        let tpm_signing_alg =
+            SignAlgorithm::try_from(config.agent.tpm_signing_alg.as_str())
+                .expect("Failed to get signing algorithm");
+
+        let ek_result = ctx
+            .create_ek(tpm_encryption_alg, None)
+            .expect("Failed to create EK");
+
+        let ek_hash = hash_ek::hash_ek_pubkey(ek_result.public)
+            .expect("Failed to get pubkey");
+
+        let ak = ctx.create_ak(
+            ek_result.key_handle,
+            tpm_hash_alg,
+            tpm_encryption_alg,
+            tpm_signing_alg,
+        )?;
+
+        let agent_data_test = AgentData::create(
+            tpm_hash_alg,
+            tpm_signing_alg,
+            &ak,
+            ek_hash.as_bytes(),
+        )?;
+
+        let valid = AgentData::valid(
+            &agent_data_test,
+            tpm_hash_alg,
+            tpm_signing_alg,
+            ek_hash.as_bytes(),
+        );
+
+        assert!(valid);
+
+        // Cleanup created keys
+        let ak_handle = ctx.load_ak(ek_result.key_handle, &ak)?;
+        _ = ctx.flush_context(ak_handle.into());
+        _ = ctx.flush_context(ek_result.key_handle.into());
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_hash() -> Result<()> {
+        let _mutex = tpm::testing::lock_tests().await;
+        let config = KeylimeConfig::default();
+
+        let mut ctx = tpm::Context::new().unwrap(); //#[allow_ci]
+
+        let tpm_encryption_alg = EncryptionAlgorithm::try_from(
+            config.agent.tpm_encryption_alg.as_str(),
+        )
+        .expect("Failed to get encryption algorithm");
+
+        let ek_result = ctx
+            .create_ek(tpm_encryption_alg, None)
+            .expect("Failed to create EK");
+
+        let result = hash_ek::hash_ek_pubkey(ek_result.public);
+
+        assert!(result.is_ok());
+
+        // Cleanup created keys
+        _ = ctx.flush_context(ek_result.key_handle.into());
+
+        Ok(())
+    }
+}
