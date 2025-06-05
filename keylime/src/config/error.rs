@@ -50,6 +50,15 @@ pub enum KeylimeConfigError {
     #[error("List parsing error")]
     ListParsing(#[from] ListParsingError),
 
+    // Missing directory set in keylime_dir configuration option
+    #[error(
+        "Missing directory {path} set in 'revocation_actions_dir' configuration option"
+    )]
+    MissingActionsDir {
+        path: String,
+        source: std::io::Error,
+    },
+
     // Missing configuration file set in KEYLIME_AGENT_CONFIG
     #[error("Missing file {file} set in 'KEYLIME_AGENT_CONFIG' environment variable")]
     MissingEnvConfigFile { file: String },

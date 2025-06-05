@@ -14,6 +14,7 @@ base64.workspace = true
 config.workspace = true
 glob.workspace = true
 hex.workspace = true
+libc.workspace = true
 log.workspace = true
 openssl.workspace = true
 pest.workspace = true

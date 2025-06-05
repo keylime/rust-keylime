@@ -31,7 +31,7 @@ pub enum Error {
     #[error("Conversion error: {0}")]
     Conversion(String),
     #[error("Configuration error")]
-    Configuration(#[from] crate::global_config::KeylimeConfigError),
+    Configuration(#[from] crate::config::KeylimeConfigError),
     #[error("Configuration builder error")]
     ConfigurationGenericError(String),
     #[error("Device ID error")]
@@ -49,7 +49,7 @@ pub enum Error {
     #[error("Serialization/deserialization error: {0}")]
     Serde(#[from] serde_json::Error),
     #[error("Permission error")]
-    Permission,
+    Permission(#[from] crate::permissions::PermissionError),
     #[error("Glob error")]
     Glob(#[from] glob::GlobError),
     #[error("Glob pattern error")]
@@ -315,7 +315,9 @@ mod tests {
 
     #[test]
     fn test_display_permission() {
-        let err = Error::Permission;
+        let err: Error =
+            crate::permissions::PermissionError::NotRoot("file".to_string())
+                .into();
         assert_eq!(format!("{err}"), "Permission error");
     }
 
@@ -485,10 +487,9 @@ mod tests {
 
     #[test]
     fn test_display_configuration_error() {
-        use crate::global_config;
-        let cfg_err = global_config::KeylimeConfigError::Generic(
-            "Generic config test".to_string(),
-        );
+        use crate::config::KeylimeConfigError;
+        let cfg_err =
+            KeylimeConfigError::Generic("Generic config test".to_string());
         let err = Error::Configuration(cfg_err);
         assert_eq!(format!("{err}"), "Configuration error");
     }
@@ -523,8 +524,8 @@ mod tests {
 
     #[test]
     fn test_from_configuration_error() {
-        use crate::global_config;
-        let cfg_err = global_config::KeylimeConfigError::Generic(
+        use crate::config;
+        let cfg_err = config::KeylimeConfigError::Generic(
             "Another config test".to_string(),
         );
         let err: Error = cfg_err.into();
@@ -569,10 +570,8 @@ mod tests {
 
     #[test]
     fn test_actix_web_error() {
-        let actix_err = actix_web::Error::from(std::io::Error::new(
-            std::io::ErrorKind::Other,
-            "Actix web error",
-        ));
+        let actix_err =
+            actix_web::Error::from(std::io::Error::other("Actix web error"));
         let err: Error = actix_err.into();
         assert_eq!(format!("{err}"), "HttpServer error: Actix web error");
     }

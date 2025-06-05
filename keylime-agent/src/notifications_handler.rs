@@ -2,11 +2,11 @@
 // Copyright 2021 Keylime Authors
 
 use crate::{
-    common::JsonWrapper,
     revocation::{Revocation, RevocationMessage},
     Error, QuoteData, Result,
 };
 use actix_web::{http, web, HttpRequest, HttpResponse, Responder};
+use keylime::json_wrapper::JsonWrapper;
 use log::*;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};

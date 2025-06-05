@@ -52,7 +52,9 @@ where
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
+#[derive(
+    Clone, Debug, Deserialize, Eq, PartialEq, PartialOrd, Ord, Serialize,
+)]
 pub struct Version {
     major: u32,
     minor: u32,

@@ -1,8 +1,10 @@
-use crate::keylime_error::Result;
 use openssl::hash::MessageDigest;
 use tss_esapi::structures::Public;
 
-use crate::crypto::{hash, tss_pubkey_to_pem};
+use crate::{
+    crypto::{hash, tss_pubkey_to_pem},
+    error::Result,
+};
 
 /// Calculate the SHA-256 hash of the TPM public key in PEM format
 ///

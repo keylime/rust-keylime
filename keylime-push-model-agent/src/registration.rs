@@ -1,12 +1,11 @@
-use keylime::agent_data::AgentData;
-use keylime::agent_registration::{
-    AgentRegistration, AgentRegistrationConfig,
+use keylime::{
+    agent_data::AgentData,
+    agent_registration::{AgentRegistration, AgentRegistrationConfig},
+    cert,
+    config::PushModelConfigTrait,
+    error::Result,
+    hash_ek, tpm,
 };
-use keylime::cert;
-use keylime::config::PushModelConfigTrait;
-use keylime::hash_ek;
-use keylime::keylime_error::Result;
-use keylime::tpm;
 use log::debug;
 
 pub async fn check_registration(avoid_registration: &bool) -> Result<()> {

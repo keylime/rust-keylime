@@ -2,7 +2,6 @@
 // Copyright 2021 Keylime Authors
 
 use crate::{
-    config,
     revocation::{Revocation, RevocationMessage},
     Error, Result,
 };
@@ -10,12 +9,15 @@ use crate::{
 #[cfg(feature = "with-zmq")]
 use crate::revocation::ZmqMessage;
 
-use keylime::crypto::{
-    self,
-    encrypted_data::EncryptedData,
-    symmkey::{KeySet, SymmKey},
+use keylime::{
+    config,
+    crypto::{
+        self,
+        encrypted_data::EncryptedData,
+        symmkey::{KeySet, SymmKey},
+    },
+    permissions,
 };
-use keylime::global_config;
 use log::*;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -81,14 +83,14 @@ fn setup_unzipped(
     }
 
     match config.agent.dec_payload_file.as_ref() {
-        "" => Err(global_config::KeylimeConfigError::RequiredOption(
+        "" => Err(config::KeylimeConfigError::RequiredOption(
             "dec_payload_path".to_string(),
         )
         .into()),
         p => {
             let dec_payload_path = unzipped.join(p);
             match config.agent.enc_keyname.as_ref() {
-                "" => Err(global_config::KeylimeConfigError::RequiredOption(
+                "" => Err(config::KeylimeConfigError::RequiredOption(
                     "enc_keyname".to_string(),
                 )
                 .into()),
@@ -239,20 +241,21 @@ async fn run_encrypted_payload(
             .map(|script| unzipped.join(script))
             .filter(|script| script.exists())
             .try_for_each(|script| {
-                if fs::set_permissions(
-                    &script,
-                    fs::Permissions::from_mode(0o700),
-                )
-                .is_err()
-                {
-                    error!(
-                        "Could not set permission for action {}",
-                        script.display()
-                    );
-                    Err(Error::Permission)
-                } else {
-                    info!("Permission set for action: {}", script.display());
-                    Ok(())
+                match permissions::set_mode(&script, 0o700) {
+                    Ok(()) => {
+                        info!(
+                            "Permission set for action: {}",
+                            script.display()
+                        );
+                        Ok(())
+                    }
+                    Err(e) => {
+                        error!(
+                            "Could not set permission for action {}",
+                            script.display()
+                        );
+                        Err(e)
+                    }
                 }
             })?
     }

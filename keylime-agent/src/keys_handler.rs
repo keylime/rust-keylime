@@ -2,18 +2,20 @@
 // Copyright 2021 Keylime Authors
 
 use crate::{
-    common::JsonWrapper,
     config::KeylimeConfig,
     payloads::{Payload, PayloadMessage},
     Error, QuoteData, Result,
 };
 use actix_web::{http, web, HttpRequest, HttpResponse, Responder};
 use base64::{engine::general_purpose, Engine as _};
-use keylime::crypto::{
-    self,
-    auth_tag::AuthTag,
-    encrypted_data::EncryptedData,
-    symmkey::{KeySet, SymmKey},
+use keylime::{
+    crypto::{
+        self,
+        auth_tag::AuthTag,
+        encrypted_data::EncryptedData,
+        symmkey::{KeySet, SymmKey},
+    },
+    json_wrapper::JsonWrapper,
 };
 use log::*;
 use serde::{Deserialize, Serialize};

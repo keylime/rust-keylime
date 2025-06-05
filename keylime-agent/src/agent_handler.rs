@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2023 Keylime Authors
 
-use crate::common::JsonWrapper;
 use crate::{tpm, Error as KeylimeError, QuoteData};
 use actix_web::{http, web, HttpRequest, HttpResponse, Responder};
 use base64::{engine::general_purpose, Engine as _};
+use keylime::json_wrapper::JsonWrapper;
 use log::*;
 use serde::{Deserialize, Serialize};
 
