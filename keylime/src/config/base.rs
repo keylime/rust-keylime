@@ -866,6 +866,79 @@ mod tests {
     }
 
     #[test]
+    fn test_invalid_revocation_actions_dir() {
+        let test_config = KeylimeConfig {
+            agent: AgentConfig {
+                enable_revocation_notifications: true,
+                revocation_actions_dir: "/invalid".to_string(),
+                ..Default::default()
+            },
+        };
+        let result = config_translate_keywords(&test_config);
+        // Expect error due to the inexistent directory
+        assert!(result.is_err());
+        let test_config = KeylimeConfig {
+            agent: AgentConfig {
+                enable_revocation_notifications: false,
+                revocation_actions_dir: "/invalid".to_string(),
+                ..Default::default()
+            },
+        };
+
+        // Now unset enable_revocation_notifications and check that is allowed
+        let result = config_translate_keywords(&test_config);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_keylime_dir_option() {
+        let dir = tempfile::tempdir()
+            .expect("Failed to create temporary directory");
+        let test_config = KeylimeConfig {
+            agent: AgentConfig {
+                keylime_dir: dir.path().display().to_string(),
+                ..Default::default()
+            },
+        };
+
+        let result = config_translate_keywords(&test_config);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_invalid_api_versions() {
+        // Check that invalid API versions are ignored
+        let test_config = KeylimeConfig {
+            agent: AgentConfig {
+                api_versions: "invalid.api".to_string(),
+                ..Default::default()
+            },
+        };
+        let result = config_translate_keywords(&test_config);
+        assert!(result.is_ok());
+
+        // Check that unsupported API versions are ignored
+        let test_config = KeylimeConfig {
+            agent: AgentConfig {
+                api_versions: "['0.0']".to_string(),
+                ..Default::default()
+            },
+        };
+        let result = config_translate_keywords(&test_config);
+        assert!(result.is_ok());
+
+        // Check that 'latest' keyword is supported
+        let test_config = KeylimeConfig {
+            agent: AgentConfig {
+                api_versions: "\"latest\"".to_string(),
+                ..Default::default()
+            },
+        };
+        let result = config_translate_keywords(&test_config);
+        assert!(result.is_ok());
+    }
+
+    #[test]
     fn test_translate_api_versions_latest_keyword() {
         let test_config = KeylimeConfig {
             agent: AgentConfig {
