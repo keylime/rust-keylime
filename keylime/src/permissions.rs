@@ -244,3 +244,72 @@ pub fn set_mode(path: &Path, mode: u32) -> Result<(), PermissionError> {
         }
     })
 }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use std::{fs::File, io::Write};
+
+    #[test]
+    fn test_get_uid() {
+        let _uid = get_uid();
+    }
+
+    #[test]
+    fn test_get_gid() {
+        let _gid = get_gid();
+    }
+
+    #[test]
+    fn test_get_euid() {
+        let _euid = get_euid();
+    }
+
+    #[test]
+    fn test_chown() {
+        // Only test chown when running as root
+        if get_euid() == 0 {
+            let temp_dir = tempfile::tempdir()
+                .expect("failed to create temporary directory");
+            let p = temp_dir.path().join("testfile.txt");
+            let mut f = File::create(&p).expect("failed to create file");
+            f.write_all(b"test content\n")
+                .expect("failed to write to file");
+            let r = chown("root:root", &p);
+            assert!(r.is_ok());
+        }
+    }
+
+    #[test]
+    fn test_set_mode() {
+        let temp_dir = tempfile::tempdir()
+            .expect("failed to create temporary directory");
+        let p = temp_dir.path().join("testfile.txt");
+        let mut f = File::create(&p).expect("failed to create file");
+        f.write_all(b"test content\n")
+            .expect("failed to write to file");
+
+        let r = set_mode(&p, 0o777);
+        assert!(r.is_ok());
+    }
+
+    #[test]
+    fn test_try_from_str_for_userids() {
+        let r = UserIds::try_from("root:root");
+        assert!(r.is_ok());
+        let r = UserIds::try_from("invalid:root");
+        assert!(r.is_err());
+        let r = UserIds::try_from("root:invalid");
+        assert!(r.is_err());
+        let r = UserIds::try_from("invalid");
+        assert!(r.is_err());
+        let r = UserIds::try_from("invalid:invalid");
+        assert!(r.is_err());
+        let r = UserIds::try_from("");
+        assert!(r.is_err());
+        let r = UserIds::try_from(":invalid");
+        assert!(r.is_err());
+        let r = UserIds::try_from("invalid:");
+        assert!(r.is_err());
+    }
+}
