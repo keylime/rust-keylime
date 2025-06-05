@@ -431,10 +431,9 @@ impl TryFrom<&str> for Entry {
                 template_hash,
                 event_data: Box::new(ImaBuf::try_from(event)?),
             }),
-            template => Err(Error::new(
-                ErrorKind::Other,
-                format!("unrecognized template \"{template}\"",),
-            )),
+            template => Err(Error::other(format!(
+                "unrecognized template \"{template}\"",
+            ))),
         }
     }
 }
