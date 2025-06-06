@@ -139,7 +139,7 @@ impl ContextInfo {
 
     pub fn get_supported_signing_schemes(&mut self) -> Result<Vec<String>> {
         self.tpm_context
-            .get_supported_hash_algorithms_as_strings()
+            .get_supported_signing_algorithms_as_strings()
             .map_err(KeylimeErrorEnum::Tpm)
     }
 

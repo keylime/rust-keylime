@@ -569,10 +569,8 @@ mod tests {
 
     #[test]
     fn test_actix_web_error() {
-        let actix_err = actix_web::Error::from(std::io::Error::new(
-            std::io::ErrorKind::Other,
-            "Actix web error",
-        ));
+        let actix_err =
+            actix_web::Error::from(std::io::Error::other("Actix web error"));
         let err: Error = actix_err.into();
         assert_eq!(format!("{err}"), "HttpServer error: Actix web error");
     }

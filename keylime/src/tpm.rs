@@ -1480,7 +1480,7 @@ impl Context<'_> {
         let mut pcrs = read_mask(mask)?;
 
         // add pcr16 if it isn't in the vec already
-        if !pcrs.iter().any(|&pcr| pcr == PcrSlot::Slot16) {
+        if !pcrs.contains(&PcrSlot::Slot16) {
             let mut slot16 = vec![PcrSlot::Slot16];
             pcrs.append(&mut slot16);
         }
