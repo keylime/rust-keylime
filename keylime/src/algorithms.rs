@@ -30,22 +30,6 @@ pub enum AlgorithmError {
     UnsupportedSigningAlgorithm(String),
 }
 
-// Array of supported algorithms
-pub const SUPPORTED_HASH_ALGORITHMS: &[HashAlgorithm] = &[
-    HashAlgorithm::Sha1,
-    HashAlgorithm::Sha256,
-    HashAlgorithm::Sha384,
-    HashAlgorithm::Sha512,
-    HashAlgorithm::Sm3_256,
-];
-// Function to return the supported algorithms as strings
-pub fn supported_hash_algorithms() -> Vec<String> {
-    SUPPORTED_HASH_ALGORITHMS
-        .iter()
-        .map(|alg| alg.to_string())
-        .collect()
-}
-
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum HashAlgorithm {
     Sha1,
@@ -305,22 +289,6 @@ impl fmt::Display for EncryptionAlgorithm {
     }
 }
 
-const SUPPORTED_SIGN_ALGORITHMS: &[SignAlgorithm] = &[
-    SignAlgorithm::RsaSsa,
-    SignAlgorithm::RsaPss,
-    SignAlgorithm::EcDsa,
-    // SignAlgorithm::EcDaa, // Requires special SignatureScheme construction that is not yet implemented
-    SignAlgorithm::EcSchnorr,
-];
-
-// Function to return the supported signing algorithms as strings
-pub fn supported_sign_algorithms() -> Vec<String> {
-    SUPPORTED_SIGN_ALGORITHMS
-        .iter()
-        .map(|alg| alg.to_string())
-        .collect()
-}
-
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum SignAlgorithm {
     RsaSsa,
@@ -472,24 +440,6 @@ mod tests {
         for (input, output) in cases {
             let alg = hash_to_hashing_algorithm(input);
             assert_eq!(alg, output);
-        }
-    }
-
-    #[test]
-    fn test_supported_hash_algorithms() {
-        let supported = supported_hash_algorithms();
-        assert_eq!(supported.len(), SUPPORTED_HASH_ALGORITHMS.len());
-        for alg in SUPPORTED_HASH_ALGORITHMS {
-            assert!(supported.contains(&alg.to_string()));
-        }
-    }
-
-    #[test]
-    fn test_supported_sign_algorithms() {
-        let supported = supported_sign_algorithms();
-        assert_eq!(supported.len(), SUPPORTED_SIGN_ALGORITHMS.len());
-        for alg in SUPPORTED_SIGN_ALGORITHMS {
-            assert!(supported.contains(&alg.to_string()));
         }
     }
 
