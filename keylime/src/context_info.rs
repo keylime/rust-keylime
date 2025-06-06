@@ -131,6 +131,18 @@ impl ContextInfo {
         Ok(base64_encoded_key)
     }
 
+    pub fn get_supported_hash_algorithms(&mut self) -> Result<Vec<String>> {
+        self.tpm_context
+            .get_supported_hash_algorithms_as_strings()
+            .map_err(KeylimeErrorEnum::Tpm)
+    }
+
+    pub fn get_supported_signing_schemes(&mut self) -> Result<Vec<String>> {
+        self.tpm_context
+            .get_supported_hash_algorithms_as_strings()
+            .map_err(KeylimeErrorEnum::Tpm)
+    }
+
     pub fn get_key_algorithm(&self) -> String {
         self.tpm_encryption_alg.to_string()
     }
@@ -212,8 +224,12 @@ impl ContextInfo {
         name_content_buffer
             .extend_from_slice(&name_alg_id_value.to_be_bytes());
         name_content_buffer.extend_from_slice(digest_bytes);
-        let ak_name_obj: Name = Name::try_from(name_content_buffer)
-            .map_err(|e| KeylimeErrorEnum::NameCreation(e.to_string()))?;
+        let ak_name_obj: Name =
+            Name::try_from(name_content_buffer).map_err(|e| {
+                KeylimeErrorEnum::Tpm(tpm::TpmError::NameFromBytesError(
+                    format!("Failed to create Name object: {}", e),
+                ))
+            })?;
         Ok(hex::encode(ak_name_obj.value()))
     }
 
@@ -305,6 +321,9 @@ mod tests {
         assert!(context_info.get_ak_key_size().is_ok());
         assert!(context_info.get_ak_local_identifier_str().is_ok());
         assert!(context_info.get_ak_public_key_as_base64().is_ok());
+        assert!(context_info.get_ak_certification_data().is_ok());
+        assert!(context_info.get_supported_hash_algorithms().is_ok());
+        assert!(context_info.get_supported_signing_schemes().is_ok());
         assert!(context_info.flush_context().is_ok());
     }
 }

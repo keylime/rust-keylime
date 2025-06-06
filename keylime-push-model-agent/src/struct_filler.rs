@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2025 Keylime Authors
-use keylime::algorithms::{
-    supported_hash_algorithms, supported_sign_algorithms, HashAlgorithm,
-};
+use keylime::algorithms::HashAlgorithm;
 use keylime::config::PushModelConfigTrait;
 use keylime::context_info::ContextInfo;
 use keylime::structures;
@@ -82,8 +80,12 @@ impl<'a> FillerFromHardware<'a> {
                             evidence_type: "tpm_quote".to_string(),
                             capabilities: structures::Capabilities {
                                 component_version: "2.0".to_string(),
-                                hash_algorithms: supported_hash_algorithms(),
-                                signature_schemes: supported_sign_algorithms(),
+                                hash_algorithms: self.tpm_context_info.get_supported_hash_algorithms().expect(
+                                    "Failed to get supported hash algorithms"
+                                ),
+                                signature_schemes: self.tpm_context_info.get_supported_signing_schemes().expect(
+                                    "Failed to get supported signing schemes"
+                                ),
                                 available_subjects: structures::ShaValues {
                                     sha1: tpm_banks_sha1,
                                     sha256: tpm_banks_sha256,

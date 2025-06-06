@@ -39,7 +39,7 @@ use tss_esapi::{
     },
     constants::{
         response_code::Tss2ResponseCodeKind, session_type::SessionType,
-        CapabilityType,
+        AlgorithmIdentifier, CapabilityType,
     },
     handles::{
         AuthHandle, KeyHandle, ObjectHandle, PcrHandle, PersistentTpmHandle,
@@ -68,6 +68,12 @@ use tss_esapi::{
     tss2_esys::{TPML_DIGEST, TPML_PCR_SELECTION},
     Error::Tss2Error,
 };
+
+use crate::algorithms::{
+    HashAlgorithm as KeylimeInternalHashAlgorithm,
+    SignAlgorithm as KeylimeInternalSignAlgorithm,
+};
+use tss_esapi::interface_types::algorithm::HashingAlgorithm as TssEsapiHashingAlgorithm;
 
 /// Maximum size of nonce used in `quote`.
 pub const MAX_NONCE_SIZE: usize = 64;
@@ -472,6 +478,10 @@ pub enum TpmError {
     /// Unsupported Hash algorithm error
     #[error("Unsupported hash algorithm: {0}")]
     UnsupportedHashAlgorithm(String),
+
+    /// Error trying to read key name from bytes
+    #[error("Name From Bytes Error: {0}")]
+    NameFromBytesError(String),
 }
 
 impl From<tss_esapi::Error> for TpmError {
@@ -1682,6 +1692,111 @@ impl Context<'_> {
                 tss_esapi::WrapperErrorKind::InvalidParam,
             ),
         })
+    }
+
+    /// Queries the TPM and returns a list of the supported hashing algorithms.
+    pub fn get_supported_hash_algorithms(
+        &mut self,
+    ) -> Result<Vec<KeylimeInternalHashAlgorithm>> {
+        let mut ctx = self.inner.lock().unwrap(); //#[allow_ci]
+
+        const MAX_ALGS_TO_QUERY: u32 = 128;
+        let (capability_data, _more) = ctx
+            .get_capability(CapabilityType::Algorithms, 0, MAX_ALGS_TO_QUERY)
+            .map_err(TpmError::from)?;
+
+        let mut supported_algs = Vec::new();
+        if let CapabilityData::Algorithms(alg_list) = capability_data {
+            for alg_prop in alg_list.iter() {
+                // Get the attributes using the correct public method
+                let attributes = alg_prop.algorithm_properties();
+
+                // Filter for algorithms that have the 'hashing' attribute set
+                if attributes.hash() {
+                    // Get the algorithm identifier using the correct public method
+                    let tss_public_alg = alg_prop.algorithm_identifier();
+
+                    if let Ok(tss_hash_alg) =
+                        TssEsapiHashingAlgorithm::try_from(tss_public_alg)
+                    {
+                        if let Ok(keylime_alg) =
+                            KeylimeInternalHashAlgorithm::try_from(
+                                tss_hash_alg,
+                            )
+                        {
+                            supported_algs.push(keylime_alg);
+                        }
+                    }
+                }
+            }
+        }
+        Ok(supported_algs)
+    }
+
+    /// Queries the TPM and returns a list of signing algorithms supported by your application.
+    pub fn get_supported_signing_algorithms(
+        &mut self,
+    ) -> Result<Vec<KeylimeInternalSignAlgorithm>> {
+        let mut ctx = self.inner.lock().unwrap(); //#[allow_ci]
+
+        const MAX_ALGS_TO_QUERY: u32 = 128;
+        let (capability_data, _more) = ctx
+            .get_capability(CapabilityType::Algorithms, 0, MAX_ALGS_TO_QUERY)
+            .map_err(TpmError::from)?;
+
+        let mut supported_algs = Vec::new();
+
+        if let CapabilityData::Algorithms(alg_list) = capability_data {
+            for alg_prop in alg_list.iter() {
+                let attributes = alg_prop.algorithm_properties();
+                if attributes.asymmetric() && attributes.signing() {
+                    let algorithm_id = alg_prop.algorithm_identifier();
+                    match algorithm_id {
+                        AlgorithmIdentifier::Rsa => {
+                            supported_algs
+                                .push(KeylimeInternalSignAlgorithm::RsaSsa);
+                            supported_algs
+                                .push(KeylimeInternalSignAlgorithm::RsaPss);
+                        }
+                        AlgorithmIdentifier::Ecc => {
+                            supported_algs
+                                .push(KeylimeInternalSignAlgorithm::EcDsa);
+                            supported_algs.push(
+                                KeylimeInternalSignAlgorithm::EcSchnorr,
+                            );
+                        }
+                        _ => {} // Ignore other types
+                    }
+                }
+            }
+        }
+        supported_algs.sort_unstable_by_key(|a| format!("{:?}", a));
+        supported_algs.dedup();
+
+        Ok(supported_algs)
+    }
+
+    /// Wrapper for get_supported_hash_algorithms that returns the results as a vector of strings.
+    pub fn get_supported_hash_algorithms_as_strings(
+        &mut self,
+    ) -> Result<Vec<String>> {
+        let supported_algs: Vec<KeylimeInternalHashAlgorithm> =
+            self.get_supported_hash_algorithms()?;
+        let alg_strings: Vec<String> =
+            supported_algs.iter().map(|alg| alg.to_string()).collect();
+        Ok(alg_strings)
+    }
+
+    /// Wrapper for get_supported_signing_algorithms that returns the results as a vector of strings.
+    pub fn get_supported_signing_algorithms_as_strings(
+        &mut self,
+    ) -> Result<Vec<String>> {
+        let supported_algs: Vec<KeylimeInternalSignAlgorithm> =
+            self.get_supported_signing_algorithms()?;
+        let alg_strings: Vec<String> =
+            supported_algs.iter().map(|alg| alg.to_string()).collect();
+
+        Ok(alg_strings)
     }
 }
 
