@@ -39,6 +39,40 @@ pub enum HashAlgorithm {
     Sm3_256,
 }
 
+pub fn hash_to_hashing_algorithm(
+    hash_algorithm: HashAlgorithm,
+) -> HashingAlgorithm {
+    match hash_algorithm {
+        HashAlgorithm::Sha1 => HashingAlgorithm::Sha1,
+        HashAlgorithm::Sha256 => HashingAlgorithm::Sha256,
+        HashAlgorithm::Sm3_256 => HashingAlgorithm::Sm3_256,
+        HashAlgorithm::Sha384 => HashingAlgorithm::Sha384,
+        HashAlgorithm::Sha512 => HashingAlgorithm::Sha512,
+    }
+}
+
+impl TryFrom<tss_esapi::interface_types::algorithm::HashingAlgorithm>
+    for HashAlgorithm
+{
+    type Error = AlgorithmError;
+
+    fn try_from(
+        tss_alg: tss_esapi::interface_types::algorithm::HashingAlgorithm,
+    ) -> Result<Self, Self::Error> {
+        match tss_alg {
+            tss_esapi::interface_types::algorithm::HashingAlgorithm::Sha1 => Ok(HashAlgorithm::Sha1),
+            tss_esapi::interface_types::algorithm::HashingAlgorithm::Sha256 => Ok(HashAlgorithm::Sha256),
+            tss_esapi::interface_types::algorithm::HashingAlgorithm::Sha384 => Ok(HashAlgorithm::Sha384),
+            tss_esapi::interface_types::algorithm::HashingAlgorithm::Sha512 => Ok(HashAlgorithm::Sha512),
+            tss_esapi::interface_types::algorithm::HashingAlgorithm::Sm3_256 => Ok(HashAlgorithm::Sm3_256),
+            _ => Err(AlgorithmError::UnsupportedHashingAlgorithm(format!(
+                "Unable to convert tss-esapi HashingAlgorithm: {:?}",
+                tss_alg
+            ))),
+        }
+    }
+}
+
 impl TryFrom<&str> for HashAlgorithm {
     type Error = AlgorithmError;
 
@@ -104,6 +138,52 @@ pub enum EncryptionAlgorithm {
     Ecc384,
     Ecc521,
     EccSm2,
+}
+
+#[derive(Eq, PartialEq, Debug)]
+pub enum KeyClass {
+    Asymmetric,
+    Symmetric,
+}
+
+impl fmt::Display for KeyClass {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let value = match self {
+            KeyClass::Asymmetric => "asymmetric",
+            KeyClass::Symmetric => "symmetric",
+        };
+        write!(f, "{value}")
+    }
+}
+
+pub fn get_key_class(&tpm_encryption_alg: &EncryptionAlgorithm) -> KeyClass {
+    match tpm_encryption_alg {
+        EncryptionAlgorithm::Rsa1024 => KeyClass::Asymmetric,
+        EncryptionAlgorithm::Rsa2048 => KeyClass::Asymmetric,
+        EncryptionAlgorithm::Rsa3072 => KeyClass::Asymmetric,
+        EncryptionAlgorithm::Rsa4096 => KeyClass::Asymmetric,
+        EncryptionAlgorithm::Ecc192 => KeyClass::Asymmetric,
+        EncryptionAlgorithm::Ecc224 => KeyClass::Asymmetric,
+        EncryptionAlgorithm::Ecc256 => KeyClass::Asymmetric,
+        EncryptionAlgorithm::Ecc384 => KeyClass::Asymmetric,
+        EncryptionAlgorithm::Ecc521 => KeyClass::Asymmetric,
+        EncryptionAlgorithm::EccSm2 => KeyClass::Asymmetric,
+    }
+}
+
+pub fn get_key_size(tpm_encryption_alg: &EncryptionAlgorithm) -> usize {
+    match tpm_encryption_alg {
+        EncryptionAlgorithm::Rsa1024 => 1024,
+        EncryptionAlgorithm::Rsa2048 => 2048,
+        EncryptionAlgorithm::Rsa3072 => 3072,
+        EncryptionAlgorithm::Rsa4096 => 4096,
+        EncryptionAlgorithm::Ecc192 => 192,
+        EncryptionAlgorithm::Ecc224 => 224,
+        EncryptionAlgorithm::Ecc256 => 256,
+        EncryptionAlgorithm::Ecc384 => 384,
+        EncryptionAlgorithm::Ecc521 => 521,
+        EncryptionAlgorithm::EccSm2 => 256,
+    }
 }
 
 impl From<EncryptionAlgorithm> for AsymmetricAlgorithm {
@@ -277,8 +357,23 @@ impl fmt::Display for SignAlgorithm {
         write!(f, "{value}")
     }
 }
+
+pub fn get_ecc_curve_key_size(curve_id: EccCurve) -> u16 {
+    match curve_id {
+        EccCurve::NistP192 => 192,
+        EccCurve::NistP224 => 224,
+        EccCurve::NistP256 => 256,
+        EccCurve::NistP384 => 384,
+        EccCurve::NistP521 => 521,
+        EccCurve::BnP256 => 256,
+        EccCurve::BnP638 => 638,
+        EccCurve::Sm2P256 => 256,
+    }
+}
+
 #[cfg(test)]
 mod tests {
+
     use super::*;
 
     #[test]
@@ -331,4 +426,112 @@ mod tests {
         let result = SignAlgorithm::try_from("unsupported");
         assert!(result.is_err());
     }
+
+    #[test]
+    fn test_hash_to_hashing_algorithm() {
+        let cases = [
+            (HashAlgorithm::Sha1, HashingAlgorithm::Sha1),
+            (HashAlgorithm::Sha256, HashingAlgorithm::Sha256),
+            (HashAlgorithm::Sha384, HashingAlgorithm::Sha384),
+            (HashAlgorithm::Sha512, HashingAlgorithm::Sha512),
+            (HashAlgorithm::Sm3_256, HashingAlgorithm::Sm3_256),
+        ];
+
+        for (input, output) in cases {
+            let alg = hash_to_hashing_algorithm(input);
+            assert_eq!(alg, output);
+        }
+    }
+
+    #[test]
+    fn test_get_key_class() {
+        let algorithms = [
+            (EncryptionAlgorithm::Rsa1024, KeyClass::Asymmetric),
+            (EncryptionAlgorithm::Rsa2048, KeyClass::Asymmetric),
+            (EncryptionAlgorithm::Rsa3072, KeyClass::Asymmetric),
+            (EncryptionAlgorithm::Rsa4096, KeyClass::Asymmetric),
+            (EncryptionAlgorithm::Ecc192, KeyClass::Asymmetric),
+            (EncryptionAlgorithm::Ecc224, KeyClass::Asymmetric),
+            (EncryptionAlgorithm::Ecc256, KeyClass::Asymmetric),
+            (EncryptionAlgorithm::Ecc384, KeyClass::Asymmetric),
+            (EncryptionAlgorithm::Ecc521, KeyClass::Asymmetric),
+            (EncryptionAlgorithm::EccSm2, KeyClass::Asymmetric),
+        ];
+        for (alg, kclass) in algorithms {
+            let key_class = get_key_class(&alg);
+            assert_eq!(key_class, kclass, "Key class mismatch for {alg}");
+        }
+    } // test_get_key_class
+
+    #[test]
+    fn test_get_key_size() {
+        let algorithms = [
+            (EncryptionAlgorithm::Rsa1024, 1024),
+            (EncryptionAlgorithm::Rsa2048, 2048),
+            (EncryptionAlgorithm::Rsa3072, 3072),
+            (EncryptionAlgorithm::Rsa4096, 4096),
+            (EncryptionAlgorithm::Ecc192, 192),
+            (EncryptionAlgorithm::Ecc224, 224),
+            (EncryptionAlgorithm::Ecc256, 256),
+            (EncryptionAlgorithm::Ecc384, 384),
+            (EncryptionAlgorithm::Ecc521, 521),
+            (EncryptionAlgorithm::EccSm2, 256),
+        ];
+        for (alg, expected_size) in algorithms {
+            let key_size = get_key_size(&alg);
+            assert_eq!(
+                key_size, expected_size,
+                "Key size mismatch for {alg}"
+            );
+        }
+    } // test_get_key_size
+
+    #[test]
+    fn test_get_ecc_curve_key_size() {
+        let curves = [
+            (EccCurve::NistP192, 192),
+            (EccCurve::NistP224, 224),
+            (EccCurve::NistP256, 256),
+            (EccCurve::NistP384, 384),
+            (EccCurve::NistP521, 521),
+            (EccCurve::BnP256, 256),
+            (EccCurve::BnP638, 638),
+            (EccCurve::Sm2P256, 256),
+        ];
+        for (curve_id, expected_size) in curves {
+            let size = get_ecc_curve_key_size(curve_id);
+            assert_eq!(size, expected_size);
+        }
+    } // test_get_ecc_curve_key_size
+
+    #[test]
+    fn test_key_class_display() {
+        let algorithms = [
+            (KeyClass::Asymmetric, "asymmetric"),
+            (KeyClass::Symmetric, "symmetric"),
+        ];
+        for (kclass, expected) in algorithms {
+            assert_eq!(kclass.to_string(), expected);
+        }
+    } // test_key_class_display
+
+    #[test]
+    fn test_unsupported_encryption_tryfrom() {
+        let result = EncryptionAlgorithm::try_from("invalid-rsa-type");
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            AlgorithmError::UnsupportedEncryptionAlgorithm(_)
+        ));
+    } // test_unsupported_encryption_tryfrom
+
+    #[test]
+    fn test_unsupported_signing_tryfrom() {
+        let result = SignAlgorithm::try_from("invalid-signing-scheme");
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            AlgorithmError::UnsupportedSigningAlgorithm(_)
+        ));
+    } // test_unsupported_signing_tryfrom
 }

@@ -1,43 +1,228 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2025 Keylime Authors
+use keylime::algorithms::HashAlgorithm;
+use keylime::config::PushModelConfigTrait;
+use keylime::context_info::ContextInfo;
 use keylime::structures;
+use log::error;
 
-// Implement a structure filler for the attestation request
-// by using polimorphism and traits, with next options:
-// 1. Use a trait to define the structure filler interface
-// 2. Implement the trait for the attestation request structure
-// 3. Use the trait to fill the structure with data from code
-// 4. Use the trait to fill the structure with data from a file
-// 5. Use the trait to fill the structure with data from real TPM quote
 pub trait StructureFiller {
-    fn get_attestation_request(&self) -> structures::AttestationRequest;
-    fn get_session_request(&self) -> structures::SessionRequest;
+    fn get_attestation_request(&mut self) -> structures::AttestationRequest;
+    fn get_session_request(&mut self) -> structures::SessionRequest;
     fn get_evidence_handling_request(
-        &self,
+        &mut self,
     ) -> structures::EvidenceHandlingRequest;
 }
 
-pub fn get_filler_request(
+pub fn get_filler_request<'a>(
     json_file: Option<String>,
-) -> Box<dyn StructureFiller> {
+    //tpm_context: Option<&'a mut tpm::Context<'static>>,
+    tpm_context_info: Option<&'a mut ContextInfo>,
+) -> Box<dyn StructureFiller + 'a> {
     if json_file.is_none() {
-        return Box::new(FillerFromCode {});
+        if tpm_context_info.is_none() {
+            return Box::new(FillerFromCode);
+        }
+        return Box::new(FillerFromHardware::new(tpm_context_info.unwrap()));
     }
     Box::new(FillerFromFile {
         file_path: json_file.clone().unwrap(),
     })
 }
 
+impl StructureFiller for FillerFromHardware<'_> {
+    fn get_attestation_request(&mut self) -> structures::AttestationRequest {
+        self.get_attestation_request_final()
+    }
+    fn get_session_request(&mut self) -> structures::SessionRequest {
+        self.get_session_request_final()
+    }
+    fn get_evidence_handling_request(
+        &mut self,
+    ) -> structures::EvidenceHandlingRequest {
+        self.get_evidence_handling_request_final()
+    }
+}
+
+pub struct FillerFromHardware<'a> {
+    pub tpm_context_info: &'a mut ContextInfo,
+}
+
+impl<'a> FillerFromHardware<'a> {
+    pub fn new(tpm_context_info: &'a mut ContextInfo) -> Self {
+        FillerFromHardware { tpm_context_info }
+    }
+    // TODO: Change this function to use the attestation request appropriately
+    // Add self to the function signature to use the tpm_context
+    fn get_attestation_request_final(
+        &mut self,
+    ) -> structures::AttestationRequest {
+        // TODO: Change config obtaining here to avoid repetitions
+        let config = keylime::config::PushModelConfig::default();
+        let tpmc_ref = self.tpm_context_info.get_mutable_tpm_context();
+        let tpm_banks_sha1 =
+            tpmc_ref.pcr_banks(HashAlgorithm::Sha1).unwrap_or_else(|_| {
+                error!("Failed to get PCR banks for SHA1");
+                vec![]
+            });
+        let tpm_banks_sha256 = tpmc_ref
+            .pcr_banks(HashAlgorithm::Sha256)
+            .unwrap_or_else(|_| {
+                error!("Failed to get PCR banks for SHA256");
+                vec![]
+            });
+        structures::AttestationRequest {
+            data: structures::RequestData {
+                type_: "attestation".to_string(),
+                attributes: structures::Attributes {
+                    evidence_supported: vec![
+                        structures::EvidenceSupported::Certification {
+                            evidence_type: "tpm_quote".to_string(),
+                            capabilities: structures::Capabilities {
+                                component_version: "2.0".to_string(),
+                                hash_algorithms: self.tpm_context_info.get_supported_hash_algorithms().expect(
+                                    "Failed to get supported hash algorithms"
+                                ),
+                                signature_schemes: self.tpm_context_info.get_supported_signing_schemes().expect(
+                                    "Failed to get supported signing schemes"
+                                ),
+                                available_subjects: structures::ShaValues {
+                                    sha1: tpm_banks_sha1,
+                                    sha256: tpm_banks_sha256,
+                                },
+                                certification_keys: vec![
+                                    self.tpm_context_info.get_ak_certification_data().expect(
+                                        "Failed to get AK certification data"
+                                    ),
+                                ],
+                            },
+                        },
+                        structures::EvidenceSupported::EvidenceLog {
+                            evidence_type: "uefi_log".to_string(),
+                            capabilities: structures::LogCapabilities {
+                                evidence_version: Some(config.get_uefi_logs_evidence_version()),
+                                entry_count: keylime::file_ops::read_file(config.get_measuredboot_ml_count_file().as_str())
+                                    .map(|content| {
+                                        content
+                                            .trim()
+                                            .parse::<u32>()
+                                            .unwrap_or(0)
+                                    })
+                                    .unwrap_or_else(|_| {
+                                        error!("Failed to read UEFI logs entry count file");
+                                        0
+                                    }),
+                                supports_partial_access: config.get_uefi_logs_supports_partial_access(),
+                                appendable: config.get_uefi_logs_appendable(),
+                                formats: config.get_uefi_logs_formats(),
+                            },
+                        },
+                        structures::EvidenceSupported::EvidenceLog {
+                            evidence_type: "ima_log".to_string(),
+                            capabilities: structures::LogCapabilities {
+                                evidence_version: None,
+                                entry_count: keylime::file_ops::read_file(config.get_ima_ml_count_file().as_str())
+                                    .map(|content| {
+                                        content
+                                            .trim()
+                                            .parse::<u32>()
+                                            .unwrap_or(0)
+                                    })
+                                    .unwrap_or_else(|_| {
+                                        error!("Failed to read IMA log entry count file");
+                                        0
+                                    }),
+                                supports_partial_access: config.get_ima_logs_supports_partial_access(),
+                                appendable: config.get_ima_logs_appendable(),
+                                formats: config.get_ima_logs_formats(),
+                            },
+                        },
+                    ],
+                    system_info: structures::SystemInfo {
+                        boot_time: chrono::Utc::now(),
+                    },
+                },
+            },
+        }
+    }
+
+    // TODO: Change this function to use the session request appropriately
+    pub fn get_session_request_final(
+        &mut self,
+    ) -> structures::SessionRequest {
+        structures::SessionRequest {
+            data: structures::SessionRequestData {
+                data_type: "session".to_string(),
+                attributes: structures::SessionRequestAttributes {
+                    agent_id: "example-agent".to_string(),
+                    auth_supported: vec![
+                        structures::SessionRequestAuthSupported {
+                            auth_class: "pop".to_string(),
+                            auth_type: "tpm_pop".to_string(),
+                        },
+                    ],
+                },
+            },
+        }
+    }
+
+    // TODO: Change this function to use the evidence handling request appropriately
+    pub fn get_evidence_handling_request_final(
+        &mut self,
+    ) -> structures::EvidenceHandlingRequest {
+        let tpm_evidence_data = structures::EvidenceData::TpmQuoteData {
+            subject_data: "subject_data".to_string(),
+            message: "message".to_string(),
+            signature: "signature".to_string(),
+        };
+
+        let tpm_evidence_collected = structures::EvidenceCollected {
+            evidence_class: "certification".to_string(),
+            evidence_type: "tpm_quote".to_string(),
+            data: tpm_evidence_data,
+        };
+        let uefi_evidence_data = structures::EvidenceData::UefiLog {
+            entries: "uefi_log_entries".to_string(),
+        };
+        let uefi_evidence_collected = structures::EvidenceCollected {
+            evidence_class: "log".to_string(),
+            evidence_type: "uefi_log".to_string(),
+            data: uefi_evidence_data,
+        };
+        let ima_evidence_data = structures::EvidenceData::ImaLog {
+            entry_count: 95,
+            entries: "ima_log_entries".to_string(),
+        };
+        let ima_evidence_collected = structures::EvidenceCollected {
+            evidence_class: "log".to_string(),
+            evidence_type: "ima_log".to_string(),
+            data: ima_evidence_data,
+        };
+        let attributes = structures::EvidenceHandlingRequestAttributes {
+            evidence_collected: vec![
+                tpm_evidence_collected,
+                uefi_evidence_collected,
+                ima_evidence_collected,
+            ],
+        };
+        let data = structures::EvidenceHandlingRequestData {
+            data_type: "attestation".to_string(),
+            attributes,
+        };
+        structures::EvidenceHandlingRequest { data }
+    }
+}
+
 pub struct FillerFromCode;
 impl StructureFiller for FillerFromCode {
-    fn get_attestation_request(&self) -> structures::AttestationRequest {
+    fn get_attestation_request(&mut self) -> structures::AttestationRequest {
         get_attestation_request_from_code()
     }
-    fn get_session_request(&self) -> structures::SessionRequest {
+    fn get_session_request(&mut self) -> structures::SessionRequest {
         get_session_request_from_code()
     }
     fn get_evidence_handling_request(
-        &self,
+        &mut self,
     ) -> structures::EvidenceHandlingRequest {
         get_evidence_handling_request_from_code()
     }
@@ -48,14 +233,14 @@ pub struct FillerFromFile {
 }
 
 impl StructureFiller for FillerFromFile {
-    fn get_attestation_request(&self) -> structures::AttestationRequest {
+    fn get_attestation_request(&mut self) -> structures::AttestationRequest {
         get_attestation_request_from_file(self.file_path.clone())
     }
-    fn get_session_request(&self) -> structures::SessionRequest {
+    fn get_session_request(&mut self) -> structures::SessionRequest {
         get_session_request_from_file(self.file_path.clone())
     }
     fn get_evidence_handling_request(
-        &self,
+        &mut self,
     ) -> structures::EvidenceHandlingRequest {
         get_evidence_handling_request_from_file(self.file_path.clone())
     }
@@ -187,6 +372,9 @@ fn get_evidence_handling_request_from_code(
 mod tests {
 
     use super::*;
+
+    #[cfg(feature = "testing")]
+    use keylime::tpm::testing;
 
     #[test]
     fn get_attestation_request_test() {
@@ -447,4 +635,69 @@ mod tests {
             "tpm_pop"
         );
     } // get_authentication_request_from_file_test
+
+    #[tokio::test]
+    #[cfg(feature = "testing")]
+    async fn test_attestation_request_final() {
+        use keylime::context_info;
+        let _mutex = testing::lock_tests().await;
+        let config = keylime::config::PushModelConfig::default();
+        let mut context_info = context_info::ContextInfo::new_from_str(
+            context_info::AlgorithmConfigurationString {
+                tpm_encryption_alg: config.get_tpm_encryption_alg(),
+                tpm_hash_alg: config.get_tpm_hash_alg(),
+                tpm_signing_alg: config.get_tpm_signing_alg(),
+            },
+        );
+        let mut filler = FillerFromHardware::new(&mut context_info);
+        let attestation_request = filler.get_attestation_request_final();
+        assert_eq!(attestation_request.data.type_, "attestation");
+        let serialized = serde_json::to_string(&attestation_request).unwrap();
+        assert!(!serialized.is_empty());
+        assert!(context_info.flush_context().is_ok());
+    } // test_attestation_request
+
+    #[tokio::test]
+    #[cfg(feature = "testing")]
+    async fn test_session_request() {
+        use keylime::context_info;
+        let _mutex = testing::lock_tests().await;
+        let config = keylime::config::PushModelConfig::default();
+        let mut context_info = context_info::ContextInfo::new_from_str(
+            context_info::AlgorithmConfigurationString {
+                tpm_encryption_alg: config.get_tpm_encryption_alg(),
+                tpm_hash_alg: config.get_tpm_hash_alg(),
+                tpm_signing_alg: config.get_tpm_signing_alg(),
+            },
+        );
+        let mut filler = FillerFromHardware::new(&mut context_info);
+        let session_request = filler.get_session_request();
+        assert_eq!(session_request.data.data_type, "session");
+        let serialized = serde_json::to_string(&session_request).unwrap();
+        assert!(!serialized.is_empty());
+        assert!(context_info.flush_context().is_ok());
+    } // test_session_request
+
+    #[tokio::test]
+    #[cfg(feature = "testing")]
+    async fn test_evidence_handling_request() {
+        use keylime::context_info;
+        let _mutex = testing::lock_tests().await;
+        let config = keylime::config::PushModelConfig::default();
+        let mut context_info = context_info::ContextInfo::new_from_str(
+            context_info::AlgorithmConfigurationString {
+                tpm_encryption_alg: config.get_tpm_encryption_alg(),
+                tpm_hash_alg: config.get_tpm_hash_alg(),
+                tpm_signing_alg: config.get_tpm_signing_alg(),
+            },
+        );
+        let mut filler = FillerFromHardware::new(&mut context_info);
+        let evidence_handling_request =
+            filler.get_evidence_handling_request();
+        assert_eq!(evidence_handling_request.data.data_type, "attestation");
+        let serialized =
+            serde_json::to_string(&evidence_handling_request).unwrap();
+        assert!(!serialized.is_empty());
+        assert!(context_info.flush_context().is_ok());
+    } // test_evidence_handling_request
 }

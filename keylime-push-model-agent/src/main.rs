@@ -2,6 +2,8 @@
 // Copyright 2025 Keylime Authors
 use anyhow::{Context, Result};
 use clap::Parser;
+use keylime::config::PushModelConfigTrait;
+use keylime::context_info;
 use log::{debug, error, info};
 use std::time::Duration;
 mod json_dump;
@@ -29,6 +31,10 @@ pub struct ResponseInformation {
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None, ignore_errors = true)]
 struct Args {
+    /// identifier
+    /// Default: 12345678
+    #[arg(long, default_missing_value = "12345678")]
+    agent_identifier: Option<String>,
     /// API version
     /// Default: "v3.0"
     #[arg(long, default_value = url_selector::DEFAULT_API_VERSION)]
@@ -53,10 +59,6 @@ struct Args {
     /// json file
     #[arg(short, long, default_missing_value = "")]
     json_file: Option<String>,
-    /// identifier
-    /// Default: 12345678
-    #[arg(long, default_value = "12345678")]
-    agent_identifier: String,
     /// index
     /// Default: 1
     #[arg(long, default_value = "1")]
@@ -87,10 +89,10 @@ struct Args {
     /// Verifier URL
     #[arg(short, long, default_value = "https://127.0.0.1:8881")]
     verifier_url: String,
-    /// avoid registration
+    /// avoid tpm
     /// Default: false
     #[arg(long, action, default_missing_value = "false")]
-    avoid_registration: Option<bool>,
+    avoid_tpm: Option<bool>,
 }
 
 fn get_message_type(args: &Args) -> MessageType {
@@ -127,11 +129,16 @@ fn get_request_builder_from_method(
     args: &Args,
 ) -> Result<reqwest::RequestBuilder> {
     let client = get_client(args)?;
+    // TODO: Change config obtaining here to avoid repetitions
+    let agent_identifier = match &args.agent_identifier {
+        Some(id) => id.clone(),
+        None => keylime::config::PushModelConfig::default().get_uuid(),
+    };
     let url_args = url_selector::UrlArgs {
         verifier_url: args.verifier_url.clone(),
         api_version: args.api_version.clone(),
         session_index: args.session_index.clone(),
-        agent_identifier: Some(args.agent_identifier.clone()),
+        agent_identifier: Some(agent_identifier),
         attestation_index: args.attestation_index.clone(),
     };
     let url = url_selector::get_url_from_message_type(
@@ -150,7 +157,13 @@ fn get_request_builder_from_method(
 }
 
 async fn send_push_model_request(args: &Args) -> Result<ResponseInformation> {
-    let filler = struct_filler::get_filler_request(args.json_file.clone());
+    let mut context_info: Option<context_info::ContextInfo> =
+        get_context(args)?;
+    let mut filler = struct_filler::get_filler_request(
+        args.json_file.clone(),
+        context_info.as_mut(),
+    );
+
     let message_type = get_message_type(args);
     let json_value = match message_type {
         MessageType::Attestation => {
@@ -168,9 +181,10 @@ async fn send_push_model_request(args: &Args) -> Result<ResponseInformation> {
         ),
     };
     let reqb = get_request_builder_from_method(args)?;
-
+    let reqcontent = json_value.unwrap().to_string();
+    debug!("Request body: {:?}", reqcontent);
     let response = reqb
-        .body(json_value.unwrap().to_string())
+        .body(reqcontent)
         .header("Accept", "application/json")
         .timeout(Duration::from_millis(args.timeout))
         .send()
@@ -189,6 +203,21 @@ async fn send_push_model_request(args: &Args) -> Result<ResponseInformation> {
     Ok(rsp)
 }
 
+fn get_context(args: &Args) -> Result<Option<context_info::ContextInfo>> {
+    let config = keylime::config::PushModelConfig::default();
+    if args.avoid_tpm.unwrap_or(false) {
+        return Ok(None);
+    }
+    let context_info = context_info::ContextInfo::new_from_str(
+        context_info::AlgorithmConfigurationString {
+            tpm_encryption_alg: config.get_tpm_encryption_alg(),
+            tpm_hash_alg: config.get_tpm_hash_alg(),
+            tpm_signing_alg: config.get_tpm_signing_alg(),
+        },
+    );
+    Ok(Some(context_info))
+}
+
 async fn run(args: &Args) -> Result<()> {
     info!("Verifier URL: {}", args.verifier_url);
     info!("Registrar URL: {}", args.registrar_url);
@@ -201,14 +230,10 @@ async fn run(args: &Args) -> Result<()> {
     debug!("Certificate file: {}", args.certificate);
     debug!("Key file: {}", args.key);
     debug!("Insecure: {}", args.insecure.unwrap_or(false));
-    debug!(
-        "Avoid registration: {}",
-        args.avoid_registration.unwrap_or(false)
-    );
-    let res = crate::registration::check_registration(
-        &args.avoid_registration.unwrap_or(false),
-    )
-    .await;
+    debug!("Avoid TPM: {}", args.avoid_tpm.unwrap_or(false));
+
+    let ctx_info = get_context(args)?;
+    let res = crate::registration::check_registration(ctx_info).await;
     match res {
         Ok(_) => {}
         Err(ref e) => error!("Could not register appropriately: {}", e),
@@ -245,7 +270,7 @@ mod tests {
         for att_idx in [None, Some("1".to_string())] {
             if (send_push_model_request(&Args {
                 api_version: Some("v3.0".to_string()),
-                avoid_registration: Some(true),
+                avoid_tpm: Some(true),
                 verifier_url: "http://1.2.3.4:5678".to_string(),
                 registrar_url: "http://1.2.3.4:8888".to_string(),
                 timeout: TEST_TIMEOUT_MILLIS,
@@ -253,7 +278,7 @@ mod tests {
                 certificate: "/tmp/does_not_exist.pem".to_string(),
                 key: "/tmp/does_not_exist.pem".to_string(),
                 insecure: Some(false),
-                agent_identifier: "12345678".to_string(),
+                agent_identifier: Some("12345678".to_string()),
                 json_file: None,
                 message_type: Some("Attestation".to_string()),
                 method: None,
@@ -272,7 +297,7 @@ mod tests {
     async fn send_attestation_request_test_no_cert_file() {
         match send_push_model_request(&Args {
             api_version: Some("v3.0".to_string()),
-            avoid_registration: Some(true),
+            avoid_tpm: Some(true),
             registrar_url: "http://1.2.3.4:8888".to_string(),
             verifier_url: "https://1.2.3.4:5678".to_string(),
             timeout: TEST_TIMEOUT_MILLIS,
@@ -280,7 +305,7 @@ mod tests {
             certificate: "/tmp/unexisting_cert_file".to_string(),
             key: "/tmp/unexisting_key_file".to_string(),
             insecure: Some(false),
-            agent_identifier: "12345678".to_string(),
+            agent_identifier: Some("12345678".to_string()),
             json_file: None,
             method: None,
             message_type: Some("Attestation".to_string()),
@@ -317,7 +342,7 @@ mod tests {
 
         match send_push_model_request(&Args {
             api_version: Some("3.0".to_string()),
-            avoid_registration: Some(true),
+            avoid_tpm: Some(true),
             registrar_url: "http://1.2.3.4:8888".to_string(),
             verifier_url: "https://1.2.3.4:5678/".to_string(),
             timeout: TEST_TIMEOUT_MILLIS,
@@ -325,7 +350,7 @@ mod tests {
             certificate: cert_file_path.display().to_string(),
             key: key_file_path.display().to_string(),
             insecure: Some(false),
-            agent_identifier: "12345678".to_string(),
+            agent_identifier: Some("12345678".to_string()),
             json_file: None,
             message_type: Some("Attestation".to_string()),
             method: None,
@@ -347,7 +372,7 @@ mod tests {
         }
         match send_push_model_request(&Args {
             api_version: Some("3.0".to_string()),
-            avoid_registration: Some(true),
+            avoid_tpm: Some(true),
             registrar_url: "http://1.2.3.4:8888".to_string(),
             verifier_url: "https://1.2.3.4:5678/".to_string(),
             timeout: TEST_TIMEOUT_MILLIS,
@@ -355,7 +380,7 @@ mod tests {
             certificate: cert_file_path.display().to_string(),
             key: key_file_path.display().to_string(),
             insecure: Some(true),
-            agent_identifier: "12345678".to_string(),
+            agent_identifier: Some("12345678".to_string()),
             attestation_index: None,
             json_file: None,
             message_type: Some("Attestation".to_string()),
@@ -373,7 +398,7 @@ mod tests {
         }
         match send_push_model_request(&Args {
             api_version: Some("3.0".to_string()),
-            avoid_registration: Some(true),
+            avoid_tpm: Some(true),
             registrar_url: "http://1.2.3.4:8888".to_string(),
             verifier_url: "https://1.2.3.4:5678/".to_string(),
             timeout: TEST_TIMEOUT_MILLIS,
@@ -381,7 +406,7 @@ mod tests {
             certificate: cert_file_path.display().to_string(),
             key: key_file_path.display().to_string(),
             insecure: Some(true),
-            agent_identifier: "12345678".to_string(),
+            agent_identifier: Some("12345678".to_string()),
             json_file: Some(
                 "./test-data/evidence_supported_attestation_request.json"
                     .to_string(),
@@ -407,7 +432,7 @@ mod tests {
         for attestation_idx in [None, Some("3".to_string())] {
             match send_push_model_request(&Args {
                 api_version: Some("3.0".to_string()),
-                avoid_registration: Some(true),
+                avoid_tpm: Some(true),
                 registrar_url: "http://1.2.3.4:8888".to_string(),
                 verifier_url: "https://1.2.3.4:5678/".to_string(),
                 timeout: TEST_TIMEOUT_MILLIS,
@@ -415,7 +440,7 @@ mod tests {
                 certificate: "/tmp/does_not_exists.pem".to_string(),
                 key: "/tmp/does_not_exists.pem".to_string(),
                 insecure: Some(true),
-                agent_identifier: "12345678".to_string(),
+                agent_identifier: Some("12345678".to_string()),
                 json_file: None,
                 message_type: Some("EvidenceHandling".to_string()),
                 method: None,
@@ -438,7 +463,7 @@ mod tests {
     async fn send_session_request_test() {
         match send_push_model_request(&Args {
             api_version: Some("3.0".to_string()),
-            avoid_registration: Some(true),
+            avoid_tpm: Some(true),
             registrar_url: "http://1.2.3.4:8888".to_string(),
             verifier_url: "https://1.2.3.4:5678/".to_string(),
             timeout: TEST_TIMEOUT_MILLIS,
@@ -446,7 +471,7 @@ mod tests {
             certificate: "/tmp/does_not_exists.pem".to_string(),
             key: "/tmp/does_not_exists.pem".to_string(),
             insecure: Some(true),
-            agent_identifier: "12345678".to_string(),
+            agent_identifier: Some("12345678".to_string()),
             json_file: None,
             message_type: Some("Session".to_string()),
             method: Some("POST".to_string()),
@@ -464,7 +489,7 @@ mod tests {
         }
         match send_push_model_request(&Args {
             api_version: Some("3.0".to_string()),
-            avoid_registration: Some(true),
+            avoid_tpm: Some(true),
             registrar_url: "http://1.2.3.4:8888".to_string(),
             verifier_url: "https://1.2.3.4:5678/".to_string(),
             timeout: TEST_TIMEOUT_MILLIS,
@@ -472,7 +497,7 @@ mod tests {
             certificate: "/tmp/does_not_exists.pem".to_string(),
             key: "/tmp/does_not_exists.pem".to_string(),
             insecure: Some(true),
-            agent_identifier: "12345678".to_string(),
+            agent_identifier: Some("12345678".to_string()),
             json_file: None,
             message_type: Some("Session".to_string()),
             method: Some("PATCH".to_string()),
@@ -496,7 +521,7 @@ mod tests {
         if std::env::var("MOCKOON").is_ok() {
             match send_push_model_request(&Args {
                 api_version: None,
-                avoid_registration: Some(true),
+                avoid_tpm: Some(true),
                 registrar_url: "http://1.2.3.4:8888".to_string(),
                 verifier_url: "http://localhost:3000".to_string(),
                 timeout: TEST_TIMEOUT_MILLIS,
@@ -504,7 +529,7 @@ mod tests {
                 certificate: "/tmp/does_not_exist.pem".to_string(),
                 key: "/tmp/does_not_exist.pem".to_string(),
                 insecure: Some(false),
-                agent_identifier: "12345678".to_string(),
+                agent_identifier: Some("12345678".to_string()),
                 json_file: None,
                 message_type: Some("Attestation".to_string()),
                 method: Some("POST".to_string()),
@@ -522,7 +547,7 @@ mod tests {
             }
             match send_push_model_request(&Args {
                 api_version: Some("-1.2.3".to_string()),
-                avoid_registration: Some(true),
+                avoid_tpm: Some(true),
                 registrar_url: "http://1.2.3.4:8888".to_string(),
                 verifier_url: "http://localhost:3000".to_string(),
                 timeout: TEST_TIMEOUT_MILLIS,
@@ -530,7 +555,7 @@ mod tests {
                 certificate: "/tmp/does_not_exist.pem".to_string(),
                 key: "/tmp/does_not_exist.pem".to_string(),
                 insecure: Some(false),
-                agent_identifier: "12345678".to_string(),
+                agent_identifier: Some("12345678".to_string()),
                 json_file: None,
                 message_type: Some("Attestation".to_string()),
                 method: Some("POST".to_string()),
@@ -548,7 +573,7 @@ mod tests {
             }
             match send_push_model_request(&Args {
                 api_version: None,
-                avoid_registration: Some(true),
+                avoid_tpm: Some(true),
                 registrar_url: "http://1.2.3.4:8888".to_string(),
                 verifier_url: "http://localhost:3000".to_string(),
                 timeout: TEST_TIMEOUT_MILLIS,
@@ -556,7 +581,7 @@ mod tests {
                 certificate: "/tmp/does_not_exist.pem".to_string(),
                 key: "/tmp/does_not_exist.pem".to_string(),
                 insecure: Some(false),
-                agent_identifier: "".to_string(),
+                agent_identifier: None,
                 json_file: None,
                 message_type: Some("Session".to_string()),
                 method: Some("POST".to_string()),
@@ -574,7 +599,7 @@ mod tests {
             }
             match send_push_model_request(&Args {
                 api_version: None,
-                avoid_registration: Some(true),
+                avoid_tpm: Some(true),
                 registrar_url: "http://1.2.3.4:8888".to_string(),
                 verifier_url: "http://localhost:3000".to_string(),
                 timeout: TEST_TIMEOUT_MILLIS,
@@ -582,7 +607,7 @@ mod tests {
                 certificate: "/tmp/does_not_exist.pem".to_string(),
                 key: "/tmp/does_not_exist.pem".to_string(),
                 insecure: Some(false),
-                agent_identifier: "".to_string(),
+                agent_identifier: None,
                 json_file: None,
                 message_type: Some("Session".to_string()),
                 method: Some("PATCH".to_string()),
@@ -610,7 +635,7 @@ mod tests {
         ] {
             let args = Args {
                 api_version: None,
-                avoid_registration: Some(true),
+                avoid_tpm: Some(true),
                 registrar_url: "".to_string(),
                 verifier_url: "".to_string(),
                 timeout: 0,
@@ -618,7 +643,7 @@ mod tests {
                 certificate: "".to_string(),
                 key: "".to_string(),
                 insecure: None,
-                agent_identifier: "".to_string(),
+                agent_identifier: None,
                 json_file: None,
                 message_type: Some(mtype.to_string()),
                 method: None,
@@ -648,7 +673,7 @@ mod tests {
         ] {
             let args = Args {
                 api_version: None,
-                avoid_registration: Some(true),
+                avoid_tpm: Some(true),
                 registrar_url: "".to_string(),
                 verifier_url: "".to_string(),
                 timeout: 0,
@@ -656,7 +681,7 @@ mod tests {
                 certificate: "".to_string(),
                 key: "".to_string(),
                 insecure: None,
-                agent_identifier: "".to_string(),
+                agent_identifier: None,
                 json_file: None,
                 message_type: None,
                 method: Some(method),
@@ -673,7 +698,7 @@ mod tests {
         // Set arguments to avoid registration
         let args = Args {
             api_version: None,
-            avoid_registration: Some(true),
+            avoid_tpm: Some(true),
             registrar_url: "".to_string(),
             verifier_url: "".to_string(),
             timeout: 0,
@@ -681,7 +706,7 @@ mod tests {
             certificate: "".to_string(),
             key: "".to_string(),
             insecure: None,
-            agent_identifier: "".to_string(),
+            agent_identifier: None,
             json_file: None,
             message_type: None,
             method: None,

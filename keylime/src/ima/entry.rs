@@ -431,10 +431,9 @@ impl TryFrom<&str> for Entry {
                 template_hash,
                 event_data: Box::new(ImaBuf::try_from(event)?),
             }),
-            template => Err(Error::new(
-                ErrorKind::Other,
-                format!("unrecognized template \"{template}\"",),
-            )),
+            template => Err(Error::other(format!(
+                "unrecognized template \"{template}\"",
+            ))),
         }
     }
 }
@@ -522,5 +521,19 @@ mod tests {
             &buf,
             &hex::decode("140000006e0e6fc8a188ef4f059638949adca4d2219469060e0000006465766963655f726573756d6500ce0000006e616d653d544553543b757569643d43525950542d5645524954592d39656633326535623635623034343234613561386562343436636630653731332d544553543b63617061636974793d303b6d616a6f723d3235333b6d696e6f723d303b6d696e6f725f636f756e743d313b6e756d5f746172676574733d313b6163746976655f7461626c655f686173683d346565383065333365353635643336333430356634303238393436653837623365396563306335383661666639656630656436663561653762656237326431333b").unwrap(), //#[allow_ci]
         );
+    }
+
+    #[test]
+    fn test_unrecognized_template() {
+        let result: Result<Entry> = "10 1234567890abcdef ima-unknown ima-unknown:1234567890abcdef /path/to/file"
+            .try_into();
+        assert!(result.is_err());
+        if let Err(e) = result {
+            assert_eq!(e.kind(), ErrorKind::Other);
+            assert_eq!(
+                e.to_string(),
+                "unrecognized template \"ima-unknown\""
+            );
+        }
     }
 }
