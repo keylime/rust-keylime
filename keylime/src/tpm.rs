@@ -1752,15 +1752,19 @@ impl Context<'_> {
                 if attributes.asymmetric() && attributes.signing() {
                     let algorithm_id = alg_prop.algorithm_identifier();
                     match algorithm_id {
-                        AlgorithmIdentifier::Rsa => {
+                        AlgorithmIdentifier::RsaSsa => {
                             supported_algs
                                 .push(KeylimeInternalSignAlgorithm::RsaSsa);
+                        }
+                        AlgorithmIdentifier::RsaPss => {
                             supported_algs
                                 .push(KeylimeInternalSignAlgorithm::RsaPss);
                         }
-                        AlgorithmIdentifier::Ecc => {
+                        AlgorithmIdentifier::EcDsa => {
                             supported_algs
                                 .push(KeylimeInternalSignAlgorithm::EcDsa);
+                        }
+                        AlgorithmIdentifier::EcSchnorr => {
                             supported_algs.push(
                                 KeylimeInternalSignAlgorithm::EcSchnorr,
                             );
