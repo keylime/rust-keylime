@@ -514,4 +514,24 @@ mod tests {
             assert_eq!(kclass.to_string(), expected);
         }
     } // test_key_class_display
+
+    #[test]
+    fn test_unsupported_encryption_tryfrom() {
+        let result = EncryptionAlgorithm::try_from("invalid-rsa-type");
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            AlgorithmError::UnsupportedEncryptionAlgorithm(_)
+        ));
+    } // test_unsupported_encryption_tryfrom
+
+    #[test]
+    fn test_unsupported_signing_tryfrom() {
+        let result = SignAlgorithm::try_from("invalid-signing-scheme");
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            AlgorithmError::UnsupportedSigningAlgorithm(_)
+        ));
+    } // test_unsupported_signing_tryfrom
 }

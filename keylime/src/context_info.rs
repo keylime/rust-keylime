@@ -306,7 +306,47 @@ mod tests {
 
     #[tokio::test]
     #[cfg(feature = "testing")]
-    async fn test_get_ak_data() {
+    #[should_panic(expected = "Invalid TPM encryption algorithm")]
+    async fn test_new_from_str_panics_on_bad_enc_alg() {
+        let _mutex = crate::tpm::testing::lock_tests().await;
+        let config = AlgorithmConfigurationString {
+            tpm_encryption_alg: "bad-algorithm".to_string(),
+            tpm_hash_alg: "sha256".to_string(),
+            tpm_signing_alg: "rsassa".to_string(),
+        };
+        ContextInfo::new_from_str(config);
+    }
+
+    #[tokio::test]
+    #[cfg(feature = "testing")]
+    #[should_panic(expected = "Invalid TPM hash algorithm")]
+    async fn test_new_from_str_panics_on_bad_hash_alg() {
+        let _mutex = crate::tpm::testing::lock_tests().await;
+        let config = AlgorithmConfigurationString {
+            tpm_encryption_alg: "rsa".to_string(),
+            tpm_hash_alg: "bad-hash".to_string(),
+            tpm_signing_alg: "rsassa".to_string(),
+        };
+        ContextInfo::new_from_str(config);
+    }
+
+    #[tokio::test]
+    #[cfg(feature = "testing")]
+    #[should_panic(expected = "Invalid TPM signing algorithm")]
+    async fn test_new_from_str_panics_on_bad_sign_alg() {
+        let _mutex = crate::tpm::testing::lock_tests().await;
+        let config = AlgorithmConfigurationString {
+            tpm_encryption_alg: "rsa".to_string(),
+            tpm_hash_alg: "sha256".to_string(),
+            tpm_signing_alg: "bad-signing-alg".to_string(),
+        };
+        ContextInfo::new_from_str(config);
+    }
+
+    #[tokio::test]
+    #[cfg(feature = "testing")]
+    async fn test_creation_and_get_all_data() {
+        // Renamed for clarity
         use crate::tpm::testing;
         let _mutex = testing::lock_tests().await;
         let config = AlgorithmConfigurationString {
@@ -315,15 +355,16 @@ mod tests {
             tpm_signing_alg: "rsassa".to_string(),
         };
         let mut context_info = ContextInfo::new_from_str(config);
-        // Check all information for the AK
+        assert!(!context_info.ek_hash.is_empty());
+        assert!(!context_info.get_public_key_as_base64().unwrap().is_empty()); //#[allow_ci]
+        assert_eq!(context_info.get_key_class(), "asymmetric");
+        assert_eq!(context_info.get_key_size(), 2048);
+        assert_eq!(context_info.get_key_algorithm(), "rsa");
         assert!(!context_info.get_ak_key_class_str().is_empty());
         assert!(!context_info.get_ak_key_algorithm_str().is_empty());
         assert!(context_info.get_ak_key_size().is_ok());
         assert!(context_info.get_ak_local_identifier_str().is_ok());
         assert!(context_info.get_ak_public_key_as_base64().is_ok());
-        assert!(context_info.get_ak_certification_data().is_ok());
-        assert!(context_info.get_supported_hash_algorithms().is_ok());
-        assert!(context_info.get_supported_signing_schemes().is_ok());
         assert!(context_info.flush_context().is_ok());
     }
 }

@@ -3091,4 +3091,17 @@ pub mod tests {
         assert!(banks.is_ok(), "Result: {banks:?}");
         assert!(!banks.unwrap().is_empty(), "No PCR banks found"); //#[allow_ci]
     } // test_pcr_banks
+
+    #[tokio::test]
+    #[cfg(feature = "testing")]
+    async fn test_algorithms() {
+        let _mutex = testing::lock_tests().await;
+        let mut ctx = Context::new().unwrap(); //#[allow_ci]
+        let mut algs = ctx.get_supported_hash_algorithms_as_strings();
+        assert!(algs.is_ok(), "Result: {algs:?}");
+        assert!(!algs.unwrap().is_empty(), "No hashing algorithms found"); //#[allow_ci]
+        algs = ctx.get_supported_signing_algorithms_as_strings();
+        assert!(algs.is_ok(), "Result: {algs:?}");
+        assert!(!algs.unwrap().is_empty(), "No signing algorithms found"); //#[allow_ci]
+    } // test_algorithms
 }
