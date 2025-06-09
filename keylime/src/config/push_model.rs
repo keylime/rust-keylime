@@ -22,10 +22,16 @@ pub const DEFAULT_UEFI_LOGS_APPENDABLE: bool = true;
 pub const DEFAULT_UEFI_LOGS_EVIDENCE_VERSION: &str = "2.1";
 pub const DEFAULT_UEFI_LOGS_FORMATS: &[&str] = &["application/octet-stream"];
 pub const DEFAULT_UEFI_LOGS_SUPPORTS_PARTIAL_ACCESS: bool = true;
-pub const DEFAULT_MEASUREDBOOT_ML_DIRECTORY_PATH: &str =
-    "/sys/kernel/security/tpm0";
-pub static DEFAULT_MEASUREDBOOT_ML_COUNT_FILE: Lazy<String> =
-    Lazy::new(|| format!("{}/count", DEFAULT_MEASUREDBOOT_ML_DIRECTORY_PATH));
+
+pub const DEFAULT_UEFI_LOGS_BINARY_PATH: &str = "/sys/kernel/security/tpm0";
+pub const DEFAULT_UEFI_LOGS_BINARY_FILE: &str = "binary_bios_measurements";
+pub static DEFAULT_UEFI_LOGS_BINARY_FILE_PATH: Lazy<String> =
+    Lazy::new(|| {
+        format!(
+            "{}/{}",
+            DEFAULT_UEFI_LOGS_BINARY_PATH, DEFAULT_UEFI_LOGS_BINARY_FILE
+        )
+    });
 
 pub trait PushModelConfigTrait {
     fn get_certification_keys_server_identifier(&self) -> String;
@@ -33,8 +39,6 @@ pub trait PushModelConfigTrait {
     fn get_contact_port(&self) -> u32;
     fn get_enable_iak_idevid(&self) -> bool;
     fn get_ek_handle(&self) -> String;
-    fn get_measuredboot_ml_directory_path(&self) -> String;
-    fn get_measuredboot_ml_count_file(&self) -> String;
     fn get_ima_logs_appendable(&self) -> bool;
     fn get_ima_logs_formats(&self) -> Vec<String>;
     fn get_ima_logs_supports_partial_access(&self) -> bool;
@@ -51,6 +55,7 @@ pub trait PushModelConfigTrait {
     fn get_registrar_api_versions(&self) -> Vec<String>;
     fn get_api_versions(&self) -> Vec<String>;
     fn get_uefi_logs_appendable(&self) -> bool;
+    fn get_uefi_logs_binary_file_path(&self) -> String;
     fn get_uefi_logs_evidence_version(&self) -> String;
     fn get_uefi_logs_formats(&self) -> Vec<String>;
     fn get_uefi_logs_supports_partial_access(&self) -> bool;
@@ -78,11 +83,6 @@ impl Default for PushModelConfig {
                 .to_string()
                 .clone(),
             ima_ml_count_file: DEFAULT_IMA_ML_COUNT_FILE.to_string().clone(),
-            measuredboot_ml_directory_path:
-                DEFAULT_MEASUREDBOOT_ML_DIRECTORY_PATH.to_string().clone(),
-            measuredboot_ml_count_file: DEFAULT_MEASUREDBOOT_ML_COUNT_FILE
-                .to_string()
-                .clone(),
             registrar_ip: DEFAULT_REGISTRAR_IP.to_string(),
             registrar_port: DEFAULT_REGISTRAR_PORT,
             registrar_api_versions: DEFAULT_REGISTRAR_API_VERSIONS
@@ -93,6 +93,8 @@ impl Default for PushModelConfig {
             server_key: DEFAULT_SERVER_KEY.to_string(),
             server_key_password: DEFAULT_SERVER_KEY_PASSWORD.to_string(),
             uefi_logs_appendable: DEFAULT_UEFI_LOGS_APPENDABLE,
+            uefi_logs_binary_file_path: DEFAULT_UEFI_LOGS_BINARY_FILE_PATH
+                .to_string(),
             uefi_logs_evidence_version: DEFAULT_UEFI_LOGS_EVIDENCE_VERSION
                 .to_string(),
             uefi_logs_formats: DEFAULT_UEFI_LOGS_FORMATS
@@ -125,8 +127,6 @@ pub struct PushModelConfig {
     ima_logs_supports_partial_access: bool,
     ima_ml_directory_path: String,
     ima_ml_count_file: String,
-    measuredboot_ml_directory_path: String,
-    measuredboot_ml_count_file: String,
     registrar_api_versions: Vec<String>,
     registrar_ip: String,
     registrar_port: u32,
@@ -136,6 +136,7 @@ pub struct PushModelConfig {
     tpm_encryption_alg: String,
     tpm_hash_alg: String,
     tpm_signing_alg: String,
+    uefi_logs_binary_file_path: String,
     uefi_logs_evidence_version: String,
     uefi_logs_supports_partial_access: bool,
     uefi_logs_appendable: bool,
@@ -190,14 +191,6 @@ impl PushModelConfigTrait for PushModelConfig {
         self.ima_ml_directory_path.clone()
     }
 
-    fn get_measuredboot_ml_directory_path(&self) -> String {
-        self.measuredboot_ml_directory_path.clone()
-    }
-
-    fn get_measuredboot_ml_count_file(&self) -> String {
-        self.measuredboot_ml_count_file.clone()
-    }
-
     fn get_registrar_ip(&self) -> String {
         self.registrar_ip.clone()
     }
@@ -224,6 +217,10 @@ impl PushModelConfigTrait for PushModelConfig {
 
     fn get_uefi_logs_appendable(&self) -> bool {
         self.uefi_logs_appendable
+    }
+
+    fn get_uefi_logs_binary_file_path(&self) -> String {
+        self.uefi_logs_binary_file_path.clone()
     }
 
     fn get_uefi_logs_evidence_version(&self) -> String {
@@ -265,9 +262,9 @@ impl PushModelConfigTrait for PushModelConfig {
             enable_iak_idevid: {}, ek_handle: {},
             ima_logs_appendable: {}, ima_logs_formats: {:?}, ima_logs_supports_partial_access: {},
             ima_ml_directory_path: {}, ima_ml_count_file: {},
-            measuredboot_ml_directory_path: {}, measuredboot_ml_count_file: {},
             registrar_ip: {}, registrar_port: {}, server_cert: {},
             server_key: {}, server_key_password: {},
+            uefi_logs_binary_file_path: {},
             uefi_logs_evidence_version: {}, uefi_logs_supports_partial_access: {},
             uefi_logs_appendable: {}, uefi_logs_formats: {:?},
             tpm_encryption_alg: {}, tpm_hash_alg: {}, tpm_signing_alg: {},
@@ -282,13 +279,12 @@ impl PushModelConfigTrait for PushModelConfig {
             self.ima_logs_supports_partial_access,
             self.ima_ml_directory_path,
             self.ima_ml_count_file,
-            self.measuredboot_ml_directory_path,
-            self.measuredboot_ml_count_file,
             self.registrar_ip,
             self.registrar_port,
             self.server_cert,
             self.server_key,
             self.server_key_password,
+            self.uefi_logs_binary_file_path,
             self.uefi_logs_evidence_version,
             self.uefi_logs_supports_partial_access,
             self.uefi_logs_appendable,
@@ -343,19 +339,18 @@ mod tests {
             pmc.get_ima_ml_count_file()
                 == DEFAULT_IMA_ML_COUNT_FILE.to_string()
         );
-        assert!(
-            pmc.get_measuredboot_ml_directory_path()
-                == DEFAULT_MEASUREDBOOT_ML_DIRECTORY_PATH
-        );
-        assert!(
-            pmc.get_measuredboot_ml_count_file()
-                == DEFAULT_MEASUREDBOOT_ML_COUNT_FILE.to_string()
-        );
         assert!(pmc.get_registrar_ip() == DEFAULT_REGISTRAR_IP);
         assert!(pmc.get_registrar_port() == DEFAULT_REGISTRAR_PORT);
         assert!(pmc.get_server_cert() == DEFAULT_SERVER_CERT);
         assert!(pmc.get_server_key() == DEFAULT_SERVER_KEY);
         assert!(pmc.get_server_key_password() == DEFAULT_SERVER_KEY_PASSWORD);
+        assert!(
+            pmc.get_uefi_logs_appendable() == DEFAULT_UEFI_LOGS_APPENDABLE
+        );
+        assert!(
+            pmc.get_uefi_logs_binary_file_path()
+                == DEFAULT_UEFI_LOGS_BINARY_FILE_PATH.to_string()
+        );
         assert!(
             pmc.get_uefi_logs_evidence_version()
                 == DEFAULT_UEFI_LOGS_EVIDENCE_VERSION
@@ -384,7 +379,7 @@ mod tests {
 
     #[test]
     fn test_display_config() {
-        let pmc = PushModelConfig::default();
+        let pmc = PushModelConfig::new();
         let display_string = pmc.to_string();
         assert!(display_string
             .contains(&pmc.get_certification_keys_server_identifier()));
@@ -404,11 +399,6 @@ mod tests {
         ));
         assert!(display_string.contains(&pmc.get_ima_ml_directory_path()));
         assert!(display_string.contains(&pmc.get_ima_ml_count_file()));
-        assert!(display_string
-            .contains(&pmc.get_measuredboot_ml_directory_path()));
-        assert!(
-            display_string.contains(&pmc.get_measuredboot_ml_count_file())
-        );
         assert!(display_string.contains(&pmc.get_registrar_ip()));
         assert!(
             display_string.contains(&pmc.get_registrar_port().to_string())
