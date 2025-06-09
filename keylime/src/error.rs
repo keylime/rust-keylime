@@ -112,6 +112,8 @@ pub enum Error {
     CertificateGeneration(
         #[from] crate::crypto::x509::CertificateBuilderError,
     ),
+    #[error("UEFI Log parser error: {0}")]
+    UEFILog(String),
     #[error("{0}")]
     Other(String),
 }
