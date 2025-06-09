@@ -10,7 +10,7 @@
 // - Event data GUIDs (for EFI variables)
 // - Event data names (for EFI variables, if UTF-16 encoded)
 // - PCR index for each event
-use crate::keylime_error::{Error as KeylimeError, Result};
+use crate::error::{Error as KeylimeError, Result};
 
 use byteorder::{LittleEndian, ReadBytesExt};
 use sha1::{Digest as Sha1Digest, Sha1};
@@ -498,5 +498,33 @@ mod tests {
                 alg_id
             );
         }
+    }
+
+    #[test]
+    fn test_empty_bytes() {
+        let empty_bytes: &[u8] = &[];
+        let result = UefiLogHandler::from_bytes(empty_bytes);
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err().to_string(),
+            "UEFI Log parser error: Empty UEFI Log file"
+        );
+    }
+
+    #[test]
+    fn test_wrong_pcr_header() {
+        let fake_log_bytes: &[u8] = &[
+            0x01, 0x00, 0x00, 0x00, // pcr_index: 1 to test wrong header
+            0x03, 0x00, 0x00, 0x00, // event_type: EV_NO_ACTION
+        ];
+        let handler = UefiLogHandler::from_bytes(fake_log_bytes);
+        assert!(handler.is_err());
+    }
+
+    #[test]
+    fn test_inexisting_uefi_log() {
+        let non_existent_path = "/path/to/nonexistent/uefi_log";
+        let result = UefiLogHandler::new(non_existent_path);
+        assert!(result.is_err());
     }
 }
