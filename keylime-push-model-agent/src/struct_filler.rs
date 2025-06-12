@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2025 Keylime Authors
 use keylime::algorithms::HashAlgorithm;
-use keylime::config::PushModelConfigTrait;
+use keylime::config::{KeylimeConfig, PushModelConfigTrait};
 use keylime::context_info::ContextInfo;
+use keylime::ima::ImaLog;
 use keylime::structures;
 use log::error;
 
@@ -71,6 +72,15 @@ impl<'a> FillerFromHardware<'a> {
                 error!("Failed to get PCR banks for SHA256");
                 vec![]
             });
+        let default = KeylimeConfig::default();
+        let ima_log_parser = ImaLog::new(default.agent.ima_ml_path.as_str());
+        let ima_log_count = match ima_log_parser {
+            Ok(ima_log) => ima_log.entry_count(),
+            Err(e) => {
+                error!("Failed to read IMA log: {}", e);
+                0
+            }
+        };
         structures::AttestationRequest {
             data: structures::RequestData {
                 type_: "attestation".to_string(),
@@ -101,17 +111,7 @@ impl<'a> FillerFromHardware<'a> {
                             evidence_type: "uefi_log".to_string(),
                             capabilities: structures::LogCapabilities {
                                 evidence_version: Some(config.get_uefi_logs_evidence_version()),
-                                entry_count: keylime::file_ops::read_file(config.get_measuredboot_ml_count_file().as_str())
-                                    .map(|content| {
-                                        content
-                                            .trim()
-                                            .parse::<u32>()
-                                            .unwrap_or(0)
-                                    })
-                                    .unwrap_or_else(|_| {
-                                        error!("Failed to read UEFI logs entry count file");
-                                        0
-                                    }),
+                                entry_count: 0, // Placeholder, as we don't have a count here
                                 supports_partial_access: config.get_uefi_logs_supports_partial_access(),
                                 appendable: config.get_uefi_logs_appendable(),
                                 formats: config.get_uefi_logs_formats(),
@@ -121,17 +121,7 @@ impl<'a> FillerFromHardware<'a> {
                             evidence_type: "ima_log".to_string(),
                             capabilities: structures::LogCapabilities {
                                 evidence_version: None,
-                                entry_count: keylime::file_ops::read_file(config.get_ima_ml_count_file().as_str())
-                                    .map(|content| {
-                                        content
-                                            .trim()
-                                            .parse::<u32>()
-                                            .unwrap_or(0)
-                                    })
-                                    .unwrap_or_else(|_| {
-                                        error!("Failed to read IMA log entry count file");
-                                        0
-                                    }),
+                                entry_count: ima_log_count,
                                 supports_partial_access: config.get_ima_logs_supports_partial_access(),
                                 appendable: config.get_ima_logs_appendable(),
                                 formats: config.get_ima_logs_formats(),
