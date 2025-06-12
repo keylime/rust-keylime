@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2025 Keylime Authors
 use keylime::algorithms::HashAlgorithm;
+use keylime::config::KeylimeConfig;
 use keylime::config::PushModelConfigTrait;
 use keylime::context_info::ContextInfo;
 use keylime::structures;
+use keylime::uefi::uefi_log_handler;
 use log::error;
 
 pub trait StructureFiller {
@@ -46,11 +48,32 @@ impl StructureFiller for FillerFromHardware<'_> {
 
 pub struct FillerFromHardware<'a> {
     pub tpm_context_info: &'a mut ContextInfo,
+    pub uefi_log_handler: Option<uefi_log_handler::UefiLogHandler>,
 }
 
 impl<'a> FillerFromHardware<'a> {
     pub fn new(tpm_context_info: &'a mut ContextInfo) -> Self {
-        FillerFromHardware { tpm_context_info }
+        // TODO: Change config obtaining here to avoid repetitions
+        let global_config = KeylimeConfig::new();
+        let ml_path = match global_config {
+            Ok(config) => config.agent.measuredboot_ml_path.clone(),
+            Err(_) => "".to_string(),
+        };
+        let uefi_log_handler =
+            uefi_log_handler::UefiLogHandler::new(&ml_path);
+        match uefi_log_handler {
+            Ok(handler) => FillerFromHardware {
+                tpm_context_info,
+                uefi_log_handler: Some(handler),
+            },
+            Err(e) => {
+                error!("Failed to create UEFI log handler: {}", e);
+                FillerFromHardware {
+                    tpm_context_info,
+                    uefi_log_handler: None,
+                }
+            }
+        }
     }
     // TODO: Change this function to use the attestation request appropriately
     // Add self to the function signature to use the tpm_context
@@ -71,6 +94,10 @@ impl<'a> FillerFromHardware<'a> {
                 error!("Failed to get PCR banks for SHA256");
                 vec![]
             });
+        let uefi_count = self
+            .uefi_log_handler
+            .as_ref()
+            .map_or(0, |handler| handler.get_entry_count());
         structures::AttestationRequest {
             data: structures::RequestData {
                 type_: "attestation".to_string(),
@@ -101,17 +128,7 @@ impl<'a> FillerFromHardware<'a> {
                             evidence_type: "uefi_log".to_string(),
                             capabilities: structures::LogCapabilities {
                                 evidence_version: Some(config.get_uefi_logs_evidence_version()),
-                                entry_count: keylime::file_ops::read_file(config.get_measuredboot_ml_count_file().as_str())
-                                    .map(|content| {
-                                        content
-                                            .trim()
-                                            .parse::<u32>()
-                                            .unwrap_or(0)
-                                    })
-                                    .unwrap_or_else(|_| {
-                                        error!("Failed to read UEFI logs entry count file");
-                                        0
-                                    }),
+                                entry_count: uefi_count,
                                 supports_partial_access: config.get_uefi_logs_supports_partial_access(),
                                 appendable: config.get_uefi_logs_appendable(),
                                 formats: config.get_uefi_logs_formats(),
@@ -121,17 +138,7 @@ impl<'a> FillerFromHardware<'a> {
                             evidence_type: "ima_log".to_string(),
                             capabilities: structures::LogCapabilities {
                                 evidence_version: None,
-                                entry_count: keylime::file_ops::read_file(config.get_ima_ml_count_file().as_str())
-                                    .map(|content| {
-                                        content
-                                            .trim()
-                                            .parse::<u32>()
-                                            .unwrap_or(0)
-                                    })
-                                    .unwrap_or_else(|_| {
-                                        error!("Failed to read IMA log entry count file");
-                                        0
-                                    }),
+                                entry_count: 0, // Placeholder, will be filled later
                                 supports_partial_access: config.get_ima_logs_supports_partial_access(),
                                 appendable: config.get_ima_logs_appendable(),
                                 formats: config.get_ima_logs_formats(),

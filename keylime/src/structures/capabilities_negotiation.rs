@@ -41,7 +41,7 @@ pub enum EvidenceSupported {
 pub struct LogCapabilities {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub evidence_version: Option<String>,
-    pub entry_count: u32,
+    pub entry_count: usize,
     pub supports_partial_access: bool,
     pub appendable: bool,
     pub formats: Vec<String>,

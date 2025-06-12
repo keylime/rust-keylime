@@ -134,6 +134,7 @@ mod tests {
     fn test_cert_no_server_cert() {
         // Ensure the test cert file does not exist before the test
         const TEST_KEY_PATH: &str = "test_key.pem";
+        let _ = std::fs::remove_file(TEST_KEY_PATH);
         let config = CertificateConfig {
             agent_uuid: "test-uuid".to_string(),
             contact_ip: "1.2.3.4".to_string(),

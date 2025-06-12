@@ -23,6 +23,7 @@ pub mod secure_mount;
 pub mod serialization;
 pub mod structures;
 pub mod tpm;
+pub mod uefi;
 pub mod version;
 
 #[macro_use]
