@@ -343,6 +343,13 @@ mod tests {
     };
     use tokio::sync::mpsc;
 
+    #[cfg(feature = "testing")]
+    use std::sync::OnceLock;
+    #[cfg(feature = "testing")]
+    use tokio::sync::{Mutex as AsyncMutex, MutexGuard as AsyncMutexGuard};
+    #[cfg(feature = "testing")]
+    pub static MUTEX: OnceLock<Arc<AsyncMutex<()>>> = OnceLock::new();
+
     // Enough length for testing both AES-128 and AES-256
     const U: &[u8; AES_256_KEY_LEN] = b"01234567890123456789012345678901";
     const V: &[u8; AES_256_KEY_LEN] = b"ABCDEFGHIJABCDEFGHIJABCDEFGHIJAB";
@@ -466,6 +473,10 @@ echo hello > test-output
     #[cfg(feature = "testing")]
     #[actix_rt::test]
     async fn test_run_encrypted_payload() {
+        let _mutex = MUTEX
+            .get_or_init(|| Arc::new(AsyncMutex::new(())))
+            .lock()
+            .await;
         let test_config = KeylimeConfig::default();
         let temp_workdir = tempfile::tempdir().unwrap(); //#[allow_ci]
         let secure_mount =
@@ -510,6 +521,10 @@ echo hello > test-output
     #[cfg(feature = "testing")]
     #[actix_rt::test]
     async fn test_payload_worker() {
+        let _mutex = MUTEX
+            .get_or_init(|| Arc::new(AsyncMutex::new(())))
+            .lock()
+            .await;
         use crate::{config::DEFAULT_PAYLOAD_SCRIPT, secure_mount};
 
         let test_config = KeylimeConfig::default();
