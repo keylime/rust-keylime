@@ -695,17 +695,60 @@ fn get_uuid(agent_uuid_config: &str) -> String {
     }
 }
 
+/// Create a configuration based on a temporary directory
+///
+/// # Arguments
+///
+/// `tempdir`: Path to be used as the keylime directory in the generated configuration
+///
+/// # Returns
+///
+/// A `KeylimeConfig` structure using the given path as the `keylime_dir` option
+#[cfg(feature = "testing")]
+pub fn get_testing_config(tempdir: &Path) -> KeylimeConfig {
+    let config = KeylimeConfig {
+        agent: AgentConfig {
+            keylime_dir: tempdir.display().to_string(),
+            ..AgentConfig::default()
+        },
+    };
+
+    // It is expected that the translation of keywords will not fail
+    config_translate_keywords(&config).expect("failed to translate keywords")
+}
+
 // Unit Testing
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    #[cfg(feature = "testing")]
+    #[test]
+    fn test_get_testing_config() {
+        let dir = tempfile::tempdir()
+            .expect("failed to create temporary directory");
+
+        // Get the config and check that the value is correct
+        let config = get_testing_config(dir.path());
+        assert_eq!(
+            config.agent.keylime_dir,
+            dir.path().display().to_string()
+        );
+    }
+
+    #[cfg(feature = "testing")]
     #[test]
     fn test_default() {
-        let default = KeylimeConfig::default();
+        let tempdir =
+            tempfile::tempdir().expect("failed to create temporary dir");
+        let default = get_testing_config(tempdir.path());
 
+        // Modify the keylime directory to refer to the created temporary directory
         let c = KeylimeConfig {
-            agent: AgentConfig::default(),
+            agent: AgentConfig {
+                keylime_dir: tempdir.path().display().to_string(),
+                ..AgentConfig::default()
+            },
         };
 
         let result = config_translate_keywords(&c);
@@ -738,9 +781,12 @@ mod tests {
         assert_eq!(resulting_registrar_ip, "registrar.ip");
     }
 
+    #[cfg(feature = "testing")]
     #[test]
     fn get_revocation_cert_path_default() {
-        let test_config = KeylimeConfig::default();
+        let tempdir =
+            tempfile::tempdir().expect("failed to create temporary dir");
+        let test_config = get_testing_config(tempdir.path());
         let revocation_cert_path = test_config.agent.revocation_cert.clone();
         let expected = Path::new(&test_config.agent.keylime_dir)
             .join("secure/unzipped")
@@ -958,9 +1004,12 @@ mod tests {
         assert_eq!(version, expected);
     }
 
+    #[cfg(feature = "testing")]
     #[test]
     fn test_translate_api_versions_default_keyword() {
-        let default = KeylimeConfig::default();
+        let tempdir =
+            tempfile::tempdir().expect("failed to create temporary dir");
+        let default = get_testing_config(tempdir.path());
         let result = config_translate_keywords(&default);
         assert!(result.is_ok());
         let config = result.unwrap(); //#[allow_ci]
@@ -1078,9 +1127,12 @@ mod tests {
             .unwrap(); //#[allow_ci]
     }
 
+    #[cfg(feature = "testing")]
     #[test]
     fn test_keylime_config_as_source() {
-        let default = KeylimeConfig::default();
+        let tempdir =
+            tempfile::tempdir().expect("failed to create temporary dir");
+        let default = get_testing_config(tempdir.path());
 
         // Test that the KeylimeConfig can be used as a source for KeylimeConfig
         let _config: KeylimeConfig = Config::builder()
