@@ -54,6 +54,7 @@ pub struct AlgorithmConfigurationString {
     pub tpm_signing_alg: String,
 }
 
+#[derive(Clone, Debug)]
 pub struct ContextInfo {
     pub tpm_context: tpm::Context<'static>,
     pub tpm_encryption_alg: algorithms::EncryptionAlgorithm,
