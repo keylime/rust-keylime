@@ -576,7 +576,7 @@ pub struct IAKPublic {
 }
 
 /// Wrapper around tss_esapi::Context.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Context<'a> {
     inner: &'a Arc<Mutex<tss_esapi::Context>>,
 }
