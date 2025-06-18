@@ -521,9 +521,15 @@ mod tests {
     // Used to create symbolic links
     use std::os::unix::fs::symlink;
 
+    #[cfg(feature = "testing")]
+    use keylime::config::get_testing_config;
+
+    #[cfg(feature = "testing")]
     #[test]
     fn revocation_scripts_ok() {
-        let test_config = KeylimeConfig::default();
+        let work_dir = tempfile::tempdir()
+            .expect("failed to create temporary directory");
+        let test_config = get_testing_config(work_dir.path());
         let json_file = concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/tests/unzipped/test_ok.json"
@@ -532,7 +538,6 @@ mod tests {
         let json = serde_json::from_str(&json_str).unwrap(); //#[allow_ci]
         let actions_dir =
             &Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/actions/");
-        let work_dir = tempfile::tempdir().unwrap(); //#[allow_ci]
         let tmpfs_dir = work_dir.path().join("tmpfs-dev"); //#[allow_ci]
         fs::create_dir(&tmpfs_dir).unwrap(); //#[allow_ci]
         let unzipped_dir =
@@ -560,9 +565,12 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "testing")]
     #[test]
     fn revocation_scripts_err() {
-        let test_config = KeylimeConfig::default();
+        let work_dir = tempfile::tempdir()
+            .expect("failed to create temporary directory");
+        let test_config = get_testing_config(work_dir.path());
         let json_file = concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/tests/unzipped/test_err.json"
@@ -571,7 +579,6 @@ mod tests {
         let json = serde_json::from_str(&json_str).unwrap(); //#[allow_ci]
         let actions_dir =
             &Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/actions/");
-        let work_dir = tempfile::tempdir().unwrap(); //#[allow_ci]
         let tmpfs_dir = work_dir.path().join("tmpfs-dev"); //#[allow_ci]
         fs::create_dir(&tmpfs_dir).unwrap(); //#[allow_ci]
         let unzipped_dir =
@@ -588,9 +595,12 @@ mod tests {
         assert!(outputs.is_err());
     }
 
+    #[cfg(feature = "testing")]
     #[test]
     fn revocation_scripts_from_config() {
-        let mut test_config = KeylimeConfig::default();
+        let work_dir = tempfile::tempdir()
+            .expect("failed to create temporary directory");
+        let test_config = get_testing_config(work_dir.path());
         let json_file = concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/tests/unzipped/test_ok.json"
@@ -606,7 +616,6 @@ mod tests {
         let json = serde_json::from_str(&json_str).unwrap(); //#[allow_ci]
         let actions_dir =
             &Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/actions/");
-        let work_dir = tempfile::tempdir().unwrap(); //#[allow_ci]
         let tmpfs_dir = work_dir.path().join("tmpfs-dev"); //#[allow_ci]
         fs::create_dir(&tmpfs_dir).unwrap(); //#[allow_ci]
         let unzipped_dir =
@@ -754,9 +763,12 @@ mod tests {
         ));
     }
 
+    #[cfg(feature = "testing")]
     #[test]
     fn test_process_revocation() {
-        let test_config = KeylimeConfig::default();
+        let work_dir = tempfile::tempdir()
+            .expect("failed to create temporary directory");
+        let test_config = get_testing_config(work_dir.path());
 
         let sig_path = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("test-data/revocation.sig");
@@ -776,8 +788,7 @@ mod tests {
         let actions_dir =
             Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/actions");
 
-        let work_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests");
-        let tmpfs_dir = work_dir.join("tmpfs-dev");
+        let tmpfs_dir = work_dir.path().join("tmpfs-dev");
 
         let result = process_revocation(
             revocation,
@@ -785,7 +796,7 @@ mod tests {
             &actions_dir,
             None,
             test_config.agent.allow_payload_revocation_actions,
-            &work_dir,
+            work_dir.path(),
             &tmpfs_dir,
         );
 

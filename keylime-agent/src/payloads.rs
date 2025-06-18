@@ -327,16 +327,12 @@ pub(crate) async fn worker(
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[cfg(feature = "testing")]
-    use crate::crypto::testing::{
-        encrypt_aead, pkey_pub_from_pem, rsa_oaep_encrypt,
-    };
     use crate::{
-        config::KeylimeConfig,
         crypto::{AES_128_KEY_LEN, AES_256_KEY_LEN},
         payloads,
     };
     use actix_rt::Arbiter;
+    use keylime::config::KeylimeConfig;
     use std::{
         env, fs,
         path::{Path, PathBuf},
@@ -344,9 +340,16 @@ mod tests {
     use tokio::sync::mpsc;
 
     #[cfg(feature = "testing")]
+    use crate::crypto::testing::{
+        encrypt_aead, pkey_pub_from_pem, rsa_oaep_encrypt,
+    };
+    #[cfg(feature = "testing")]
+    use keylime::config::get_testing_config;
+    #[cfg(feature = "testing")]
     use std::sync::OnceLock;
     #[cfg(feature = "testing")]
-    use tokio::sync::{Mutex as AsyncMutex, MutexGuard as AsyncMutexGuard};
+    use tokio::sync::Mutex as AsyncMutex;
+
     #[cfg(feature = "testing")]
     pub static MUTEX: OnceLock<Arc<AsyncMutex<()>>> = OnceLock::new();
 
@@ -408,10 +411,11 @@ echo hello > test-output
         assert!(result.is_ok());
     }
 
+    #[cfg(feature = "testing")]
     #[test]
     fn test_setup_unzipped() {
-        let test_config = KeylimeConfig::default();
         let temp_workdir = tempfile::tempdir().unwrap(); //#[allow_ci]
+        let test_config = get_testing_config(temp_workdir.path());
         let secure_mount =
             PathBuf::from(&temp_workdir.path().join("tmpfs-dev"));
         fs::create_dir(&secure_mount).unwrap(); //#[allow_ci]
@@ -441,10 +445,11 @@ echo hello > test-output
         assert!(result.is_ok());
     }
 
+    #[cfg(feature = "testing")]
     #[test]
     fn test_unzip_payload() {
-        let mut test_config = KeylimeConfig::default();
         let temp_workdir = tempfile::tempdir().unwrap(); //#[allow_ci]
+        let test_config = get_testing_config(temp_workdir.path());
         let payload_path = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("test-data")
             .join("payload.zip");
@@ -477,8 +482,8 @@ echo hello > test-output
             .get_or_init(|| Arc::new(AsyncMutex::new(())))
             .lock()
             .await;
-        let test_config = KeylimeConfig::default();
         let temp_workdir = tempfile::tempdir().unwrap(); //#[allow_ci]
+        let test_config = get_testing_config(temp_workdir.path());
         let secure_mount =
             PathBuf::from(&temp_workdir.path().join("tmpfs-dev"));
         fs::create_dir(&secure_mount).unwrap(); //#[allow_ci]
@@ -527,8 +532,8 @@ echo hello > test-output
             .await;
         use crate::{config::DEFAULT_PAYLOAD_SCRIPT, secure_mount};
 
-        let test_config = KeylimeConfig::default();
         let temp_workdir = tempfile::tempdir().unwrap(); //#[allow_ci]
+        let test_config = get_testing_config(temp_workdir.path());
         let secure_mount =
             PathBuf::from(&temp_workdir.path().join("tmpfs-dev"));
         fs::create_dir(&secure_mount).unwrap(); //#[allow_ci]
