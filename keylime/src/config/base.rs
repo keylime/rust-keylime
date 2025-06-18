@@ -759,9 +759,12 @@ mod tests {
 
     #[test]
     fn test_hostname_support() {
+        let tempdir =
+            tempfile::tempdir().expect("failed to create temporary dir");
         let default = AgentConfig::default();
 
         let modified = AgentConfig {
+            keylime_dir: tempdir.path().display().to_string(),
             ip: "localhost".to_string(),
             contact_ip: "contact.ip".to_string(),
             registrar_ip: "registrar.ip".to_string(),
@@ -798,8 +801,12 @@ mod tests {
 
     #[test]
     fn get_revocation_cert_path_absolute() {
+        let tempdir = tempfile::tempdir()
+            .expect("failed to create temporary directory");
+
         let test_config = KeylimeConfig {
             agent: AgentConfig {
+                keylime_dir: tempdir.path().display().to_string(),
                 revocation_cert: "/test/cert.crt".to_string(),
                 ..Default::default()
             },
@@ -814,8 +821,12 @@ mod tests {
 
     #[test]
     fn get_revocation_cert_path_relative() {
+        let tempdir = tempfile::tempdir()
+            .expect("failed to create temporary directory");
+
         let test_config = KeylimeConfig {
             agent: AgentConfig {
+                keylime_dir: tempdir.path().display().to_string(),
                 revocation_cert: "cert.crt".to_string(),
                 ..Default::default()
             },
@@ -833,8 +844,12 @@ mod tests {
 
     #[test]
     fn get_revocation_notification_ip_empty() {
+        let tempdir = tempfile::tempdir()
+            .expect("failed to create temporary directory");
+
         let test_config = KeylimeConfig {
             agent: AgentConfig {
+                keylime_dir: tempdir.path().display().to_string(),
                 enable_revocation_notifications: true,
                 revocation_notification_ip: "".to_string(),
                 ..Default::default()
@@ -845,6 +860,7 @@ mod tests {
         assert!(result.is_err());
         let test_config = KeylimeConfig {
             agent: AgentConfig {
+                keylime_dir: tempdir.path().display().to_string(),
                 enable_revocation_notifications: false,
                 revocation_notification_ip: "".to_string(),
                 ..Default::default()
@@ -863,8 +879,12 @@ mod tests {
 
     #[test]
     fn get_revocation_cert_empty() {
+        let tempdir = tempfile::tempdir()
+            .expect("failed to create temporary directory");
+
         let test_config = KeylimeConfig {
             agent: AgentConfig {
+                keylime_dir: tempdir.path().display().to_string(),
                 enable_revocation_notifications: true,
                 revocation_cert: "".to_string(),
                 ..Default::default()
@@ -875,6 +895,7 @@ mod tests {
         assert!(result.is_err());
         let test_config = KeylimeConfig {
             agent: AgentConfig {
+                keylime_dir: tempdir.path().display().to_string(),
                 enable_revocation_notifications: false,
                 revocation_cert: "".to_string(),
                 ..Default::default()
@@ -888,8 +909,12 @@ mod tests {
 
     #[test]
     fn get_revocation_actions_dir_empty() {
+        let tempdir = tempfile::tempdir()
+            .expect("failed to create temporary directory");
+
         let test_config = KeylimeConfig {
             agent: AgentConfig {
+                keylime_dir: tempdir.path().display().to_string(),
                 enable_revocation_notifications: true,
                 revocation_actions_dir: "".to_string(),
                 ..Default::default()
@@ -900,6 +925,7 @@ mod tests {
         assert!(result.is_err());
         let test_config = KeylimeConfig {
             agent: AgentConfig {
+                keylime_dir: tempdir.path().display().to_string(),
                 enable_revocation_notifications: false,
                 revocation_actions_dir: "".to_string(),
                 ..Default::default()
@@ -913,8 +939,12 @@ mod tests {
 
     #[test]
     fn test_invalid_revocation_actions_dir() {
+        let tempdir = tempfile::tempdir()
+            .expect("failed to create temporary directory");
+
         let test_config = KeylimeConfig {
             agent: AgentConfig {
+                keylime_dir: tempdir.path().display().to_string(),
                 enable_revocation_notifications: true,
                 revocation_actions_dir: "/invalid".to_string(),
                 ..Default::default()
@@ -925,6 +955,7 @@ mod tests {
         assert!(result.is_err());
         let test_config = KeylimeConfig {
             agent: AgentConfig {
+                keylime_dir: tempdir.path().display().to_string(),
                 enable_revocation_notifications: false,
                 revocation_actions_dir: "/invalid".to_string(),
                 ..Default::default()
@@ -953,9 +984,13 @@ mod tests {
 
     #[test]
     fn test_invalid_api_versions() {
+        let tempdir = tempfile::tempdir()
+            .expect("failed to create temporary directory");
+
         // Check that invalid API versions are ignored
         let test_config = KeylimeConfig {
             agent: AgentConfig {
+                keylime_dir: tempdir.path().display().to_string(),
                 api_versions: "invalid.api".to_string(),
                 ..Default::default()
             },
@@ -966,6 +1001,7 @@ mod tests {
         // Check that unsupported API versions are ignored
         let test_config = KeylimeConfig {
             agent: AgentConfig {
+                keylime_dir: tempdir.path().display().to_string(),
                 api_versions: "['0.0']".to_string(),
                 ..Default::default()
             },
@@ -976,6 +1012,7 @@ mod tests {
         // Check that 'latest' keyword is supported
         let test_config = KeylimeConfig {
             agent: AgentConfig {
+                keylime_dir: tempdir.path().display().to_string(),
                 api_versions: "\"latest\"".to_string(),
                 ..Default::default()
             },
@@ -986,8 +1023,12 @@ mod tests {
 
     #[test]
     fn test_translate_api_versions_latest_keyword() {
+        let tempdir = tempfile::tempdir()
+            .expect("failed to create temporary directory");
+
         let test_config = KeylimeConfig {
             agent: AgentConfig {
+                keylime_dir: tempdir.path().display().to_string(),
                 api_versions: "latest".to_string(),
                 ..Default::default()
             },
@@ -1004,13 +1045,17 @@ mod tests {
         assert_eq!(version, expected);
     }
 
-    #[cfg(feature = "testing")]
     #[test]
     fn test_translate_api_versions_default_keyword() {
         let tempdir =
             tempfile::tempdir().expect("failed to create temporary dir");
-        let default = get_testing_config(tempdir.path());
-        let result = config_translate_keywords(&default);
+        let test_config = KeylimeConfig {
+            agent: AgentConfig {
+                keylime_dir: tempdir.path().display().to_string(),
+                ..Default::default()
+            },
+        };
+        let result = config_translate_keywords(&test_config);
         assert!(result.is_ok());
         let config = result.unwrap(); //#[allow_ci]
         let version = config.agent.api_versions;
@@ -1024,10 +1069,13 @@ mod tests {
 
     #[test]
     fn test_translate_api_versions_old_supported() {
+        let tempdir =
+            tempfile::tempdir().expect("failed to create temporary dir");
         let old = SUPPORTED_API_VERSIONS[0];
 
         let test_config = KeylimeConfig {
             agent: AgentConfig {
+                keylime_dir: tempdir.path().display().to_string(),
                 api_versions: old.to_string(),
                 ..Default::default()
             },
@@ -1041,10 +1089,13 @@ mod tests {
 
     #[test]
     fn test_translate_invalid_api_versions_filtered() {
+        let tempdir =
+            tempfile::tempdir().expect("failed to create temporary dir");
         let old = SUPPORTED_API_VERSIONS[0];
 
         let test_config = KeylimeConfig {
             agent: AgentConfig {
+                keylime_dir: tempdir.path().display().to_string(),
                 api_versions: format!("a.b, {old}, c.d"),
                 ..Default::default()
             },
@@ -1058,10 +1109,13 @@ mod tests {
 
     #[test]
     fn test_translate_invalid_api_versions_fallback_default() {
+        let tempdir =
+            tempfile::tempdir().expect("failed to create temporary dir");
         let old = SUPPORTED_API_VERSIONS;
 
         let test_config = KeylimeConfig {
             agent: AgentConfig {
+                keylime_dir: tempdir.path().display().to_string(),
                 api_versions: "a.b, c.d".to_string(),
                 ..Default::default()
             },
@@ -1075,6 +1129,8 @@ mod tests {
 
     #[test]
     fn test_translate_api_versions_sort() {
+        let tempdir =
+            tempfile::tempdir().expect("failed to create temporary dir");
         let old = SUPPORTED_API_VERSIONS;
         let reversed = SUPPORTED_API_VERSIONS
             .iter()
@@ -1085,6 +1141,7 @@ mod tests {
 
         let test_config = KeylimeConfig {
             agent: AgentConfig {
+                keylime_dir: tempdir.path().display().to_string(),
                 api_versions: reversed,
                 ..Default::default()
             },

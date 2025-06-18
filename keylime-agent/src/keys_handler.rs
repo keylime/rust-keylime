@@ -607,7 +607,6 @@ mod tests {
         encrypt_aead, pkey_pub_from_pem, rsa_oaep_encrypt,
     };
     use crate::{
-        config::KeylimeConfig,
         crypto::{compute_hmac, AES_128_KEY_LEN, AES_256_KEY_LEN},
         payloads,
     };
@@ -627,6 +626,9 @@ mod tests {
         path::{Path, PathBuf},
     };
     use tokio::sync::mpsc;
+
+    #[cfg(feature = "testing")]
+    use crate::config::get_testing_config;
 
     // Enough length for testing both AES-128 and AES-256
     const U: &[u8; AES_256_KEY_LEN] = b"01234567890123456789012345678901";
@@ -877,11 +879,12 @@ mod tests {
 
     #[cfg(feature = "testing")]
     async fn test_u_or_v_key(key_len: usize, payload: Option<&[u8]>) {
-        let test_config = KeylimeConfig::default();
-        let (mut fixture, mutex) = QuoteData::fixture().await.unwrap(); //#[allow_ci]
-
         // Create temporary working directory and secure mount
         let temp_workdir = tempfile::tempdir().unwrap(); //#[allow_ci]
+        let test_config = get_testing_config(temp_workdir.path());
+
+        let (mut fixture, mutex) = QuoteData::fixture().await.unwrap(); //#[allow_ci]
+
         fixture.secure_mount =
             PathBuf::from(&temp_workdir.path().join("tmpfs-dev"));
         fs::create_dir(&fixture.secure_mount).unwrap(); //#[allow_ci]

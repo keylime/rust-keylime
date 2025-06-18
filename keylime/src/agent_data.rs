@@ -71,15 +71,15 @@ impl AgentData {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::{
-        algorithms::EncryptionAlgorithm, config::KeylimeConfig, hash_ek,
-    };
+    use crate::{algorithms::EncryptionAlgorithm, config, hash_ek};
 
     #[tokio::test]
-    #[cfg(feature = "testing")]
     async fn test_agent_data() -> Result<()> {
         let _mutex = tpm::testing::lock_tests().await;
-        let config = KeylimeConfig::default();
+
+        let tempdir =
+            tempfile::tempdir().expect("failed to create temporary dir");
+        let config = config::get_testing_config(tempdir.path());
 
         let mut ctx = tpm::Context::new().unwrap(); //#[allow_ci]
 
@@ -136,7 +136,9 @@ mod test {
     #[tokio::test]
     async fn test_hash() -> Result<()> {
         let _mutex = tpm::testing::lock_tests().await;
-        let config = KeylimeConfig::default();
+        let tempdir =
+            tempfile::tempdir().expect("failed to create temporary dir");
+        let config = config::get_testing_config(tempdir.path());
 
         let mut ctx = tpm::Context::new().unwrap(); //#[allow_ci]
 

@@ -898,13 +898,14 @@ fn read_in_file(path: String) -> std::io::Result<String> {
 #[cfg(test)]
 mod testing {
     use super::*;
-    use crate::{config::KeylimeConfig, crypto::CryptoError};
-    use thiserror::Error;
-
+    use keylime::{
+        config::{get_testing_config, KeylimeConfig},
+        crypto::CryptoError,
+        tpm::testing::lock_tests,
+    };
     use std::sync::{Arc, Mutex, OnceLock};
+    use thiserror::Error;
     use tokio::sync::{Mutex as AsyncMutex, MutexGuard as AsyncMutexGuard};
-
-    use keylime::tpm::testing::lock_tests;
 
     #[derive(Error, Debug)]
     pub(crate) enum MainTestError {
@@ -953,7 +954,10 @@ mod testing {
             MainTestError,
         > {
             let mutex = lock_tests().await;
-            let test_config = KeylimeConfig::default();
+            let work_dir =
+                Path::new(env!("CARGO_MANIFEST_DIR")).join("tests");
+
+            let test_config = get_testing_config(&work_dir);
             let mut ctx = tpm::Context::new()?;
 
             let tpm_encryption_alg =
@@ -1009,9 +1013,6 @@ mod testing {
             let actions_dir = Some(
                 Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/actions/"),
             );
-
-            let work_dir =
-                Path::new(env!("CARGO_MANIFEST_DIR")).join("tests");
 
             let secure_mount = work_dir.join("tmpfs-dev");
 

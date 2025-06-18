@@ -43,15 +43,20 @@ impl Source for EnvConfig {
     }
 }
 
+#[cfg(feature = "testing")]
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::config::KeylimeConfig;
+    use crate::config::{get_testing_config, KeylimeConfig};
     use config::Config;
 
     #[test]
     fn test_env_config_as_source() {
-        let default = KeylimeConfig::default();
+        // Get the configuration using a temporary directory as `keylime_dir`
+        let tempdir =
+            tempfile::tempdir().expect("failed to create temporary dir");
+        let default = get_testing_config(tempdir.path());
+
         let env_config = EnvConfig::new().unwrap(); //#[allow_ci]
 
         // Test that the EnvConfig can be used as a source for KeylimeConfig
@@ -152,10 +157,13 @@ mod test {
             ("KEYLIME_AGENT_VERSION", "override_version"),
         ]);
 
+        // Get the configuration using a temporary directory as `keylime_dir`
+        let tempdir =
+            tempfile::tempdir().expect("failed to create temporary dir");
+        let default = get_testing_config(tempdir.path());
+
         // For possible variable
         for (c, v) in override_map.into_iter() {
-            let default = KeylimeConfig::default();
-
             // Create a source emulating the environment with a variable set
             let env_source = Environment::with_prefix("KEYLIME_AGENT")
                 .separator(".")
@@ -171,7 +179,7 @@ mod test {
 
             // Create the resulting configuration with a variable overriden
             let overriden: KeylimeConfig = Config::builder()
-                .add_source(default)
+                .add_source(default.clone())
                 .add_source(env_config)
                 .build()
                 .unwrap() //#[allow_ci]
@@ -183,7 +191,7 @@ mod test {
             let obtained = internal.to_owned().into_table().unwrap(); //#[allow_ci]
 
             // Create the expected result by manually replacing the value
-            let d = KeylimeConfig::default().collect().unwrap(); //#[allow_ci]
+            let d = default.collect().unwrap(); //#[allow_ci]
             let i = d.get("agent").unwrap(); //#[allow_ci]
             let mut expected = i.to_owned().into_table().unwrap(); //#[allow_ci]
             _ = expected.insert(
