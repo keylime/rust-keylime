@@ -17,7 +17,8 @@ systemdsystemunitdir := $(shell pkg-config systemd --variable=systemdsystemunitd
 
 programs = \
 	${TARGETDIR}/${PROFILE}/keylime_agent \
-	${TARGETDIR}/${PROFILE}/keylime_ima_emulator
+	${TARGETDIR}/${PROFILE}/keylime_ima_emulator \
+	${TARGETDIR}/${PROFILE}/keylime_push_model_agent
 
 .PHONY: all
 all: $(programs)
