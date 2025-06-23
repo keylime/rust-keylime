@@ -1,0 +1,7 @@
+error: This macro only supports structs with named fields.
+ --> tests/define_view_trait/error_tuple_struct.rs:5:1
+  |
+5 | #[define_view_trait(for_struct = "Target")]
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: this error originates in the attribute macro `define_view_trait` (in Nightly builds, run with -Z macro-backtrace for more info)

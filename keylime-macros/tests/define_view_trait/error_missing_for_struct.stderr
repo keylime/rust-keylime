@@ -1,0 +1,7 @@
+error: Usage: #[define_view_trait(for_struct = "MainStruct")]
+ --> tests/define_view_trait/error_missing_for_struct.rs:3:1
+  |
+3 | #[define_view_trait]        // ← missing `for_struct = "..."`
+  | ^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: this error originates in the attribute macro `define_view_trait` (in Nightly builds, run with -Z macro-backtrace for more info)
