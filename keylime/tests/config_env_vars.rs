@@ -17,18 +17,24 @@ static TEST_MUTEX: OnceLock<Arc<Mutex<()>>> = OnceLock::new();
 #[test]
 fn test_env_var_override() {
     let _mutex = TEST_MUTEX.get_or_init(|| Arc::new(Mutex::new(()))).lock();
-    let dir = tempdir().unwrap();
+    let dir = tempdir().expect("failed to create temp dir");
     let override_file_path = dir.path().join("override.toml");
-    let mut override_file = File::create(&override_file_path).unwrap();
-    writeln!(override_file, "[agent]\nip = \"0.0.0.0\"").unwrap();
+    let mut override_file = File::create(&override_file_path)
+        .expect("failed to create config file");
+    writeln!(override_file, "[agent]\nip = \"0.0.0.0\"")
+        .expect("failed to write on config file");
 
     // Set the environment variable for this test
     env::set_var(
         GLOBAL_CONFIG_OVERRIDE_ENV_VAR,
-        override_file_path.to_str().unwrap(),
+        override_file_path
+            .to_str()
+            .expect("failed to convert to string"),
     );
 
-    let config = FileConfigBuilder::new().build().unwrap();
+    let config = FileConfigBuilder::new()
+        .build()
+        .expect("failed to build config");
 
     assert_eq!(config.ip, "0.0.0.0");
 
