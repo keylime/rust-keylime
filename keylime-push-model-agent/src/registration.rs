@@ -86,6 +86,7 @@ mod tests {
             tpm_encryption_alg: "rsa".to_string(),
             tpm_hash_alg: "sha256".to_string(),
             tpm_signing_alg: "rsassa".to_string(),
+            agent_data_path: "".to_string(),
         };
         let mut context_info = ContextInfo::new_from_str(alg_config)
             .expect("Failed to create context info from string");
