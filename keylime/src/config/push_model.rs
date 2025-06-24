@@ -34,6 +34,7 @@ pub static DEFAULT_UEFI_LOGS_BINARY_FILE_PATH: Lazy<String> =
     });
 
 pub trait PushModelConfigTrait {
+    fn get_agent_data_path(&self) -> String;
     fn get_certification_keys_server_identifier(&self) -> String;
     fn get_contact_ip(&self) -> String;
     fn get_contact_port(&self) -> u32;
@@ -66,6 +67,7 @@ pub trait PushModelConfigTrait {
 impl Default for PushModelConfig {
     fn default() -> Self {
         PushModelConfig {
+            agent_data_path: DEFAULT_AGENT_DATA_PATH.to_string(),
             certification_keys_server_identifier:
                 DEFAULT_CERTIFICATION_KEYS_SERVER_IDENTIFIER.to_string(),
             contact_ip: DEFAULT_CONTACT_IP.to_string(),
@@ -116,6 +118,7 @@ impl Default for PushModelConfig {
 }
 
 pub struct PushModelConfig {
+    agent_data_path: String,
     api_versions: Vec<String>,
     certification_keys_server_identifier: String,
     contact_ip: String,
@@ -151,6 +154,10 @@ impl PushModelConfig {
 }
 
 impl PushModelConfigTrait for PushModelConfig {
+    fn get_agent_data_path(&self) -> String {
+        self.agent_data_path.clone()
+    }
+
     fn get_certification_keys_server_identifier(&self) -> String {
         self.certification_keys_server_identifier.clone()
     }
@@ -257,7 +264,8 @@ impl PushModelConfigTrait for PushModelConfig {
 
     fn display(&self) -> String {
         format!(
-            "PushModelConfig {{ certification_keys_server_identifier: {},
+            "PushModelConfig {{ agent_data_path: {},
+            certification_keys_server_identifier: {},
             contact_ip: {}, contact_port: {},
             enable_iak_idevid: {}, ek_handle: {},
             ima_logs_appendable: {}, ima_logs_formats: {:?}, ima_logs_supports_partial_access: {},
@@ -269,6 +277,7 @@ impl PushModelConfigTrait for PushModelConfig {
             uefi_logs_appendable: {}, uefi_logs_formats: {:?},
             tpm_encryption_alg: {}, tpm_hash_alg: {}, tpm_signing_alg: {},
             api_versions: {:?}, registrar_api_versions: {:?}, uuid: {} }}",
+            self.agent_data_path,
             self.certification_keys_server_identifier,
             self.contact_ip,
             self.contact_port,
@@ -316,6 +325,7 @@ mod tests {
             pmc.get_certification_keys_server_identifier()
                 == DEFAULT_CERTIFICATION_KEYS_SERVER_IDENTIFIER
         );
+        assert!(pmc.get_agent_data_path() == DEFAULT_AGENT_DATA_PATH);
         assert!(pmc.get_contact_ip() == DEFAULT_CONTACT_IP);
         assert!(pmc.get_contact_port() == DEFAULT_CONTACT_PORT);
         assert!(pmc.get_ek_handle() == DEFAULT_PUSH_EK_HANDLE);
@@ -381,6 +391,7 @@ mod tests {
     fn test_display_config() {
         let pmc = PushModelConfig::new();
         let display_string = pmc.to_string();
+        assert!(display_string.contains(&pmc.get_agent_data_path()));
         assert!(display_string
             .contains(&pmc.get_certification_keys_server_identifier()));
         assert!(display_string.contains(&pmc.get_contact_ip()));

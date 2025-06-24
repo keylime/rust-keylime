@@ -221,6 +221,7 @@ fn init_context(args: &Args) -> Result<()> {
                     tpm_encryption_alg: config.get_tpm_encryption_alg(),
                     tpm_hash_alg: config.get_tpm_hash_alg(),
                     tpm_signing_alg: config.get_tpm_signing_alg(),
+                    agent_data_path: config.get_agent_data_path(),
                 },
             )?;
             Ok(Some(context_info))

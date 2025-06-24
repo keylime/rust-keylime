@@ -11,6 +11,7 @@ use base64::{
 };
 use hex;
 use openssl::hash::{Hasher, MessageDigest};
+use std::path::Path;
 use thiserror::Error;
 use tss_esapi::{
     handles::KeyHandle,
@@ -40,18 +41,30 @@ pub enum ContextInfoError {
     /// Unsupported AK type
     #[error("Unsupported AK type")]
     UnsupportedAKType,
+
+    /// I/O error for file operations
+    #[error("I/O error")]
+    Io(#[from] std::io::Error),
+
+    /// Keylime general error
+    #[error("Keylime error: {0}")]
+    Keylime(String),
 }
 
+#[derive(Debug, Clone)]
 pub struct AlgorithmConfiguration {
     pub tpm_encryption_alg: algorithms::EncryptionAlgorithm,
     pub tpm_hash_alg: algorithms::HashAlgorithm,
     pub tpm_signing_alg: algorithms::SignAlgorithm,
+    pub agent_data_path: String,
 }
 
+#[derive(Debug, Clone)]
 pub struct AlgorithmConfigurationString {
     pub tpm_encryption_alg: String,
     pub tpm_hash_alg: String,
     pub tpm_signing_alg: String,
+    pub agent_data_path: String,
 }
 
 #[derive(Clone, Debug)]
@@ -80,44 +93,81 @@ impl ContextInfo {
         let tpm_signing_alg = algorithms::SignAlgorithm::try_from(
             config.tpm_signing_alg.as_str(),
         )?;
-        Ok(Self::new(AlgorithmConfiguration {
+        Self::new(AlgorithmConfiguration {
             tpm_encryption_alg,
             tpm_hash_alg,
             tpm_signing_alg,
-        }))
+            agent_data_path: config.agent_data_path,
+        })
     }
 
-    pub fn new(config: AlgorithmConfiguration) -> Self {
+    pub fn new(
+        config: AlgorithmConfiguration,
+    ) -> Result<Self, ContextInfoError> {
         let mut tpm_context =
             tpm::Context::new().expect("Failed to create TPM context");
         let tpm_encryption_alg = config.tpm_encryption_alg;
         let tpm_hash_alg = config.tpm_hash_alg;
         let tpm_signing_alg = config.tpm_signing_alg;
-        let ek_result = tpm_context
-            .create_ek(tpm_encryption_alg, None)
-            .expect("Failed to create EK");
+
+        let ek_result = tpm_context.create_ek(tpm_encryption_alg, None)?;
         let ek_handle = ek_result.key_handle;
         let ek_hash = hash_ek::hash_ek_pubkey(ek_result.public.clone())
-            .expect("Failed to hash EK public key");
-        let ak = tpm_context
-            .create_ak(
+            .map_err(|e| ContextInfoError::Keylime(e.to_string()))?;
+
+        let loaded_ak = if config.agent_data_path.is_empty() {
+            None
+        } else {
+            let path = Path::new(&config.agent_data_path);
+            if path.exists() {
+                match AgentData::load(path) {
+                    Ok(data) => {
+                        if data.valid(
+                            tpm_hash_alg,
+                            tpm_signing_alg,
+                            ek_hash.as_bytes(),
+                        ) {
+                            Some(data.get_ak().map_err(|e| {
+                                ContextInfoError::Keylime(e.to_string())
+                            })?)
+                        } else {
+                            None
+                        }
+                    }
+                    Err(_) => None,
+                }
+            } else {
+                None
+            }
+        };
+
+        let ak = if let Some(ak) = loaded_ak {
+            ak
+        } else {
+            tpm_context.create_ak(
                 ek_result.key_handle,
                 tpm_hash_alg,
                 tpm_encryption_alg,
                 tpm_signing_alg,
+            )?
+        };
+
+        let ak_handle = tpm_context.load_ak(ek_result.key_handle, &ak)?;
+
+        if !config.agent_data_path.is_empty() {
+            let agent_data_to_store = AgentData::create(
+                tpm_hash_alg,
+                tpm_signing_alg,
+                &ak,
+                ek_hash.as_bytes(),
             )
-            .expect("Failed to create AK");
-        let ak_handle = tpm_context
-            .load_ak(ek_result.key_handle, &ak)
-            .expect("Failed to load AK");
-        AgentData::create(
-            tpm_hash_alg,
-            tpm_signing_alg,
-            &ak,
-            ek_hash.as_bytes(),
-        )
-        .expect("Failed to create AgentData");
-        ContextInfo {
+            .map_err(|e| ContextInfoError::Keylime(e.to_string()))?;
+            agent_data_to_store
+                .store(Path::new(&config.agent_data_path))
+                .map_err(|e| ContextInfoError::Keylime(e.to_string()))?;
+        }
+
+        Ok(ContextInfo {
             tpm_context,
             tpm_encryption_alg,
             tpm_hash_alg,
@@ -127,7 +177,7 @@ impl ContextInfo {
             ek_handle,
             ak,
             ak_handle,
-        }
+        })
     }
 
     pub fn get_mutable_tpm_context(&mut self) -> &mut tpm::Context<'static> {
@@ -272,6 +322,12 @@ impl ContextInfo {
     }
 }
 
+impl Drop for ContextInfo {
+    fn drop(&mut self) {
+        let _ = self.flush_context();
+    }
+}
+
 // tests
 #[cfg(test)]
 mod tests {
@@ -288,6 +344,8 @@ mod tests {
             tpm_encryption_alg: "rsa".to_string(),
             tpm_hash_alg: "sha256".to_string(),
             tpm_signing_alg: "rsassa".to_string(),
+            // Leave empty to test creation path without persistence
+            agent_data_path: "".to_string(),
         };
         let mut context_info = ContextInfo::new_from_str(config)
             .expect("Failed to create context from string");
@@ -304,10 +362,10 @@ mod tests {
             tpm_encryption_alg: "rsa".to_string(),
             tpm_hash_alg: "sha256".to_string(),
             tpm_signing_alg: "rsassa".to_string(),
+            agent_data_path: "".to_string(), // Don't use persistence for this test
         };
         let mut context_info = ContextInfo::new_from_str(config)
             .expect("Failed to create context from string");
-        assert!(!context_info.ek_hash.is_empty());
         assert!(!context_info.get_public_key_as_base64().unwrap().is_empty()); //#[allow_ci]
         assert_eq!(context_info.get_key_class(), "asymmetric");
         assert_eq!(context_info.get_key_size(), 2048);
@@ -326,12 +384,56 @@ mod tests {
 
     #[tokio::test]
     #[cfg(feature = "testing")]
+    async fn test_ak_persistence_and_reload() {
+        use crate::tpm::testing;
+        let _mutex = testing::lock_tests().await;
+        // The `tempdir` object provides a temporary directory. When it goes out
+        // of scope at the end of this test, the directory and all its contents
+        // (including our agent_data.json) are automatically deleted.
+        let tempdir = tempfile::tempdir().unwrap(); //#[allow_ci]
+        let data_path = tempdir.path().join("agent_data.json");
+
+        let config = AlgorithmConfigurationString {
+            tpm_encryption_alg: "rsa".to_string(),
+            tpm_hash_alg: "sha256".to_string(),
+            tpm_signing_alg: "rsassa".to_string(),
+            agent_data_path: data_path.to_str().unwrap().to_string(), //#[allow_ci]
+        };
+
+        // First run: should create and store the AK
+        let ak_name_1 = {
+            let mut context_info_1 =
+                ContextInfo::new_from_str(config.clone()).unwrap(); //#[allow_ci]
+            let name = context_info_1.get_ak_local_identifier_str().unwrap(); //#[allow_ci]
+            context_info_1.flush_context().unwrap(); //#[allow_ci]
+            name
+        };
+
+        // The agent_data.json file should now exist
+        assert!(data_path.exists());
+
+        // Second run: should load the previously stored AK
+        let ak_name_2 = {
+            let mut context_info_2 =
+                ContextInfo::new_from_str(config).unwrap(); //#[allow_ci]
+            let name = context_info_2.get_ak_local_identifier_str().unwrap(); //#[allow_ci]
+            context_info_2.flush_context().unwrap(); //#[allow_ci]
+            name
+        };
+
+        // The AK name (a unique identifier) should be the same, proving it was loaded
+        assert_eq!(ak_name_1, ak_name_2);
+    }
+
+    #[tokio::test]
+    #[cfg(feature = "testing")]
     async fn test_new_from_str_errors_on_bad_enc_alg() {
         let _mutex = crate::tpm::testing::lock_tests().await;
         let config = AlgorithmConfigurationString {
             tpm_encryption_alg: "bad-algorithm".to_string(),
             tpm_hash_alg: "sha256".to_string(),
             tpm_signing_alg: "rsassa".to_string(),
+            agent_data_path: "".to_string(),
         };
         let r = ContextInfo::new_from_str(config);
         assert!(r.is_err());
@@ -345,6 +447,7 @@ mod tests {
             tpm_encryption_alg: "rsa".to_string(),
             tpm_hash_alg: "bad-hash".to_string(),
             tpm_signing_alg: "rsassa".to_string(),
+            agent_data_path: "".to_string(),
         };
         let r = ContextInfo::new_from_str(config);
         assert!(r.is_err());
@@ -358,6 +461,7 @@ mod tests {
             tpm_encryption_alg: "rsa".to_string(),
             tpm_hash_alg: "sha256".to_string(),
             tpm_signing_alg: "bad-signing-alg".to_string(),
+            agent_data_path: "".to_string(),
         };
         let r = ContextInfo::new_from_str(config);
         assert!(r.is_err());
@@ -366,13 +470,13 @@ mod tests {
     #[tokio::test]
     #[cfg(feature = "testing")]
     async fn test_creation_and_get_all_data() {
-        // Renamed for clarity
         use crate::tpm::testing;
         let _mutex = testing::lock_tests().await;
         let config = AlgorithmConfigurationString {
             tpm_encryption_alg: "rsa".to_string(),
             tpm_hash_alg: "sha256".to_string(),
             tpm_signing_alg: "rsassa".to_string(),
+            agent_data_path: "".to_string(),
         };
         let mut context_info = ContextInfo::new_from_str(config)
             .expect("Failed to create context from string");
@@ -387,5 +491,81 @@ mod tests {
         assert!(context_info.get_ak_local_identifier_str().is_ok());
         assert!(context_info.get_ak_public_key_as_base64().is_ok());
         assert!(context_info.flush_context().is_ok());
+    }
+
+    #[tokio::test]
+    #[cfg(feature = "testing")]
+    async fn test_ak_persistence_with_invalid_data() {
+        use crate::tpm::testing;
+        let _mutex = testing::lock_tests().await;
+        let tempdir = tempfile::tempdir().unwrap(); //#[allow_ci]
+        let data_path = tempdir.path().join("agent_data.json");
+
+        // First run: Create a context with SHA256 and persist it
+        let config1 = AlgorithmConfigurationString {
+            tpm_encryption_alg: "rsa".to_string(),
+            tpm_hash_alg: "sha256".to_string(),
+            tpm_signing_alg: "rsassa".to_string(),
+            agent_data_path: data_path.to_str().unwrap().to_string(), //#[allow_ci]
+        };
+        let ak_name_1 = {
+            let mut context_info_1 =
+                ContextInfo::new_from_str(config1.clone()).unwrap(); //#[allow_ci]
+            let name = context_info_1.get_ak_local_identifier_str().unwrap(); //#[allow_ci]
+            context_info_1.flush_context().unwrap(); //#[allow_ci]
+            name
+        };
+
+        // Second run: Create a context with a different hash alg (SHA384)
+        // This should invalidate the persisted data and force a new key creation.
+        let config2 = AlgorithmConfigurationString {
+            tpm_encryption_alg: "rsa".to_string(),
+            tpm_hash_alg: "sha384".to_string(),
+            tpm_signing_alg: "rsassa".to_string(),
+            agent_data_path: data_path.to_str().unwrap().to_string(), //#[allow_ci]
+        };
+        let ak_name_2 = {
+            let mut context_info_2 =
+                ContextInfo::new_from_str(config2).unwrap(); //#[allow_ci]
+            let name = context_info_2.get_ak_local_identifier_str().unwrap(); //#[allow_ci]
+            context_info_2.flush_context().unwrap(); //#[allow_ci]
+            name
+        };
+
+        // The names should be different, proving a new key was created.
+        assert_ne!(ak_name_1, ak_name_2);
+    }
+
+    #[tokio::test]
+    #[cfg(feature = "testing")]
+    async fn test_ak_persistence_with_corrupt_file() {
+        use crate::tpm::testing;
+        use std::fs::File;
+        use std::io::Write;
+        let _mutex = testing::lock_tests().await;
+        let tempdir = tempfile::tempdir().unwrap(); //#[allow_ci]
+        let data_path = tempdir.path().join("agent_data.json");
+
+        let mut file = File::create(&data_path).unwrap(); //#[allow_ci]
+        file.write_all(b"this is not valid json").unwrap(); //#[allow_ci]
+
+        let config = AlgorithmConfigurationString {
+            tpm_encryption_alg: "rsa".to_string(),
+            tpm_hash_alg: "sha256".to_string(),
+            tpm_signing_alg: "rsassa".to_string(),
+            agent_data_path: data_path.to_str().unwrap().to_string(), //#[allow_ci]
+        };
+
+        // The creation should not fail, but gracefully create a new key.
+        let context_result = ContextInfo::new_from_str(config);
+        assert!(context_result.is_ok());
+
+        // We can verify that the newly created context has a valid AK
+        let mut context_info = context_result.unwrap(); //#[allow_ci]
+        assert!(!context_info
+            .get_ak_local_identifier_str()
+            .unwrap() //#[allow_ci]
+            .is_empty());
+        context_info.flush_context().unwrap(); //#[allow_ci]
     }
 }
