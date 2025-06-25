@@ -1,6 +1,4 @@
 use core::fmt;
-// Use LazyCell for lazy initialization of count file paths
-use once_cell::sync::Lazy;
 
 use crate::config::*;
 
@@ -8,30 +6,6 @@ use crate::config::*;
 pub const DEFAULT_CERTIFICATION_KEYS_SERVER_IDENTIFIER: &str = "ak";
 pub static DEFAULT_PUSH_API_VERSIONS: &[&str] = &["3.0"];
 pub static DEFAULT_PUSH_EK_HANDLE: &str = "";
-
-// IMA logs specific defaults
-pub const DEFAULT_IMA_LOGS_APPENDABLE: bool = true;
-pub const DEFAULT_IMA_LOGS_FORMATS: &[&str] = &["text/plain"];
-pub const DEFAULT_IMA_LOGS_SUPPORTS_PARTIAL_ACCESS: bool = true;
-pub const DEFAULT_IMA_ML_DIRECTORY_PATH: &str = "/sys/kernel/security/ima";
-pub static DEFAULT_IMA_ML_COUNT_FILE: Lazy<String> =
-    Lazy::new(|| format!("{}/measurements", DEFAULT_IMA_ML_DIRECTORY_PATH));
-
-//UEFI logs specific defaults
-pub const DEFAULT_UEFI_LOGS_APPENDABLE: bool = true;
-pub const DEFAULT_UEFI_LOGS_EVIDENCE_VERSION: &str = "2.1";
-pub const DEFAULT_UEFI_LOGS_FORMATS: &[&str] = &["application/octet-stream"];
-pub const DEFAULT_UEFI_LOGS_SUPPORTS_PARTIAL_ACCESS: bool = true;
-
-pub const DEFAULT_UEFI_LOGS_BINARY_PATH: &str = "/sys/kernel/security/tpm0";
-pub const DEFAULT_UEFI_LOGS_BINARY_FILE: &str = "binary_bios_measurements";
-pub static DEFAULT_UEFI_LOGS_BINARY_FILE_PATH: Lazy<String> =
-    Lazy::new(|| {
-        format!(
-            "{}/{}",
-            DEFAULT_UEFI_LOGS_BINARY_PATH, DEFAULT_UEFI_LOGS_BINARY_FILE
-        )
-    });
 
 pub trait PushModelConfigTrait {
     fn get_agent_data_path(&self) -> String;
@@ -43,7 +17,6 @@ pub trait PushModelConfigTrait {
     fn get_ima_logs_appendable(&self) -> bool;
     fn get_ima_logs_formats(&self) -> Vec<String>;
     fn get_ima_logs_supports_partial_access(&self) -> bool;
-    fn get_ima_ml_directory_path(&self) -> String;
     fn get_ima_ml_count_file(&self) -> String;
     fn get_registrar_ip(&self) -> String;
     fn get_registrar_port(&self) -> u32;
@@ -81,9 +54,6 @@ impl Default for PushModelConfig {
                 .collect(),
             ima_logs_supports_partial_access:
                 DEFAULT_IMA_LOGS_SUPPORTS_PARTIAL_ACCESS,
-            ima_ml_directory_path: DEFAULT_IMA_ML_DIRECTORY_PATH
-                .to_string()
-                .clone(),
             ima_ml_count_file: DEFAULT_IMA_ML_COUNT_FILE.to_string().clone(),
             registrar_ip: DEFAULT_REGISTRAR_IP.to_string(),
             registrar_port: DEFAULT_REGISTRAR_PORT,
@@ -128,7 +98,6 @@ pub struct PushModelConfig {
     ima_logs_appendable: bool,
     ima_logs_formats: Vec<String>,
     ima_logs_supports_partial_access: bool,
-    ima_ml_directory_path: String,
     ima_ml_count_file: String,
     registrar_api_versions: Vec<String>,
     registrar_ip: String,
@@ -192,10 +161,6 @@ impl PushModelConfigTrait for PushModelConfig {
 
     fn get_ima_ml_count_file(&self) -> String {
         self.ima_ml_count_file.clone()
-    }
-
-    fn get_ima_ml_directory_path(&self) -> String {
-        self.ima_ml_directory_path.clone()
     }
 
     fn get_registrar_ip(&self) -> String {
@@ -269,7 +234,7 @@ impl PushModelConfigTrait for PushModelConfig {
             contact_ip: {}, contact_port: {},
             enable_iak_idevid: {}, ek_handle: {},
             ima_logs_appendable: {}, ima_logs_formats: {:?}, ima_logs_supports_partial_access: {},
-            ima_ml_directory_path: {}, ima_ml_count_file: {},
+            ima_ml_count_file: {},
             registrar_ip: {}, registrar_port: {}, server_cert: {},
             server_key: {}, server_key_password: {},
             uefi_logs_binary_file_path: {},
@@ -286,7 +251,6 @@ impl PushModelConfigTrait for PushModelConfig {
             self.ima_logs_appendable,
             self.ima_logs_formats,
             self.ima_logs_supports_partial_access,
-            self.ima_ml_directory_path,
             self.ima_ml_count_file,
             self.registrar_ip,
             self.registrar_port,
@@ -342,13 +306,7 @@ mod tests {
             pmc.get_ima_logs_supports_partial_access()
                 == DEFAULT_IMA_LOGS_SUPPORTS_PARTIAL_ACCESS
         );
-        assert!(
-            pmc.get_ima_ml_directory_path() == DEFAULT_IMA_ML_DIRECTORY_PATH
-        );
-        assert!(
-            pmc.get_ima_ml_count_file()
-                == DEFAULT_IMA_ML_COUNT_FILE.to_string()
-        );
+        assert!(pmc.get_ima_ml_count_file() == DEFAULT_IMA_ML_COUNT_FILE);
         assert!(pmc.get_registrar_ip() == DEFAULT_REGISTRAR_IP);
         assert!(pmc.get_registrar_port() == DEFAULT_REGISTRAR_PORT);
         assert!(pmc.get_server_cert() == DEFAULT_SERVER_CERT);
@@ -359,7 +317,7 @@ mod tests {
         );
         assert!(
             pmc.get_uefi_logs_binary_file_path()
-                == DEFAULT_UEFI_LOGS_BINARY_FILE_PATH.to_string()
+                == DEFAULT_UEFI_LOGS_BINARY_FILE_PATH
         );
         assert!(
             pmc.get_uefi_logs_evidence_version()
@@ -408,7 +366,6 @@ mod tests {
         assert!(display_string.contains(
             &pmc.get_ima_logs_supports_partial_access().to_string()
         ));
-        assert!(display_string.contains(&pmc.get_ima_ml_directory_path()));
         assert!(display_string.contains(&pmc.get_ima_ml_count_file()));
         assert!(display_string.contains(&pmc.get_registrar_ip()));
         assert!(
