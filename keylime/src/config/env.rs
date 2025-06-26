@@ -23,7 +23,7 @@ impl EnvConfig {
             .for_each(|(c, v)| debug!("Environment configuration {c}={v}"));
 
         // Return an EnvConfig containing the collected environment variables in a format that
-        // allows it to be used as a Source for KeylimeConfig
+        // allows it to be used as a Source for AgentConfig
         Ok(EnvConfig {
             map: Map::from([(
                 "agent".to_string(),
@@ -47,8 +47,14 @@ impl Source for EnvConfig {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::config::{get_testing_config, KeylimeConfig};
+    use crate::config::{get_testing_config, AgentConfig};
     use config::Config;
+    use serde::Deserialize;
+
+    #[derive(Deserialize)]
+    struct Wrapper {
+        agent: AgentConfig,
+    }
 
     #[test]
     fn test_env_config_as_source() {
@@ -59,14 +65,14 @@ mod test {
 
         let env_config = EnvConfig::new().unwrap(); //#[allow_ci]
 
-        // Test that the EnvConfig can be used as a source for KeylimeConfig
-        let _config: KeylimeConfig = Config::builder()
+        // Test that the EnvConfig can be used as a source for AgentConfig
+        let _config: Wrapper = Config::builder()
             .add_source(default)
             .add_source(env_config)
             .build()
-            .unwrap() //#[allow_ci]
+            .expect("failed to build config")
             .try_deserialize()
-            .unwrap(); //#[allow_ci]
+            .expect("failed to deserialize config");
     }
 
     #[test]
@@ -173,12 +179,16 @@ mod test {
             let env_config = EnvConfig {
                 map: Map::from([(
                     "agent".to_string(),
-                    Value::from(env_source.collect().unwrap()), //#[allow_ci]
+                    Value::from(
+                        env_source
+                            .collect()
+                            .expect("failed to collect env options"),
+                    ),
                 )]),
             };
 
             // Create the resulting configuration with a variable overriden
-            let overriden: KeylimeConfig = Config::builder()
+            let overriden: Wrapper = Config::builder()
                 .add_source(default.clone())
                 .add_source(env_config)
                 .build()
@@ -186,14 +196,29 @@ mod test {
                 .try_deserialize()
                 .unwrap(); //#[allow_ci]
 
-            let m = overriden.collect().unwrap(); //#[allow_ci]
-            let internal = m.get("agent").unwrap(); //#[allow_ci]
-            let obtained = internal.to_owned().into_table().unwrap(); //#[allow_ci]
+            let m = overriden
+                .agent
+                .collect()
+                .expect("Failed to collect env options");
+            let internal = m
+                .get("agent")
+                .expect("Failed to get the internal agent config");
+            let obtained = internal
+                .to_owned()
+                .into_table()
+                .expect("failed to convert map into table");
 
             // Create the expected result by manually replacing the value
-            let d = default.collect().unwrap(); //#[allow_ci]
-            let i = d.get("agent").unwrap(); //#[allow_ci]
-            let mut expected = i.to_owned().into_table().unwrap(); //#[allow_ci]
+            let d = default
+                .collect()
+                .expect("failed to collect default options");
+            let i = d
+                .get("agent")
+                .expect("failed to get default internal agent config");
+            let mut expected = i
+                .to_owned()
+                .into_table()
+                .expect("failed to convert map into table");
             _ = expected.insert(
                 c.to_lowercase()
                     .strip_prefix("keylime_agent_")
