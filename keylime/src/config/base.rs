@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2022 Keylime Authors
 use crate::{
-    config::{EnvConfig, KeylimeConfigError},
+    config::{file_config, EnvConfig, KeylimeConfigError},
     hostname_parser::parse_hostname,
     ip_parser::parse_ip,
     list_parser::parse_list,
@@ -9,10 +9,9 @@ use crate::{
     version::{self, GetErrorInput},
 };
 use config::{
-    builder::DefaultState, Config, ConfigBuilder, ConfigError, File,
-    FileFormat, Map, Source, Value,
+    builder::DefaultState, Config, ConfigBuilder, ConfigError, Map, Source,
+    Value,
 };
-use glob::glob;
 use log::*;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
@@ -21,6 +20,12 @@ use uuid::Uuid;
 
 pub static SUPPORTED_API_VERSIONS: &[&str] = &["2.1", "2.2"];
 pub static DEFAULT_REGISTRAR_API_VERSIONS: &[&str] = &["2.3"];
+
+pub static DEFAULT_CONFIG: &str = "/etc/keylime/agent.conf";
+pub static DEFAULT_CONFIG_SNIPPETS_DIR: &str = "/etc/keylime/agent.conf.d";
+pub static DEFAULT_SYS_CONFIG: &str = "/usr/etc/keylime/agent.conf";
+pub static DEFAULT_SYS_CONFIG_SNIPPETS_DIR: &str =
+    "/usr/etc/keylime/agent.conf.d";
 
 pub static CONFIG_VERSION: &str = "2.0";
 pub static DEFAULT_API_VERSIONS: &str = "default";
@@ -51,8 +56,6 @@ pub static DEFAULT_IAK_HANDLE: &str = "";
 pub static DEFAULT_RUN_AS: &str = "keylime:tss";
 pub static DEFAULT_IMA_ML_PATH: &str =
     "/sys/kernel/security/ima/ascii_runtime_measurements";
-pub static DEFAULT_CONFIG: &str = "/etc/keylime/agent.conf";
-pub static DEFAULT_CONFIG_SYS: &str = "/usr/etc/keylime/agent.conf";
 
 // Pull attestation agent options defaults
 pub static DEFAULT_AGENT_DATA_PATH: &str = "agent_data.json";
@@ -145,19 +148,18 @@ pub struct AgentConfig {
     pub version: String,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
-pub struct KeylimeConfig {
-    pub agent: AgentConfig,
-}
-
-impl KeylimeConfig {
+impl AgentConfig {
     pub fn new() -> Result<Self, KeylimeConfigError> {
+        #[derive(Deserialize)]
+        struct Wrapper {
+            agent: AgentConfig,
+        }
         // Get the base configuration file from the environment variable or the default locations
-        let config: KeylimeConfig =
+        let config: Wrapper =
             config_get_setting()?.build()?.try_deserialize()?;
 
         // Replace keywords with actual values
-        config_translate_keywords(&config)
+        config_translate_keywords(&config.agent)
     }
 }
 
@@ -205,16 +207,6 @@ impl Source for AgentConfig {
         let config_map = json_to_config_value(json)?.into_table()?;
 
         Ok(Map::from([("agent".to_string(), Value::from(config_map))]))
-    }
-
-    fn clone_into_box(&self) -> Box<dyn Source + Send + Sync> {
-        Box::new(self.clone())
-    }
-}
-
-impl Source for KeylimeConfig {
-    fn collect(&self) -> Result<Map<String, Value>, ConfigError> {
-        self.agent.collect()
     }
 
     fn clone_into_box(&self) -> Box<dyn Source + Send + Sync> {
@@ -289,85 +281,17 @@ impl Default for AgentConfig {
     }
 }
 
-impl Default for KeylimeConfig {
-    fn default() -> Self {
-        let c = KeylimeConfig {
-            agent: AgentConfig::default(),
-        };
-
-        // The default config should never fail to translate keywords
-        config_translate_keywords(&c).unwrap() //#[allow_ci]
-    }
-}
-
 fn config_get_setting(
 ) -> Result<ConfigBuilder<DefaultState>, KeylimeConfigError> {
-    let default_config = KeylimeConfig::default();
-    let mut builder = Config::builder()
-        // Default values
-        .add_source(default_config);
+    // Load the configuration from the default file locations
+    let default_config = file_config::load_default_files()?;
 
-    // If the 'KEYLIME_AGENT_CONFIG' environment variable is set, load the configuration file set
-    // and ignore system configurations
-    if let Ok(env_cfg) = env::var("KEYLIME_AGENT_CONFIG") {
-        if !env_cfg.is_empty() {
-            let path = Path::new(&env_cfg);
-            if path.exists() {
-                builder = builder.add_source(
-                    File::new(&env_cfg, FileFormat::Toml).required(true),
-                )
-            } else {
-                warn!("Configuration set in KEYLIME_AGENT_CONFIG environment variable not found");
-                return Err(KeylimeConfigError::MissingEnvConfigFile {
-                    file: path.display().to_string(),
-                });
-            }
-        }
-    } else {
-        // Load the system configuration files.
-        builder = builder
-            // Add the system configuration file
-            .add_source(
-                File::new(DEFAULT_CONFIG_SYS, FileFormat::Toml)
-                    .required(false),
-            )
-            // Add system configuration snippets
-            .add_source(
-                glob("/usr/etc/keylime/agent.conf.d/*")
-                    .map_err(KeylimeConfigError::GlobPattern)?
-                    .filter_map(|entry| entry.ok())
-                    .map(|path| {
-                        File::new(
-                            &path.display().to_string(),
-                            FileFormat::Toml,
-                        )
-                        .required(false)
-                    })
-                    .collect::<Vec<_>>(),
-            )
-            // Add user configuration file
-            .add_source(
-                File::new(DEFAULT_CONFIG, FileFormat::Toml).required(false),
-            )
-            // Add user configuration snippets
-            .add_source(
-                glob("/etc/keylime/agent.conf.d/*")
-                    .map_err(KeylimeConfigError::GlobPattern)?
-                    .filter_map(|entry| entry.ok())
-                    .map(|path| {
-                        File::new(
-                            &path.display().to_string(),
-                            FileFormat::Toml,
-                        )
-                        .required(false)
-                    })
-                    .collect::<Vec<_>>(),
-            );
-    }
-
+    // Load the configuration overrides from the environment
     let env_config = EnvConfig::new()?;
 
-    builder = builder
+    let builder = Config::builder()
+        // Default values
+        .add_source(default_config)
         // Add environment variables overrides
         .add_source(env_config);
 
@@ -376,24 +300,24 @@ fn config_get_setting(
 
 /// Replace the options that support keywords with the final value
 fn config_translate_keywords(
-    config: &KeylimeConfig,
-) -> Result<KeylimeConfig, KeylimeConfigError> {
-    let uuid = get_uuid(&config.agent.uuid);
+    config: &AgentConfig,
+) -> Result<AgentConfig, KeylimeConfigError> {
+    let uuid = get_uuid(&config.uuid);
 
     let env_keylime_dir = env::var("KEYLIME_DIR").ok();
 
     let keylime_dir = if let Some(ref dir) = env_keylime_dir {
         if !dir.is_empty() {
             Path::new(dir)
-        } else if config.agent.keylime_dir.is_empty() {
+        } else if config.keylime_dir.is_empty() {
             Path::new(DEFAULT_KEYLIME_DIR)
         } else {
-            Path::new(&config.agent.keylime_dir)
+            Path::new(&config.keylime_dir)
         }
-    } else if config.agent.keylime_dir.is_empty() {
+    } else if config.keylime_dir.is_empty() {
         Path::new(DEFAULT_KEYLIME_DIR)
     } else {
-        Path::new(&config.agent.keylime_dir)
+        Path::new(&config.keylime_dir)
     };
 
     // Validate that keylime_dir exists
@@ -409,7 +333,7 @@ fn config_translate_keywords(
 
     let agent_data_path = config_get_file_path(
         "agent_data_path",
-        &config.agent.agent_data_path,
+        &config.agent_data_path,
         keylime_dir,
         DEFAULT_AGENT_DATA_PATH,
         false,
@@ -417,7 +341,7 @@ fn config_translate_keywords(
 
     let ima_ml_path = config_get_file_path(
         "ima_ml_path",
-        &config.agent.ima_ml_path,
+        &config.ima_ml_path,
         root_path,
         DEFAULT_IMA_ML_PATH,
         false,
@@ -425,7 +349,7 @@ fn config_translate_keywords(
 
     let measuredboot_ml_path = config_get_file_path(
         "measuredboot_ml_path",
-        &config.agent.measuredboot_ml_path,
+        &config.measuredboot_ml_path,
         root_path,
         DEFAULT_MEASUREDBOOT_ML_PATH,
         false,
@@ -433,7 +357,7 @@ fn config_translate_keywords(
 
     let server_key = config_get_file_path(
         "server_key",
-        &config.agent.server_key,
+        &config.server_key,
         keylime_dir,
         DEFAULT_SERVER_KEY,
         false,
@@ -441,30 +365,29 @@ fn config_translate_keywords(
 
     let server_cert = config_get_file_path(
         "server_cert",
-        &config.agent.server_cert,
+        &config.server_cert,
         keylime_dir,
         DEFAULT_SERVER_CERT,
         false,
     );
 
-    let trusted_client_ca: String =
-        parse_list(&config.agent.trusted_client_ca)?
-            .iter()
-            .map(|t| {
-                config_get_file_path(
-                    "trusted_client_ca",
-                    t,
-                    keylime_dir,
-                    DEFAULT_TRUSTED_CLIENT_CA,
-                    false,
-                )
-            })
-            .collect::<Vec<_>>()
-            .join(", ");
+    let trusted_client_ca: String = parse_list(&config.trusted_client_ca)?
+        .iter()
+        .map(|t| {
+            config_get_file_path(
+                "trusted_client_ca",
+                t,
+                keylime_dir,
+                DEFAULT_TRUSTED_CLIENT_CA,
+                false,
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
 
     let iak_cert = config_get_file_path(
         "iak_cert",
-        &config.agent.iak_cert,
+        &config.iak_cert,
         keylime_dir,
         DEFAULT_IAK_CERT,
         true,
@@ -472,39 +395,39 @@ fn config_translate_keywords(
 
     let idevid_cert = config_get_file_path(
         "idevid_cert",
-        &config.agent.idevid_cert,
+        &config.idevid_cert,
         keylime_dir,
         DEFAULT_IDEVID_CERT,
         true,
     );
 
-    let ek_handle = match config.agent.ek_handle.as_ref() {
+    let ek_handle = match config.ek_handle.as_ref() {
         "generate" => "".to_string(),
         "" => "".to_string(),
         s => s.to_string(),
     };
 
-    let ip = match parse_ip(config.agent.ip.as_ref()) {
+    let ip = match parse_ip(config.ip.as_ref()) {
         Ok(ip) => ip.to_string(),
         Err(_) => {
             debug!("Parsing configured IP as hostname");
-            parse_hostname(config.agent.ip.as_ref())?.to_string()
+            parse_hostname(config.ip.as_ref())?.to_string()
         }
     };
 
-    let contact_ip = match parse_ip(config.agent.contact_ip.as_ref()) {
+    let contact_ip = match parse_ip(config.contact_ip.as_ref()) {
         Ok(ip) => ip.to_string(),
         Err(_) => {
             debug!("Parsing configured contact IP as hostname");
-            parse_hostname(config.agent.contact_ip.as_ref())?.to_string()
+            parse_hostname(config.contact_ip.as_ref())?.to_string()
         }
     };
 
-    let registrar_ip = match parse_ip(config.agent.registrar_ip.as_ref()) {
+    let registrar_ip = match parse_ip(config.registrar_ip.as_ref()) {
         Ok(ip) => ip.to_string(),
         Err(_) => {
             debug!("Parsing configured registrar IP as hostname");
-            parse_hostname(config.agent.registrar_ip.as_ref())?.to_string()
+            parse_hostname(config.registrar_ip.as_ref())?.to_string()
         }
     };
 
@@ -513,7 +436,7 @@ fn config_translate_keywords(
     // versions
     // If the "default" keyword is used, use all the supported versions
     // If the "latest" keyword is used, use only the latest version
-    let api_versions: String = match config.agent.api_versions.as_ref() {
+    let api_versions: String = match config.api_versions.as_ref() {
         "default" => SUPPORTED_API_VERSIONS
             .iter()
             .map(|&s| s.to_string())
@@ -579,8 +502,8 @@ fn config_translate_keywords(
     // Validate the configuration
 
     // If revocation notifications is enabled, verify all the required options for revocation
-    if config.agent.enable_revocation_notifications {
-        if config.agent.revocation_notification_ip.is_empty() {
+    if config.enable_revocation_notifications {
+        if config.revocation_notification_ip.is_empty() {
             error!("The option 'enable_revocation_notifications' is set as 'true' but 'revocation_notification_ip' was set as empty");
             return Err(KeylimeConfigError::IncompatibleOptions {
                 option_a: "enable_revocation_notifications".into(),
@@ -589,7 +512,7 @@ fn config_translate_keywords(
                 value_b: "empty".into(),
             });
         }
-        if config.agent.revocation_cert.is_empty() {
+        if config.revocation_cert.is_empty() {
             error!("The option 'enable_revocation_notifications' is set as 'true' 'revocation_cert' was set as empty");
             return Err(KeylimeConfigError::IncompatibleOptions {
                 option_a: "enable_revocation_notifications".into(),
@@ -599,7 +522,7 @@ fn config_translate_keywords(
             });
         }
 
-        let actions_dir = match config.agent.revocation_actions_dir.as_ref() {
+        let actions_dir = match config.revocation_actions_dir.as_ref() {
             "" => {
                 error!("The option 'enable_revocation_notifications' is set as 'true' but the revocation actions directory was set as empty in 'revocation_actions_dir'");
                 return Err(KeylimeConfigError::IncompatibleOptions {
@@ -624,32 +547,30 @@ fn config_translate_keywords(
 
     let revocation_cert = config_get_file_path(
         "revocation_cert",
-        &config.agent.revocation_cert,
+        &config.revocation_cert,
         keylime_dir,
         &format!("secure/unzipped/{DEFAULT_REVOCATION_CERT}"),
         false,
     );
 
-    Ok(KeylimeConfig {
-        agent: AgentConfig {
-            agent_data_path,
-            api_versions,
-            contact_ip,
-            ek_handle,
-            iak_cert,
-            idevid_cert,
-            ima_ml_path,
-            ip,
-            keylime_dir: keylime_dir.display().to_string(),
-            measuredboot_ml_path,
-            registrar_ip,
-            revocation_cert,
-            server_cert,
-            server_key,
-            trusted_client_ca,
-            uuid,
-            ..config.agent.clone()
-        },
+    Ok(AgentConfig {
+        agent_data_path,
+        api_versions,
+        contact_ip,
+        ek_handle,
+        iak_cert,
+        idevid_cert,
+        ima_ml_path,
+        ip,
+        keylime_dir: keylime_dir.display().to_string(),
+        measuredboot_ml_path,
+        registrar_ip,
+        revocation_cert,
+        server_cert,
+        server_key,
+        trusted_client_ca,
+        uuid,
+        ..config.clone()
     })
 }
 
@@ -719,14 +640,12 @@ fn get_uuid(agent_uuid_config: &str) -> String {
 ///
 /// # Returns
 ///
-/// A `KeylimeConfig` structure using the given path as the `keylime_dir` option
+/// A `AgentConfig` structure using the given path as the `keylime_dir` option
 #[cfg(feature = "testing")]
-pub fn get_testing_config(tempdir: &Path) -> KeylimeConfig {
-    let config = KeylimeConfig {
-        agent: AgentConfig {
-            keylime_dir: tempdir.display().to_string(),
-            ..AgentConfig::default()
-        },
+pub fn get_testing_config(tempdir: &Path) -> AgentConfig {
+    let config = AgentConfig {
+        keylime_dir: tempdir.display().to_string(),
+        ..AgentConfig::default()
     };
 
     // It is expected that the translation of keywords will not fail
@@ -746,10 +665,7 @@ mod tests {
 
         // Get the config and check that the value is correct
         let config = get_testing_config(dir.path());
-        assert_eq!(
-            config.agent.keylime_dir,
-            dir.path().display().to_string()
-        );
+        assert_eq!(config.keylime_dir, dir.path().display().to_string());
     }
 
     #[cfg(feature = "testing")]
@@ -760,11 +676,9 @@ mod tests {
         let default = get_testing_config(tempdir.path());
 
         // Modify the keylime directory to refer to the created temporary directory
-        let c = KeylimeConfig {
-            agent: AgentConfig {
-                keylime_dir: tempdir.path().display().to_string(),
-                ..AgentConfig::default()
-            },
+        let c = AgentConfig {
+            keylime_dir: tempdir.path().display().to_string(),
+            ..AgentConfig::default()
         };
 
         let result = config_translate_keywords(&c);
@@ -787,14 +701,12 @@ mod tests {
             ..default
         };
 
-        let c = KeylimeConfig { agent: modified };
-
-        let result = config_translate_keywords(&c);
+        let result = config_translate_keywords(&modified);
         assert!(result.is_ok());
         let result = result.unwrap(); //#[allow_ci]
-        let resulting_ip = result.agent.ip;
-        let resulting_contact_ip = result.agent.contact_ip;
-        let resulting_registrar_ip = result.agent.registrar_ip;
+        let resulting_ip = result.ip;
+        let resulting_contact_ip = result.contact_ip;
+        let resulting_registrar_ip = result.registrar_ip;
         assert_eq!(resulting_ip, "localhost");
         assert_eq!(resulting_contact_ip, "contact.ip");
         assert_eq!(resulting_registrar_ip, "registrar.ip");
@@ -806,8 +718,8 @@ mod tests {
         let tempdir =
             tempfile::tempdir().expect("failed to create temporary dir");
         let test_config = get_testing_config(tempdir.path());
-        let revocation_cert_path = test_config.agent.revocation_cert.clone();
-        let expected = Path::new(&test_config.agent.keylime_dir)
+        let revocation_cert_path = test_config.revocation_cert.clone();
+        let expected = Path::new(&test_config.keylime_dir)
             .join("secure/unzipped")
             .join(DEFAULT_REVOCATION_CERT)
             .display()
@@ -820,17 +732,15 @@ mod tests {
         let tempdir = tempfile::tempdir()
             .expect("failed to create temporary directory");
 
-        let test_config = KeylimeConfig {
-            agent: AgentConfig {
-                keylime_dir: tempdir.path().display().to_string(),
-                revocation_cert: "/test/cert.crt".to_string(),
-                ..Default::default()
-            },
+        let test_config = AgentConfig {
+            keylime_dir: tempdir.path().display().to_string(),
+            revocation_cert: "/test/cert.crt".to_string(),
+            ..Default::default()
         };
         let result = config_translate_keywords(&test_config);
         assert!(result.is_ok());
         let test_config = result.unwrap(); //#[allow_ci]
-        let revocation_cert_path = test_config.agent.revocation_cert;
+        let revocation_cert_path = test_config.revocation_cert;
         let expected = Path::new("/test/cert.crt").display().to_string();
         assert_eq!(revocation_cert_path, expected);
     }
@@ -840,18 +750,16 @@ mod tests {
         let tempdir = tempfile::tempdir()
             .expect("failed to create temporary directory");
 
-        let test_config = KeylimeConfig {
-            agent: AgentConfig {
-                keylime_dir: tempdir.path().display().to_string(),
-                revocation_cert: "cert.crt".to_string(),
-                ..Default::default()
-            },
+        let test_config = AgentConfig {
+            keylime_dir: tempdir.path().display().to_string(),
+            revocation_cert: "cert.crt".to_string(),
+            ..Default::default()
         };
         let result = config_translate_keywords(&test_config);
         assert!(result.is_ok());
         let test_config = result.unwrap(); //#[allow_ci]
-        let revocation_cert_path = test_config.agent.revocation_cert.clone();
-        let expected = Path::new(&test_config.agent.keylime_dir)
+        let revocation_cert_path = test_config.revocation_cert.clone();
+        let expected = Path::new(&test_config.keylime_dir)
             .join("cert.crt")
             .display()
             .to_string();
@@ -863,34 +771,27 @@ mod tests {
         let tempdir = tempfile::tempdir()
             .expect("failed to create temporary directory");
 
-        let test_config = KeylimeConfig {
-            agent: AgentConfig {
-                keylime_dir: tempdir.path().display().to_string(),
-                enable_revocation_notifications: true,
-                revocation_notification_ip: "".to_string(),
-                ..Default::default()
-            },
+        let test_config = AgentConfig {
+            keylime_dir: tempdir.path().display().to_string(),
+            enable_revocation_notifications: true,
+            revocation_notification_ip: "".to_string(),
+            ..Default::default()
         };
         let result = config_translate_keywords(&test_config);
         // Due to enable_revocation_notifications being set
         assert!(result.is_err());
-        let test_config = KeylimeConfig {
-            agent: AgentConfig {
-                keylime_dir: tempdir.path().display().to_string(),
-                enable_revocation_notifications: false,
-                revocation_notification_ip: "".to_string(),
-                ..Default::default()
-            },
+        let test_config = AgentConfig {
+            keylime_dir: tempdir.path().display().to_string(),
+            enable_revocation_notifications: false,
+            revocation_notification_ip: "".to_string(),
+            ..Default::default()
         };
 
         // Now unset enable_revocation_notifications and check that is allowed
         let result = config_translate_keywords(&test_config);
         assert!(result.is_ok());
         let test_config = result.unwrap(); //#[allow_ci]
-        assert_eq!(
-            test_config.agent.revocation_notification_ip,
-            "".to_string()
-        );
+        assert_eq!(test_config.revocation_notification_ip, "".to_string());
     }
 
     #[test]
@@ -898,24 +799,20 @@ mod tests {
         let tempdir = tempfile::tempdir()
             .expect("failed to create temporary directory");
 
-        let test_config = KeylimeConfig {
-            agent: AgentConfig {
-                keylime_dir: tempdir.path().display().to_string(),
-                enable_revocation_notifications: true,
-                revocation_cert: "".to_string(),
-                ..Default::default()
-            },
+        let test_config = AgentConfig {
+            keylime_dir: tempdir.path().display().to_string(),
+            enable_revocation_notifications: true,
+            revocation_cert: "".to_string(),
+            ..Default::default()
         };
         let result = config_translate_keywords(&test_config);
         // Due to enable_revocation_notifications being set
         assert!(result.is_err());
-        let test_config = KeylimeConfig {
-            agent: AgentConfig {
-                keylime_dir: tempdir.path().display().to_string(),
-                enable_revocation_notifications: false,
-                revocation_cert: "".to_string(),
-                ..Default::default()
-            },
+        let test_config = AgentConfig {
+            keylime_dir: tempdir.path().display().to_string(),
+            enable_revocation_notifications: false,
+            revocation_cert: "".to_string(),
+            ..Default::default()
         };
 
         // Now unset enable_revocation_notifications and check that is allowed
@@ -928,24 +825,20 @@ mod tests {
         let tempdir = tempfile::tempdir()
             .expect("failed to create temporary directory");
 
-        let test_config = KeylimeConfig {
-            agent: AgentConfig {
-                keylime_dir: tempdir.path().display().to_string(),
-                enable_revocation_notifications: true,
-                revocation_actions_dir: "".to_string(),
-                ..Default::default()
-            },
+        let test_config = AgentConfig {
+            keylime_dir: tempdir.path().display().to_string(),
+            enable_revocation_notifications: true,
+            revocation_actions_dir: "".to_string(),
+            ..Default::default()
         };
         let result = config_translate_keywords(&test_config);
         // Due to enable_revocation_notifications being set
         assert!(result.is_err());
-        let test_config = KeylimeConfig {
-            agent: AgentConfig {
-                keylime_dir: tempdir.path().display().to_string(),
-                enable_revocation_notifications: false,
-                revocation_actions_dir: "".to_string(),
-                ..Default::default()
-            },
+        let test_config = AgentConfig {
+            keylime_dir: tempdir.path().display().to_string(),
+            enable_revocation_notifications: false,
+            revocation_actions_dir: "".to_string(),
+            ..Default::default()
         };
 
         // Now unset enable_revocation_notifications and check that is allowed
@@ -958,24 +851,20 @@ mod tests {
         let tempdir = tempfile::tempdir()
             .expect("failed to create temporary directory");
 
-        let test_config = KeylimeConfig {
-            agent: AgentConfig {
-                keylime_dir: tempdir.path().display().to_string(),
-                enable_revocation_notifications: true,
-                revocation_actions_dir: "/invalid".to_string(),
-                ..Default::default()
-            },
+        let test_config = AgentConfig {
+            keylime_dir: tempdir.path().display().to_string(),
+            enable_revocation_notifications: true,
+            revocation_actions_dir: "/invalid".to_string(),
+            ..Default::default()
         };
         let result = config_translate_keywords(&test_config);
         // Expect error due to the inexistent directory
         assert!(result.is_err());
-        let test_config = KeylimeConfig {
-            agent: AgentConfig {
-                keylime_dir: tempdir.path().display().to_string(),
-                enable_revocation_notifications: false,
-                revocation_actions_dir: "/invalid".to_string(),
-                ..Default::default()
-            },
+        let test_config = AgentConfig {
+            keylime_dir: tempdir.path().display().to_string(),
+            enable_revocation_notifications: false,
+            revocation_actions_dir: "/invalid".to_string(),
+            ..Default::default()
         };
 
         // Now unset enable_revocation_notifications and check that is allowed
@@ -987,11 +876,9 @@ mod tests {
     fn test_keylime_dir_option() {
         let dir = tempfile::tempdir()
             .expect("Failed to create temporary directory");
-        let test_config = KeylimeConfig {
-            agent: AgentConfig {
-                keylime_dir: dir.path().display().to_string(),
-                ..Default::default()
-            },
+        let test_config = AgentConfig {
+            keylime_dir: dir.path().display().to_string(),
+            ..Default::default()
         };
 
         let result = config_translate_keywords(&test_config);
@@ -1004,34 +891,28 @@ mod tests {
             .expect("failed to create temporary directory");
 
         // Check that invalid API versions are ignored
-        let test_config = KeylimeConfig {
-            agent: AgentConfig {
-                keylime_dir: tempdir.path().display().to_string(),
-                api_versions: "invalid.api".to_string(),
-                ..Default::default()
-            },
+        let test_config = AgentConfig {
+            keylime_dir: tempdir.path().display().to_string(),
+            api_versions: "invalid.api".to_string(),
+            ..Default::default()
         };
         let result = config_translate_keywords(&test_config);
         assert!(result.is_ok());
 
         // Check that unsupported API versions are ignored
-        let test_config = KeylimeConfig {
-            agent: AgentConfig {
-                keylime_dir: tempdir.path().display().to_string(),
-                api_versions: "['0.0']".to_string(),
-                ..Default::default()
-            },
+        let test_config = AgentConfig {
+            keylime_dir: tempdir.path().display().to_string(),
+            api_versions: "['0.0']".to_string(),
+            ..Default::default()
         };
         let result = config_translate_keywords(&test_config);
         assert!(result.is_ok());
 
         // Check that 'latest' keyword is supported
-        let test_config = KeylimeConfig {
-            agent: AgentConfig {
-                keylime_dir: tempdir.path().display().to_string(),
-                api_versions: "\"latest\"".to_string(),
-                ..Default::default()
-            },
+        let test_config = AgentConfig {
+            keylime_dir: tempdir.path().display().to_string(),
+            api_versions: "\"latest\"".to_string(),
+            ..Default::default()
         };
         let result = config_translate_keywords(&test_config);
         assert!(result.is_ok());
@@ -1042,17 +923,15 @@ mod tests {
         let tempdir = tempfile::tempdir()
             .expect("failed to create temporary directory");
 
-        let test_config = KeylimeConfig {
-            agent: AgentConfig {
-                keylime_dir: tempdir.path().display().to_string(),
-                api_versions: "latest".to_string(),
-                ..Default::default()
-            },
+        let test_config = AgentConfig {
+            keylime_dir: tempdir.path().display().to_string(),
+            api_versions: "latest".to_string(),
+            ..Default::default()
         };
         let result = config_translate_keywords(&test_config);
         assert!(result.is_ok());
         let config = result.unwrap(); //#[allow_ci]
-        let version = config.agent.api_versions;
+        let version = config.api_versions;
         let expected = SUPPORTED_API_VERSIONS
             .iter()
             .map(|e| e.to_string())
@@ -1065,16 +944,14 @@ mod tests {
     fn test_translate_api_versions_default_keyword() {
         let tempdir =
             tempfile::tempdir().expect("failed to create temporary dir");
-        let test_config = KeylimeConfig {
-            agent: AgentConfig {
-                keylime_dir: tempdir.path().display().to_string(),
-                ..Default::default()
-            },
+        let test_config = AgentConfig {
+            keylime_dir: tempdir.path().display().to_string(),
+            ..Default::default()
         };
         let result = config_translate_keywords(&test_config);
         assert!(result.is_ok());
         let config = result.unwrap(); //#[allow_ci]
-        let version = config.agent.api_versions;
+        let version = config.api_versions;
         let expected = SUPPORTED_API_VERSIONS
             .iter()
             .map(|e| e.to_string())
@@ -1089,17 +966,15 @@ mod tests {
             tempfile::tempdir().expect("failed to create temporary dir");
         let old = SUPPORTED_API_VERSIONS[0];
 
-        let test_config = KeylimeConfig {
-            agent: AgentConfig {
-                keylime_dir: tempdir.path().display().to_string(),
-                api_versions: old.to_string(),
-                ..Default::default()
-            },
+        let test_config = AgentConfig {
+            keylime_dir: tempdir.path().display().to_string(),
+            api_versions: old.to_string(),
+            ..Default::default()
         };
         let result = config_translate_keywords(&test_config);
         assert!(result.is_ok());
         let config = result.unwrap(); //#[allow_ci]
-        let version = config.agent.api_versions;
+        let version = config.api_versions;
         assert_eq!(version, old);
     }
 
@@ -1109,17 +984,15 @@ mod tests {
             tempfile::tempdir().expect("failed to create temporary dir");
         let old = SUPPORTED_API_VERSIONS[0];
 
-        let test_config = KeylimeConfig {
-            agent: AgentConfig {
-                keylime_dir: tempdir.path().display().to_string(),
-                api_versions: format!("a.b, {old}, c.d"),
-                ..Default::default()
-            },
+        let test_config = AgentConfig {
+            keylime_dir: tempdir.path().display().to_string(),
+            api_versions: format!("a.b, {old}, c.d"),
+            ..Default::default()
         };
         let result = config_translate_keywords(&test_config);
         assert!(result.is_ok());
         let config = result.unwrap(); //#[allow_ci]
-        let version = config.agent.api_versions;
+        let version = config.api_versions;
         assert_eq!(version, old);
     }
 
@@ -1129,17 +1002,15 @@ mod tests {
             tempfile::tempdir().expect("failed to create temporary dir");
         let old = SUPPORTED_API_VERSIONS;
 
-        let test_config = KeylimeConfig {
-            agent: AgentConfig {
-                keylime_dir: tempdir.path().display().to_string(),
-                api_versions: "a.b, c.d".to_string(),
-                ..Default::default()
-            },
+        let test_config = AgentConfig {
+            keylime_dir: tempdir.path().display().to_string(),
+            api_versions: "a.b, c.d".to_string(),
+            ..Default::default()
         };
         let result = config_translate_keywords(&test_config);
         assert!(result.is_ok());
         let config = result.unwrap(); //#[allow_ci]
-        let version = config.agent.api_versions;
+        let version = config.api_versions;
         assert_eq!(version, old.join(", "));
     }
 
@@ -1155,17 +1026,15 @@ mod tests {
             .collect::<Vec<_>>()
             .join(", ");
 
-        let test_config = KeylimeConfig {
-            agent: AgentConfig {
-                keylime_dir: tempdir.path().display().to_string(),
-                api_versions: reversed,
-                ..Default::default()
-            },
+        let test_config = AgentConfig {
+            keylime_dir: tempdir.path().display().to_string(),
+            api_versions: reversed,
+            ..Default::default()
         };
         let result = config_translate_keywords(&test_config);
         assert!(result.is_ok());
         let config = result.unwrap(); //#[allow_ci]
-        let version = config.agent.api_versions;
+        let version = config.api_versions;
         assert_eq!(version, old.join(", "));
     }
 
@@ -1189,26 +1058,15 @@ mod tests {
 
     #[test]
     fn test_agent_config_as_source() {
+        #[derive(Deserialize, Serialize)]
+        struct Wrapper {
+            agent: AgentConfig,
+        }
+
         let default = AgentConfig::default();
 
-        // Test that the AgentConfig can be used as a source for KeylimeConfig
-        let _config: KeylimeConfig = Config::builder()
-            .add_source(default)
-            .build()
-            .unwrap() //#[allow_ci]
-            .try_deserialize()
-            .unwrap(); //#[allow_ci]
-    }
-
-    #[cfg(feature = "testing")]
-    #[test]
-    fn test_keylime_config_as_source() {
-        let tempdir =
-            tempfile::tempdir().expect("failed to create temporary dir");
-        let default = get_testing_config(tempdir.path());
-
-        // Test that the KeylimeConfig can be used as a source for KeylimeConfig
-        let _config: KeylimeConfig = Config::builder()
+        // Test that the AgentConfig can be used as a source for AgentConfig
+        let _config: Wrapper = Config::builder()
             .add_source(default)
             .build()
             .unwrap() //#[allow_ci]
