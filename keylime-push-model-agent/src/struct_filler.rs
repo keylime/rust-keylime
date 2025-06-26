@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2025 Keylime Authors
 use keylime::algorithms::HashAlgorithm;
-use keylime::config::{KeylimeConfig, PushModelConfigTrait};
+use keylime::config::{AgentConfig, PushModelConfigTrait};
 use keylime::context_info::ContextInfo;
 use keylime::ima::ImaLog;
 use keylime::structures;
@@ -54,9 +54,10 @@ pub struct FillerFromHardware<'a> {
 impl<'a> FillerFromHardware<'a> {
     pub fn new(tpm_context_info: &'a mut ContextInfo) -> Self {
         // TODO: Change config obtaining here to avoid repetitions
-        let global_config = KeylimeConfig::new();
+        // TODO: Modify here to avoid panic on failure
+        let global_config = AgentConfig::new();
         let ml_path = match global_config {
-            Ok(config) => config.agent.measuredboot_ml_path.clone(),
+            Ok(config) => config.measuredboot_ml_path.clone(),
             Err(_) => "".to_string(),
         };
         let uefi_log_handler =
@@ -94,8 +95,10 @@ impl<'a> FillerFromHardware<'a> {
                 error!("Failed to get PCR banks for SHA256");
                 vec![]
             });
-        let default = KeylimeConfig::default();
-        let ima_log_parser = ImaLog::new(default.agent.ima_ml_path.as_str());
+        // TODO Modify this to not panic on failure
+        let default =
+            AgentConfig::new().expect("failed to load default config");
+        let ima_log_parser = ImaLog::new(default.ima_ml_path.as_str());
         let ima_log_count = match ima_log_parser {
             Ok(ima_log) => ima_log.entry_count(),
             Err(e) => {

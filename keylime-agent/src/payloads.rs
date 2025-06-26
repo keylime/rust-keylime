@@ -72,7 +72,7 @@ fn decrypt_payload(
 // writing out symmetric key and encrypted payload. returns file paths for
 // both.
 fn setup_unzipped(
-    config: &config::KeylimeConfig,
+    config: &config::AgentConfig,
     mount: &Path,
 ) -> Result<(PathBuf, PathBuf, PathBuf)> {
     let unzipped = mount.join("unzipped");
@@ -82,14 +82,14 @@ fn setup_unzipped(
         fs::remove_dir_all(&unzipped)?;
     }
 
-    match config.agent.dec_payload_file.as_ref() {
+    match config.dec_payload_file.as_ref() {
         "" => Err(config::KeylimeConfigError::RequiredOption(
             "dec_payload_path".to_string(),
         )
         .into()),
         p => {
             let dec_payload_path = unzipped.join(p);
-            match config.agent.enc_keyname.as_ref() {
+            match config.enc_keyname.as_ref() {
                 "" => Err(config::KeylimeConfigError::RequiredOption(
                     "enc_keyname".to_string(),
                 )
@@ -173,10 +173,10 @@ fn run(dir: &Path, script: &str) -> Result<()> {
 // the input string is the directory where the unzipped file(s) should be stored.
 fn optional_unzip_payload(
     unzipped: &Path,
-    config: &config::KeylimeConfig,
+    config: &config::AgentConfig,
 ) -> Result<()> {
-    if config.agent.extract_payload_zip {
-        match config.agent.dec_payload_file.as_ref() {
+    if config.extract_payload_zip {
+        match config.dec_payload_file.as_ref() {
             "" => {
                 warn!("Configuration option dec_payload_file not set, not unzipping payload");
             }
@@ -198,7 +198,7 @@ fn optional_unzip_payload(
 async fn run_encrypted_payload(
     symm_key: SymmKey,
     payload: EncryptedData,
-    config: &config::KeylimeConfig,
+    config: &config::AgentConfig,
     mount: &Path,
     revocation_tx: Sender<RevocationMessage>,
     #[cfg(feature = "with-zmq")] zmq_tx: Sender<ZmqMessage>,
@@ -217,7 +217,7 @@ async fn run_encrypted_payload(
 
     optional_unzip_payload(&unzipped, config)?;
     // there may also be also a separate init script
-    match config.agent.payload_script.as_ref() {
+    match config.payload_script.as_ref() {
         "" => {
             info!("No payload script specified, skipping");
         }
@@ -280,7 +280,7 @@ async fn run_encrypted_payload(
 }
 
 pub(crate) async fn worker(
-    config: config::KeylimeConfig,
+    config: config::AgentConfig,
     mount: impl AsRef<Path>,
     mut payload_rx: Receiver<PayloadMessage>,
     mut revocation_tx: Sender<RevocationMessage>,
@@ -332,7 +332,7 @@ mod tests {
         payloads,
     };
     use actix_rt::Arbiter;
-    use keylime::config::KeylimeConfig;
+    use keylime::config::AgentConfig;
     use std::{
         env, fs,
         path::{Path, PathBuf},
@@ -424,10 +424,9 @@ echo hello > test-output
         let (unzipped, dec_payload_path, key_path) = result.unwrap(); //#[allow_ci]
         assert!(unzipped.exists());
         assert!(
-            dec_payload_path
-                == unzipped.join(test_config.agent.dec_payload_file)
+            dec_payload_path == unzipped.join(test_config.dec_payload_file)
         );
-        assert!(key_path == unzipped.join(test_config.agent.enc_keyname));
+        assert!(key_path == unzipped.join(test_config.enc_keyname));
     }
 
     #[test]
@@ -454,11 +453,10 @@ echo hello > test-output
             .join("test-data")
             .join("payload.zip");
 
-        let dec_payload_file =
-            match test_config.agent.dec_payload_file.as_ref() {
-                "" => panic!("dec_payload_file not set by default"), //#[allow_ci]
-                f => f,
-            };
+        let dec_payload_file = match test_config.dec_payload_file.as_ref() {
+            "" => panic!("dec_payload_file not set by default"), //#[allow_ci]
+            f => f,
+        };
 
         let result = fs::copy(
             payload_path,
