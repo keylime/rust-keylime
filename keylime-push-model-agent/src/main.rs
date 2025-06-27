@@ -2,8 +2,10 @@
 // Copyright 2025 Keylime Authors
 use anyhow::{Context, Result};
 use clap::Parser;
-use keylime::config::PushModelConfigTrait;
-use keylime::context_info;
+use keylime::{
+    config::{AgentConfig, PushModelConfigTrait},
+    context_info,
+};
 use log::{debug, error, info};
 use std::time::Duration;
 mod json_dump;
@@ -128,14 +130,16 @@ fn get_client(args: &Args) -> Result<reqwest::Client> {
         .context("Failed to build plain HTTP client")
 }
 
-fn get_request_builder_from_method(
+fn get_request_builder_from_method<T: PushModelConfigTrait>(
+    config: &T,
     args: &Args,
 ) -> Result<reqwest::RequestBuilder> {
     let client = get_client(args)?;
     // TODO: Change config obtaining here to avoid repetitions
+    // TODO: refactor to avoid loading the configuration multiple times
     let agent_identifier = match &args.agent_identifier {
         Some(id) => id.clone(),
-        None => keylime::config::PushModelConfig::default().get_uuid(),
+        None => config.uuid().to_string(),
     };
     let url_args = url_selector::UrlArgs {
         verifier_url: args.verifier_url.clone(),
@@ -159,7 +163,10 @@ fn get_request_builder_from_method(
     }
 }
 
-async fn send_push_model_request(args: &Args) -> Result<ResponseInformation> {
+async fn send_push_model_request<T: PushModelConfigTrait>(
+    config: &T,
+    args: &Args,
+) -> Result<ResponseInformation> {
     let mut context_info = get_context(args).map_err(|e| {
         error!("Error obtaining context information: {}", e);
         e
@@ -185,7 +192,7 @@ async fn send_push_model_request(args: &Args) -> Result<ResponseInformation> {
             &filler.get_session_request(),
         ),
     };
-    let reqb = get_request_builder_from_method(args)?;
+    let reqb = get_request_builder_from_method(config, args)?;
     let reqcontent = json_value.unwrap().to_string();
     debug!("Request body: {:?}", reqcontent);
     let response = reqb
@@ -209,20 +216,24 @@ async fn send_push_model_request(args: &Args) -> Result<ResponseInformation> {
     Ok(rsp)
 }
 
-fn init_context(args: &Args) -> Result<()> {
+fn init_context<T: PushModelConfigTrait>(
+    config: &T,
+    args: &Args,
+) -> Result<()> {
     let result = GLOBAL_CONTEXT.set(
         || -> Result<Option<context_info::ContextInfo>> {
             if args.avoid_tpm.unwrap_or(false) {
                 return Ok(None);
             }
-            let config = keylime::config::PushModelConfig::default();
             debug!("Initializing unique TPM Context...");
             let context_info = context_info::ContextInfo::new_from_str(
                 context_info::AlgorithmConfigurationString {
-                    tpm_encryption_alg: config.get_tpm_encryption_alg(),
-                    tpm_hash_alg: config.get_tpm_hash_alg(),
-                    tpm_signing_alg: config.get_tpm_signing_alg(),
-                    agent_data_path: config.get_agent_data_path(),
+                    tpm_encryption_alg: config
+                        .tpm_encryption_alg()
+                        .to_string(),
+                    tpm_hash_alg: config.tpm_hash_alg().to_string(),
+                    tpm_signing_alg: config.tpm_signing_alg().to_string(),
+                    agent_data_path: config.agent_data_path().to_string(),
                 },
             )?;
             Ok(Some(context_info))
@@ -265,7 +276,8 @@ async fn run(args: &Args) -> Result<()> {
     debug!("Key file: {}", args.key);
     debug!("Insecure: {}", args.insecure.unwrap_or(false));
     debug!("Avoid TPM: {}", args.avoid_tpm.unwrap_or(false));
-    init_context(args)?;
+    let config = AgentConfig::new()?;
+    init_context(&config, args)?;
     let ctx_info = match get_context(args) {
         Ok(Some(context_info)) => Some(context_info),
         Ok(None) => {
@@ -277,13 +289,14 @@ async fn run(args: &Args) -> Result<()> {
             return Err(e);
         }
     };
-    let res = crate::registration::check_registration(ctx_info).await;
+    let res =
+        crate::registration::check_registration(&config, ctx_info).await;
     match res {
         Ok(_) => {}
         Err(ref e) => error!("Could not register appropriately: {}", e),
     }
 
-    let res = send_push_model_request(args).await;
+    let res = send_push_model_request(&config, args).await;
     match res {
         Ok(_) => {
             info!("Request sent successfully");
@@ -304,31 +317,39 @@ async fn main() -> Result<()> {
     run(&Args::parse()).await
 }
 
+#[cfg(feature = "testing")]
 #[cfg(test)]
 mod tests {
     use super::*;
     const TEST_TIMEOUT_MILLIS: u64 = 100;
 
+    use keylime::config::get_testing_config;
+
     #[actix_rt::test]
     async fn send_attestation_request_test() {
+        let tmpdir = tempfile::tempdir().expect("failed to create tmpdir");
+        let config = get_testing_config(tmpdir.path());
         for att_idx in [None, Some("1".to_string())] {
-            if (send_push_model_request(&Args {
-                api_version: Some("v3.0".to_string()),
-                avoid_tpm: Some(true),
-                verifier_url: "http://1.2.3.4:5678".to_string(),
-                registrar_url: "http://1.2.3.4:8888".to_string(),
-                timeout: TEST_TIMEOUT_MILLIS,
-                ca_certificate: "/tmp/does_not_exist.pem".to_string(),
-                certificate: "/tmp/does_not_exist.pem".to_string(),
-                key: "/tmp/does_not_exist.pem".to_string(),
-                insecure: Some(false),
-                agent_identifier: Some("12345678".to_string()),
-                json_file: None,
-                message_type: Some("Attestation".to_string()),
-                method: None,
-                attestation_index: att_idx,
-                session_index: None,
-            })
+            if (send_push_model_request(
+                &config,
+                &Args {
+                    api_version: Some("v3.0".to_string()),
+                    avoid_tpm: Some(true),
+                    verifier_url: "http://1.2.3.4:5678".to_string(),
+                    registrar_url: "http://1.2.3.4:8888".to_string(),
+                    timeout: TEST_TIMEOUT_MILLIS,
+                    ca_certificate: "/tmp/does_not_exist.pem".to_string(),
+                    certificate: "/tmp/does_not_exist.pem".to_string(),
+                    key: "/tmp/does_not_exist.pem".to_string(),
+                    insecure: Some(false),
+                    agent_identifier: Some("12345678".to_string()),
+                    json_file: None,
+                    message_type: Some("Attestation".to_string()),
+                    method: None,
+                    attestation_index: att_idx,
+                    session_index: None,
+                },
+            )
             .await)
                 .is_ok()
             {
@@ -339,23 +360,28 @@ mod tests {
 
     #[actix_rt::test]
     async fn send_attestation_request_test_no_cert_file() {
-        match send_push_model_request(&Args {
-            api_version: Some("v3.0".to_string()),
-            avoid_tpm: Some(true),
-            registrar_url: "http://1.2.3.4:8888".to_string(),
-            verifier_url: "https://1.2.3.4:5678".to_string(),
-            timeout: TEST_TIMEOUT_MILLIS,
-            ca_certificate: "/tmp/unexisting_cert_file".to_string(),
-            certificate: "/tmp/unexisting_cert_file".to_string(),
-            key: "/tmp/unexisting_key_file".to_string(),
-            insecure: Some(false),
-            agent_identifier: Some("12345678".to_string()),
-            json_file: None,
-            method: None,
-            message_type: Some("Attestation".to_string()),
-            attestation_index: None,
-            session_index: None,
-        })
+        let tmpdir = tempfile::tempdir().expect("failed to create tmpdir");
+        let config = get_testing_config(tmpdir.path());
+        match send_push_model_request(
+            &config,
+            &Args {
+                api_version: Some("v3.0".to_string()),
+                avoid_tpm: Some(true),
+                registrar_url: "http://1.2.3.4:8888".to_string(),
+                verifier_url: "https://1.2.3.4:5678".to_string(),
+                timeout: TEST_TIMEOUT_MILLIS,
+                ca_certificate: "/tmp/unexisting_cert_file".to_string(),
+                certificate: "/tmp/unexisting_cert_file".to_string(),
+                key: "/tmp/unexisting_key_file".to_string(),
+                insecure: Some(false),
+                agent_identifier: Some("12345678".to_string()),
+                json_file: None,
+                method: None,
+                message_type: Some("Attestation".to_string()),
+                attestation_index: None,
+                session_index: None,
+            },
+        )
         .await
         {
             Ok(_) => unreachable!(),
@@ -373,6 +399,8 @@ mod tests {
     #[actix_rt::test]
     async fn send_attestation_request_test_on_https() {
         use std::fs::File;
+        let tmpdir = tempfile::tempdir().expect("failed to create tmpdir");
+        let config = get_testing_config(tmpdir.path());
         let temp_workdir = tempfile::tempdir().unwrap(); //#[allow_ci]
         let ca_cert_file_path = temp_workdir.path().join("test_ca_cert_file");
         let _ca_cert_file = File::create(&ca_cert_file_path)
@@ -384,23 +412,26 @@ mod tests {
         let _key_file =
             File::create(&key_file_path).expect("Failed to create key file");
 
-        match send_push_model_request(&Args {
-            api_version: Some("3.0".to_string()),
-            avoid_tpm: Some(true),
-            registrar_url: "http://1.2.3.4:8888".to_string(),
-            verifier_url: "https://1.2.3.4:5678/".to_string(),
-            timeout: TEST_TIMEOUT_MILLIS,
-            ca_certificate: ca_cert_file_path.display().to_string(),
-            certificate: cert_file_path.display().to_string(),
-            key: key_file_path.display().to_string(),
-            insecure: Some(false),
-            agent_identifier: Some("12345678".to_string()),
-            json_file: None,
-            message_type: Some("Attestation".to_string()),
-            method: None,
-            attestation_index: None,
-            session_index: None,
-        })
+        match send_push_model_request(
+            &config,
+            &Args {
+                api_version: Some("3.0".to_string()),
+                avoid_tpm: Some(true),
+                registrar_url: "http://1.2.3.4:8888".to_string(),
+                verifier_url: "https://1.2.3.4:5678/".to_string(),
+                timeout: TEST_TIMEOUT_MILLIS,
+                ca_certificate: ca_cert_file_path.display().to_string(),
+                certificate: cert_file_path.display().to_string(),
+                key: key_file_path.display().to_string(),
+                insecure: Some(false),
+                agent_identifier: Some("12345678".to_string()),
+                json_file: None,
+                message_type: Some("Attestation".to_string()),
+                method: None,
+                attestation_index: None,
+                session_index: None,
+            },
+        )
         .await
         {
             Ok(_) => unreachable!(),
@@ -414,52 +445,59 @@ mod tests {
                 )
             }
         }
-        match send_push_model_request(&Args {
-            api_version: Some("3.0".to_string()),
-            avoid_tpm: Some(true),
-            registrar_url: "http://1.2.3.4:8888".to_string(),
-            verifier_url: "https://1.2.3.4:5678/".to_string(),
-            timeout: TEST_TIMEOUT_MILLIS,
-            ca_certificate: ca_cert_file_path.display().to_string(),
-            certificate: cert_file_path.display().to_string(),
-            key: key_file_path.display().to_string(),
-            insecure: Some(true),
-            agent_identifier: Some("12345678".to_string()),
-            attestation_index: None,
-            json_file: None,
-            message_type: Some("Attestation".to_string()),
-            method: None,
-            session_index: None,
-        })
+        match send_push_model_request(
+            &config,
+            &Args {
+                api_version: Some("3.0".to_string()),
+                avoid_tpm: Some(true),
+                registrar_url: "http://1.2.3.4:8888".to_string(),
+                verifier_url: "https://1.2.3.4:5678/".to_string(),
+                timeout: TEST_TIMEOUT_MILLIS,
+                ca_certificate: ca_cert_file_path.display().to_string(),
+                certificate: cert_file_path.display().to_string(),
+                key: key_file_path.display().to_string(),
+                insecure: Some(true),
+                agent_identifier: Some("12345678".to_string()),
+                attestation_index: None,
+                json_file: None,
+                message_type: Some("Attestation".to_string()),
+                method: None,
+                session_index: None,
+            },
+        )
         .await
         {
             Ok(_) => unreachable!(),
             Err(e) => {
                 assert!(e
                     .to_string()
-                    .contains("error sending request for url (https://1.2.3.4:5678/3.0/agents/12345678/attestations)"))
+                    .contains("error sending request for url (https://1.2.3.4:5678/3.0/agents/12345678/attestations)"),
+                    "expected string not found in {e:?}")
             }
         }
-        match send_push_model_request(&Args {
-            api_version: Some("3.0".to_string()),
-            avoid_tpm: Some(true),
-            registrar_url: "http://1.2.3.4:8888".to_string(),
-            verifier_url: "https://1.2.3.4:5678/".to_string(),
-            timeout: TEST_TIMEOUT_MILLIS,
-            ca_certificate: ca_cert_file_path.display().to_string(),
-            certificate: cert_file_path.display().to_string(),
-            key: key_file_path.display().to_string(),
-            insecure: Some(true),
-            agent_identifier: Some("12345678".to_string()),
-            json_file: Some(
-                "./test-data/evidence_supported_attestation_request.json"
-                    .to_string(),
-            ),
-            message_type: Some("Attestation".to_string()),
-            method: None,
-            attestation_index: None,
-            session_index: None,
-        })
+        match send_push_model_request(
+            &config,
+            &Args {
+                api_version: Some("3.0".to_string()),
+                avoid_tpm: Some(true),
+                registrar_url: "http://1.2.3.4:8888".to_string(),
+                verifier_url: "https://1.2.3.4:5678/".to_string(),
+                timeout: TEST_TIMEOUT_MILLIS,
+                ca_certificate: ca_cert_file_path.display().to_string(),
+                certificate: cert_file_path.display().to_string(),
+                key: key_file_path.display().to_string(),
+                insecure: Some(true),
+                agent_identifier: Some("12345678".to_string()),
+                json_file: Some(
+                    "./test-data/evidence_supported_attestation_request.json"
+                        .to_string(),
+                ),
+                message_type: Some("Attestation".to_string()),
+                method: None,
+                attestation_index: None,
+                session_index: None,
+            },
+        )
         .await
         {
             Ok(_) => unreachable!(),
@@ -473,8 +511,49 @@ mod tests {
 
     #[actix_rt::test]
     async fn send_evidence_handling_request_test() {
+        let tmpdir = tempfile::tempdir().expect("failed to create tmpdir");
+        let config = get_testing_config(tmpdir.path());
         for attestation_idx in [None, Some("3".to_string())] {
-            match send_push_model_request(&Args {
+            match send_push_model_request(
+                &config,
+                &Args {
+                    api_version: Some("3.0".to_string()),
+                    avoid_tpm: Some(true),
+                    registrar_url: "http://1.2.3.4:8888".to_string(),
+                    verifier_url: "https://1.2.3.4:5678/".to_string(),
+                    timeout: TEST_TIMEOUT_MILLIS,
+                    ca_certificate: "/tmp/does_not_exists.pem".to_string(),
+                    certificate: "/tmp/does_not_exists.pem".to_string(),
+                    key: "/tmp/does_not_exists.pem".to_string(),
+                    insecure: Some(true),
+                    agent_identifier: Some("12345678".to_string()),
+                    json_file: None,
+                    message_type: Some("EvidenceHandling".to_string()),
+                    method: None,
+                    attestation_index: attestation_idx,
+                    session_index: None,
+                },
+            )
+            .await
+            {
+                Ok(_) => unreachable!(),
+                Err(e) => {
+                    assert!(e
+                        .to_string()
+                        .contains("error sending request for url (https://1.2.3.4:5678/3.0/agents/12345678/attestations"),
+                        "expected string not found in {e:?}")
+                }
+            }
+        }
+    } // send_evidence_handling_request_test
+
+    #[actix_rt::test]
+    async fn send_session_request_test() {
+        let tmpdir = tempfile::tempdir().expect("failed to create tmpdir");
+        let config = get_testing_config(tmpdir.path());
+        match send_push_model_request(
+            &config,
+            &Args {
                 api_version: Some("3.0".to_string()),
                 avoid_tpm: Some(true),
                 registrar_url: "http://1.2.3.4:8888".to_string(),
@@ -486,68 +565,42 @@ mod tests {
                 insecure: Some(true),
                 agent_identifier: Some("12345678".to_string()),
                 json_file: None,
-                message_type: Some("EvidenceHandling".to_string()),
-                method: None,
-                attestation_index: attestation_idx,
+                message_type: Some("Session".to_string()),
+                method: Some("POST".to_string()),
+                attestation_index: None,
                 session_index: None,
-            })
-            .await
-            {
-                Ok(_) => unreachable!(),
-                Err(e) => {
-                    assert!(e
-                        .to_string()
-                        .contains("error sending request for url (https://1.2.3.4:5678/3.0/agents/12345678/attestations"))
-                }
-            }
-        }
-    } // send_evidence_handling_request_test
-
-    #[actix_rt::test]
-    async fn send_session_request_test() {
-        match send_push_model_request(&Args {
-            api_version: Some("3.0".to_string()),
-            avoid_tpm: Some(true),
-            registrar_url: "http://1.2.3.4:8888".to_string(),
-            verifier_url: "https://1.2.3.4:5678/".to_string(),
-            timeout: TEST_TIMEOUT_MILLIS,
-            ca_certificate: "/tmp/does_not_exists.pem".to_string(),
-            certificate: "/tmp/does_not_exists.pem".to_string(),
-            key: "/tmp/does_not_exists.pem".to_string(),
-            insecure: Some(true),
-            agent_identifier: Some("12345678".to_string()),
-            json_file: None,
-            message_type: Some("Session".to_string()),
-            method: Some("POST".to_string()),
-            attestation_index: None,
-            session_index: None,
-        })
+            },
+        )
         .await
         {
             Ok(_) => unreachable!(),
             Err(e) => {
                 assert!(e
                     .to_string()
-                    .contains("error sending request for url (https://1.2.3.4:5678/3.0/sessions)"))
+                    .contains("error sending request for url (https://1.2.3.4:5678/3.0/sessions)"),
+                    "expected string not found in {e:?}")
             }
         }
-        match send_push_model_request(&Args {
-            api_version: Some("3.0".to_string()),
-            avoid_tpm: Some(true),
-            registrar_url: "http://1.2.3.4:8888".to_string(),
-            verifier_url: "https://1.2.3.4:5678/".to_string(),
-            timeout: TEST_TIMEOUT_MILLIS,
-            ca_certificate: "/tmp/does_not_exists.pem".to_string(),
-            certificate: "/tmp/does_not_exists.pem".to_string(),
-            key: "/tmp/does_not_exists.pem".to_string(),
-            insecure: Some(true),
-            agent_identifier: Some("12345678".to_string()),
-            json_file: None,
-            message_type: Some("Session".to_string()),
-            method: Some("PATCH".to_string()),
-            attestation_index: None,
-            session_index: Some("2244668800".to_string()),
-        })
+        match send_push_model_request(
+            &config,
+            &Args {
+                api_version: Some("3.0".to_string()),
+                avoid_tpm: Some(true),
+                registrar_url: "http://1.2.3.4:8888".to_string(),
+                verifier_url: "https://1.2.3.4:5678/".to_string(),
+                timeout: TEST_TIMEOUT_MILLIS,
+                ca_certificate: "/tmp/does_not_exists.pem".to_string(),
+                certificate: "/tmp/does_not_exists.pem".to_string(),
+                key: "/tmp/does_not_exists.pem".to_string(),
+                insecure: Some(true),
+                agent_identifier: Some("12345678".to_string()),
+                json_file: None,
+                message_type: Some("Session".to_string()),
+                method: Some("PATCH".to_string()),
+                attestation_index: None,
+                session_index: Some("2244668800".to_string()),
+            },
+        )
         .await
         {
             Ok(_) => unreachable!(),
@@ -562,24 +615,29 @@ mod tests {
 
     #[actix_rt::test]
     async fn mockoon_based_test() {
+        let tmpdir = tempfile::tempdir().expect("failed to create tmpdir");
+        let config = get_testing_config(tmpdir.path());
         if std::env::var("MOCKOON").is_ok() {
-            match send_push_model_request(&Args {
-                api_version: None,
-                avoid_tpm: Some(true),
-                registrar_url: "http://1.2.3.4:8888".to_string(),
-                verifier_url: "http://localhost:3000".to_string(),
-                timeout: TEST_TIMEOUT_MILLIS,
-                ca_certificate: "/tmp/does_not_exist.pem".to_string(),
-                certificate: "/tmp/does_not_exist.pem".to_string(),
-                key: "/tmp/does_not_exist.pem".to_string(),
-                insecure: Some(false),
-                agent_identifier: Some("12345678".to_string()),
-                json_file: None,
-                message_type: Some("Attestation".to_string()),
-                method: Some("POST".to_string()),
-                attestation_index: None,
-                session_index: None,
-            })
+            match send_push_model_request(
+                &config,
+                &Args {
+                    api_version: None,
+                    avoid_tpm: Some(true),
+                    registrar_url: "http://1.2.3.4:8888".to_string(),
+                    verifier_url: "http://localhost:3000".to_string(),
+                    timeout: TEST_TIMEOUT_MILLIS,
+                    ca_certificate: "/tmp/does_not_exist.pem".to_string(),
+                    certificate: "/tmp/does_not_exist.pem".to_string(),
+                    key: "/tmp/does_not_exist.pem".to_string(),
+                    insecure: Some(false),
+                    agent_identifier: Some("12345678".to_string()),
+                    json_file: None,
+                    message_type: Some("Attestation".to_string()),
+                    method: Some("POST".to_string()),
+                    attestation_index: None,
+                    session_index: None,
+                },
+            )
             .await
             {
                 Ok(r) => {
@@ -589,23 +647,26 @@ mod tests {
                     unreachable!()
                 }
             }
-            match send_push_model_request(&Args {
-                api_version: Some("-1.2.3".to_string()),
-                avoid_tpm: Some(true),
-                registrar_url: "http://1.2.3.4:8888".to_string(),
-                verifier_url: "http://localhost:3000".to_string(),
-                timeout: TEST_TIMEOUT_MILLIS,
-                ca_certificate: "/tmp/does_not_exist.pem".to_string(),
-                certificate: "/tmp/does_not_exist.pem".to_string(),
-                key: "/tmp/does_not_exist.pem".to_string(),
-                insecure: Some(false),
-                agent_identifier: Some("12345678".to_string()),
-                json_file: None,
-                message_type: Some("Attestation".to_string()),
-                method: Some("POST".to_string()),
-                attestation_index: None,
-                session_index: None,
-            })
+            match send_push_model_request(
+                &config,
+                &Args {
+                    api_version: Some("-1.2.3".to_string()),
+                    avoid_tpm: Some(true),
+                    registrar_url: "http://1.2.3.4:8888".to_string(),
+                    verifier_url: "http://localhost:3000".to_string(),
+                    timeout: TEST_TIMEOUT_MILLIS,
+                    ca_certificate: "/tmp/does_not_exist.pem".to_string(),
+                    certificate: "/tmp/does_not_exist.pem".to_string(),
+                    key: "/tmp/does_not_exist.pem".to_string(),
+                    insecure: Some(false),
+                    agent_identifier: Some("12345678".to_string()),
+                    json_file: None,
+                    message_type: Some("Attestation".to_string()),
+                    method: Some("POST".to_string()),
+                    attestation_index: None,
+                    session_index: None,
+                },
+            )
             .await
             {
                 Ok(r) => {
@@ -615,23 +676,26 @@ mod tests {
                     unreachable!()
                 }
             }
-            match send_push_model_request(&Args {
-                api_version: None,
-                avoid_tpm: Some(true),
-                registrar_url: "http://1.2.3.4:8888".to_string(),
-                verifier_url: "http://localhost:3000".to_string(),
-                timeout: TEST_TIMEOUT_MILLIS,
-                ca_certificate: "/tmp/does_not_exist.pem".to_string(),
-                certificate: "/tmp/does_not_exist.pem".to_string(),
-                key: "/tmp/does_not_exist.pem".to_string(),
-                insecure: Some(false),
-                agent_identifier: None,
-                json_file: None,
-                message_type: Some("Session".to_string()),
-                method: Some("POST".to_string()),
-                attestation_index: None,
-                session_index: None,
-            })
+            match send_push_model_request(
+                &config,
+                &Args {
+                    api_version: None,
+                    avoid_tpm: Some(true),
+                    registrar_url: "http://1.2.3.4:8888".to_string(),
+                    verifier_url: "http://localhost:3000".to_string(),
+                    timeout: TEST_TIMEOUT_MILLIS,
+                    ca_certificate: "/tmp/does_not_exist.pem".to_string(),
+                    certificate: "/tmp/does_not_exist.pem".to_string(),
+                    key: "/tmp/does_not_exist.pem".to_string(),
+                    insecure: Some(false),
+                    agent_identifier: None,
+                    json_file: None,
+                    message_type: Some("Session".to_string()),
+                    method: Some("POST".to_string()),
+                    attestation_index: None,
+                    session_index: None,
+                },
+            )
             .await
             {
                 Ok(r) => {
@@ -641,23 +705,26 @@ mod tests {
                     unreachable!()
                 }
             }
-            match send_push_model_request(&Args {
-                api_version: None,
-                avoid_tpm: Some(true),
-                registrar_url: "http://1.2.3.4:8888".to_string(),
-                verifier_url: "http://localhost:3000".to_string(),
-                timeout: TEST_TIMEOUT_MILLIS,
-                ca_certificate: "/tmp/does_not_exist.pem".to_string(),
-                certificate: "/tmp/does_not_exist.pem".to_string(),
-                key: "/tmp/does_not_exist.pem".to_string(),
-                insecure: Some(false),
-                agent_identifier: None,
-                json_file: None,
-                message_type: Some("Session".to_string()),
-                method: Some("PATCH".to_string()),
-                attestation_index: None,
-                session_index: Some("12345678".to_string()),
-            })
+            match send_push_model_request(
+                &config,
+                &Args {
+                    api_version: None,
+                    avoid_tpm: Some(true),
+                    registrar_url: "http://1.2.3.4:8888".to_string(),
+                    verifier_url: "http://localhost:3000".to_string(),
+                    timeout: TEST_TIMEOUT_MILLIS,
+                    ca_certificate: "/tmp/does_not_exist.pem".to_string(),
+                    certificate: "/tmp/does_not_exist.pem".to_string(),
+                    key: "/tmp/does_not_exist.pem".to_string(),
+                    insecure: Some(false),
+                    agent_identifier: None,
+                    json_file: None,
+                    message_type: Some("Session".to_string()),
+                    method: Some("PATCH".to_string()),
+                    attestation_index: None,
+                    session_index: Some("12345678".to_string()),
+                },
+            )
             .await
             {
                 Ok(r) => {
@@ -708,6 +775,8 @@ mod tests {
 
     #[actix_rt::test]
     async fn create_request_builder_test() {
+        let tmpdir = tempfile::tempdir().expect("failed to create tmpdir");
+        let config = get_testing_config(tmpdir.path());
         for method in [
             "POST".to_string(),
             "PUT".to_string(),
@@ -732,8 +801,11 @@ mod tests {
                 attestation_index: None,
                 session_index: None,
             };
-            let reqb = get_request_builder_from_method(&args);
-            assert!(reqb.is_ok());
+            let reqb = get_request_builder_from_method(&config, &args);
+            assert!(
+                reqb.is_ok(),
+                "failed get_request_builder_from_method: {reqb:?}"
+            );
         }
     }
 
@@ -761,8 +833,11 @@ mod tests {
         assert!(res.await.is_ok());
     }
 
+    #[cfg(feature = "testing")]
     #[actix_rt::test]
     async fn test_context_with_avoid_tpm_flag() {
+        let tmpdir = tempfile::tempdir().expect("failed to create tmpdir");
+        let config = get_testing_config(tmpdir.path());
         let args = Args {
             api_version: None,
             avoid_tpm: Some(true),
@@ -781,7 +856,7 @@ mod tests {
             session_index: Some("12345678".to_string()),
         };
 
-        let init_res = init_context(&args);
+        let init_res = init_context(&config, &args);
         assert!(init_res.is_ok());
         let context_res = get_context(&args);
         assert!(context_res.is_ok());
