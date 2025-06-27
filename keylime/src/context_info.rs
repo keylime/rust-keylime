@@ -1,7 +1,7 @@
 use crate::{
     agent_data::AgentData,
     algorithms::{self, HashAlgorithm as KeylimeInternalHashAlgorithm},
-    config::{PushModelConfig, PushModelConfigTrait},
+    config::{AgentConfig, KeylimeConfigError, PushModelConfigTrait},
     hash_ek,
     structures::CertificationKey,
     tpm,
@@ -29,6 +29,10 @@ use tss_esapi::{
 
 #[derive(Debug, Error)]
 pub enum ContextInfoError {
+    /// Keylime configuration error
+    #[error("Configuration error")]
+    Configuration(#[from] KeylimeConfigError),
+
     /// Invalid algorithm
     #[error("Invalid Algorithm")]
     InvalidAlgorithm(#[from] algorithms::AlgorithmError),
@@ -332,13 +336,14 @@ impl ContextInfo {
     pub fn get_ak_certification_data(
         &self,
     ) -> Result<CertificationKey, ContextInfoError> {
-        let config = PushModelConfig::default();
+        let config = AgentConfig::new()?;
         Ok(CertificationKey {
             key_class: self.get_ak_key_class_str(),
             key_algorithm: self.get_ak_key_algorithm_str(),
             key_size: self.get_ak_key_size()?.into(),
             server_identifier: config
-                .get_certification_keys_server_identifier(),
+                .certification_keys_server_identifier()
+                .to_string(),
             local_identifier: self.get_ak_local_identifier_str()?,
             public: self.get_ak_public_key_as_base64()?,
         })

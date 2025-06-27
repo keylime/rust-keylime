@@ -1,28 +1,27 @@
 use anyhow::Result;
-use keylime::config::PushModelConfigTrait;
-use keylime::context_info::{AlgorithmConfigurationString, ContextInfo};
+use keylime::{config::PushModelConfigTrait, context_info::{AlgorithmConfigurationString, ContextInfo}};
 use log::debug;
 use std::sync::{Mutex, OnceLock};
 
 static GLOBAL_CONTEXT: OnceLock<Mutex<Result<ContextInfo, String>>> =
     OnceLock::new();
 
-pub fn init_context_info(avoid_tpm: bool) -> Result<()> {
+pub fn init_context_info<T: PushModelConfigTrait>(config: &T, avoid_tpm: bool) -> Result<()> {
     if avoid_tpm {
         debug!("TPM is avoided, skipping context initialization.");
         return Ok(());
     }
-
     let result = GLOBAL_CONTEXT.set(Mutex::new(
         (|| -> Result<ContextInfo, String> {
-            let config = keylime::config::PushModelConfig::default();
             debug!("Initializing unique TPM Context...");
             let context_info =
                 ContextInfo::new_from_str(AlgorithmConfigurationString {
-                    tpm_encryption_alg: config.get_tpm_encryption_alg(),
-                    tpm_hash_alg: config.get_tpm_hash_alg(),
-                    tpm_signing_alg: config.get_tpm_signing_alg(),
-                    agent_data_path: config.get_agent_data_path(),
+                    tpm_encryption_alg: config
+                        .tpm_encryption_alg()
+                        .to_string(),
+                    tpm_hash_alg: config.tpm_hash_alg().to_string(),
+                    tpm_signing_alg: config.tpm_signing_alg().to_string(),
+                    agent_data_path: config.agent_data_path().to_string(),
                 })
                 .map_err(|e| e.to_string())?;
 

@@ -2,7 +2,7 @@
 // Copyright 2025 Keylime Authors
 use anyhow::Result;
 use clap::Parser;
-use keylime::config::PushModelConfigTrait;
+use keylime::config::AgentConfig;
 use log::{debug, error, info};
 mod attestation;
 mod context_info_handler;
@@ -110,9 +110,10 @@ async fn run(args: &Args) -> Result<()> {
     debug!("Certificate file: {}", args.certificate);
     debug!("Key file: {}", args.key);
     debug!("Insecure: {}", args.insecure.unwrap_or(false));
+    let config = AgentConfig::new()?;
     let avoid_tpm = get_avoid_tpm_from_args(args);
     debug!("Avoid TPM: {}", avoid_tpm);
-    context_info_handler::init_context_info(avoid_tpm)?;
+    context_info_handler::init_context_info(&config, avoid_tpm)?;
     let ctx_info = match context_info_handler::get_context_info(avoid_tpm) {
         Ok(Some(context_info)) => Some(context_info),
         Ok(None) => {
@@ -124,14 +125,15 @@ async fn run(args: &Args) -> Result<()> {
             return Err(e);
         }
     };
-    let res = crate::registration::check_registration(ctx_info).await;
+    let res =
+        crate::registration::check_registration(&config, ctx_info).await;
     match res {
         Ok(_) => {}
         Err(ref e) => error!("Could not register appropriately: {}", e),
     }
     let agent_identifier = match &args.agent_identifier {
         Some(id) => id.clone(),
-        None => keylime::config::PushModelConfig::default().get_uuid(),
+        None => config.uuid.to_string(),
     };
     let negotiations_request_url =
         url_selector::get_negotiations_request_url(&url_selector::UrlArgs {
@@ -227,6 +229,7 @@ async fn main() -> Result<()> {
     run(&Args::parse()).await
 }
 
+#[cfg(feature = "testing")]
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -255,6 +258,7 @@ mod tests {
         assert!(res.await.is_err());
     }
 
+    #[cfg(feature = "testing")]
     #[actix_rt::test]
     async fn avoid_tpm_test() {
         // Set arguments to avoid TPM
