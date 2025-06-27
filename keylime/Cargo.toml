@@ -17,6 +17,7 @@ config.workspace = true
 glob.workspace = true
 hex.workspace = true
 libc.workspace = true
+keylime-macros.workspace = true
 log.workspace = true
 once_cell.workspace = true
 openssl.workspace = true
