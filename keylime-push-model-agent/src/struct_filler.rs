@@ -669,6 +669,7 @@ mod tests {
                 tpm_hash_alg: config.tpm_hash_alg().to_string(),
                 tpm_signing_alg: config.tpm_signing_alg().to_string(),
                 agent_data_path: "".to_string(),
+                disabled_signing_algorithms: vec![],
             },
         )
         .expect("Failed to create context info from string");
@@ -693,6 +694,7 @@ mod tests {
                 tpm_hash_alg: config.tpm_hash_alg().to_string(),
                 tpm_signing_alg: config.tpm_signing_alg().to_string(),
                 agent_data_path: "".to_string(),
+                disabled_signing_algorithms: vec![],
             },
         )
         .expect("Failed to create context info from string");
@@ -717,6 +719,7 @@ mod tests {
                 tpm_hash_alg: config.tpm_hash_alg().to_string(),
                 tpm_signing_alg: config.tpm_signing_alg().to_string(),
                 agent_data_path: "".to_string(),
+                disabled_signing_algorithms: vec![],
             },
         )
         .expect("Failed to create context info from string");
