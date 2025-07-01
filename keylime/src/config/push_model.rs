@@ -36,6 +36,7 @@ pub struct PushModelConfig {
     certification_keys_server_identifier: String,
     contact_ip: String,
     contact_port: u32,
+    disabled_signing_algorithms: Vec<String>,
     enable_iak_idevid: bool,
     #[transform(using = override_default_ek_handle, error = OverrideError)]
     ek_handle: String,

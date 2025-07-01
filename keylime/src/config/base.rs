@@ -84,6 +84,7 @@ pub static DEFAULT_SERVER_KEY_PASSWORD: &str = "";
 pub static DEFAULT_TRUSTED_CLIENT_CA: &str = "cv_ca/cacert.crt";
 
 // Push attestation agent option defaults
+pub const DEFAULT_DISABLED_SIGNING_ALGORITHMS: &[&str] = &["ecschnorr"];
 pub const DEFAULT_IMA_LOGS_APPENDABLE: bool = true;
 pub const DEFAULT_IMA_LOGS_FORMATS: &str = "text/plain";
 pub const DEFAULT_IMA_LOGS_SUPPORTS_PARTIAL_ACCESS: bool = true;
@@ -106,6 +107,7 @@ pub static DEFAULT_PUSH_EK_HANDLE: &str = "";
 pub struct AgentConfig {
     pub agent_data_path: String,
     pub api_versions: String,
+    pub disabled_signing_algorithms: Vec<String>,
     pub ek_handle: String,
     pub enable_iak_idevid: bool,
     pub iak_cert: String,
@@ -251,6 +253,10 @@ impl Default for AgentConfig {
             contact_ip: DEFAULT_CONTACT_IP.to_string(),
             contact_port: DEFAULT_CONTACT_PORT,
             dec_payload_file: DEFAULT_DEC_PAYLOAD_FILE.to_string(),
+            disabled_signing_algorithms: DEFAULT_DISABLED_SIGNING_ALGORITHMS
+                .iter()
+                .map(|s| s.to_string())
+                .collect(),
             ek_handle: DEFAULT_EK_HANDLE.to_string(),
             enable_agent_mtls: DEFAULT_ENABLE_AGENT_MTLS,
             enable_iak_idevid: DEFAULT_ENABLE_IAK_IDEVID,
