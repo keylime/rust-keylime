@@ -33,6 +33,8 @@ pub static DEFAULT_UEFI_LOGS_BINARY_FILE_PATH: Lazy<String> =
         )
     });
 
+pub const DEFAULT_PROHIBITED_SIGNING_ALGORITHMS: &[&str] = &["ecschnorr"];
+
 pub trait PushModelConfigTrait {
     fn get_agent_data_path(&self) -> String;
     fn get_certification_keys_server_identifier(&self) -> String;
@@ -45,6 +47,7 @@ pub trait PushModelConfigTrait {
     fn get_ima_logs_supports_partial_access(&self) -> bool;
     fn get_ima_ml_directory_path(&self) -> String;
     fn get_ima_ml_count_file(&self) -> String;
+    fn get_prohibited_signing_algorithms(&self) -> Vec<String>;
     fn get_registrar_ip(&self) -> String;
     fn get_registrar_port(&self) -> u32;
     fn get_server_cert(&self) -> String;
@@ -85,6 +88,11 @@ impl Default for PushModelConfig {
                 .to_string()
                 .clone(),
             ima_ml_count_file: DEFAULT_IMA_ML_COUNT_FILE.to_string().clone(),
+            prohibited_signing_algorithms:
+                DEFAULT_PROHIBITED_SIGNING_ALGORITHMS
+                    .iter()
+                    .map(|&s| s.to_string())
+                    .collect(),
             registrar_ip: DEFAULT_REGISTRAR_IP.to_string(),
             registrar_port: DEFAULT_REGISTRAR_PORT,
             registrar_api_versions: DEFAULT_REGISTRAR_API_VERSIONS
@@ -130,6 +138,7 @@ pub struct PushModelConfig {
     ima_logs_supports_partial_access: bool,
     ima_ml_directory_path: String,
     ima_ml_count_file: String,
+    prohibited_signing_algorithms: Vec<String>,
     registrar_api_versions: Vec<String>,
     registrar_ip: String,
     registrar_port: u32,
@@ -196,6 +205,10 @@ impl PushModelConfigTrait for PushModelConfig {
 
     fn get_ima_ml_directory_path(&self) -> String {
         self.ima_ml_directory_path.clone()
+    }
+
+    fn get_prohibited_signing_algorithms(&self) -> Vec<String> {
+        self.prohibited_signing_algorithms.clone()
     }
 
     fn get_registrar_ip(&self) -> String {
@@ -270,6 +283,7 @@ impl PushModelConfigTrait for PushModelConfig {
             enable_iak_idevid: {}, ek_handle: {},
             ima_logs_appendable: {}, ima_logs_formats: {:?}, ima_logs_supports_partial_access: {},
             ima_ml_directory_path: {}, ima_ml_count_file: {},
+            prohibited_signing_algorithms: {:?},
             registrar_ip: {}, registrar_port: {}, server_cert: {},
             server_key: {}, server_key_password: {},
             uefi_logs_binary_file_path: {},
@@ -288,6 +302,7 @@ impl PushModelConfigTrait for PushModelConfig {
             self.ima_logs_supports_partial_access,
             self.ima_ml_directory_path,
             self.ima_ml_count_file,
+            self.prohibited_signing_algorithms,
             self.registrar_ip,
             self.registrar_port,
             self.server_cert,
@@ -385,6 +400,13 @@ mod tests {
                 == DEFAULT_REGISTRAR_API_VERSIONS
         );
         assert!(pmc.get_uuid() == DEFAULT_UUID);
+        assert!(
+            pmc.get_prohibited_signing_algorithms()
+                == DEFAULT_PROHIBITED_SIGNING_ALGORITHMS
+                    .iter()
+                    .map(|&s| s.to_string())
+                    .collect::<Vec<String>>()
+        );
     } // create_default_config_test
 
     #[test]
@@ -435,5 +457,7 @@ mod tests {
         assert!(display_string
             .contains(&pmc.get_registrar_api_versions().join(", ")));
         assert!(display_string.contains(&pmc.get_uuid()));
+        assert!(display_string
+            .contains(&pmc.get_prohibited_signing_algorithms().join(", ")));
     }
 }

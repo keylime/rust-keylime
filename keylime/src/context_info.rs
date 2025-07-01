@@ -57,6 +57,7 @@ pub struct AlgorithmConfiguration {
     pub tpm_hash_alg: algorithms::HashAlgorithm,
     pub tpm_signing_alg: algorithms::SignAlgorithm,
     pub agent_data_path: String,
+    pub prohibited_signing_algorithms: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -65,6 +66,7 @@ pub struct AlgorithmConfigurationString {
     pub tpm_hash_alg: String,
     pub tpm_signing_alg: String,
     pub agent_data_path: String,
+    pub prohibited_signing_algorithms: Vec<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -78,6 +80,7 @@ pub struct ContextInfo {
     pub ek_handle: KeyHandle,
     pub ak: tpm::AKResult,
     pub ak_handle: KeyHandle,
+    pub prohibited_signing_algorithms: Vec<String>,
 }
 
 impl ContextInfo {
@@ -98,6 +101,9 @@ impl ContextInfo {
             tpm_hash_alg,
             tpm_signing_alg,
             agent_data_path: config.agent_data_path,
+            prohibited_signing_algorithms: config
+                .prohibited_signing_algorithms
+                .clone(),
         })
     }
 
@@ -177,6 +183,9 @@ impl ContextInfo {
             ek_handle,
             ak,
             ak_handle,
+            prohibited_signing_algorithms: config
+                .prohibited_signing_algorithms
+                .clone(),
         })
     }
 
@@ -222,9 +231,14 @@ impl ContextInfo {
     pub fn get_supported_signing_schemes(
         &mut self,
     ) -> Result<Vec<String>, ContextInfoError> {
-        Ok(self
+        let mut supported_algs = self
             .tpm_context
-            .get_supported_signing_algorithms_as_strings()?)
+            .get_supported_signing_algorithms_as_strings()?;
+        let prohibited_signing_algorithms =
+            self.prohibited_signing_algorithms.clone();
+        supported_algs
+            .retain(|alg| !prohibited_signing_algorithms.contains(alg));
+        Ok(supported_algs)
     }
 
     pub fn get_key_algorithm(&self) -> String {
@@ -346,6 +360,7 @@ mod tests {
             tpm_signing_alg: "rsassa".to_string(),
             // Leave empty to test creation path without persistence
             agent_data_path: "".to_string(),
+            prohibited_signing_algorithms: vec![],
         };
         let mut context_info = ContextInfo::new_from_str(config)
             .expect("Failed to create context from string");
@@ -363,6 +378,7 @@ mod tests {
             tpm_hash_alg: "sha256".to_string(),
             tpm_signing_alg: "rsassa".to_string(),
             agent_data_path: "".to_string(), // Don't use persistence for this test
+            prohibited_signing_algorithms: vec![],
         };
         let mut context_info = ContextInfo::new_from_str(config)
             .expect("Failed to create context from string");
@@ -398,6 +414,7 @@ mod tests {
             tpm_hash_alg: "sha256".to_string(),
             tpm_signing_alg: "rsassa".to_string(),
             agent_data_path: data_path.to_str().unwrap().to_string(), //#[allow_ci]
+            prohibited_signing_algorithms: vec![],
         };
 
         // First run: should create and store the AK
@@ -434,6 +451,7 @@ mod tests {
             tpm_hash_alg: "sha256".to_string(),
             tpm_signing_alg: "rsassa".to_string(),
             agent_data_path: "".to_string(),
+            prohibited_signing_algorithms: vec![],
         };
         let r = ContextInfo::new_from_str(config);
         assert!(r.is_err());
@@ -448,6 +466,7 @@ mod tests {
             tpm_hash_alg: "bad-hash".to_string(),
             tpm_signing_alg: "rsassa".to_string(),
             agent_data_path: "".to_string(),
+            prohibited_signing_algorithms: vec![],
         };
         let r = ContextInfo::new_from_str(config);
         assert!(r.is_err());
@@ -462,6 +481,7 @@ mod tests {
             tpm_hash_alg: "sha256".to_string(),
             tpm_signing_alg: "bad-signing-alg".to_string(),
             agent_data_path: "".to_string(),
+            prohibited_signing_algorithms: vec![],
         };
         let r = ContextInfo::new_from_str(config);
         assert!(r.is_err());
@@ -477,6 +497,7 @@ mod tests {
             tpm_hash_alg: "sha256".to_string(),
             tpm_signing_alg: "rsassa".to_string(),
             agent_data_path: "".to_string(),
+            prohibited_signing_algorithms: vec![],
         };
         let mut context_info = ContextInfo::new_from_str(config)
             .expect("Failed to create context from string");
@@ -507,6 +528,7 @@ mod tests {
             tpm_hash_alg: "sha256".to_string(),
             tpm_signing_alg: "rsassa".to_string(),
             agent_data_path: data_path.to_str().unwrap().to_string(), //#[allow_ci]
+            prohibited_signing_algorithms: vec![],
         };
         let ak_name_1 = {
             let mut context_info_1 =
@@ -523,6 +545,7 @@ mod tests {
             tpm_hash_alg: "sha384".to_string(),
             tpm_signing_alg: "rsassa".to_string(),
             agent_data_path: data_path.to_str().unwrap().to_string(), //#[allow_ci]
+            prohibited_signing_algorithms: vec![],
         };
         let ak_name_2 = {
             let mut context_info_2 =
@@ -554,6 +577,7 @@ mod tests {
             tpm_hash_alg: "sha256".to_string(),
             tpm_signing_alg: "rsassa".to_string(),
             agent_data_path: data_path.to_str().unwrap().to_string(), //#[allow_ci]
+            prohibited_signing_algorithms: vec![],
         };
 
         // The creation should not fail, but gracefully create a new key.
