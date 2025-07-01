@@ -19,7 +19,6 @@ use std::{
 use thiserror::Error;
 use tss_esapi::handles::SessionHandle;
 use tss_esapi::interface_types::session_handles::PolicySession;
-use tss_esapi::structures::{DigestList, SymmetricDefinition};
 
 use openssl::{
     hash::{Hasher, MessageDigest},
@@ -54,13 +53,14 @@ use tss_esapi::{
         structure_tags::AttestationType,
     },
     structures::{
-        Attest, AttestInfo, Auth, CapabilityData, Data, Digest, DigestValues,
-        EccParameter, EccPoint, EccScheme, EncryptedSecret, HashScheme,
-        IdObject, KeyDerivationFunctionScheme, Name, PcrSelectionList,
-        PcrSelectionListBuilder, PcrSlot, Private as TssPrivate,
-        Public as TssPublic, PublicBuilder, PublicEccParametersBuilder,
-        PublicKeyRsa, PublicRsaParametersBuilder, RsaExponent, RsaScheme,
-        Signature, SignatureScheme, SymmetricDefinitionObject, Ticket,
+        Attest, AttestInfo, Auth, CapabilityData, Data, Digest, DigestList,
+        DigestValues, EccParameter, EccPoint, EccScheme, EncryptedSecret,
+        HashScheme, IdObject, KeyDerivationFunctionScheme, Name,
+        PcrSelectionList, PcrSelectionListBuilder, PcrSlot,
+        Private as TssPrivate, Public as TssPublic, PublicBuilder,
+        PublicEccParametersBuilder, PublicKeyRsa, PublicRsaParametersBuilder,
+        RsaExponent, RsaScheme, Signature, SignatureScheme,
+        SymmetricDefinition, SymmetricDefinitionObject, Ticket,
         VerifiedTicket,
     },
     tcti_ldr::TctiNameConf,
@@ -1665,28 +1665,41 @@ impl Context<'_> {
         &mut self,
         expected_hash_algorithm: HashAlgorithm,
     ) -> Result<Vec<u32>> {
-        let mut selected_pcr_numbers: Vec<u32> = Vec::new();
         let hashing_algorithm = crate::algorithms::hash_to_hashing_algorithm(
             expected_hash_algorithm,
         );
-        let pcr_selection_list =
-            self.get_pcr_selection_list(hashing_algorithm)?;
+        let pcrs_to_select: Vec<PcrSlot> = (0..24)
+            .map(|i| PcrSlot::try_from(1 << i))
+            .filter_map(|result| result.ok())
+            .collect();
+
+        let pcr_selection_list = PcrSelectionListBuilder::new()
+            .with_selection(hashing_algorithm, &pcrs_to_select)
+            .build()
+            .map_err(|e| TpmError::TSSPCRSelectionBuildError { source: e })?;
+
+        let mut selected_pcr_numbers: Vec<u32> = Vec::new();
+
         for selection in pcr_selection_list.get_selections() {
             if selection.hashing_algorithm() == hashing_algorithm {
                 let selected_slots = selection.selected();
                 for pcr_slot in selected_slots {
                     let pcr_mask_value: u32 = pcr_slot.into();
-                    if pcr_mask_value > 0 {
-                        let pcr_index = pcr_mask_value.trailing_zeros();
-                        selected_pcr_numbers.push(pcr_index);
+                    for i in 0..24 {
+                        if (pcr_mask_value >> i) & 1 == 1 {
+                            selected_pcr_numbers.push(i);
+                        }
                     }
                 }
-                let mut sorted_pcr_numbers: Vec<u32> =
-                    selected_pcr_numbers.into_iter().collect();
-                sorted_pcr_numbers.sort_unstable();
-                return Ok(sorted_pcr_numbers);
             }
         }
+
+        if !selected_pcr_numbers.is_empty() {
+            selected_pcr_numbers.sort_unstable();
+            selected_pcr_numbers.dedup();
+            return Ok(selected_pcr_numbers);
+        }
+
         Err(TpmError::TSSPCRSelectionBuildError {
             source: tss_esapi::Error::WrapperError(
                 tss_esapi::WrapperErrorKind::InvalidParam,
