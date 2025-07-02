@@ -248,7 +248,7 @@ impl ContextInfo {
     }
 
     pub fn get_ak_key_algorithm_str(&self) -> String {
-        self.tpm_signing_alg.to_string()
+        self.tpm_encryption_alg.to_string()
     }
 
     pub fn get_ak_public_enum_ref(&self) -> &TssPublic {
