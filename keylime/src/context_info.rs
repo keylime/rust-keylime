@@ -11,6 +11,12 @@ use base64::{
 };
 use hex;
 use openssl::hash::{Hasher, MessageDigest};
+use openssl::{
+    bn::BigNum,
+    pkey::{PKey, Public},
+    rsa::Rsa,
+};
+use std::collections::HashMap;
 use std::path::Path;
 use thiserror::Error;
 use tss_esapi::{
@@ -78,6 +84,22 @@ pub struct ContextInfo {
     pub ek_handle: KeyHandle,
     pub ak: tpm::AKResult,
     pub ak_handle: KeyHandle,
+}
+
+#[derive(Debug, Clone)]
+pub struct AttestationRequiredParams {
+    pub challenge: String,
+    pub signature_scheme: String,
+    pub hash_algorithm: String,
+    pub selected_subjects: HashMap<String, Vec<u32>>,
+}
+
+#[derive(Debug, Clone)]
+pub struct AttestationEvidence {
+    pub quote_message: String,
+    pub quote_signature: String,
+    // pub ima_log: String, # TODO: Implement IMA log collection
+    // pub uefi_log: String, # TODO: Implement UEFI log collection
 }
 
 impl ContextInfo {
@@ -305,7 +327,6 @@ impl ContextInfo {
         Ok(base64_standard.encode(&public_key_bytes))
     }
 
-    /// Gathers all information for a single AK entry in the "certification_keys" array.
     pub fn get_ak_certification_data(
         &self,
     ) -> Result<CertificationKey, ContextInfoError> {
@@ -318,6 +339,78 @@ impl ContextInfo {
                 .get_certification_keys_server_identifier(),
             local_identifier: self.get_ak_local_identifier_str()?,
             public: self.get_ak_public_key_as_base64()?,
+        })
+    }
+
+    fn build_openssl_pkey_from_params(
+        &self,
+    ) -> Result<PKey<Public>, ContextInfoError> {
+        let tss_pub = self.get_ak_public_ref().clone(); // Clonamos para tener propiedad
+
+        if let TssPublic::Rsa {
+            unique, parameters, ..
+        } = tss_pub
+        {
+            let n = BigNum::from_slice(unique.value())?;
+            let exponent_val: u32 = parameters.exponent().into();
+            let e_val = if exponent_val == 0 {
+                65537
+            } else {
+                exponent_val
+            };
+            let e = BigNum::from_u32(e_val)?;
+            let rsa = Rsa::from_public_components(n, e)?;
+            let pkey = PKey::from_rsa(rsa)?;
+            Ok(pkey)
+        } else {
+            Err(ContextInfoError::UnsupportedAKType)
+        }
+    }
+
+    pub fn perform_attestation(
+        &mut self,
+        params: &AttestationRequiredParams,
+    ) -> Result<AttestationEvidence, ContextInfoError> {
+        let sign_alg_enum = algorithms::SignAlgorithm::try_from(
+            params.signature_scheme.as_str(),
+        )?;
+        let hash_alg_enum = algorithms::HashAlgorithm::try_from(
+            params.hash_algorithm.as_str(),
+        )?;
+        let mut pcr_mask: u32 = 0;
+        if let Some(pcr_indices) =
+            params.selected_subjects.get(&params.hash_algorithm)
+        {
+            for &pcr_index in pcr_indices {
+                pcr_mask |= 1 << pcr_index;
+            }
+        }
+        let pubkey_for_quote = self.build_openssl_pkey_from_params()?;
+
+        let full_quote_str = self.tpm_context.quote(
+            params.challenge.as_bytes(),
+            pcr_mask,
+            &pubkey_for_quote,
+            self.ak_handle,
+            hash_alg_enum,
+            sign_alg_enum,
+        )?;
+
+        let parts: Vec<&str> = full_quote_str.split(':').collect();
+        if parts.len() < 2 {
+            let msg = "Invalid quote format received from TPM".to_string();
+            return Err(ContextInfoError::Keylime(msg));
+        }
+
+        let quote_message =
+            parts[0].strip_prefix('r').unwrap_or(parts[0]).to_string();
+
+        let quote_signature = parts[1].to_string();
+
+        // TODO: Implement IMA and UEFI log collection
+        Ok(AttestationEvidence {
+            quote_message,
+            quote_signature,
         })
     }
 }
@@ -567,5 +660,74 @@ mod tests {
             .unwrap() //#[allow_ci]
             .is_empty());
         context_info.flush_context().unwrap(); //#[allow_ci]
+    }
+
+    #[tokio::test]
+    #[cfg(feature = "testing")]
+    async fn test_perform_attestation() {
+        use crate::tpm::testing;
+        let _mutex = testing::lock_tests().await;
+        let config = AlgorithmConfigurationString {
+            tpm_encryption_alg: "rsa".to_string(),
+            tpm_hash_alg: "sha256".to_string(),
+            tpm_signing_alg: "rsassa".to_string(),
+            agent_data_path: "".to_string(),
+        };
+        let context_result = ContextInfo::new_from_str(config);
+        assert!(context_result.is_ok());
+
+        let mut subjects = HashMap::new();
+        subjects
+            .insert("sha256".to_string(), vec![0, 1, 2, 3, 4, 5, 6, 7, 10]);
+
+        let params = AttestationRequiredParams {
+            challenge: "test_challenge".to_string(),
+            signature_scheme: "rsassa".to_string(),
+            hash_algorithm: "sha256".to_string(),
+            selected_subjects: subjects,
+        };
+        let mut context_info = context_result.unwrap(); //#[allow_ci]
+        let result = context_info.perform_attestation(&params);
+        assert!(result.is_ok());
+        let evidence = result.unwrap(); //#[allow_ci]
+        assert!(!evidence.quote_message.is_empty());
+        assert!(!evidence.quote_signature.is_empty());
+        context_info.flush_context().unwrap(); //#[allow_ci]
+    }
+
+    #[tokio::test]
+    #[cfg(feature = "testing")]
+    async fn test_perform_attestation_with_invalid_algs() {
+        use crate::tpm::testing;
+        let _mutex = testing::lock_tests().await;
+        let config = AlgorithmConfigurationString {
+            tpm_encryption_alg: "rsa".to_string(),
+            tpm_hash_alg: "sha256".to_string(),
+            tpm_signing_alg: "rsassa".to_string(),
+            agent_data_path: "".to_string(),
+        };
+
+        let context_result = ContextInfo::new_from_str(config);
+        assert!(context_result.is_ok());
+        let mut context_info = context_result.unwrap(); //#[allow_ci]
+
+        let mut subjects = HashMap::new();
+        subjects.insert("sha256".to_string(), vec![10]);
+
+        let params = AttestationRequiredParams {
+            challenge: "test_challenge".to_string(),
+            signature_scheme: "invalid-algorithm".to_string(),
+            hash_algorithm: "sha256".to_string(),
+            selected_subjects: subjects,
+        };
+
+        let result = context_info.perform_attestation(&params);
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            ContextInfoError::InvalidAlgorithm(
+                algorithms::AlgorithmError::UnsupportedSigningAlgorithm(_)
+            )
+        ));
     }
 }
