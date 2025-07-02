@@ -2,12 +2,11 @@
 // Copyright 2025 Keylime Authors
 pub const DEFAULT_API_VERSION: &str = "v3.0";
 const DEFAULT_INDEX: &str = "1";
-use crate::MessageType;
 
 pub struct UrlArgs {
     pub verifier_url: String,
-    pub api_version: Option<String>,
     pub agent_identifier: Option<String>,
+    pub api_version: Option<String>,
     pub attestation_index: Option<String>,
     pub session_index: Option<String>,
 }
@@ -26,56 +25,38 @@ fn get_api_version(args: &UrlArgs) -> String {
     DEFAULT_API_VERSION.to_string()
 }
 
-pub fn get_url_from_message_type(
-    url_args: &UrlArgs,
-    message_type: &MessageType,
+pub fn get_negotiations_request_url(args: &UrlArgs) -> String {
+    let id = match args.agent_identifier {
+        Some(ref identifier) => identifier.clone(),
+        None => return "ERROR: No agent identifier provided".to_string(),
+    };
+    let verifier_url = args.verifier_url.clone();
+    let api_version = get_api_version(args);
+    if verifier_url.ends_with('/') {
+        return format!(
+            "{verifier_url}{api_version}/agents/{id}/attestations"
+        );
+    }
+    format!("{verifier_url}/{api_version}/agents/{id}/attestations")
+}
+
+#[allow(dead_code)]
+pub fn get_evidence_handling_request_url(args: &UrlArgs) -> String {
+    let id = args.agent_identifier.clone().unwrap();
+    let verifier_url = args.verifier_url.clone();
+    let api_version = get_api_version(args);
+    if verifier_url.ends_with('/') {
+        return format!(
+            "{verifier_url}{api_version}/agents/{id}/attestations"
+        );
+    }
+    format!("{verifier_url}/{api_version}/agents/{id}/attestations")
+}
+
+#[allow(dead_code)]
+pub fn get_evidence_handling_request_url_with_index(
+    args: &UrlArgs,
 ) -> String {
-    match message_type {
-        MessageType::Attestation => get_attestation_request_url(url_args),
-        MessageType::EvidenceHandling => {
-            if url_args.attestation_index.is_some() {
-                get_evidence_handling_request_url_with_index(url_args)
-            } else {
-                get_evidence_handling_request_url(url_args)
-            }
-        }
-        MessageType::Session => get_session_request_url(url_args),
-    }
-}
-
-fn get_index_suffix(args: &UrlArgs) -> String {
-    let index = get_attestation_index(args);
-    if args.attestation_index.is_some() {
-        return format!("/{index}");
-    }
-    "".to_string()
-}
-
-fn get_attestation_request_url(args: &UrlArgs) -> String {
-    let id = args.agent_identifier.clone().unwrap();
-    let verifier_url = args.verifier_url.clone();
-    let api_version = get_api_version(args);
-    if verifier_url.ends_with('/') {
-        return format!(
-            "{verifier_url}{api_version}/agents/{id}/attestations"
-        );
-    }
-    format!("{verifier_url}/{api_version}/agents/{id}/attestations")
-}
-
-fn get_evidence_handling_request_url(args: &UrlArgs) -> String {
-    let id = args.agent_identifier.clone().unwrap();
-    let verifier_url = args.verifier_url.clone();
-    let api_version = get_api_version(args);
-    if verifier_url.ends_with('/') {
-        return format!(
-            "{verifier_url}{api_version}/agents/{id}/attestations"
-        );
-    }
-    format!("{verifier_url}/{api_version}/agents/{id}/attestations")
-}
-
-fn get_evidence_handling_request_url_with_index(args: &UrlArgs) -> String {
     let id = args.agent_identifier.clone().unwrap();
     let verifier_url = args.verifier_url.clone();
     let api_version = get_api_version(args);
@@ -90,6 +71,16 @@ fn get_evidence_handling_request_url_with_index(args: &UrlArgs) -> String {
     )
 }
 
+#[allow(dead_code)]
+fn get_index_suffix(args: &UrlArgs) -> String {
+    let index = get_attestation_index(args);
+    if args.attestation_index.is_some() {
+        return format!("/{index}");
+    }
+    "".to_string()
+}
+
+#[allow(dead_code)]
 pub fn get_session_request_url(args: &UrlArgs) -> String {
     let verifier_url = args.verifier_url.clone();
     let api_version = get_api_version(args);
@@ -132,7 +123,7 @@ mod tests {
 
     #[test]
     fn get_attestation_request_url_test() {
-        let url = get_attestation_request_url(&UrlArgs {
+        let url = get_negotiations_request_url(&UrlArgs {
             api_version: None,
             verifier_url: "https://1.2.3.4:5678/".to_string(),
             agent_identifier: Some("024680".to_string()),
