@@ -10,7 +10,9 @@ use log::error;
 
 pub trait StructureFiller {
     fn get_attestation_request(&mut self) -> structures::AttestationRequest;
+    #[allow(dead_code)]
     fn get_session_request(&mut self) -> structures::SessionRequest;
+    #[allow(dead_code)]
     fn get_evidence_handling_request(
         &mut self,
     ) -> structures::EvidenceHandlingRequest;
@@ -18,7 +20,6 @@ pub trait StructureFiller {
 
 pub fn get_filler_request<'a>(
     json_file: Option<String>,
-    //tpm_context: Option<&'a mut tpm::Context<'static>>,
     tpm_context_info: Option<&'a mut ContextInfo>,
 ) -> Box<dyn StructureFiller + 'a> {
     if json_file.is_none() {

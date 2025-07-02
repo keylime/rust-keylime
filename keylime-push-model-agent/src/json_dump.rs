@@ -9,12 +9,14 @@ pub fn dump_attestation_request_to_value(
     serde_json::to_value(request)
 }
 
+#[allow(dead_code)]
 pub fn dump_session_request_to_value(
     request: &structures::SessionRequest,
 ) -> Result<Value, Error> {
     serde_json::to_value(request)
 }
 
+#[allow(dead_code)]
 pub fn dump_evidence_handling_request_to_value(
     request: &structures::EvidenceHandlingRequest,
 ) -> Result<Value, Error> {
