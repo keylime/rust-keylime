@@ -5,6 +5,7 @@ use clap::Parser;
 use keylime::config::{AgentConfig, PushModelConfigTrait};
 use log::{debug, error, info};
 use std::time::Duration;
+mod attestation;
 mod context_info_handler;
 mod json_dump;
 mod registration;
