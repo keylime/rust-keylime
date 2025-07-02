@@ -3,16 +3,13 @@
 use anyhow::{Context, Result};
 use clap::Parser;
 use keylime::config::PushModelConfigTrait;
-use keylime::context_info;
 use log::{debug, error, info};
 use std::time::Duration;
+mod context_info_handler;
 mod json_dump;
 mod registration;
 mod struct_filler;
 mod url_selector;
-use std::sync::OnceLock;
-static GLOBAL_CONTEXT: OnceLock<Result<Option<context_info::ContextInfo>>> =
-    OnceLock::new();
 
 const DEFAULT_TIMEOUT_MILLIS: &str = "5000";
 const HTTPS_PREFIX: &str = "https://";
@@ -159,11 +156,17 @@ fn get_request_builder_from_method(
     }
 }
 
+fn get_avoid_tpm_from_args(args: &Args) -> bool {
+    args.avoid_tpm.unwrap_or(false)
+}
+
 async fn send_push_model_request(args: &Args) -> Result<ResponseInformation> {
-    let mut context_info = get_context(args).map_err(|e| {
-        error!("Error obtaining context information: {}", e);
-        e
-    })?;
+    let avoid_tpm = get_avoid_tpm_from_args(args);
+    let mut context_info = context_info_handler::get_context_info(avoid_tpm)
+        .map_err(|e| {
+            error!("Error obtaining context information: {}", e);
+            e
+        })?;
     let mut filler = struct_filler::get_filler_request(
         args.json_file.clone(),
         context_info.as_mut(),
@@ -209,49 +212,6 @@ async fn send_push_model_request(args: &Args) -> Result<ResponseInformation> {
     Ok(rsp)
 }
 
-fn init_context(args: &Args) -> Result<()> {
-    let result = GLOBAL_CONTEXT.set(
-        || -> Result<Option<context_info::ContextInfo>> {
-            if args.avoid_tpm.unwrap_or(false) {
-                return Ok(None);
-            }
-            let config = keylime::config::PushModelConfig::default();
-            debug!("Initializing unique TPM Context...");
-            let context_info = context_info::ContextInfo::new_from_str(
-                context_info::AlgorithmConfigurationString {
-                    tpm_encryption_alg: config.get_tpm_encryption_alg(),
-                    tpm_hash_alg: config.get_tpm_hash_alg(),
-                    tpm_signing_alg: config.get_tpm_signing_alg(),
-                    agent_data_path: config.get_agent_data_path(),
-                },
-            )?;
-            Ok(Some(context_info))
-        }(),
-    );
-    if result.is_err() {
-        error!("Error: Agent context has already been initialized.");
-    }
-    Ok(())
-}
-
-fn get_context(args: &Args) -> Result<Option<context_info::ContextInfo>> {
-    if args.avoid_tpm.unwrap_or(false) {
-        return Ok(None);
-    }
-    match GLOBAL_CONTEXT.get() {
-        Some(context_result) => {
-            match context_result {
-                Ok(Some(context_info)) => Ok(Some(context_info.clone())),
-                Ok(None) => Ok(None),
-                Err(e) => Err(anyhow::anyhow!("TPM Global context could not be initialized {}", e)),
-            }
-        },
-        None => {
-           Err(anyhow::anyhow!("TPM Global context has not been initialized yet. Please call init_context first."))
-        }
-    }
-}
-
 async fn run(args: &Args) -> Result<()> {
     info!("Verifier URL: {}", args.verifier_url);
     info!("Registrar URL: {}", args.registrar_url);
@@ -265,8 +225,9 @@ async fn run(args: &Args) -> Result<()> {
     debug!("Key file: {}", args.key);
     debug!("Insecure: {}", args.insecure.unwrap_or(false));
     debug!("Avoid TPM: {}", args.avoid_tpm.unwrap_or(false));
-    init_context(args)?;
-    let ctx_info = match get_context(args) {
+    let avoid_tpm = get_avoid_tpm_from_args(args);
+    context_info_handler::init_context_info(avoid_tpm)?;
+    let ctx_info = match context_info_handler::get_context_info(avoid_tpm) {
         Ok(Some(context_info)) => Some(context_info),
         Ok(None) => {
             error!("No context");
@@ -762,32 +723,26 @@ mod tests {
     }
 
     #[actix_rt::test]
-    async fn test_context_with_avoid_tpm_flag() {
+    async fn avoid_tpm_test() {
+        // Set arguments to avoid TPM
         let args = Args {
             api_version: None,
             avoid_tpm: Some(true),
-            registrar_url: "http://1.2.3.4:8888".to_string(),
-            verifier_url: "http://localhost:3000".to_string(),
-            timeout: TEST_TIMEOUT_MILLIS,
-            ca_certificate: "/tmp/does_not_exist.pem".to_string(),
-            certificate: "/tmp/does_not_exist.pem".to_string(),
-            key: "/tmp/does_not_exist.pem".to_string(),
-            insecure: Some(false),
+            registrar_url: "".to_string(),
+            verifier_url: "".to_string(),
+            timeout: 0,
+            ca_certificate: "".to_string(),
+            certificate: "".to_string(),
+            key: "".to_string(),
+            insecure: None,
             agent_identifier: None,
             json_file: None,
-            message_type: Some("Session".to_string()),
-            method: Some("PATCH".to_string()),
+            message_type: None,
+            method: None,
             attestation_index: None,
-            session_index: Some("12345678".to_string()),
+            session_index: None,
         };
-
-        let init_res = init_context(&args);
-        assert!(init_res.is_ok());
-        let context_res = get_context(&args);
-        assert!(context_res.is_ok());
-        assert!(
-            context_res.unwrap().is_none(),
-            "Context should be None when TPM is avoided"
-        );
+        let avoid_tpm = get_avoid_tpm_from_args(&args);
+        assert!(avoid_tpm);
     }
 }
