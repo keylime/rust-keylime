@@ -8,6 +8,7 @@ mod attestation;
 mod context_info_handler;
 mod json_dump;
 mod registration;
+mod response_handler;
 mod struct_filler;
 mod url_selector;
 
@@ -109,8 +110,8 @@ async fn run(args: &Args) -> Result<()> {
     debug!("Certificate file: {}", args.certificate);
     debug!("Key file: {}", args.key);
     debug!("Insecure: {}", args.insecure.unwrap_or(false));
-    debug!("Avoid TPM: {}", args.avoid_tpm.unwrap_or(false));
     let avoid_tpm = get_avoid_tpm_from_args(args);
+    debug!("Avoid TPM: {}", avoid_tpm);
     context_info_handler::init_context_info(avoid_tpm)?;
     let ctx_info = match context_info_handler::get_context_info(avoid_tpm) {
         Ok(Some(context_info)) => Some(context_info),
@@ -139,26 +140,25 @@ async fn run(args: &Args) -> Result<()> {
             agent_identifier: Some(agent_identifier.clone()),
             attestation_index: args.attestation_index.clone(),
             session_index: args.session_index.clone(),
+            location: None,
         });
-    debug!(
-        "QUIT: Negotiations request URL: {}",
-        negotiations_request_url
-    );
+    debug!("Negotiations request URL: {}", negotiations_request_url);
 
-    let neg_response =
-        attestation::send_negotiation(attestation::NegotiationConfig {
-            avoid_tpm,
-            url: &negotiations_request_url,
-            timeout: args.timeout,
-            ca_certificate: &args.ca_certificate,
-            client_certificate: &args.certificate,
-            key: &args.key,
-            insecure: args.insecure,
-        })
-        .await;
+    let neg_config = attestation::NegotiationConfig {
+        avoid_tpm,
+        url: &negotiations_request_url,
+        timeout: args.timeout,
+        ca_certificate: &args.ca_certificate,
+        client_certificate: &args.certificate,
+        key: &args.key,
+        insecure: args.insecure,
+    };
+    let attestation_client =
+        attestation::AttestationClient::new(&neg_config)?;
+    let neg_response = attestation_client.send_negotiation(&neg_config).await;
 
-    match neg_response {
-        Ok(_) => {
+    let neg_response_data = match neg_response {
+        Ok(ref neg) => {
             info!("Request sent successfully");
             info!(
                 "Returned response code: {:?}",
@@ -172,8 +172,51 @@ async fn run(args: &Args) -> Result<()> {
                 "Returned response body: {:?}",
                 neg_response.as_ref().unwrap().body
             );
+            neg
         }
-        Err(ref e) => error!("Error: {}", e),
+        Err(ref e) => {
+            error!("Error: {}", e);
+            &attestation::ResponseInformation {
+                status_code: reqwest::StatusCode::INTERNAL_SERVER_ERROR,
+                body: e.to_string(),
+                headers: reqwest::header::HeaderMap::new(),
+            }
+        }
+    };
+
+    if neg_response_data.status_code != reqwest::StatusCode::CREATED {
+        error!(
+            "Negotiation failed with status code: {}",
+            neg_response_data.status_code
+        );
+        return Err(anyhow::anyhow!(
+            "Negotiation failed with status code: {}",
+            neg_response_data.status_code
+        ));
+    }
+
+    let evidence_config: attestation::NegotiationConfig<'_> =
+        attestation::NegotiationConfig {
+            url: &args.verifier_url,
+            ..neg_config.clone()
+        };
+
+    let evidence_response = attestation_client
+        .handle_evidence_submission(
+            neg_response_data.clone(),
+            &evidence_config,
+        )
+        .await?;
+
+    if evidence_response.status_code == reqwest::StatusCode::ACCEPTED {
+        info!("SUCCESS! Evidence accepted by the Verifier.");
+        info!("Response body: {}", evidence_response.body);
+    } else {
+        error!(
+            "Verifier rejected the evidence with code: {}",
+            evidence_response.status_code
+        );
+        error!("Response body: {}", evidence_response.body);
     }
     Ok(())
 }
@@ -190,7 +233,7 @@ mod tests {
 
     #[actix_rt::test]
     async fn run_test() {
-        // Set arguments to avoid registration
+        // Set arguments to avoid TPM
         let args = Args {
             api_version: None,
             avoid_tpm: Some(true),
@@ -209,7 +252,7 @@ mod tests {
             session_index: None,
         };
         let res = run(&args);
-        assert!(res.await.is_ok());
+        assert!(res.await.is_err());
     }
 
     #[actix_rt::test]

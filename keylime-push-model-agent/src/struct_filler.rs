@@ -2,7 +2,7 @@
 // Copyright 2025 Keylime Authors
 use keylime::algorithms::HashAlgorithm;
 use keylime::config::{KeylimeConfig, PushModelConfigTrait};
-use keylime::context_info::ContextInfo;
+use keylime::context_info::{AttestationRequiredParams, ContextInfo};
 use keylime::ima::ImaLog;
 use keylime::structures;
 use keylime::uefi::uefi_log_handler;
@@ -15,6 +15,7 @@ pub trait StructureFiller {
     #[allow(dead_code)]
     fn get_evidence_handling_request(
         &mut self,
+        params: &AttestationRequiredParams,
     ) -> structures::EvidenceHandlingRequest;
 }
 
@@ -42,8 +43,9 @@ impl StructureFiller for FillerFromHardware<'_> {
     }
     fn get_evidence_handling_request(
         &mut self,
+        params: &AttestationRequiredParams,
     ) -> structures::EvidenceHandlingRequest {
-        self.get_evidence_handling_request_final()
+        self.get_evidence_handling_request_final(params)
     }
 }
 
@@ -186,11 +188,29 @@ impl<'a> FillerFromHardware<'a> {
     // TODO: Change this function to use the evidence handling request appropriately
     pub fn get_evidence_handling_request_final(
         &mut self,
+        params: &AttestationRequiredParams,
     ) -> structures::EvidenceHandlingRequest {
+        let evidence = match self.tpm_context_info.perform_attestation(params)
+        {
+            Ok(evidence) => evidence,
+            Err(e) => {
+                error!("Failed to perform attestation: {}", e);
+                return structures::EvidenceHandlingRequest {
+                    data: structures::EvidenceHandlingRequestData {
+                        data_type: "error".to_string(),
+                        attributes:
+                            structures::EvidenceHandlingRequestAttributes {
+                                evidence_collected: vec![],
+                            },
+                    },
+                };
+            }
+        };
+
         let tpm_evidence_data = structures::EvidenceData::TpmQuoteData {
-            subject_data: "subject_data".to_string(),
-            message: "message".to_string(),
-            signature: "signature".to_string(),
+            subject_data: evidence.pcr_values,
+            message: evidence.quote_message,
+            signature: evidence.quote_signature,
         };
 
         let tpm_evidence_collected = structures::EvidenceCollected {
@@ -198,6 +218,8 @@ impl<'a> FillerFromHardware<'a> {
             evidence_type: "tpm_quote".to_string(),
             data: tpm_evidence_data,
         };
+
+        // TODO: Collect UEFI and IMA logs
         let uefi_evidence_data = structures::EvidenceData::UefiLog {
             entries: "uefi_log_entries".to_string(),
         };
@@ -238,8 +260,10 @@ impl StructureFiller for FillerFromCode {
     fn get_session_request(&mut self) -> structures::SessionRequest {
         get_session_request_from_code()
     }
+    #[allow(unused_variables)]
     fn get_evidence_handling_request(
         &mut self,
+        params: &AttestationRequiredParams,
     ) -> structures::EvidenceHandlingRequest {
         get_evidence_handling_request_from_code()
     }
@@ -256,8 +280,10 @@ impl StructureFiller for FillerFromFile {
     fn get_session_request(&mut self) -> structures::SessionRequest {
         get_session_request_from_file(self.file_path.clone())
     }
+    #[allow(unused_variables)]
     fn get_evidence_handling_request(
         &mut self,
+        params: &AttestationRequiredParams,
     ) -> structures::EvidenceHandlingRequest {
         get_evidence_handling_request_from_file(self.file_path.clone())
     }
@@ -575,7 +601,12 @@ mod tests {
         let deserialized = FillerFromFile {
             file_path: "test-data/evidence_handling_request.json".to_string(),
         }
-        .get_evidence_handling_request();
+        .get_evidence_handling_request(&AttestationRequiredParams {
+            challenge: "".to_string(),
+            signature_scheme: "".to_string(),
+            hash_algorithm: "".to_string(),
+            selected_subjects: std::collections::HashMap::new(),
+        });
 
         assert_eq!(deserialized.data.data_type, "attestation");
         assert_eq!(deserialized.data.attributes.evidence_collected.len(), 3);
@@ -703,6 +734,7 @@ mod tests {
     #[cfg(feature = "testing")]
     async fn test_evidence_handling_request() {
         use keylime::context_info;
+        use std::collections::HashMap;
         let _mutex = testing::lock_tests().await;
         let config = keylime::config::PushModelConfig::default();
         let mut context_info = context_info::ContextInfo::new_from_str(
@@ -715,8 +747,16 @@ mod tests {
         )
         .expect("Failed to create context info from string");
         let mut filler = FillerFromHardware::new(&mut context_info);
+        let mut subjects = HashMap::new();
+        subjects.insert("sha256".to_string(), vec![10]);
+        let params = AttestationRequiredParams {
+            challenge: "test_challenge".to_string(),
+            signature_scheme: "rsassa".to_string(),
+            hash_algorithm: "sha256".to_string(),
+            selected_subjects: subjects,
+        };
         let evidence_handling_request =
-            filler.get_evidence_handling_request();
+            filler.get_evidence_handling_request(&params);
         assert_eq!(evidence_handling_request.data.data_type, "attestation");
         let serialized =
             serde_json::to_string(&evidence_handling_request).unwrap();
