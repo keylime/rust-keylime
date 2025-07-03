@@ -190,6 +190,7 @@ async fn send_push_model_request(args: &Args) -> Result<ResponseInformation> {
     debug!("Request body: {:?}", reqcontent);
     let response = reqb
         .body(reqcontent)
+        .header("Content-Type", "application/json")
         .header("Accept", "application/json")
         .timeout(Duration::from_millis(args.timeout))
         .send()
