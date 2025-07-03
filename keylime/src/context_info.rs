@@ -105,6 +105,7 @@ pub struct AttestationRequiredParams {
 pub struct AttestationEvidence {
     pub quote_message: String,
     pub quote_signature: String,
+    pub pcr_values: String,
     // pub ima_log: String, # TODO: Implement IMA log collection
     // pub uefi_log: String, # TODO: Implement UEFI log collection
 }
@@ -416,7 +417,7 @@ impl ContextInfo {
         )?;
 
         let parts: Vec<&str> = full_quote_str.split(':').collect();
-        if parts.len() < 2 {
+        if parts.len() < 3 {
             let msg = "Invalid quote format received from TPM".to_string();
             return Err(ContextInfoError::Keylime(msg));
         }
@@ -425,11 +426,13 @@ impl ContextInfo {
             parts[0].strip_prefix('r').unwrap_or(parts[0]).to_string();
 
         let quote_signature = parts[1].to_string();
+        let pcr_values = parts[2].to_string();
 
         // TODO: Implement IMA and UEFI log collection
         Ok(AttestationEvidence {
             quote_message,
             quote_signature,
+            pcr_values,
         })
     }
 }
