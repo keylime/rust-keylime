@@ -9,6 +9,7 @@ pub struct UrlArgs {
     pub api_version: Option<String>,
     pub attestation_index: Option<String>,
     pub session_index: Option<String>,
+    pub location: Option<String>,
 }
 
 pub fn get_attestation_index(args: &UrlArgs) -> String {
@@ -40,35 +41,16 @@ pub fn get_negotiations_request_url(args: &UrlArgs) -> String {
     format!("{verifier_url}/{api_version}/agents/{id}/attestations")
 }
 
-#[allow(dead_code)]
-pub fn get_evidence_handling_request_url(args: &UrlArgs) -> String {
-    let id = args.agent_identifier.clone().unwrap();
-    let verifier_url = args.verifier_url.clone();
-    let api_version = get_api_version(args);
-    if verifier_url.ends_with('/') {
-        return format!(
-            "{verifier_url}{api_version}/agents/{id}/attestations"
-        );
-    }
-    format!("{verifier_url}/{api_version}/agents/{id}/attestations")
-}
-
-#[allow(dead_code)]
-pub fn get_evidence_handling_request_url_with_index(
-    args: &UrlArgs,
-) -> String {
-    let id = args.agent_identifier.clone().unwrap();
-    let verifier_url = args.verifier_url.clone();
-    let api_version = get_api_version(args);
-    let index_suffix = get_index_suffix(args);
-    if verifier_url.ends_with('/') {
-        return format!(
-            "{verifier_url}{api_version}/agents/{id}/attestations{index_suffix}"
-        );
-    }
-    format!(
-        "{verifier_url}/{api_version}/agents/{id}/attestations{index_suffix}"
-    )
+pub fn get_evidence_submission_request_url(args: &UrlArgs) -> String {
+    let trimmed_base = match args.verifier_url.trim_end_matches('/') {
+        "" => return "ERROR: No verifier URL provided".to_string(),
+        trimmed => trimmed.to_string(),
+    };
+    let location = match &args.location {
+        Some(loc) => loc.clone(),
+        None => return "ERROR: No location provided".to_string(),
+    };
+    format!("{}{}", trimmed_base, location)
 }
 
 #[allow(dead_code)]
@@ -117,6 +99,7 @@ mod tests {
             agent_identifier: Some("024680".to_string()),
             session_index: None,
             attestation_index: Some("2".to_string()),
+            location: None,
         });
         assert_eq!(index, "2".to_string());
     } // get_attestation_index_test
@@ -129,6 +112,7 @@ mod tests {
             agent_identifier: Some("024680".to_string()),
             attestation_index: Some("2".to_string()),
             session_index: None,
+            location: None,
         });
         assert_eq!(
             url,
@@ -146,23 +130,27 @@ mod tests {
             "http://1.2.3.4:5678".to_string(),
         ];
         for u in urls {
-            let url = get_evidence_handling_request_url(&UrlArgs {
+            let url = get_evidence_submission_request_url(&UrlArgs {
                 verifier_url: u.clone(),
-                api_version: Some(DEFAULT_API_VERSION.to_string()),
-                agent_identifier: Some("024680".to_string()),
+                api_version: None,
+                agent_identifier: None,
                 session_index: None,
-                attestation_index: Some("2".to_string()),
+                attestation_index: None,
+                location: Some(
+                    "/v3.0/agents/024680/attestations/0".to_string(),
+                ),
             });
 
             match u.clone().ends_with('/') {
                 true => assert_eq!(
                     url,
-                    u.clone().to_string() + "v3.0/agents/024680/attestations"
+                    u.clone().to_string()
+                        + "v3.0/agents/024680/attestations/0"
                 ),
                 false => assert_eq!(
                     url,
                     u.clone().to_string()
-                        + "/v3.0/agents/024680/attestations"
+                        + "/v3.0/agents/024680/attestations/0"
                 ),
             };
         }
@@ -183,6 +171,7 @@ mod tests {
                 agent_identifier: None,
                 session_index: Some("024680".to_string()),
                 attestation_index: None,
+                location: None,
             });
 
             match u.clone().ends_with('/') {
@@ -213,6 +202,7 @@ mod tests {
                 agent_identifier: None,
                 session_index: None,
                 attestation_index: None,
+                location: None,
             });
 
             match u.clone().ends_with('/') {
@@ -235,28 +225,9 @@ mod tests {
                 agent_identifier: Some("024680".to_string()),
                 session_index: None,
                 attestation_index: None,
+                location: None,
             }),
             DEFAULT_INDEX.to_string()
         );
     } // get_attestation_index_test_no_index
-
-    #[test]
-    fn get_evidence_handling_request_with_index_test() {
-        for v_url in [
-            "https://1.2.3.4:1234/".to_string(),
-            "https://1.2.3.4:1234".to_string(),
-        ] {
-            assert_eq!(
-                get_evidence_handling_request_url_with_index(&UrlArgs {
-                    verifier_url: v_url,
-                    api_version: Some(DEFAULT_API_VERSION.to_string()),
-                    agent_identifier: Some("024680".to_string()),
-                    session_index: None,
-                    attestation_index: None,
-                }),
-                "https://1.2.3.4:1234/v3.0/agents/024680/attestations"
-                    .to_string()
-            );
-        }
-    } // get_evidence_handling_request_with_index_test
 }
