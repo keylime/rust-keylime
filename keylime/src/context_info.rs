@@ -347,7 +347,7 @@ impl ContextInfo {
     fn build_openssl_pkey_from_params(
         &self,
     ) -> Result<PKey<Public>, ContextInfoError> {
-        let tss_pub = self.get_ak_public_ref().clone(); // Clonamos para tener propiedad
+        let tss_pub = self.get_ak_public_ref().clone();
 
         if let TssPublic::Rsa {
             unique, parameters, ..
@@ -389,14 +389,12 @@ impl ContextInfo {
         }
         let pubkey_for_quote = self.build_openssl_pkey_from_params()?;
 
-        let ak = self.ak.clone();
-        let ek_handle = self.ek_handle;
+        let ak_handle = self.ak_handle;
         let challenge = params.challenge.clone();
         let challenge_bytes = challenge.into_bytes();
+        let mut tpm_context = self.get_mutable_tpm_context().clone();
 
         let full_quote_str = task::spawn_blocking(move || {
-            let mut tpm_context = tpm::Context::new()?;
-            let ak_handle = tpm_context.load_ak(ek_handle, &ak)?;
             tpm_context.quote(
                 &challenge_bytes,
                 pcr_mask,
@@ -427,12 +425,6 @@ impl ContextInfo {
             quote_signature,
             pcr_values,
         })
-    }
-}
-
-impl Drop for ContextInfo {
-    fn drop(&mut self) {
-        let _ = self.flush_context();
     }
 }
 
@@ -744,5 +736,42 @@ mod tests {
                 algorithms::AlgorithmError::UnsupportedSigningAlgorithm(_)
             )
         ));
+        context_info.flush_context().unwrap(); //#[allow_ci]
+    }
+
+    #[tokio::test]
+    #[cfg(feature = "testing")]
+    async fn test_verifier_subjects() {
+        use crate::tpm::testing;
+        let _mutex = testing::lock_tests().await;
+        let config = AlgorithmConfigurationString {
+            tpm_encryption_alg: "rsa".to_string(),
+            tpm_hash_alg: "sha256".to_string(),
+            tpm_signing_alg: "rsassa".to_string(),
+            agent_data_path: "".to_string(),
+        };
+
+        let context_result = ContextInfo::new_from_str(config);
+        assert!(context_result.is_ok());
+        let mut context_info = context_result.unwrap(); //#[allow_ci]
+
+        let mut subjects = HashMap::new();
+        subjects.insert(
+            "sha1".to_string(),
+            vec![
+                0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17,
+                18, 19, 20, 21, 22, 23,
+            ],
+        );
+        subjects.insert("sha256".to_string(), vec![10]);
+        let params = AttestationRequiredParams {
+            challenge: "test_challenge".to_string(),
+            signature_scheme: "rsassa".to_string(),
+            hash_algorithm: "sha256".to_string(),
+            selected_subjects: subjects,
+        };
+        let result = context_info.perform_attestation(&params).await;
+        assert!(result.is_ok());
+        context_info.flush_context().unwrap(); //#[allow_ci]
     }
 }
