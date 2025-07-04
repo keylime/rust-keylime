@@ -162,11 +162,11 @@ impl AttestationClient {
             },
         );
         info!("Sending evidence (PATCH) to: {}", patch_url);
-
         let attestation_params =
             response_handler::process_negotiation_response(
                 &neg_response.body,
             )?;
+        debug!("Attestation parameters: {:?}", attestation_params);
         let mut context_info =
             context_info_handler::get_context_info(config.avoid_tpm)?
                 .ok_or_else(|| {
@@ -174,13 +174,17 @@ impl AttestationClient {
                         "TPM context is required for evidence submission"
                     )
                 })?;
+        debug!("Getting filler");
         let mut filler =
             struct_filler::get_filler_request(None, Some(&mut context_info));
-        let evidence_request_struct =
-            filler.get_evidence_handling_request(&attestation_params);
+        debug!("Calling filler to get evidence request struct");
+        let evidence_request_struct = filler
+            .get_evidence_handling_request(&attestation_params)
+            .await;
+        debug!("Evidence request struct: {:?}", evidence_request_struct);
         let evidence_json_body =
             serde_json::to_string(&evidence_request_struct)?;
-
+        debug!("Evidence JSON body: {:?}", evidence_json_body);
         let evidence_config = NegotiationConfig {
             url: &patch_url,
             ..*config

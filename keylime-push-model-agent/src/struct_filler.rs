@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2025 Keylime Authors
+use async_trait::async_trait;
 use keylime::algorithms::HashAlgorithm;
 use keylime::config::{KeylimeConfig, PushModelConfigTrait};
 use keylime::context_info::{AttestationRequiredParams, ContextInfo};
@@ -8,12 +9,12 @@ use keylime::structures;
 use keylime::uefi::uefi_log_handler;
 use log::error;
 
+#[async_trait]
 pub trait StructureFiller {
     fn get_attestation_request(&mut self) -> structures::AttestationRequest;
     #[allow(dead_code)]
     fn get_session_request(&mut self) -> structures::SessionRequest;
-    #[allow(dead_code)]
-    fn get_evidence_handling_request(
+    async fn get_evidence_handling_request(
         &mut self,
         params: &AttestationRequiredParams,
     ) -> structures::EvidenceHandlingRequest;
@@ -34,6 +35,7 @@ pub fn get_filler_request<'a>(
     })
 }
 
+#[async_trait]
 impl StructureFiller for FillerFromHardware<'_> {
     fn get_attestation_request(&mut self) -> structures::AttestationRequest {
         self.get_attestation_request_final()
@@ -41,11 +43,11 @@ impl StructureFiller for FillerFromHardware<'_> {
     fn get_session_request(&mut self) -> structures::SessionRequest {
         self.get_session_request_final()
     }
-    fn get_evidence_handling_request(
+    async fn get_evidence_handling_request(
         &mut self,
         params: &AttestationRequiredParams,
     ) -> structures::EvidenceHandlingRequest {
-        self.get_evidence_handling_request_final(params)
+        self.get_evidence_handling_request_final(params).await
     }
 }
 
@@ -186,16 +188,16 @@ impl<'a> FillerFromHardware<'a> {
     }
 
     // TODO: Change this function to use the evidence handling request appropriately
-    pub fn get_evidence_handling_request_final(
+    pub async fn get_evidence_handling_request_final(
         &mut self,
         params: &AttestationRequiredParams,
     ) -> structures::EvidenceHandlingRequest {
-        let evidence = match self.tpm_context_info.perform_attestation(params)
-        {
-            Ok(evidence) => evidence,
-            Err(e) => {
-                error!("Failed to perform attestation: {}", e);
-                return structures::EvidenceHandlingRequest {
+        let evidence =
+            match self.tpm_context_info.perform_attestation(params).await {
+                Ok(evidence) => evidence,
+                Err(e) => {
+                    error!("Failed to perform attestation: {}", e);
+                    return structures::EvidenceHandlingRequest {
                     data: structures::EvidenceHandlingRequestData {
                         data_type: "error".to_string(),
                         attributes:
@@ -204,8 +206,8 @@ impl<'a> FillerFromHardware<'a> {
                             },
                     },
                 };
-            }
-        };
+                }
+            };
 
         let tpm_evidence_data = structures::EvidenceData::TpmQuoteData {
             subject_data: evidence.pcr_values,
@@ -253,6 +255,7 @@ impl<'a> FillerFromHardware<'a> {
 }
 
 pub struct FillerFromCode;
+#[async_trait]
 impl StructureFiller for FillerFromCode {
     fn get_attestation_request(&mut self) -> structures::AttestationRequest {
         get_attestation_request_from_code()
@@ -261,7 +264,7 @@ impl StructureFiller for FillerFromCode {
         get_session_request_from_code()
     }
     #[allow(unused_variables)]
-    fn get_evidence_handling_request(
+    async fn get_evidence_handling_request(
         &mut self,
         params: &AttestationRequiredParams,
     ) -> structures::EvidenceHandlingRequest {
@@ -273,6 +276,7 @@ pub struct FillerFromFile {
     pub file_path: String,
 }
 
+#[async_trait]
 impl StructureFiller for FillerFromFile {
     fn get_attestation_request(&mut self) -> structures::AttestationRequest {
         get_attestation_request_from_file(self.file_path.clone())
@@ -281,7 +285,7 @@ impl StructureFiller for FillerFromFile {
         get_session_request_from_file(self.file_path.clone())
     }
     #[allow(unused_variables)]
-    fn get_evidence_handling_request(
+    async fn get_evidence_handling_request(
         &mut self,
         params: &AttestationRequiredParams,
     ) -> structures::EvidenceHandlingRequest {
@@ -596,8 +600,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn get_evidence_handling_request_from_file_test() {
+    #[actix_rt::test]
+    async fn get_evidence_handling_request_from_file_test() {
         let deserialized = FillerFromFile {
             file_path: "test-data/evidence_handling_request.json".to_string(),
         }
@@ -606,7 +610,8 @@ mod tests {
             signature_scheme: "".to_string(),
             hash_algorithm: "".to_string(),
             selected_subjects: std::collections::HashMap::new(),
-        });
+        })
+        .await;
 
         assert_eq!(deserialized.data.data_type, "attestation");
         assert_eq!(deserialized.data.attributes.evidence_collected.len(), 3);
@@ -756,7 +761,7 @@ mod tests {
             selected_subjects: subjects,
         };
         let evidence_handling_request =
-            filler.get_evidence_handling_request(&params);
+            filler.get_evidence_handling_request(&params).await;
         assert_eq!(evidence_handling_request.data.data_type, "attestation");
         let serialized =
             serde_json::to_string(&evidence_handling_request).unwrap();

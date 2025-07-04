@@ -19,6 +19,7 @@ use openssl::{
 use std::collections::HashMap;
 use std::path::Path;
 use thiserror::Error;
+use tokio::task;
 use tss_esapi::{
     handles::KeyHandle,
     interface_types::algorithm::HashingAlgorithm as TssEsapiInterfaceHashingAlgorithm,
@@ -368,7 +369,7 @@ impl ContextInfo {
         }
     }
 
-    pub fn perform_attestation(
+    pub async fn perform_attestation(
         &mut self,
         params: &AttestationRequiredParams,
     ) -> Result<AttestationEvidence, ContextInfoError> {
@@ -388,14 +389,25 @@ impl ContextInfo {
         }
         let pubkey_for_quote = self.build_openssl_pkey_from_params()?;
 
-        let full_quote_str = self.tpm_context.quote(
-            params.challenge.as_bytes(),
-            pcr_mask,
-            &pubkey_for_quote,
-            self.ak_handle,
-            hash_alg_enum,
-            sign_alg_enum,
-        )?;
+        let ak = self.ak.clone();
+        let ek_handle = self.ek_handle;
+        let challenge = params.challenge.clone();
+        let challenge_bytes = challenge.into_bytes();
+
+        let full_quote_str = task::spawn_blocking(move || {
+            let mut tpm_context = tpm::Context::new()?;
+            let ak_handle = tpm_context.load_ak(ek_handle, &ak)?;
+            tpm_context.quote(
+                &challenge_bytes,
+                pcr_mask,
+                &pubkey_for_quote,
+                ak_handle,
+                hash_alg_enum,
+                sign_alg_enum,
+            )
+        })
+        .await
+        .map_err(|e| ContextInfoError::Keylime(e.to_string()))??;
 
         let parts: Vec<&str> = full_quote_str.split(':').collect();
         if parts.len() < 3 {
@@ -690,7 +702,7 @@ mod tests {
             selected_subjects: subjects,
         };
         let mut context_info = context_result.unwrap(); //#[allow_ci]
-        let result = context_info.perform_attestation(&params);
+        let result = context_info.perform_attestation(&params).await;
         assert!(result.is_ok());
         let evidence = result.unwrap(); //#[allow_ci]
         assert!(!evidence.quote_message.is_empty());
@@ -724,7 +736,7 @@ mod tests {
             selected_subjects: subjects,
         };
 
-        let result = context_info.perform_attestation(&params);
+        let result = context_info.perform_attestation(&params).await;
         assert!(result.is_err());
         assert!(matches!(
             result.unwrap_err(),
