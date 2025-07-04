@@ -1663,48 +1663,37 @@ impl Context<'_> {
     /// Helper function to extract selected PCR banks from a PcrSelectionList.
     pub fn pcr_banks(
         &mut self,
-        expected_hash_algorithm: HashAlgorithm,
+        expected_hash_algorithm: KeylimeInternalHashAlgorithm,
     ) -> Result<Vec<u32>> {
-        let hashing_algorithm = crate::algorithms::hash_to_hashing_algorithm(
-            expected_hash_algorithm,
-        );
-        let pcrs_to_select: Vec<PcrSlot> = (0..24)
-            .map(|i| PcrSlot::try_from(1 << i))
-            .filter_map(|result| result.ok())
-            .collect();
-
-        let pcr_selection_list = PcrSelectionListBuilder::new()
-            .with_selection(hashing_algorithm, &pcrs_to_select)
-            .build()
-            .map_err(|e| TpmError::TSSPCRSelectionBuildError { source: e })?;
-
-        let mut selected_pcr_numbers: Vec<u32> = Vec::new();
-
-        for selection in pcr_selection_list.get_selections() {
-            if selection.hashing_algorithm() == hashing_algorithm {
-                let selected_slots = selection.selected();
-                for pcr_slot in selected_slots {
-                    let pcr_mask_value: u32 = pcr_slot.into();
-                    for i in 0..24 {
-                        if (pcr_mask_value >> i) & 1 == 1 {
-                            selected_pcr_numbers.push(i);
+        let (capability_data, _more) = self
+            .inner
+            .lock()
+            .unwrap() //#[allow_ci]
+            .get_capability(CapabilityType::AssignedPcr, 0, 1)
+            .map_err(TpmError::from)?;
+        if let CapabilityData::AssignedPcr(pcr_selection_list) =
+            capability_data
+        {
+            let tss_hash_alg = crate::algorithms::hash_to_hashing_algorithm(
+                expected_hash_algorithm,
+            );
+            for selection in pcr_selection_list.get_selections() {
+                if selection.hashing_algorithm() == tss_hash_alg {
+                    let mut selected_pcr_numbers = Vec::new();
+                    let selected_slots = selection.selected();
+                    for pcr_slot in selected_slots {
+                        let pcr_mask_value: u32 = pcr_slot.into();
+                        for i in 0..24 {
+                            if (pcr_mask_value >> i) & 1 == 1 {
+                                selected_pcr_numbers.push(i);
+                            }
                         }
                     }
+                    return Ok(selected_pcr_numbers);
                 }
             }
         }
-
-        if !selected_pcr_numbers.is_empty() {
-            selected_pcr_numbers.sort_unstable();
-            selected_pcr_numbers.dedup();
-            return Ok(selected_pcr_numbers);
-        }
-
-        Err(TpmError::TSSPCRSelectionBuildError {
-            source: tss_esapi::Error::WrapperError(
-                tss_esapi::WrapperErrorKind::InvalidParam,
-            ),
-        })
+        Ok(Vec::new())
     }
 
     /// Queries the TPM and returns a list of the supported hashing algorithms.
@@ -1712,38 +1701,52 @@ impl Context<'_> {
         &mut self,
     ) -> Result<Vec<KeylimeInternalHashAlgorithm>> {
         let mut ctx = self.inner.lock().unwrap(); //#[allow_ci]
-
         const MAX_ALGS_TO_QUERY: u32 = 128;
-        let (capability_data, _more) = ctx
+        let (capability_data_algs, _) = ctx
             .get_capability(CapabilityType::Algorithms, 0, MAX_ALGS_TO_QUERY)
             .map_err(TpmError::from)?;
+        let (capability_data_pcrs, _) = ctx
+            .get_capability(CapabilityType::AssignedPcr, 0, 1)
+            .map_err(TpmError::from)?;
 
-        let mut supported_algs = Vec::new();
-        if let CapabilityData::Algorithms(alg_list) = capability_data {
+        let mut all_supported_algs = Vec::new();
+        if let CapabilityData::Algorithms(alg_list) = capability_data_algs {
             for alg_prop in alg_list.iter() {
-                // Get the attributes using the correct public method
-                let attributes = alg_prop.algorithm_properties();
-
-                // Filter for algorithms that have the 'hashing' attribute set
-                if attributes.hash() {
-                    // Get the algorithm identifier using the correct public method
-                    let tss_public_alg = alg_prop.algorithm_identifier();
-
+                if alg_prop.algorithm_properties().hash() {
                     if let Ok(tss_hash_alg) =
-                        TssEsapiHashingAlgorithm::try_from(tss_public_alg)
+                        TssEsapiHashingAlgorithm::try_from(
+                            alg_prop.algorithm_identifier(),
+                        )
                     {
                         if let Ok(keylime_alg) =
                             KeylimeInternalHashAlgorithm::try_from(
                                 tss_hash_alg,
                             )
                         {
-                            supported_algs.push(keylime_alg);
+                            all_supported_algs.push(keylime_alg);
                         }
                     }
                 }
             }
         }
-        Ok(supported_algs)
+        let mut usable_algs = Vec::new();
+        if let CapabilityData::AssignedPcr(pcr_selection_list) =
+            capability_data_pcrs
+        {
+            for alg in all_supported_algs {
+                let tss_alg =
+                    crate::algorithms::hash_to_hashing_algorithm(alg);
+                for selection in pcr_selection_list.get_selections() {
+                    if selection.hashing_algorithm() == tss_alg
+                        && !selection.selected().is_empty()
+                    {
+                        usable_algs.push(alg);
+                        break;
+                    }
+                }
+            }
+        }
+        Ok(usable_algs)
     }
 
     /// Queries the TPM and returns a list of signing algorithms supported by your application.
