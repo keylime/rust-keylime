@@ -1,0 +1,5 @@
+error: expected `,`
+  --> tests/define_view_trait/error_missing_transform_err.rs:27:37
+   |
+27 |     #[transform(error = ParsingError)] // missing transform error type
+   |                                     ^

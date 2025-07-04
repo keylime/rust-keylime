@@ -6,13 +6,13 @@ use keylime::{
     error::Result,
 };
 
-pub async fn check_registration(
+pub async fn check_registration<T: PushModelConfigTrait>(
+    config: &T,
     context_info: Option<context_info::ContextInfo>,
 ) -> Result<()> {
-    let reg_config = keylime::config::PushModelConfig::default();
     if context_info.is_some() {
         crate::registration::register_agent(
-            &reg_config,
+            config,
             &mut context_info.unwrap(),
         )
         .await?;
@@ -25,21 +25,25 @@ pub async fn register_agent<T: PushModelConfigTrait>(
     context_info: &mut context_info::ContextInfo,
 ) -> Result<()> {
     let ac = AgentRegistrationConfig {
-        contact_ip: config.get_contact_ip(),
-        contact_port: config.get_contact_port(),
-        registrar_ip: config.get_registrar_ip(),
-        registrar_port: config.get_registrar_port(),
-        enable_iak_idevid: config.get_enable_iak_idevid(),
-        ek_handle: config.get_ek_handle(),
+        contact_ip: config.contact_ip().to_string(),
+        contact_port: config.contact_port(),
+        registrar_ip: config.registrar_ip().to_string(),
+        registrar_port: config.registrar_port(),
+        enable_iak_idevid: config.enable_iak_idevid(),
+        // TODO: make it to not panic on failure
+        ek_handle: config
+            .ek_handle()
+            .expect("failed to get ek_handle")
+            .to_string(),
     };
 
     let cert_config = cert::CertificateConfig {
-        agent_uuid: config.get_uuid(),
-        contact_ip: config.get_contact_ip(),
-        contact_port: config.get_contact_port(),
-        server_cert: config.get_server_cert(),
-        server_key: config.get_server_key(),
-        server_key_password: config.get_server_key_password(),
+        agent_uuid: config.uuid().to_string(),
+        contact_ip: config.contact_ip().to_string(),
+        contact_port: config.contact_port(),
+        server_cert: config.server_cert().to_string(),
+        server_key: config.server_key().to_string(),
+        server_key_password: config.server_key_password().to_string(),
     };
 
     let server_cert_key = cert::cert_from_server_key(&cert_config)?;
@@ -47,9 +51,13 @@ pub async fn register_agent<T: PushModelConfigTrait>(
     let aa = AgentRegistration {
         ak: context_info.ak.clone(),
         ek_result: context_info.ek_result.clone(),
-        api_versions: config.get_registrar_api_versions(),
+        api_versions: config
+            .registrar_api_versions()?
+            .iter()
+            .map(|e| e.to_string())
+            .collect(),
         agent_registration_config: ac,
-        agent_uuid: config.get_uuid(),
+        agent_uuid: config.uuid().to_string(),
         mtls_cert: Some(server_cert_key.0),
         device_id: None, // TODO: Check how to proceed with device ID
         attest: None, // TODO: Check how to proceed with attestation, normally, no device ID means no attest
@@ -63,25 +71,31 @@ pub async fn register_agent<T: PushModelConfigTrait>(
     }
 } // register_agent
 
+#[cfg(feature = "testing")]
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[cfg(feature = "testing")]
-    use keylime::context_info::{AlgorithmConfigurationString, ContextInfo};
+    use keylime::{
+        config::get_testing_config,
+        context_info::{AlgorithmConfigurationString, ContextInfo},
+        tpm::testing,
+    };
 
     #[actix_rt::test]
     async fn test_avoid_registration() {
-        let result = check_registration(None).await;
+        let _mutex = testing::lock_tests().await;
+        let tmpdir = tempfile::tempdir().expect("failed to create tempdir");
+        let config = get_testing_config(tmpdir.path());
+        let result = check_registration(&config, None).await;
         assert!(result.is_ok());
     }
 
     #[tokio::test]
-    #[cfg(feature = "testing")]
     async fn test_register_agent() {
-        use keylime::tpm::testing;
         let _mutex = testing::lock_tests().await;
-        let config = keylime::config::PushModelConfig::default();
+        let tmpdir = tempfile::tempdir().expect("failed to create tmpdir");
+        let config = get_testing_config(tmpdir.path());
         let alg_config = AlgorithmConfigurationString {
             tpm_encryption_alg: "rsa".to_string(),
             tpm_hash_alg: "sha256".to_string(),

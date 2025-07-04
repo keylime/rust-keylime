@@ -84,15 +84,15 @@ mod test {
         let mut ctx = tpm::Context::new().unwrap(); //#[allow_ci]
 
         let tpm_encryption_alg = EncryptionAlgorithm::try_from(
-            config.agent.tpm_encryption_alg.as_str(),
+            config.tpm_encryption_alg.as_str(),
         )?;
 
         let tpm_hash_alg =
-            HashAlgorithm::try_from(config.agent.tpm_hash_alg.as_str())
+            HashAlgorithm::try_from(config.tpm_hash_alg.as_str())
                 .expect("Failed to get hash algorithm");
 
         let tpm_signing_alg =
-            SignAlgorithm::try_from(config.agent.tpm_signing_alg.as_str())
+            SignAlgorithm::try_from(config.tpm_signing_alg.as_str())
                 .expect("Failed to get signing algorithm");
 
         let ek_result = ctx
@@ -142,10 +142,9 @@ mod test {
 
         let mut ctx = tpm::Context::new().unwrap(); //#[allow_ci]
 
-        let tpm_encryption_alg = EncryptionAlgorithm::try_from(
-            config.agent.tpm_encryption_alg.as_str(),
-        )
-        .expect("Failed to get encryption algorithm");
+        let tpm_encryption_alg =
+            EncryptionAlgorithm::try_from(config.tpm_encryption_alg.as_str())
+                .expect("Failed to get encryption algorithm");
 
         let ek_result = ctx
             .create_ek(tpm_encryption_alg, None)

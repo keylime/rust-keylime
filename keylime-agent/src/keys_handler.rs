@@ -2,7 +2,7 @@
 // Copyright 2021 Keylime Authors
 
 use crate::{
-    config::KeylimeConfig,
+    config::AgentConfig,
     payloads::{Payload, PayloadMessage},
     Error, QuoteData, Result,
 };
@@ -923,7 +923,7 @@ mod tests {
             encrypt_aead(k.as_ref(), &iv[..], payload).unwrap() //#[allow_ci]
         });
 
-        let uuid = test_config.agent.uuid;
+        let uuid = test_config.uuid;
         let auth_tag = compute_hmac(k.as_ref(), uuid.as_bytes()).unwrap(); //#[allow_ci]
 
         let arbiter = Arbiter::new();

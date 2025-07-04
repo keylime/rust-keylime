@@ -3,7 +3,7 @@
 
 #[macro_use]
 use actix_web::rt;
-use crate::config::{AgentConfig, KeylimeConfig};
+use crate::config::AgentConfig;
 use crate::crypto;
 use crate::secure_mount;
 use keylime::{error::*, list_parser::parse_list};
@@ -795,7 +795,7 @@ mod tests {
             &cert,
             &actions_dir,
             None,
-            test_config.agent.allow_payload_revocation_actions,
+            test_config.allow_payload_revocation_actions,
             work_dir.path(),
             &tmpfs_dir,
         );
