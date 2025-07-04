@@ -19,6 +19,7 @@ actix-rt = "2"
 actix-web =  { version = "4", default-features = false, features = ["macros", "openssl"] }
 anyhow = { version = "1.0", features = ["backtrace"] }
 assert_cmd = { version = "2.0.16" }
+async-trait = { version = "0.1.88" }
 base64 = "0.22"
 byteorder = "1.5.0"
 cfg-if = "1"
