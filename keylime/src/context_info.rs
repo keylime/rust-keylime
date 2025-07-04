@@ -366,7 +366,7 @@ impl ContextInfo {
     fn build_openssl_pkey_from_params(
         &self,
     ) -> Result<PKey<Public>, ContextInfoError> {
-        let tss_pub = self.get_ak_public_ref().clone(); // Clonamos para tener propiedad
+        let tss_pub = self.get_ak_public_ref().clone();
 
         if let TssPublic::Rsa {
             unique, parameters, ..
@@ -408,14 +408,12 @@ impl ContextInfo {
         }
         let pubkey_for_quote = self.build_openssl_pkey_from_params()?;
 
-        let ak = self.ak.clone();
-        let ek_handle = self.ek_handle;
+        let ak_handle = self.ak_handle;
         let challenge = params.challenge.clone();
         let challenge_bytes = challenge.into_bytes();
+        let mut tpm_context = self.get_mutable_tpm_context().clone();
 
         let full_quote_str = task::spawn_blocking(move || {
-            let mut tpm_context = tpm::Context::new()?;
-            let ak_handle = tpm_context.load_ak(ek_handle, &ak)?;
             tpm_context.quote(
                 &challenge_bytes,
                 pcr_mask,
@@ -446,12 +444,6 @@ impl ContextInfo {
             quote_signature,
             pcr_values,
         })
-    }
-}
-
-impl Drop for ContextInfo {
-    fn drop(&mut self) {
-        let _ = self.flush_context();
     }
 }
 
