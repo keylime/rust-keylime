@@ -441,7 +441,7 @@ mod tests {
     use super::*;
 
     #[cfg(feature = "testing")]
-    use keylime::{config::get_testing_config, context_info, tpm::testing};
+    use keylime::{context_info, tpm::testing};
 
     #[test]
     fn get_attestation_request_test() {
@@ -717,13 +717,11 @@ mod tests {
     #[cfg(feature = "testing")]
     async fn test_attestation_request_final() {
         let _mutex = testing::lock_tests().await;
-        let tmpdir = tempfile::tempdir().expect("failed to create tmpdir");
-        let config = get_testing_config(tmpdir.path());
         let mut context_info = context_info::ContextInfo::new_from_str(
             context_info::AlgorithmConfigurationString {
-                tpm_encryption_alg: config.tpm_encryption_alg().to_string(),
-                tpm_hash_alg: config.tpm_hash_alg().to_string(),
-                tpm_signing_alg: config.tpm_signing_alg().to_string(),
+                tpm_encryption_alg: "rsa".to_string(),
+                tpm_hash_alg: "sha256".to_string(),
+                tpm_signing_alg: "rsassa".to_string(),
                 agent_data_path: "".to_string(),
                 disabled_signing_algorithms: vec![],
             },
@@ -742,13 +740,11 @@ mod tests {
     async fn test_session_request() {
         use keylime::context_info;
         let _mutex = testing::lock_tests().await;
-        let tmpdir = tempfile::tempdir().expect("failed to create tmpdir");
-        let config = get_testing_config(tmpdir.path());
         let mut context_info = context_info::ContextInfo::new_from_str(
             context_info::AlgorithmConfigurationString {
-                tpm_encryption_alg: config.tpm_encryption_alg().to_string(),
-                tpm_hash_alg: config.tpm_hash_alg().to_string(),
-                tpm_signing_alg: config.tpm_signing_alg().to_string(),
+                tpm_encryption_alg: "rsa".to_string(),
+                tpm_hash_alg: "sha256".to_string(),
+                tpm_signing_alg: "rsassa".to_string(),
                 agent_data_path: "".to_string(),
                 disabled_signing_algorithms: vec![],
             },
@@ -768,13 +764,11 @@ mod tests {
         use keylime::context_info;
         use std::collections::HashMap;
         let _mutex = testing::lock_tests().await;
-        let tmpdir = tempfile::tempdir().expect("failed to create tmpdir");
-        let config = get_testing_config(tmpdir.path());
         let mut context_info = context_info::ContextInfo::new_from_str(
             context_info::AlgorithmConfigurationString {
-                tpm_encryption_alg: config.tpm_encryption_alg().to_string(),
-                tpm_hash_alg: config.tpm_hash_alg().to_string(),
-                tpm_signing_alg: config.tpm_signing_alg().to_string(),
+                tpm_encryption_alg: "rsa".to_string(),
+                tpm_hash_alg: "sha256".to_string(),
+                tpm_signing_alg: "rsassa".to_string(),
                 agent_data_path: "".to_string(),
                 disabled_signing_algorithms: vec![],
             },
@@ -801,4 +795,36 @@ mod tests {
         assert!(!serialized.is_empty());
         assert!(context_info.flush_context().is_ok());
     } // test_evidence_handling_request
+
+    #[tokio::test]
+    #[cfg(feature = "testing")]
+    async fn test_failing_evidence_handling_request() {
+        use std::collections::HashMap;
+        let _mutex = testing::lock_tests().await;
+        let mut context_info = context_info::ContextInfo::new_from_str(
+            context_info::AlgorithmConfigurationString {
+                tpm_encryption_alg: "rsa".to_string(),
+                tpm_hash_alg: "sha256".to_string(),
+                tpm_signing_alg: "rsassa".to_string(),
+                agent_data_path: "".to_string(),
+                disabled_signing_algorithms: vec![],
+            },
+        )
+        .expect("Failed to create context info from string");
+        let mut filler = FillerFromHardware::new(&mut context_info);
+        let mut subjects = HashMap::new();
+        subjects.insert("sha256".to_string(), vec![10]);
+        let params = AttestationRequiredParams {
+            challenge: "test_challenge".to_string(),
+            signature_scheme: "invalid-sign-scheme".to_string(),
+            hash_algorithm: "sha256".to_string(),
+            selected_subjects: subjects,
+            ima_log_path: Some("test-data/ima_log.txt".to_string()),
+            ima_offset: 0,
+            ima_entry_count: Some(1),
+            uefi_log_path: Some("test-data/uefi_log.bin".to_string()),
+        };
+        let _ = filler.get_evidence_handling_request(&params).await;
+        assert!(context_info.flush_context().is_ok());
+    }
 }

@@ -99,4 +99,27 @@ mod tests {
             "Context should be None when TPM is avoided"
         );
     }
+
+    #[tokio::test]
+    #[cfg(feature = "testing")]
+    async fn test_init_and_get_context() {
+        use keylime::tpm::testing;
+        let _mutex = testing::lock_tests().await;
+        use keylime::config::AgentConfig;
+        const DONT_AVOID_TPM: bool = false;
+        let config = AgentConfig::new();
+        assert!(config.is_ok(), "Failed to create AgentConfig");
+        let conf = config.unwrap(); //#[allow-ci]
+        let init_res = init_context_info(&conf, DONT_AVOID_TPM);
+        assert!(init_res.is_ok());
+        let context_res = get_context_info(DONT_AVOID_TPM);
+        assert!(context_res.is_ok());
+        let context_info_handler = context_res.unwrap(); //#[allow_ci]
+        assert!(
+            context_info_handler.is_some(),
+            "Context should not be None when TPM is not avoided"
+        );
+        let mut context_info = context_info_handler.unwrap(); //#[allow_ci]
+        context_info.flush_context().unwrap(); //#[allow_ci]
+    }
 }

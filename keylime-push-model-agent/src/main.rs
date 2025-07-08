@@ -6,7 +6,6 @@ use keylime::config::{AgentConfig, PushModelConfigTrait};
 use log::{debug, error, info};
 mod attestation;
 mod context_info_handler;
-mod json_dump;
 mod registration;
 mod response_handler;
 mod struct_filler;
@@ -140,8 +139,6 @@ async fn run(args: &Args) -> Result<()> {
             verifier_url: args.verifier_url.clone(),
             api_version: args.api_version.clone(),
             agent_identifier: Some(agent_identifier.clone()),
-            attestation_index: args.attestation_index.clone(),
-            session_index: args.session_index.clone(),
             location: None,
         });
     debug!("Negotiations request URL: {}", negotiations_request_url);
