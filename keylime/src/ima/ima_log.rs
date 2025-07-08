@@ -30,6 +30,35 @@ impl ImaLog {
     pub fn entry_count(&self) -> usize {
         self.entries.len()
     }
+    pub fn get_entries(
+        &self,
+        offset: usize,
+        entry_count: Option<usize>,
+    ) -> Vec<String> {
+        if offset >= self.entries.len() {
+            return Vec::new();
+        }
+        let end = match entry_count {
+            Some(count) => std::cmp::min(offset + count, self.entries.len()),
+            None => self.entries.len(),
+        };
+        self.entries[offset..end]
+            .iter()
+            .map(|entry| entry.raw_line.clone())
+            .collect()
+    }
+    pub fn get_entries_as_string(
+        &self,
+        offset: usize,
+        entry_count: Option<usize>,
+    ) -> String {
+        let entries = self.get_entries(offset, entry_count);
+        let mut result = entries.join("\n");
+        if !result.is_empty() {
+            result.push('\n');
+        }
+        result
+    }
 }
 
 #[cfg(test)]
@@ -84,5 +113,17 @@ mod tests {
             ima_log.is_err(),
             "Should return an error for invalid log format"
         );
+    }
+
+    #[test]
+    fn test_get_all_entries_as_string() {
+        let log_path = "test-data/ima_log.txt";
+        let ima_log =
+            ImaLog::new(log_path).expect("Failed to create ImaLog from file");
+        let original_content = fs::read_to_string(log_path)
+            .expect("Failed to read original log file");
+        let result_string =
+            ima_log.get_entries_as_string(0, Some(ima_log.entry_count()));
+        assert_eq!(result_string, original_content);
     }
 }

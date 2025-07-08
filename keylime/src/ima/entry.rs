@@ -394,6 +394,7 @@ impl Encode for ImaBuf {
 pub struct Entry {
     pub template_hash: Digest,
     pub event_data: Box<dyn EventData>,
+    pub raw_line: String,
 }
 
 impl TryFrom<&str> for Entry {
@@ -413,23 +414,28 @@ impl TryFrom<&str> for Entry {
         };
         let mode = tokens[2];
         let event = tokens[3];
+        let raw_line = value.to_string();
 
         match mode {
             "ima" => Ok(Self {
                 template_hash,
                 event_data: Box::new(Ima::try_from(event)?),
+                raw_line,
             }),
             "ima-ng" => Ok(Self {
                 template_hash,
                 event_data: Box::new(ImaNg::try_from(event)?),
+                raw_line,
             }),
             "ima-sig" => Ok(Self {
                 template_hash,
                 event_data: Box::new(ImaSig::try_from(event)?),
+                raw_line,
             }),
             "ima-buf" => Ok(Self {
                 template_hash,
                 event_data: Box::new(ImaBuf::try_from(event)?),
+                raw_line,
             }),
             template => Err(Error::other(format!(
                 "unrecognized template \"{template}\"",
