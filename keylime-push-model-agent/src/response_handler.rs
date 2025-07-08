@@ -17,6 +17,30 @@ pub fn process_negotiation_response(
             anyhow!("Verifier response did not request a tpm_quote")
         })?;
 
+    let ima_chosen_parameters = match verifier_response
+        .data
+        .attributes
+        .evidence_requested
+        .iter()
+        .find(|req| req.evidence_type == "ima_log")
+    {
+        Some(req) => req.chosen_parameters.clone(),
+        None => {
+            return Err(anyhow!(
+                "Verifier response did not request an ima_log"
+            ));
+        }
+    };
+    let (ima_offset, ima_entry_count) = match ima_chosen_parameters {
+        Some(ChosenParameters::Offset(offset)) => {
+            (offset.starting_offset.unwrap_or(0), offset.entry_count)
+        }
+        _ => {
+            return Err(anyhow!(
+                "Verifier response did not provide valid ima_log parameters"
+            ));
+        }
+    };
     if let Some(ChosenParameters::Parameters(params_box)) =
         &tpm_quote_request.chosen_parameters
     {
@@ -39,6 +63,10 @@ pub fn process_negotiation_response(
                     map
                 },
             ),
+            ima_log_path: None,
+            ima_offset,
+            ima_entry_count,
+            uefi_log_path: None,
         };
         Ok(params)
     } else {

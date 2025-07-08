@@ -11,12 +11,14 @@
 // - Event data names (for EFI variables, if UTF-16 encoded)
 // - PCR index for each event
 use crate::error::{Error as KeylimeError, Result};
-
-use byteorder::{LittleEndian, ReadBytesExt};
+use base64::{
+    engine::general_purpose::STANDARD as base64_standard, Engine as _,
+};
+use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 
 use std::collections::HashMap;
 use std::fs;
-use std::io::{Cursor, Read};
+use std::io::{Cursor, Read, Write};
 
 // Event Types (a partial list for common events)
 const EV_NO_ACTION: u32 = 0x00000003;
@@ -47,6 +49,8 @@ pub struct UefiLogHandler {
     pub events: Vec<ParsedUefiEvent>,
     /// A list of hash algorithms that are active for this log.
     pub active_algorithms: Vec<String>,
+    /// The raw bytes of the initial TCG_EfiSpecIdEvent.
+    spec_id_event_raw: Vec<u8>,
 }
 
 impl UefiLogHandler {
@@ -97,6 +101,9 @@ impl UefiLogHandler {
         let event_size_0 = cursor.read_u32::<LittleEndian>()?;
         let mut spec_id_event_data = vec![0u8; event_size_0 as usize];
         cursor.read_exact(&mut spec_id_event_data)?;
+
+        let spec_id_event_end_pos = cursor.position() as usize;
+        let spec_id_event_raw = log_bytes[0..spec_id_event_end_pos].to_vec();
 
         // Now, parse the TCG_EfiSpecIdEventStruct from the event data to find active algorithms.
         let mut spec_id_cursor = Cursor::new(&spec_id_event_data);
@@ -167,7 +174,45 @@ impl UefiLogHandler {
         Ok(UefiLogHandler {
             events: parsed_events,
             active_algorithms: active_algs_list,
+            spec_id_event_raw,
         })
+    }
+
+    /// Reconstructs the binary UEFI event log from the parsed data.
+    pub fn to_bytes(&self) -> std::io::Result<Vec<u8>> {
+        let mut buffer = Vec::new();
+        buffer.write_all(&self.spec_id_event_raw)?;
+
+        for event in &self.events {
+            buffer.write_u32::<LittleEndian>(event.pcr_index)?;
+            let event_type_val =
+                Self::map_str_to_event_type(&event.event_type);
+            buffer.write_u32::<LittleEndian>(event_type_val)?;
+
+            buffer.write_u32::<LittleEndian>(event.digests.len() as u32)?;
+
+            let mut digests_sorted: Vec<_> = event.digests.iter().collect();
+            digests_sorted.sort_by_key(|(alg_name, _)| {
+                Self::map_str_to_alg_id(alg_name)
+            });
+
+            // Iterate over the sorted vector, not the HashMap directly.
+            for (alg_name, digest_value) in digests_sorted {
+                let alg_id = Self::map_str_to_alg_id(alg_name);
+                buffer.write_u16::<LittleEndian>(alg_id)?;
+                buffer.write_all(digest_value)?;
+            }
+
+            buffer.write_u32::<LittleEndian>(event.event_data.len() as u32)?;
+            buffer.write_all(&event.event_data)?;
+        }
+
+        Ok(buffer)
+    }
+
+    pub fn base_64(&self) -> std::io::Result<String> {
+        let bytes = self.to_bytes()?;
+        Ok(base64_standard.encode(&bytes))
     }
 
     /// Returns the known digest size for a given algorithm ID.
@@ -214,6 +259,16 @@ impl UefiLogHandler {
             .collect()
     }
 
+    fn map_str_to_alg_id(alg_name: &str) -> u16 {
+        match alg_name {
+            "sha1" => TPM_ALG_SHA1,
+            "sha256" => TPM_ALG_SHA256,
+            "sha384" => TPM_ALG_SHA384,
+            "sha512" => TPM_ALG_SHA512,
+            _ => 0, // Should not happen with parsed data
+        }
+    }
+
     fn map_alg_id_to_str(alg_id: u16) -> &'static str {
         match alg_id {
             TPM_ALG_SHA1 => "sha1",
@@ -221,6 +276,41 @@ impl UefiLogHandler {
             TPM_ALG_SHA384 => "sha384",
             TPM_ALG_SHA512 => "sha512",
             _ => "unknown",
+        }
+    }
+
+    fn map_str_to_event_type(event_type_str: &str) -> u32 {
+        match event_type_str {
+            "EV_PREBOOT_CERT" => 0x00000000,
+            "EV_POST_CODE" => 0x00000001,
+            "EV_UNUSED" => 0x00000002,
+            "EV_NO_ACTION" => 0x00000003,
+            "EV_SEPARATOR" => 0x00000004,
+            "EV_ACTION" => 0x00000005,
+            "EV_EVENT_TAG" => 0x00000006,
+            "EV_S_CRTM_CONTENTS" => 0x00000007,
+            "EV_S_CRTM_VERSION" => 0x00000008,
+            "EV_CPU_MICROCODE" => 0x00000009,
+            "EV_PLATFORM_CONFIG_FLAGS" => 0x0000000A,
+            "EV_TABLE_OF_DEVICES" => 0x0000000B,
+            "EV_COMPACT_HASH" => 0x0000000C,
+            "EV_IPL" => 0x0000000D,
+            "EV_IPL_PARTITION_DATA" => 0x0000000E,
+            "EV_NONHOST_CODE" => 0x0000000F,
+            "EV_NONHOST_CONFIG" => 0x00000010,
+            "EV_NONHOST_INFO" => 0x00000011,
+            "EV_OMIT_BOOT_DEVICE_EVENTS" => 0x00000012,
+            "EV_EFI_VARIABLE_DRIVER_CONFIG" => 0x80000001,
+            "EV_EFI_VARIABLE_BOOT" => 0x80000002,
+            "EV_EFI_BOOT_SERVICES_APPLICATION" => 0x80000003,
+            "EV_EFI_BOOT_SERVICES_DRIVER" => 0x80000004,
+            "EV_EFI_RUNTIME_SERVICES_DRIVER" => 0x80000005,
+            "EV_EFI_GPT_EVENT" => 0x80000006,
+            "EV_EFI_ACTION" => 0x80000007,
+            "EV_EFI_PLATFORM_FIRMWARE_BLOB" => 0x80000008,
+            "EV_EFI_HANDOFF_TABLES" => 0x80000009,
+            "EV_EFI_HCRTM_EVENT" => 0x8000000A,
+            _ => 0xFFFFFFFF, // Default for EV_UNKNOWN_TYPE
         }
     }
 
@@ -471,5 +561,119 @@ mod tests {
         let non_existent_path = "/path/to/nonexistent/uefi_log";
         let result = UefiLogHandler::new(non_existent_path);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_log_reconstruction_to_bytes_and_base64() {
+        let fake_log_bytes: &[u8] = &[
+            // 1. TCG_PCR_EVENT Header
+            0x00, 0x00, 0x00, 0x00, // pcr_index: 0
+            0x03, 0x00, 0x00, 0x00, // event_type: EV_NO_ACTION
+            // digest: 20 bytes of a SHA1 digest (zeros in this case)
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            // event_size: 37 bytes (size of the TCG_EfiSpecIdEventStruct that follows)
+            37, 0x00, 0x00, 0x00,
+            // 2. Event Content (TCG_EfiSpecIdEventStruct)
+            // signature: "Spec ID Event\0" (16 bytes)
+            0x53, 0x70, 0x65, 0x63, 0x20, 0x49, 0x44, 0x20, 0x45, 0x76, 0x65,
+            0x6e, 0x74, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, // platform_class
+            0x00, // spec_version_minor
+            0x02, // spec_version_major
+            0x00, // spec_errata
+            0x02, // uintn_size
+            0x02, 0x00, 0x00, 0x00, // numberOfAlgorithms: 2
+            // alg_id: SHA1, digest_size: 20
+            0x04, 0x00, 20, 0x00,
+            // alg_id: SHA256, digest_size: 32
+            0x0B, 0x00, 32, 0x00, // vendorInfoSize: 0
+            0x00,
+            // --- Event 2: A normal measurement event (TCG_PCR_EVENT2 format) ---
+            // 1. TCG_PCR_EVENT2 Header
+            0x04, 0x00, 0x00, 0x00, // pcr_index: 4
+            0x01, 0x00, 0x00, 0x00, // event_type: EV_POST_CODE
+            // 2. Digests List
+            0x02, 0x00, 0x00,
+            0x00, // count: 2 (one digest for SHA1 and another for SHA256)
+            // SHA1 Digest (20 bytes)
+            0x04, 0x00, // alg_id: SHA1
+            0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA,
+            0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA,
+            // SHA256 Digest (32 bytes)
+            0x0B, 0x00, // alg_id: SHA256
+            0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB,
+            0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB,
+            0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB,
+            // 3. Event Content
+            0x04, 0x00, 0x00, 0x00, // eventSize: 4
+            0xDE, 0xAD, 0xBE, 0xEF, // eventData (4 bytes)
+        ];
+
+        let handler = UefiLogHandler::from_bytes(fake_log_bytes).unwrap(); //#[allow_ci]
+        let reconstructed_bytes = handler.to_bytes().unwrap(); //#[allow_ci]
+        assert_eq!(reconstructed_bytes, fake_log_bytes.to_vec());
+        let base64_str = handler.base_64().unwrap(); //#[allow_ci]
+        let decoded_bytes = base64_standard.decode(&base64_str).unwrap(); //#[allow_ci]
+        assert_eq!(decoded_bytes, fake_log_bytes);
+    }
+
+    #[test]
+    fn test_map_str_to_alg_id() {
+        let algs = vec![
+            ("sha1", TPM_ALG_SHA1),
+            ("sha256", TPM_ALG_SHA256),
+            ("sha384", TPM_ALG_SHA384),
+            ("sha512", TPM_ALG_SHA512),
+            ("unknown", 0),
+        ];
+        for (alg_str, expected_id) in algs {
+            assert_eq!(
+                UefiLogHandler::map_str_to_alg_id(alg_str),
+                expected_id
+            );
+        }
+    }
+
+    #[test]
+    fn test_map_str_to_event_type() {
+        let event_tuples = vec![
+            ("EV_PREBOOT_CERT", 0x00000000),
+            ("EV_POST_CODE", 0x00000001),
+            ("EV_UNUSED", 0x00000002),
+            ("EV_SEPARATOR", 0x00000004),
+            ("EV_ACTION", 0x00000005),
+            ("EV_EVENT_TAG", 0x00000006),
+            ("EV_S_CRTM_CONTENTS", 0x00000007),
+            ("EV_S_CRTM_VERSION", 0x00000008),
+            ("EV_CPU_MICROCODE", 0x00000009),
+            ("EV_PLATFORM_CONFIG_FLAGS", 0x0000000A),
+            ("EV_TABLE_OF_DEVICES", 0x0000000B),
+            ("EV_COMPACT_HASH", 0x0000000C),
+            ("EV_IPL", 0x0000000D),
+            ("EV_IPL_PARTITION_DATA", 0x0000000E),
+            ("EV_NONHOST_CODE", 0x0000000F),
+            ("EV_NONHOST_CONFIG", 0x00000010),
+            ("EV_NONHOST_INFO", 0x00000011),
+            ("EV_OMIT_BOOT_DEVICE_EVENTS", 0x00000012),
+            ("EV_NO_ACTION", 0x00000003),
+            ("EV_EFI_VARIABLE_DRIVER_CONFIG", 0x80000001),
+            ("EV_EFI_VARIABLE_BOOT", 0x80000002),
+            ("EV_EFI_BOOT_SERVICES_APPLICATION", 0x80000003),
+            ("EV_EFI_BOOT_SERVICES_DRIVER", 0x80000004),
+            ("EV_EFI_RUNTIME_SERVICES_DRIVER", 0x80000005),
+            ("EV_EFI_GPT_EVENT", 0x80000006),
+            ("EV_EFI_ACTION", 0x80000007),
+            ("EV_EFI_PLATFORM_FIRMWARE_BLOB", 0x80000008),
+            ("EV_EFI_HANDOFF_TABLES", 0x80000009),
+            ("EV_EFI_HCRTM_EVENT", 0x8000000A),
+            ("EV_UNKNOWN_TYPE", 0xFFFFFFFF),
+        ];
+        for (event_str, expected_type) in event_tuples {
+            assert_eq!(
+                UefiLogHandler::map_str_to_event_type(event_str),
+                expected_type,
+            );
+        }
     }
 }

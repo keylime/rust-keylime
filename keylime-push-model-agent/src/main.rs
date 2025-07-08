@@ -145,7 +145,6 @@ async fn run(args: &Args) -> Result<()> {
             location: None,
         });
     debug!("Negotiations request URL: {}", negotiations_request_url);
-
     let neg_config = attestation::NegotiationConfig {
         avoid_tpm,
         url: &negotiations_request_url,
@@ -154,6 +153,8 @@ async fn run(args: &Args) -> Result<()> {
         client_certificate: &args.certificate,
         key: &args.key,
         insecure: args.insecure,
+        ima_log_path: Some(config.ima_ml_path.as_str()),
+        uefi_log_path: Some(config.measuredboot_ml_path.as_str()),
     };
     let attestation_client =
         attestation::AttestationClient::new(&neg_config)?;

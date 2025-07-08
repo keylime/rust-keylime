@@ -7,7 +7,7 @@ use keylime::context_info::{AttestationRequiredParams, ContextInfo};
 use keylime::ima::ImaLog;
 use keylime::structures;
 use keylime::uefi::uefi_log_handler;
-use log::error;
+use log::{debug, error};
 
 #[async_trait]
 pub trait StructureFiller {
@@ -192,7 +192,6 @@ impl<'a> FillerFromHardware<'a> {
         }
     }
 
-    // TODO: Change this function to use the evidence handling request appropriately
     pub async fn get_evidence_handling_request_final(
         &mut self,
         params: &AttestationRequiredParams,
@@ -226,18 +225,34 @@ impl<'a> FillerFromHardware<'a> {
             data: tpm_evidence_data,
         };
 
-        // TODO: Collect UEFI and IMA logs
         let uefi_evidence_data = structures::EvidenceData::UefiLog {
-            entries: "uefi_log_entries".to_string(),
+            entries: evidence.uefi_log,
         };
         let uefi_evidence_collected = structures::EvidenceCollected {
             evidence_class: "log".to_string(),
             evidence_type: "uefi_log".to_string(),
             data: uefi_evidence_data,
         };
+
+        let ima_entry_count = match params.ima_entry_count {
+            Some(count) => count,
+            None => {
+                debug!("IMA entry count is not provided");
+                0
+            }
+        };
+        debug!(
+            "IMA information: path:{}, entry_count:{}",
+            params
+                .ima_log_path
+                .clone()
+                .unwrap_or("PATH_NOT_SET".to_string()),
+            ima_entry_count
+        );
+        debug!("IMA log entries: {}", evidence.ima_log_entries);
         let ima_evidence_data = structures::EvidenceData::ImaLog {
-            entry_count: 95,
-            entries: "ima_log_entries".to_string(),
+            entry_count: ima_entry_count,
+            entries: evidence.ima_log_entries,
         };
         let ima_evidence_collected = structures::EvidenceCollected {
             evidence_class: "log".to_string(),
@@ -615,6 +630,10 @@ mod tests {
             signature_scheme: "".to_string(),
             hash_algorithm: "".to_string(),
             selected_subjects: std::collections::HashMap::new(),
+            ima_offset: 0,
+            ima_entry_count: Some(0),
+            ima_log_path: None,
+            uefi_log_path: None,
         })
         .await;
 
@@ -769,6 +788,10 @@ mod tests {
             signature_scheme: "rsassa".to_string(),
             hash_algorithm: "sha256".to_string(),
             selected_subjects: subjects,
+            ima_log_path: Some("test-data/ima_log.txt".to_string()),
+            ima_offset: 0,
+            ima_entry_count: Some(1),
+            uefi_log_path: Some("test-data/uefi_log.bin".to_string()),
         };
         let evidence_handling_request =
             filler.get_evidence_handling_request(&params).await;
