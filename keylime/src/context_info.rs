@@ -700,6 +700,7 @@ mod tests {
             tpm_hash_alg: "sha256".to_string(),
             tpm_signing_alg: "rsassa".to_string(),
             agent_data_path: "".to_string(),
+            disabled_signing_algorithms: vec![],
         };
         let context_result = ContextInfo::new_from_str(config);
         assert!(context_result.is_ok());
@@ -733,6 +734,7 @@ mod tests {
             tpm_hash_alg: "sha256".to_string(),
             tpm_signing_alg: "rsassa".to_string(),
             agent_data_path: "".to_string(),
+            disabled_signing_algorithms: vec![],
         };
 
         let context_result = ContextInfo::new_from_str(config);
@@ -757,5 +759,43 @@ mod tests {
                 algorithms::AlgorithmError::UnsupportedSigningAlgorithm(_)
             )
         ));
+        context_info.flush_context().unwrap(); //#[allow_ci]
+    }
+
+    #[tokio::test]
+    #[cfg(feature = "testing")]
+    async fn test_verifier_subjects() {
+        use crate::tpm::testing;
+        let _mutex = testing::lock_tests().await;
+        let config = AlgorithmConfigurationString {
+            tpm_encryption_alg: "rsa".to_string(),
+            tpm_hash_alg: "sha256".to_string(),
+            tpm_signing_alg: "rsassa".to_string(),
+            agent_data_path: "".to_string(),
+            disabled_signing_algorithms: vec![],
+        };
+
+        let context_result = ContextInfo::new_from_str(config);
+        assert!(context_result.is_ok());
+        let mut context_info = context_result.unwrap(); //#[allow_ci]
+
+        let mut subjects = HashMap::new();
+        subjects.insert(
+            "sha1".to_string(),
+            vec![
+                0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17,
+                18, 19, 20, 21, 22, 23,
+            ],
+        );
+        subjects.insert("sha256".to_string(), vec![10]);
+        let params = AttestationRequiredParams {
+            challenge: "test_challenge".to_string(),
+            signature_scheme: "rsassa".to_string(),
+            hash_algorithm: "sha256".to_string(),
+            selected_subjects: subjects,
+        };
+        let result = context_info.perform_attestation(&params).await;
+        assert!(result.is_ok());
+        context_info.flush_context().unwrap(); //#[allow_ci]
     }
 }
