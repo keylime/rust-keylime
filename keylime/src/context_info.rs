@@ -3,8 +3,10 @@ use crate::{
     algorithms::{self, HashAlgorithm as KeylimeInternalHashAlgorithm},
     config::{AgentConfig, KeylimeConfigError, PushModelConfigTrait},
     hash_ek,
+    ima::ImaLog,
     structures::CertificationKey,
     tpm,
+    uefi::UefiLogHandler,
 };
 use base64::{
     engine::general_purpose::STANDARD as base64_standard, Engine as _,
@@ -100,6 +102,10 @@ pub struct AttestationRequiredParams {
     pub signature_scheme: String,
     pub hash_algorithm: String,
     pub selected_subjects: HashMap<String, Vec<u32>>,
+    pub ima_log_path: Option<String>,
+    pub ima_offset: usize,
+    pub ima_entry_count: Option<usize>,
+    pub uefi_log_path: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -107,8 +113,8 @@ pub struct AttestationEvidence {
     pub quote_message: String,
     pub quote_signature: String,
     pub pcr_values: String,
-    // pub ima_log: String, # TODO: Implement IMA log collection
-    // pub uefi_log: String, # TODO: Implement UEFI log collection
+    pub ima_log_entries: String,
+    pub uefi_log: String,
 }
 
 impl ContextInfo {
@@ -438,11 +444,53 @@ impl ContextInfo {
         let quote_signature = parts[1].to_string();
         let pcr_values = parts[2].to_string();
 
-        // TODO: Implement IMA and UEFI log collection
+        let ima_log_path = match params.ima_log_path.clone() {
+            Some(path) => path,
+            None => {
+                return Err(ContextInfoError::Keylime(
+                    "IMA log path is required for attestation".to_string(),
+                ));
+            }
+        };
+        let ima_log = ImaLog::new(ima_log_path.as_str()).map_err(|e| {
+            ContextInfoError::Keylime(format!(
+                "Failed to read IMA log: {}",
+                e
+            ))
+        })?;
+        let result_string = ima_log
+            .get_entries_as_string(params.ima_offset, params.ima_entry_count);
+        let uefi_log_path = match params.uefi_log_path.clone() {
+            Some(path) => path,
+            None => {
+                return Err(ContextInfoError::Keylime(
+                    "UEFI log path is required for attestation".to_string(),
+                ));
+            }
+        };
+        let uefi_log_handler = UefiLogHandler::new(uefi_log_path.as_str())
+            .map_err(|e| {
+                ContextInfoError::Keylime(format!(
+                    "Failed to create UEFI log handler: {}",
+                    e
+                ))
+            })?;
+        let uefi_log = match uefi_log_handler.base_64() {
+            Ok(content) => content,
+            Err(e) => {
+                return Err(ContextInfoError::Keylime(format!(
+                    "Failed to read UEFI log: {}",
+                    e
+                )));
+            }
+        };
+
         Ok(AttestationEvidence {
             quote_message,
             quote_signature,
             pcr_values,
+            ima_log_entries: result_string,
+            uefi_log,
         })
     }
 }
@@ -721,6 +769,10 @@ mod tests {
             signature_scheme: "rsassa".to_string(),
             hash_algorithm: "sha256".to_string(),
             selected_subjects: subjects,
+            ima_log_path: Some("test-data/ima_log.txt".to_string()),
+            ima_offset: 0,
+            ima_entry_count: Some(1),
+            uefi_log_path: Some("test-data/uefi_log.bin".to_string()),
         };
         let mut context_info = context_result.unwrap(); //#[allow_ci]
         let result = context_info.perform_attestation(&params).await;
@@ -756,6 +808,10 @@ mod tests {
             signature_scheme: "invalid-algorithm".to_string(),
             hash_algorithm: "sha256".to_string(),
             selected_subjects: subjects,
+            ima_log_path: Some("test-data/ima_log.txt".to_string()),
+            ima_offset: 0,
+            ima_entry_count: Some(1),
+            uefi_log_path: Some("test-data/uefi_log.bin".to_string()),
         };
 
         let result = context_info.perform_attestation(&params).await;
@@ -800,6 +856,10 @@ mod tests {
             signature_scheme: "rsassa".to_string(),
             hash_algorithm: "sha256".to_string(),
             selected_subjects: subjects,
+            ima_log_path: Some("test-data/ima_log.txt".to_string()),
+            ima_offset: 0,
+            ima_entry_count: Some(1),
+            uefi_log_path: Some("test-data/uefi_log.bin".to_string()),
         };
         let result = context_info.perform_attestation(&params).await;
         assert!(result.is_ok());

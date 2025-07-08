@@ -26,6 +26,8 @@ pub struct NegotiationConfig<'a> {
     pub client_certificate: &'a str,
     pub key: &'a str,
     pub insecure: Option<bool>,
+    pub ima_log_path: Option<&'a str>,
+    pub uefi_log_path: Option<&'a str>,
 }
 
 const HTTPS_PREFIX: &str = "https://";
@@ -162,10 +164,14 @@ impl AttestationClient {
             },
         );
         info!("Sending evidence (PATCH) to: {}", patch_url);
-        let attestation_params =
+        let mut attestation_params =
             response_handler::process_negotiation_response(
                 &neg_response.body,
             )?;
+        attestation_params.ima_log_path =
+            config.ima_log_path.map(|path| path.to_string());
+        attestation_params.uefi_log_path =
+            config.uefi_log_path.map(|path| path.to_string());
         debug!("Attestation parameters: {:?}", attestation_params);
         let mut context_info =
             context_info_handler::get_context_info(config.avoid_tpm)?
@@ -181,10 +187,8 @@ impl AttestationClient {
         let evidence_request_struct = filler
             .get_evidence_handling_request(&attestation_params)
             .await;
-        debug!("Evidence request struct: {:?}", evidence_request_struct);
         let evidence_json_body =
             serde_json::to_string(&evidence_request_struct)?;
-        debug!("Evidence JSON body: {:?}", evidence_json_body);
         let evidence_config = NegotiationConfig {
             url: &patch_url,
             ..*config
@@ -220,6 +224,8 @@ mod tests {
             client_certificate: cert_path,
             key: key_path,
             insecure: Some(false),
+            ima_log_path: None,
+            uefi_log_path: None,
         }
     }
 

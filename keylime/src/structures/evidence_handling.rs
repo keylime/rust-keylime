@@ -39,7 +39,7 @@ pub enum EvidenceData {
         entries: String,
     },
     ImaLog {
-        entry_count: u64,
+        entry_count: usize,
         entries: String,
     },
 }
@@ -74,7 +74,10 @@ impl TryFrom<JsonValue> for EvidenceData {
             }
         } else if let Some(entry_count) = value.get("entry_count") {
             if entry_count.is_number() {
-                let entry_count = entry_count.as_u64().unwrap(); //#[allow_ci]
+                let entry_count = entry_count
+                    .as_u64()
+                    .ok_or_else(|| "Invalid entry_count field".to_string())?
+                    as usize;
                 let entries = value
                     .get("entries")
                     .ok_or_else(|| "Missing entries field".to_string())?

@@ -129,9 +129,9 @@ pub struct CertificationParameters {
 pub struct LogParameters {
     pub format: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub starting_offset: Option<i32>,
+    pub starting_offset: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub entry_count: Option<i32>,
+    pub entry_count: Option<usize>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
