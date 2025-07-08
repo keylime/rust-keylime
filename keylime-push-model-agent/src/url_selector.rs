@@ -1,22 +1,12 @@
 // SPDX-License-agent_identifier: Apache-2.0
 // Copyright 2025 Keylime Authors
 pub const DEFAULT_API_VERSION: &str = "v3.0";
-const DEFAULT_INDEX: &str = "1";
 
 pub struct UrlArgs {
     pub verifier_url: String,
     pub agent_identifier: Option<String>,
     pub api_version: Option<String>,
-    pub attestation_index: Option<String>,
-    pub session_index: Option<String>,
     pub location: Option<String>,
-}
-
-pub fn get_attestation_index(args: &UrlArgs) -> String {
-    if args.attestation_index.is_some() {
-        return args.attestation_index.clone().unwrap();
-    }
-    DEFAULT_INDEX.to_string()
 }
 
 fn get_api_version(args: &UrlArgs) -> String {
@@ -53,56 +43,10 @@ pub fn get_evidence_submission_request_url(args: &UrlArgs) -> String {
     format!("{}{}", trimmed_base, location)
 }
 
-#[allow(dead_code)]
-fn get_index_suffix(args: &UrlArgs) -> String {
-    let index = get_attestation_index(args);
-    if args.attestation_index.is_some() {
-        return format!("/{index}");
-    }
-    "".to_string()
-}
-
-#[allow(dead_code)]
-pub fn get_session_request_url(args: &UrlArgs) -> String {
-    let verifier_url = args.verifier_url.clone();
-    let api_version = get_api_version(args);
-    if verifier_url.ends_with('/') {
-        match args.session_index {
-            Some(ref index) => {
-                return format!(
-                    "{verifier_url}{api_version}/sessions/{index}"
-                );
-            }
-            None => {
-                return format!("{verifier_url}{api_version}/sessions");
-            }
-        }
-    }
-    match args.session_index {
-        Some(ref index) => {
-            format!("{verifier_url}/{api_version}/sessions/{index}")
-        }
-        None => format!("{verifier_url}/{api_version}/sessions"),
-    }
-}
-
 #[cfg(test)]
 mod tests {
 
     use super::*;
-
-    #[test]
-    fn get_attestation_index_test() {
-        let index = get_attestation_index(&UrlArgs {
-            verifier_url: "https://1.2.3.4:5678/".to_string(),
-            api_version: Some(DEFAULT_API_VERSION.to_string()),
-            agent_identifier: Some("024680".to_string()),
-            session_index: None,
-            attestation_index: Some("2".to_string()),
-            location: None,
-        });
-        assert_eq!(index, "2".to_string());
-    } // get_attestation_index_test
 
     #[test]
     fn get_attestation_request_url_test() {
@@ -110,8 +54,6 @@ mod tests {
             api_version: None,
             verifier_url: "https://1.2.3.4:5678/".to_string(),
             agent_identifier: Some("024680".to_string()),
-            attestation_index: Some("2".to_string()),
-            session_index: None,
             location: None,
         });
         assert_eq!(
@@ -134,8 +76,6 @@ mod tests {
                 verifier_url: u.clone(),
                 api_version: None,
                 agent_identifier: None,
-                session_index: None,
-                attestation_index: None,
                 location: Some(
                     "/v3.0/agents/024680/attestations/0".to_string(),
                 ),
@@ -155,79 +95,4 @@ mod tests {
             };
         }
     } // get_evidence_handling_request_url_test
-
-    #[test]
-    fn get_sessions_request_url_test() {
-        let urls = vec![
-            "https://1.2.3.4:5678/".to_string(),
-            "https://1.2.3.4:5678".to_string(),
-            "http://1.2.3.4:5678/".to_string(),
-            "http://1.2.3.4:5678".to_string(),
-        ];
-        for u in urls {
-            let url = get_session_request_url(&UrlArgs {
-                verifier_url: u.clone(),
-                api_version: Some(DEFAULT_API_VERSION.to_string()),
-                agent_identifier: None,
-                session_index: Some("024680".to_string()),
-                attestation_index: None,
-                location: None,
-            });
-
-            match u.clone().ends_with('/') {
-                true => assert_eq!(
-                    url,
-                    u.clone().to_string() + "v3.0/sessions/024680"
-                ),
-                false => assert_eq!(
-                    url,
-                    u.clone().to_string() + "/v3.0/sessions/024680"
-                ),
-            };
-        }
-    } // get_sessions_request_url_test
-
-    #[test]
-    fn get_sessions_request_url_no_session_test() {
-        let urls = vec![
-            "https://1.2.3.4:5678/".to_string(),
-            "https://1.2.3.4:5678".to_string(),
-            "http://1.2.3.4:5678/".to_string(),
-            "http://1.2.3.4:5678".to_string(),
-        ];
-        for u in urls {
-            let url = get_session_request_url(&UrlArgs {
-                verifier_url: u.clone(),
-                api_version: Some(DEFAULT_API_VERSION.to_string()),
-                agent_identifier: None,
-                session_index: None,
-                attestation_index: None,
-                location: None,
-            });
-
-            match u.clone().ends_with('/') {
-                true => {
-                    assert_eq!(url, u.clone().to_string() + "v3.0/sessions")
-                }
-                false => {
-                    assert_eq!(url, u.clone().to_string() + "/v3.0/sessions")
-                }
-            };
-        }
-    } // get_sessions_request_url_no_session_test
-
-    #[test]
-    fn get_attestation_index_test_no_index() {
-        assert_eq!(
-            get_attestation_index(&UrlArgs {
-                verifier_url: "https://1.2.3.4:5678/".to_string(),
-                api_version: Some(DEFAULT_API_VERSION.to_string()),
-                agent_identifier: Some("024680".to_string()),
-                session_index: None,
-                attestation_index: None,
-                location: None,
-            }),
-            DEFAULT_INDEX.to_string()
-        );
-    } // get_attestation_index_test_no_index
 }

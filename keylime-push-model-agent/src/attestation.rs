@@ -1,6 +1,5 @@
 use crate::{
-    context_info_handler, json_dump, response_handler, struct_filler,
-    url_selector,
+    context_info_handler, response_handler, struct_filler, url_selector,
 };
 use anyhow::{Context, Result};
 use keylime::https_client;
@@ -71,9 +70,8 @@ impl AttestationClient {
         let mut filler =
             struct_filler::get_filler_request(None, context_info.as_mut());
 
-        let json_value = json_dump::dump_attestation_request_to_value(
-            &filler.get_attestation_request(),
-        );
+        let json_value =
+            serde_json::to_value(filler.get_attestation_request());
         let reqcontent = json_value?.to_string();
         debug!("Request body: {:?}", reqcontent);
 
@@ -158,8 +156,6 @@ impl AttestationClient {
                 verifier_url: config.url.to_string(),
                 agent_identifier: None,
                 api_version: None,
-                attestation_index: None,
-                session_index: None,
                 location: Some(location_header.to_string()),
             },
         );
@@ -311,5 +307,28 @@ mod tests {
             response_info.status_code
         );
         assert!(response_info.body.contains("evidence_requested"));
+    }
+
+    #[actix_rt::test]
+    async fn test_handle_evidence_submission_no_location_header() {
+        let config = create_test_config("http://localhost:3000", "", "", "");
+        let client = AttestationClient::new(&config).unwrap();
+
+        // Create a response with no Location header
+        let neg_response = ResponseInformation {
+            status_code: StatusCode::CREATED,
+            headers: HeaderMap::new(), // Empty headers
+            body: "{}".to_string(),
+        };
+
+        let result = client
+            .handle_evidence_submission(neg_response, &config)
+            .await;
+
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("missing 'Location' header"));
     }
 }
