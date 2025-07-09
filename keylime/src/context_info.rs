@@ -338,8 +338,7 @@ impl ContextInfo {
         let ak_name_obj: Name =
             Name::try_from(name_content_buffer).map_err(|e| {
                 tpm::TpmError::NameFromBytesError(format!(
-                    "Failed to create Name object: {}",
-                    e
+                    "Failed to create Name object: {e:?}"
                 ))
             })?;
         Ok(hex::encode(ak_name_obj.value()))
@@ -454,8 +453,7 @@ impl ContextInfo {
         };
         let ima_log = ImaLog::new(ima_log_path.as_str()).map_err(|e| {
             ContextInfoError::Keylime(format!(
-                "Failed to read IMA log: {}",
-                e
+                "Failed to read IMA log: {e:?}",
             ))
         })?;
         let result_string = ima_log
@@ -471,16 +469,14 @@ impl ContextInfo {
         let uefi_log_handler = UefiLogHandler::new(uefi_log_path.as_str())
             .map_err(|e| {
                 ContextInfoError::Keylime(format!(
-                    "Failed to create UEFI log handler: {}",
-                    e
+                    "Failed to create UEFI log handler: {e:?}",
                 ))
             })?;
         let uefi_log = match uefi_log_handler.base_64() {
             Ok(content) => content,
             Err(e) => {
                 return Err(ContextInfoError::Keylime(format!(
-                    "Failed to read UEFI log: {}",
-                    e
+                    "Failed to read UEFI log: {e:?}",
                 )));
             }
         };

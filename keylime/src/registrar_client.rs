@@ -103,7 +103,7 @@ impl RegistrarClientBuilder {
         // Try to reach the registrar
         let addr = format!("http://{registrar_ip}:{registrar_port}/version");
 
-        info!("Requesting registrar API version to {}", addr);
+        info!("Requesting registrar API version to {addr}");
 
         let resp = reqwest::Client::new()
             .get(&addr)
@@ -291,9 +291,12 @@ impl RegistrarClient {
             port: Some(ai.port),
         };
 
+        let registrar_ip = &self.registrar_ip;
+        let registrar_port = &self.registrar_port;
+        let uuid = &ai.uuid;
+
         let addr = format!(
-            "http://{}:{}/v{}/agents/{}",
-            &self.registrar_ip, &self.registrar_port, api_version, &ai.uuid
+            "http://{registrar_ip}:{registrar_port}/v{api_version}/agents/{uuid}",
         );
 
         info!(
@@ -407,9 +410,12 @@ impl RegistrarClient {
     ) -> Result<(), RegistrarClientError> {
         let data = Activate { auth_tag };
 
+        let registrar_ip = &self.registrar_ip;
+        let registrar_port = &self.registrar_port;
+        let uuid = &ai.uuid;
+
         let addr = format!(
-            "http://{}:{}/v{}/agents/{}",
-            &self.registrar_ip, &self.registrar_port, api_version, &ai.uuid
+            "http://{registrar_ip}:{registrar_port}/v{api_version}/agents/{uuid}",
         );
 
         info!(
@@ -595,10 +601,10 @@ mod tests {
             .build()
             .await;
 
-        assert!(response.is_ok(), "error: {:?}", response);
+        assert!(response.is_ok(), "error: {response:?}");
         let mut registrar_client = response.unwrap(); //#[allow_ci]
         let response = registrar_client.register_agent(&ai).await;
-        assert!(response.is_ok(), "error: {:?}", response);
+        assert!(response.is_ok(), "error: {response:?}");
     }
 
     #[actix_rt::test]
@@ -655,7 +661,7 @@ mod tests {
         let mut registrar_client = builder.build().await.unwrap(); //#[allow_ci]
 
         let response = registrar_client.register_agent(&ai).await;
-        assert!(response.is_ok(), "error: {:?}", response);
+        assert!(response.is_ok(), "error: {response:?}");
     }
 
     #[actix_rt::test]
@@ -726,7 +732,7 @@ mod tests {
         let mut registrar_client = builder.build().await.unwrap(); //#[allow_ci]
 
         let response = registrar_client.register_agent(&ai).await;
-        assert!(response.is_ok(), "error: {:?}", response);
+        assert!(response.is_ok(), "error: {response:?}");
     }
 
     #[actix_rt::test]
@@ -797,7 +803,7 @@ mod tests {
         let mut registrar_client = builder.build().await.unwrap(); //#[allow_ci]
 
         let response = registrar_client.register_agent(&ai).await;
-        assert!(response.is_ok(), "error: {:?}", response);
+        assert!(response.is_ok(), "error: {response:?}");
     }
 
     #[actix_rt::test]
@@ -915,7 +921,7 @@ mod tests {
             .await;
 
         // The build process should work, but the registration should fail
-        assert!(response.is_ok(), "error: {:?}", response);
+        assert!(response.is_ok(), "error: {response:?}");
         let mut registrar_client =
             response.expect("failed to build Registrar Client");
         let response = registrar_client.register_agent(&ai).await;
@@ -982,7 +988,7 @@ mod tests {
         let mut registrar_client = builder.build().await.unwrap(); //#[allow_ci]
 
         let response = registrar_client.activate_agent(&ai, "tag").await;
-        assert!(response.is_ok(), "error: {:?}", response);
+        assert!(response.is_ok(), "error: {response:?}");
     }
 
     #[actix_rt::test]
@@ -1030,7 +1036,7 @@ mod tests {
         let mut registrar_client = builder.build().await.unwrap(); //#[allow_ci]
 
         let response = registrar_client.activate_agent(&ai, "tag").await;
-        assert!(response.is_ok(), "error: {:?}", response);
+        assert!(response.is_ok(), "error: {response:?}");
     }
 
     #[actix_rt::test]
@@ -1095,7 +1101,7 @@ mod tests {
             .expect("failed top build Registrar Client");
 
         let response = registrar_client.activate_agent(&ai, "tag").await;
-        assert!(response.is_ok(), "error: {:?}", response);
+        assert!(response.is_ok(), "error: {response:?}");
     }
 
     #[actix_rt::test]
@@ -1162,7 +1168,7 @@ mod tests {
 
         // The build process should work, but the activation should fail as
         // there is no compatible API version
-        assert!(response.is_ok(), "error: {:?}", response);
+        assert!(response.is_ok(), "error: {response:?}");
         let mut registrar_client =
             response.expect("failed to build Registrar Client");
         let response = registrar_client.activate_agent(&ai, "tag").await;

@@ -88,7 +88,7 @@ impl FileConfigBuilder {
                     let f: FileConfig = builder.build()?.try_deserialize()?;
                     return Ok(f.agent);
                 } else {
-                    warn!("Configuration set in {} environment variable not found", GLOBAL_CONFIG_OVERRIDE_ENV_VAR);
+                    warn!("Configuration set in {GLOBAL_CONFIG_OVERRIDE_ENV_VAR} environment variable not found");
                     return Err(KeylimeConfigError::MissingEnvConfigFile {
                         file: path.display().to_string(),
                     });

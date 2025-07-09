@@ -265,7 +265,7 @@ async fn main() -> Result<()> {
                 config::KeylimeConfigError::Generic(message),
             ));
         }
-        info!("Running the service as {}...", user_group);
+        info!("Running the service as {user_group}...");
     }
 
     // Parse the configured API versions
@@ -399,7 +399,7 @@ async fn main() -> Result<()> {
                         }
                     }
                     Err(e) => {
-                        warn!("Could not load agent data: {}", e);
+                        warn!("Could not load agent data: {e:?}");
                         None
                     }
                 }
@@ -438,7 +438,7 @@ async fn main() -> Result<()> {
         path => agent_data_new.store(Path::new(&path))?,
     }
 
-    info!("Agent UUID: {}", agent_uuid);
+    info!("Agent UUID: {agent_uuid}");
 
     // If using IAK/IDevID is enabled, obtain IAK/IDevID and respective certificates
     let mut device_id = if config.enable_iak_idevid {
@@ -590,7 +590,7 @@ async fn main() -> Result<()> {
         ) {
             Ok(t) => Ok(t),
             Err(e) => {
-                error!("Failed to load trusted CA certificates: {}", e);
+                error!("Failed to load trusted CA certificates: {e:?}");
                 Err(e)
             }
         }?;
@@ -631,7 +631,7 @@ async fn main() -> Result<()> {
     match keylime::agent_registration::register_agent(aa, &mut ctx).await {
         Ok(()) => (),
         Err(e) => {
-            error!("Failed to register agent: {}", e);
+            error!("Failed to register agent: {e:?}");
         }
     }
 
@@ -762,7 +762,7 @@ async fn main() -> Result<()> {
         Ok(ip_addr) => {
             // Add bracket if IPv6, otherwise use as it is
             if ip_addr.is_ipv6() {
-                format!("[{}]", ip_addr)
+                format!("[{ip_addr}]")
             } else {
                 ip_addr.to_string()
             }

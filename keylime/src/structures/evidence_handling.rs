@@ -548,7 +548,7 @@ mod tests {
         match serde_json::from_str::<EvidenceHandlingRequest>(json) {
             Ok(_) => panic!("Expected error"), //#[allow_ci]
             Err(e) => {
-                print!("Error: {}", e); //#[allow_ci]
+                print!("Error: {e:?}"); //#[allow_ci]
                 assert!(e.to_string().contains("Invalid entries field")); //#[allow_ci]
             }
         } //#[allow_ci]
@@ -575,7 +575,7 @@ mod tests {
         match serde_json::from_str::<EvidenceHandlingRequest>(json) {
             Ok(_) => panic!("Expected error"), //#[allow_ci]
             Err(e) => {
-                print!("Error: {}", e); //#[allow_ci]
+                print!("Error: {e:?}"); //#[allow_ci]
                 assert!(e.to_string().contains("Invalid entry_count field")); //#[allow_ci]
             }
         }
@@ -601,7 +601,7 @@ mod tests {
         match serde_json::from_str::<EvidenceHandlingRequest>(json) {
             Ok(_) => panic!("Expected error"), //#[allow_ci]
             Err(e) => {
-                print!("Error: {}", e); //#[allow_ci]
+                print!("Error: {e:?}"); //#[allow_ci]
                 assert!(e.to_string().contains("Missing entries field")); //#[allow_ci]
             }
         }
@@ -628,7 +628,7 @@ mod tests {
         match serde_json::from_str::<EvidenceHandlingRequest>(json) {
             Ok(_) => panic!("Expected error"), //#[allow_ci]
             Err(e) => {
-                print!("Error: {}", e); //#[allow_ci]
+                print!("Error: {e:?}"); //#[allow_ci]
                 assert!(e.to_string().contains("Invalid entries field")); //#[allow_ci]
             }
         }

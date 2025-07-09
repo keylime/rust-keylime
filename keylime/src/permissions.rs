@@ -203,7 +203,7 @@ pub fn run_as(user_group: &str) -> Result<(), PermissionError> {
         return Err(PermissionError::SetUID(e));
     }
 
-    info!("Dropped privileges to run as {}", user_group);
+    info!("Dropped privileges to run as {user_group}");
 
     Ok(())
 }

@@ -112,7 +112,7 @@ async fn run(args: &Args) -> Result<()> {
     let config = AgentConfig::new()?;
     let avoid_tpm = get_avoid_tpm_from_args(args);
     context_info_handler::init_context_info(&config, avoid_tpm)?;
-    debug!("Avoid TPM: {}", avoid_tpm);
+    debug!("Avoid TPM: {avoid_tpm}");
     let ctx_info = match context_info_handler::get_context_info(avoid_tpm) {
         Ok(Some(context_info)) => Some(context_info),
         Ok(None) => {
@@ -120,7 +120,7 @@ async fn run(args: &Args) -> Result<()> {
             None
         }
         Err(e) => {
-            error!("Error obtaining context information: {}", e);
+            error!("Error obtaining context information: {e:?}");
             return Err(e);
         }
     };
@@ -128,7 +128,7 @@ async fn run(args: &Args) -> Result<()> {
         crate::registration::check_registration(&config, ctx_info).await;
     match res {
         Ok(_) => {}
-        Err(ref e) => error!("Could not register appropriately: {}", e),
+        Err(ref e) => error!("Could not register appropriately: {e:?}"),
     }
     let agent_identifier = match &args.agent_identifier {
         Some(id) => id.clone(),
@@ -141,7 +141,7 @@ async fn run(args: &Args) -> Result<()> {
             agent_identifier: Some(agent_identifier.clone()),
             location: None,
         });
-    debug!("Negotiations request URL: {}", negotiations_request_url);
+    debug!("Negotiations request URL: {negotiations_request_url}");
     let neg_config = attestation::NegotiationConfig {
         avoid_tpm,
         url: &negotiations_request_url,
@@ -175,7 +175,7 @@ async fn run(args: &Args) -> Result<()> {
             neg
         }
         Err(ref e) => {
-            error!("Error: {}", e);
+            error!("Error: {e:?}");
             &attestation::ResponseInformation {
                 status_code: reqwest::StatusCode::INTERNAL_SERVER_ERROR,
                 body: e.to_string(),

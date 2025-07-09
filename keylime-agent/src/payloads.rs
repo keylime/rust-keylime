@@ -116,14 +116,14 @@ fn write_out_key_and_payload(
     if bytes != key.as_ref().len() {
         return Err(Error::Other(format!("Error writing symm key to {:?}: key len is {}, but {bytes} bytes were written", key_path, key.as_ref().len())));
     }
-    info!("Wrote payload decryption key to {:?}", key_path);
+    info!("Wrote payload decryption key to {key_path:?}");
 
     let mut dec_payload_file = fs::File::create(dec_payload_path)?;
     let bytes = dec_payload_file.write(dec_payload)?;
     if bytes != dec_payload.len() {
         return Err(Error::Other(format!("Error writing decrypted payload to {:?}: payload len is {}, but {bytes} bytes were written", dec_payload_path, dec_payload.len())));
     }
-    info!("Wrote decrypted payload to {:?}", dec_payload_path);
+    info!("Wrote decrypted payload to {dec_payload_path:?}");
 
     Ok(())
 }
@@ -131,7 +131,7 @@ fn write_out_key_and_payload(
 // run a script (such as the init script, if any) and check the status
 fn run(dir: &Path, script: &str) -> Result<()> {
     let script_path = dir.join(script);
-    info!("Running script: {:?}", script_path);
+    info!("Running script: {script_path:?}");
 
     if !script_path.exists() {
         info!("No payload script {script} found in {}", dir.display());
@@ -183,7 +183,7 @@ fn optional_unzip_payload(
             dec_file => {
                 let zipped_payload_path = unzipped.join(dec_file);
 
-                info!("Unzipping payload {} to {:?}", dec_file, unzipped);
+                info!("Unzipping payload {dec_file} to {unzipped:?}");
 
                 let mut source = fs::File::open(zipped_payload_path)?;
                 let mut zip = ZipArchive::new(source)?;
@@ -222,7 +222,7 @@ async fn run_encrypted_payload(
             info!("No payload script specified, skipping");
         }
         script => {
-            info!("Payload init script indicated: {}", script);
+            info!("Payload init script indicated: {script}");
             run(&unzipped, script)?;
         }
     }
@@ -312,7 +312,7 @@ pub(crate) async fn worker(
                         info!("Successfully executed encrypted payload");
                     }
                     Err(e) => {
-                        warn!("Failed to run encrypted payload: {}", e);
+                        warn!("Failed to run encrypted payload: {e:?}");
                     }
                 }
             }
@@ -565,7 +565,7 @@ echo hello > test-output
             .await;
 
             if result.is_err() {
-                debug!("payloads worker failed: {:?}", result);
+                debug!("payloads worker failed: {result:?}");
             }
 
             let timestamp_path = temp_workdir.path().join("timestamp");
