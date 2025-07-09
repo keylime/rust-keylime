@@ -230,7 +230,7 @@ mod tests {
         let negotiation_config =
             create_test_config("http://127.0.0.1:9999/test", "", "", "");
 
-        let client = AttestationClient::new(&negotiation_config).unwrap();
+        let client = AttestationClient::new(&negotiation_config).unwrap(); //#[allow_ci]
         let result =
             client.send_negotiation(&negotiation_config.clone()).await;
 
@@ -257,20 +257,20 @@ mod tests {
 
     #[actix_rt::test]
     async fn test_send_negotiation_bad_certs() {
-        let temp_dir = tempdir().unwrap();
+        let temp_dir = tempdir().unwrap(); //#[allow_ci]
         let ca_path = temp_dir.path().join("ca.pem");
         let cert_path = temp_dir.path().join("cert.pem");
         let key_path = temp_dir.path().join("key.pem");
 
-        File::create(&ca_path).unwrap();
-        File::create(&cert_path).unwrap();
-        File::create(&key_path).unwrap();
+        File::create(&ca_path).unwrap(); //#[allow_ci]
+        File::create(&cert_path).unwrap(); //#[allow_ci]
+        File::create(&key_path).unwrap(); //#[allow_ci]
 
         let config = create_test_config(
             "https://1.2.3.4:9999/test",
-            ca_path.to_str().unwrap(),
-            cert_path.to_str().unwrap(),
-            key_path.to_str().unwrap(),
+            ca_path.to_str().unwrap(),   //#[allow_ci]
+            cert_path.to_str().unwrap(), //#[allow_ci]
+            key_path.to_str().unwrap(),  //#[allow_ci]
         );
 
         let client_result = AttestationClient::new(&config);
@@ -291,7 +291,7 @@ mod tests {
             "", "", "",
         );
 
-        let client = AttestationClient::new(&config).unwrap();
+        let client = AttestationClient::new(&config).unwrap(); //#[allow_ci]
         let result = client.send_negotiation(&config).await;
 
         assert!(
@@ -299,7 +299,7 @@ mod tests {
             "Request to mockoon failed: {:?}",
             result.err()
         );
-        let response_info = result.unwrap();
+        let response_info = result.unwrap(); //#[allow_ci]
         assert_eq!(
             response_info.status_code,
             StatusCode::CREATED,
@@ -312,7 +312,7 @@ mod tests {
     #[actix_rt::test]
     async fn test_handle_evidence_submission_no_location_header() {
         let config = create_test_config("http://localhost:3000", "", "", "");
-        let client = AttestationClient::new(&config).unwrap();
+        let client = AttestationClient::new(&config).unwrap(); //#[allow_ci]
 
         // Create a response with no Location header
         let neg_response = ResponseInformation {
