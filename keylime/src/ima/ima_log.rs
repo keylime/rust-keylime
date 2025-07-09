@@ -11,8 +11,7 @@ impl ImaLog {
     pub fn new(log_path: &str) -> Result<Self> {
         let contents = fs::read_to_string(log_path).map_err(|e| {
             KeylimeError::Other(format!(
-                "Unable to parse IMA file {}: {}",
-                log_path, e
+                "Unable to parse IMA file {log_path}: {e:?}"
             ))
         })?;
         let entries = contents
@@ -21,8 +20,7 @@ impl ImaLog {
             .collect::<Vec<entry::Entry>>();
         if entries.is_empty() {
             return Err(KeylimeError::Other(format!(
-                "No valid entries found in IMA log file: {}",
-                log_path
+                "No valid entries found in IMA log file: {log_path}"
             )));
         }
         Ok(Self { entries })

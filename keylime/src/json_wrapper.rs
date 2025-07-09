@@ -38,7 +38,7 @@ where
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let out = json!(self).to_string();
-        write!(f, "{}", out)
+        write!(f, "{out}")
     }
 }
 
@@ -54,7 +54,7 @@ mod test {
     impl Display for TestResult {
         fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
             let out = json!(self).to_string();
-            write!(f, "{}", out)
+            write!(f, "{out}")
         }
     }
 

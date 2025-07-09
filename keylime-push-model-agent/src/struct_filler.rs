@@ -70,7 +70,7 @@ impl<'a> FillerFromHardware<'a> {
                 uefi_log_handler: Some(handler),
             },
             Err(e) => {
-                error!("Failed to create UEFI log handler: {}", e);
+                error!("Failed to create UEFI log handler: {e:?}");
                 FillerFromHardware {
                     tpm_context_info,
                     uefi_log_handler: None,
@@ -107,7 +107,7 @@ impl<'a> FillerFromHardware<'a> {
         let ima_log_count = match ima_log_parser {
             Ok(ima_log) => ima_log.entry_count(),
             Err(e) => {
-                error!("Failed to read IMA log: {}", e);
+                error!("Failed to read IMA log: {e:?}");
                 0
             }
         };
@@ -200,7 +200,7 @@ impl<'a> FillerFromHardware<'a> {
             match self.tpm_context_info.perform_attestation(params).await {
                 Ok(evidence) => evidence,
                 Err(e) => {
-                    error!("Failed to perform attestation: {}", e);
+                    error!("Failed to perform attestation: {e}");
                     return structures::EvidenceHandlingRequest {
                     data: structures::EvidenceHandlingRequestData {
                         data_type: "error".to_string(),

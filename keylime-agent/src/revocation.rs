@@ -123,7 +123,7 @@ pub(crate) fn run_action(
         allow_payload_actions,
     )?;
 
-    info!("Executing revocation action {}", action);
+    info!("Executing revocation action {action}");
 
     // Write JSON argument to a temporary file
     let raw_json = serde_json::value::to_raw_value(&json)?;
@@ -170,7 +170,7 @@ pub(crate) fn run_action(
         return Err(output.try_into()?);
     }
 
-    info!("INFO: revocation action {} successful", action);
+    info!("INFO: revocation action {action} successful");
 
     Ok(output)
 }
@@ -232,7 +232,7 @@ fn run_revocation_actions(
                     let msg = format!(
                         "error executing revocation script {action}: {e:?}"
                     );
-                    error!("{}", msg);
+                    error!("{msg}");
                     return Err(Error::Script(
                         action.to_string(),
                         e.exe_code()?,
@@ -272,8 +272,7 @@ fn process_revocation(
         let msg_payload: Value = serde_json::from_str(msg)?;
 
         debug!(
-            "Revocation signature validated for revocation: {}",
-            msg_payload
+            "Revocation signature validated for revocation: {msg_payload}"
         );
 
         let outputs = run_revocation_actions(
@@ -288,11 +287,11 @@ fn process_revocation(
         for output in outputs {
             if !output.stdout.is_empty() {
                 let out = String::from_utf8(output.stdout)?;
-                info!("Action stdout: {}", out);
+                info!("Action stdout: {out}");
             }
             if !output.stderr.is_empty() {
                 let out = String::from_utf8(output.stderr)?;
-                warn!("Action stderr: {}", out);
+                warn!("Action stderr: {out}");
             }
         }
         Ok(())
@@ -317,14 +316,11 @@ fn listen_zmq(
 
     let endpoint = format!("tcp://{ip}:{port}");
 
-    info!(
-        "Connecting to revocation notification endpoint at {}...",
-        endpoint
-    );
+    info!("Connecting to revocation notification endpoint at {endpoint}...");
 
     mysock.connect(endpoint.as_str())?;
 
-    info!("Waiting for revocation messages on 0mq {}", endpoint);
+    info!("Waiting for revocation messages on 0mq {endpoint}");
 
     Ok(rt::spawn(async move {
         // Main revocation service loop. If a message is malformed or
@@ -380,7 +376,7 @@ fn listen_zmq(
             };
             sleep(Duration::from_millis(100)).await;
         }
-        info!("Stop waiting for revocation messages on 0mq {}", endpoint);
+        info!("Stop waiting for revocation messages on 0mq {endpoint}");
         Ok(())
     }))
 }
@@ -475,7 +471,7 @@ pub(crate) async fn worker(
                                 info!("Revocation processed successfully");
                             }
                             Err(e) => {
-                                error!("Failed to process revocation: {}", e);
+                                error!("Failed to process revocation: {e:?}");
                             }
                         }
                     }

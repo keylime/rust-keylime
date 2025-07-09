@@ -233,7 +233,7 @@ pub fn define_view_trait(
     // Derive the trait name using the "Trait" suffix
     let view_name = &view_struct.ident;
     let trait_ident =
-        Ident::new(&format!("{}Trait", view_name), view_name.span());
+        Ident::new(&format!("{view_name}Trait"), view_name.span());
 
     let named_fields = match &mut view_struct.fields {
         Fields::Named(f) => &mut f.named,

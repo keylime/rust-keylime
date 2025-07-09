@@ -66,8 +66,7 @@ impl TryFrom<tss_esapi::interface_types::algorithm::HashingAlgorithm>
             tss_esapi::interface_types::algorithm::HashingAlgorithm::Sha512 => Ok(HashAlgorithm::Sha512),
             tss_esapi::interface_types::algorithm::HashingAlgorithm::Sm3_256 => Ok(HashAlgorithm::Sm3_256),
             _ => Err(AlgorithmError::UnsupportedHashingAlgorithm(format!(
-                "Unable to convert tss-esapi HashingAlgorithm: {:?}",
-                tss_alg
+                "Unable to convert tss-esapi HashingAlgorithm: {tss_alg:?}"
             ))),
         }
     }

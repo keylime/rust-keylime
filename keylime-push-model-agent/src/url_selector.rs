@@ -40,7 +40,7 @@ pub fn get_evidence_submission_request_url(args: &UrlArgs) -> String {
         Some(loc) => loc.clone(),
         None => return "ERROR: No location provided".to_string(),
     };
-    format!("{}{}", trimmed_base, location)
+    format!("{trimmed_base}{location}")
 }
 
 #[cfg(test)]

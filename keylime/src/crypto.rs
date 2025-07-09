@@ -403,14 +403,14 @@ pub fn check_x509_key(
                 .map_err(CryptoError::RSAGetPublicKeyError)?
                 .n()
                 .to_vec();
-            let mut cert_n_str = format!("{:?}", cert_n);
+            let mut cert_n_str = format!("{cert_n:?}");
             _ = cert_n_str.pop();
             _ = cert_n_str.remove(0);
             let key = SubjectPublicKeyInfo::try_from(tpm_key.clone())
                 .map_err(CryptoError::SubjectPublicKeyInfoFromRSAError)?;
             let key_der = picky_asn1_der::to_vec(&key)
                 .map_err(CryptoError::SubjectPublicKeyInfoToDERError)?;
-            let key_der_str = format!("{:?}", key_der);
+            let key_der_str = format!("{key_der:?}");
 
             Ok(key_der_str.contains(&cert_n_str))
         }
@@ -422,14 +422,14 @@ pub fn check_x509_key(
                 .map_err(CryptoError::RSAGetPublicKeyError)?
                 .n()
                 .to_vec();
-            let mut cert_n_str = format!("{:?}", cert_n);
+            let mut cert_n_str = format!("{cert_n:?}");
             _ = cert_n_str.pop();
             _ = cert_n_str.remove(0);
             let key = SubjectPublicKeyInfo::try_from(tpm_key.clone())
                 .map_err(CryptoError::SubjectPublicKeyInfoFromRSAError)?;
             let key_der = picky_asn1_der::to_vec(&key)
                 .map_err(CryptoError::SubjectPublicKeyInfoToDERError)?;
-            let key_der_str = format!("{:?}", key_der);
+            let key_der_str = format!("{key_der:?}");
 
             Ok(key_der_str.contains(&cert_n_str))
         }
@@ -441,14 +441,14 @@ pub fn check_x509_key(
                 .map_err(CryptoError::PublicKeyGetECCError)?
                 .public_key_to_der()
                 .map_err(CryptoError::PublicKeyToDERError)?;
-            let mut cert_n_str = format!("{:?}", cert_n);
+            let mut cert_n_str = format!("{cert_n:?}");
             _ = cert_n_str.pop();
             _ = cert_n_str.remove(0);
             let key = SubjectPublicKeyInfo::try_from(tpm_key.clone())
                 .map_err(CryptoError::SubjectPublicKeyInfoFromECCError)?;
             let key_der = picky_asn1_der::to_vec(&key)
                 .map_err(CryptoError::SubjectPublicKeyInfoToDERError)?;
-            let key_der_str = format!("{:?}", key_der);
+            let key_der_str = format!("{key_der:?}");
 
             Ok(key_der_str.contains(&cert_n_str))
         }

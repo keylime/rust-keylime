@@ -74,7 +74,7 @@ async fn identity(
     ) {
         Ok(quote) => quote,
         Err(e) => {
-            debug!("Unable to retrieve quote: {:?}", e);
+            debug!("Unable to retrieve quote: {e:?}");
             return HttpResponse::InternalServerError().json(
                 JsonWrapper::error(
                     500,
@@ -95,7 +95,7 @@ async fn identity(
     match crypto::pkey_pub_to_pem(&data.pub_key) {
         Ok(pubkey) => quote.pubkey = Some(pubkey),
         Err(e) => {
-            debug!("Unable to retrieve public key for quote: {:?}", e);
+            debug!("Unable to retrieve public key for quote: {e:?}");
             return HttpResponse::InternalServerError().json(
                 JsonWrapper::error(
                     500,
@@ -172,7 +172,7 @@ async fn integrity(
             let pubkey = match crypto::pkey_pub_to_pem(&data.pub_key) {
                 Ok(pubkey) => pubkey,
                 Err(e) => {
-                    debug!("Unable to retrieve public key: {:?}", e);
+                    debug!("Unable to retrieve public key: {e:?}");
                     return HttpResponse::InternalServerError().json(
                         JsonWrapper::error(
                             500,
@@ -221,7 +221,7 @@ async fn integrity(
     ) {
         Ok(tpm_quote) => tpm_quote,
         Err(e) => {
-            debug!("Unable to retrieve quote: {:?}", e);
+            debug!("Unable to retrieve quote: {e:?}");
             return HttpResponse::InternalServerError().json(
                 JsonWrapper::error(
                     500,
@@ -247,7 +247,7 @@ async fn integrity(
                 let mut ml = Vec::<u8>::new();
                 let mut f = measuredboot_ml_file.lock().unwrap(); //#[allow_ci]
                 if let Err(e) = f.rewind() {
-                    debug!("Failed to rewind measured boot file: {}", e);
+                    debug!("Failed to rewind measured boot file: {e:?}");
                     return HttpResponse::InternalServerError().json(
                         JsonWrapper::error(
                             500,
@@ -258,14 +258,14 @@ async fn integrity(
                 mb_measurement_list = match f.read_to_end(&mut ml) {
                     Ok(_) => Some(general_purpose::STANDARD.encode(ml)),
                     Err(e) => {
-                        warn!("Could not read TPM2 event log: {}", e);
+                        warn!("Could not read TPM2 event log: {e:?}");
                         None
                     }
                 };
             }
         }
         Err(e) => {
-            debug!("Unable to check PCR mask: {:?}", e);
+            debug!("Unable to check PCR mask: {e:?}");
             return HttpResponse::InternalServerError().json(
                 JsonWrapper::error(
                     500,
@@ -288,7 +288,7 @@ async fn integrity(
                     (Some(result.0), Some(result.1), Some(result.2))
                 }
                 Err(e) => {
-                    debug!("Unable to read measurement list: {:?}", e);
+                    debug!("Unable to read measurement list: {e:?}");
                     return HttpResponse::InternalServerError().json(
                         JsonWrapper::error(
                             500,

@@ -232,10 +232,7 @@ mod test {
                 let j = obtained.get(i).unwrap(); //#[allow_ci]
                 assert!(
                     e.to_string() == j.to_string(),
-                    "Option {} mismatch: expected == '{}', obtained == '{}'",
-                    i,
-                    e,
-                    j
+                    "Option {i} mismatch: expected == '{e}', obtained == '{j}'"
                 );
             }
         }

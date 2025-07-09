@@ -331,7 +331,7 @@ async fn pubkey(
             HttpResponse::Ok().json(response)
         }
         Err(e) => {
-            debug!("Unable to retrieve public key: {:?}", e);
+            debug!("Unable to retrieve public key: {e:?}");
             HttpResponse::InternalServerError().json(JsonWrapper::error(
                 500,
                 "Unable to retrieve public key".to_string(),
@@ -415,7 +415,7 @@ async fn verify(
                 HttpResponse::Ok().json(response)
             }
             Err(e) => {
-                warn!("GET key challenge failed: {:?}", e);
+                warn!("GET key challenge failed: {e:?}");
                 HttpResponse::InternalServerError().json(JsonWrapper::error(
                     500,
                     "GET key challenge failed".to_string(),
@@ -934,7 +934,7 @@ mod tests {
             let result = worker(true, uuid_clone, keys_rx, p_tx).await;
 
             if result.is_err() {
-                debug!("keys worker failed: {:?}", result);
+                debug!("keys worker failed: {result:?}");
             }
         })));
 

@@ -486,8 +486,7 @@ mod tests {
             assert_eq!(
                 UefiLogHandler::map_event_type_to_str(event_type),
                 expected_str,
-                "Failed to map event type 0x{:08X} to string",
-                event_type
+                "Failed to map event type 0x{event_type:08X} to string"
             );
         }
     }
@@ -504,8 +503,7 @@ mod tests {
             assert_eq!(
                 UefiLogHandler::get_known_digest_size(alg_id),
                 expected_size,
-                "Failed to get known size for algorithm ID: {:#04X}",
-                alg_id
+                "Failed to get known size for algorithm ID: {alg_id:#04X}"
             );
         }
         // Test an unknown algorithm
@@ -529,8 +527,7 @@ mod tests {
             assert_eq!(
                 UefiLogHandler::map_alg_id_to_str(alg_id),
                 expected_str,
-                "Failed to map algorithm ID {:#04X} to string",
-                alg_id
+                "Failed to map algorithm ID {alg_id:#04X} to string"
             );
         }
     }

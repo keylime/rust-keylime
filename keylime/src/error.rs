@@ -243,14 +243,11 @@ mod tests {
         let converted_error: Error = original_tss_error.into();
 
         if let Error::Tss2 { err, kind, message } = converted_error {
-            assert_eq!(
-                format!("{:?}", err),
-                format!("{:?}", original_tss_error)
-            );
+            assert_eq!(format!("{err:?}"), format!("{original_tss_error:?}"));
             assert_eq!(message, format!("{original_tss_error}"));
             assert!(kind.is_some());
         } else {
-            panic!("Expected Tss2Error, got {:?}", converted_error); //#[allow_ci]
+            panic!("Expected Tss2Error, got {converted_error:?}"); //#[allow_ci]
         }
     }
 
@@ -275,10 +272,7 @@ mod tests {
             tss_esapi::Error::WrapperError(WrapperErrorKind::WrongParamSize);
         let converted_error: Error = original_tss_error.into();
         if let Error::Tss2 { err, kind, message } = converted_error {
-            assert_eq!(
-                format!("{:?}", err),
-                format!("{:?}", original_tss_error)
-            );
+            assert_eq!(format!("{err:?}"), format!("{original_tss_error:?}"));
             assert_eq!(kind, None);
             assert_eq!(message, format!("{original_tss_error}"));
         }
@@ -293,8 +287,7 @@ mod tests {
         let unwrapped_err = result.unwrap_err();
         if let Error::Other(msg) = unwrapped_err {
             let expected_msg = format!(
-                "cannot get execution status code for Error type {}",
-                non_execution_error
+                "cannot get execution status code for Error type {non_execution_error}"
             );
             assert_eq!(msg, expected_msg);
         }
@@ -308,8 +301,7 @@ mod tests {
         let unwrapped_err = result.unwrap_err();
         if let Error::Other(msg) = unwrapped_err {
             let expected_msg = format!(
-                "cannot get stderr for Error type {}",
-                non_execution_error
+                "cannot get stderr for Error type {non_execution_error}"
             );
             assert_eq!(msg, expected_msg);
         }
@@ -362,7 +354,7 @@ mod tests {
             assert_eq!(e.kind(), IoErrorKind::NotFound);
             assert_eq!(format!("{e}"), "file not found");
         } else {
-            panic!("Expected Error::Io, got {:?}", err); //#[allow_ci]
+            panic!("Expected Error::Io, got {err:?}"); //#[allow_ci]
         }
     }
 
@@ -373,7 +365,7 @@ mod tests {
         if let Error::InvalidIP(e) = err {
             assert_eq!(format!("{e}"), "invalid IP address syntax");
         } else {
-            panic!("Expected Error::InvalidIP, got {:?}", err); //#[allow_ci]
+            panic!("Expected Error::InvalidIP, got {err:?}"); //#[allow_ci]
         }
     }
 
@@ -387,7 +379,7 @@ mod tests {
                 "cannot parse integer from empty string"
             );
         } else {
-            panic!("Expected Error::NumParse, got {:?}", err); //#[allow_ci]
+            panic!("Expected Error::NumParse, got {err:?}"); //#[allow_ci]
         }
     }
 
@@ -401,7 +393,7 @@ mod tests {
                 "provided string was not `true` or `false`"
             );
         } else {
-            panic!("Expected Error::ParseBool, got {:?}", err); //#[allow_ci]
+            panic!("Expected Error::ParseBool, got {err:?}"); //#[allow_ci]
         }
     }
 
@@ -414,7 +406,7 @@ mod tests {
             assert_eq!(msg, "Invalid character 'Z' at position 1");
             assert!(msg.contains("Invalid character"));
         } else {
-            panic!("Expected Error::FromHex, got {:?}", err); //#[allow_ci]
+            panic!("Expected Error::FromHex, got {err:?}"); //#[allow_ci]
         }
     }
 
@@ -428,7 +420,7 @@ mod tests {
             assert!(msg
                 .contains("nul byte found in provided data at position: 1"));
         } else {
-            panic!("Expected Error::Nul, got {:?}", err); //#[allow_ci]
+            panic!("Expected Error::Nul, got {err:?}"); //#[allow_ci]
         }
     }
 
@@ -441,10 +433,10 @@ mod tests {
             if let ZipErrorSource::InvalidArchive(msg) = e {
                 assert_eq!(msg, "Invalid zip data");
             } else {
-                panic!("Expected ZipError::InvalidArchive, got {:?}", e); //#[allow_ci]
+                panic!("Expected ZipError::InvalidArchive, got {e:?}"); //#[allow_ci]
             }
         } else {
-            panic!("Expected Error::Zip, got {:?}", err); //#[allow_ci]
+            panic!("Expected Error::Zip, got {err:?}"); //#[allow_ci]
         }
     }
 
@@ -465,10 +457,10 @@ mod tests {
 
         let err = result.unwrap_err();
         if let Error::Utf8(e) = err {
-            let msg = format!("{}", e);
+            let msg = format!("{e}");
             assert!(msg.contains("invalid utf-8 sequence"));
         } else {
-            panic!("Invalid stderr: {:?}", err); //#[allow_ci]
+            panic!("Invalid stderr: {err:?}"); //#[allow_ci]
         }
     }
 
@@ -537,7 +529,7 @@ mod tests {
                 "Configuration error: Another config test"
             );
         } else {
-            panic!("Expected Error::Configuration, got {:?}", err); //#[allow_ci]
+            panic!("Expected Error::Configuration, got {err:?}"); //#[allow_ci]
         }
     }
 
@@ -549,7 +541,7 @@ mod tests {
         if let Error::IpParser(e) = err {
             assert_eq!(format!("{e}"), "Invalid input Invalid");
         } else {
-            panic!("Expected Error::IpParser, got {:?}", err); //#[allow_ci]
+            panic!("Expected Error::IpParser, got {err:?}"); //#[allow_ci]
         }
     }
 
@@ -633,9 +625,7 @@ mod tests {
         let formatted_err = format!("{err}");
         assert!(
             formatted_err.starts_with(expected_prefix),
-            "Expected error to start with '{}', but got: {}",
-            expected_prefix,
-            formatted_err
+            "Expected error to start with '{expected_prefix}', but got: {formatted_err}"
         );
     }
 
@@ -649,7 +639,7 @@ mod tests {
             let inner_msg = format!("{e}");
             assert!(inner_msg.contains("invalid character"));
         } else {
-            panic!("Expected Error::Uuid, got {:?}", err); //#[allow_ci]
+            panic!("Expected Error::Uuid, got {err:?}"); //#[allow_ci]
         }
     }
 
@@ -667,7 +657,7 @@ mod tests {
             assert!(msg.contains("Simulated task panic"),);
             assert!(e.is_panic());
         } else {
-            panic!("Expected Error::Join, got {:?}", converted_error); //#[allow_ci]
+            panic!("Expected Error::Join, got {converted_error:?}"); //#[allow_ci]
         }
     }
 }

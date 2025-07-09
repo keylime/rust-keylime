@@ -1790,7 +1790,7 @@ impl Context<'_> {
                 }
             }
         }
-        supported_algs.sort_unstable_by_key(|a| format!("{:?}", a));
+        supported_algs.sort_unstable_by_key(|a| format!("{a:?}"));
         supported_algs.dedup();
 
         Ok(supported_algs)
@@ -2159,9 +2159,7 @@ fn check_if_pcr_data_and_attestation_match(
         .map_err(|source| TpmError::OpenSSLHasherFinish { source })?;
 
     log::trace!(
-        "Attested to PCR digest: {:?}, read PCR digest: {:?}",
-        attested_pcr,
-        pcr_digest,
+        "Attested to PCR digest: {attested_pcr:?}, read PCR digest: {pcr_digest:?}"
     );
 
     Ok(memcmp::eq(attested_pcr, &pcr_digest))
@@ -2205,12 +2203,11 @@ fn perform_quote_and_pcr_read(
         }
 
         log::info!(
-            "PCR data and attestation data mismatched on attempt {}",
-            attempt
+            "PCR data and attestation data mismatched on attempt {attempt}"
         );
     }
 
-    log::error!("PCR data and attestation data mismatched on all {} attempts, giving up", NUM_ATTESTATION_ATTEMPTS);
+    log::error!("PCR data and attestation data mismatched on all {NUM_ATTESTATION_ATTEMPTS} attempts, giving up");
     Err(TpmError::TooManyAttestationMismatches {
         attempts: NUM_ATTESTATION_ATTEMPTS,
     })
@@ -2440,9 +2437,9 @@ pub mod testing {
     fn deserialize_pcrsel(pcrsel_vec: &[u8]) -> Result<TPML_PCR_SELECTION> {
         if pcrsel_vec.len() != TPML_PCR_SELECTION_SIZE {
             return Err(TpmError::InvalidRequest(format!(
-                "Unexpected PCR selection size: Expected {} but got {}",
-                TPML_PCR_SELECTION_SIZE,
-                pcrsel_vec.len()
+                "Unexpected PCR selection size: Expected {expected} but got {got}",
+                expected = TPML_PCR_SELECTION_SIZE,
+                got = pcrsel_vec.len()
             )));
         }
 
@@ -2497,9 +2494,9 @@ pub mod testing {
     fn deserialize_digest(digest_vec: &[u8]) -> Result<TPML_DIGEST> {
         if digest_vec.len() != TPML_DIGEST_SIZE {
             return Err(TpmError::InvalidRequest(format!(
-                "Unexpected digest size: Expected {} but got {}",
-                TPML_DIGEST_SIZE,
-                digest_vec.len()
+                "Unexpected digest size: Expected {expected} but got {got}",
+                expected = TPML_DIGEST_SIZE,
+                got = digest_vec.len()
             )));
         }
 
@@ -2560,8 +2557,7 @@ pub mod testing {
         // Always 1 PCR digest should follow
         if count != 1 {
             return Err(TpmError::InvalidRequest(format!(
-                "Expected 1 PCR digest, got {}",
-                count
+                "Expected 1 PCR digest, got {count}"
             )));
         }
 
@@ -2680,9 +2676,9 @@ pub mod testing {
         let quote_info = match attestation.attested() {
             AttestInfo::Quote { info } => info,
             _ => {
+                let attestation_type = attestation.attestation_type();
                 return Err(TpmError::Other(format!(
-                    "Expected attestation type TPM2_ST_ATTEST_QUOTE, got {:?}",
-                    attestation.attestation_type()
+                    "Expected attestation type TPM2_ST_ATTEST_QUOTE, got {attestation_type:?}"
                 )));
             }
         };

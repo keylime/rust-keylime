@@ -73,7 +73,7 @@ impl AttestationClient {
         let json_value =
             serde_json::to_value(filler.get_attestation_request());
         let reqcontent = json_value?.to_string();
-        debug!("Request body: {:?}", reqcontent);
+        debug!("Request body: {reqcontent:?}");
 
         let response = self
             .client
@@ -88,11 +88,11 @@ impl AttestationClient {
         let sc = response.status();
         let headers = response.headers().clone();
         info!("Response code:{}", response.status());
-        info!("Response headers: {:?}", headers);
+        info!("Response headers: {headers:?}");
 
         let response_body = response.text().await?;
         if !response_body.is_empty() {
-            info!("Response body: {}", response_body);
+            info!("Response body: {response_body}");
         }
 
         let rsp = ResponseInformation {
@@ -108,7 +108,7 @@ impl AttestationClient {
         json_body: String,
         config: &NegotiationConfig<'_>,
     ) -> Result<ResponseInformation> {
-        debug!("PATCH Request body: {:?}", json_body);
+        debug!("PATCH Request body: {json_body:?}");
 
         let response = self
             .client
@@ -124,10 +124,10 @@ impl AttestationClient {
         let headers = response.headers().clone();
         let response_body = response.text().await?;
 
-        info!("PATCH Response code:{}", sc);
-        info!("PATCH Response headers: {:?}", headers);
+        info!("PATCH Response code:{sc}");
+        info!("PATCH Response headers: {headers:?}");
         if !response_body.is_empty() {
-            info!("PATCH Response body: {}", response_body);
+            info!("PATCH Response body: {response_body}");
         }
 
         Ok(ResponseInformation {
@@ -159,7 +159,7 @@ impl AttestationClient {
                 location: Some(location_header.to_string()),
             },
         );
-        info!("Sending evidence (PATCH) to: {}", patch_url);
+        info!("Sending evidence (PATCH) to: {patch_url}");
         let mut attestation_params =
             response_handler::process_negotiation_response(
                 &neg_response.body,
@@ -168,7 +168,7 @@ impl AttestationClient {
             config.ima_log_path.map(|path| path.to_string());
         attestation_params.uefi_log_path =
             config.uefi_log_path.map(|path| path.to_string());
-        debug!("Attestation parameters: {:?}", attestation_params);
+        debug!("Attestation parameters: {attestation_params:?}");
         let mut context_info =
             context_info_handler::get_context_info(config.avoid_tpm)?
                 .ok_or_else(|| {
