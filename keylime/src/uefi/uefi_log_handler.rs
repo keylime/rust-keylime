@@ -359,7 +359,7 @@ mod tests {
     #[cfg(feature = "testing")]
     async fn test_uefi_log_handler() {
         let log_path = "/sys/kernel/security/tpm0/binary_bios_measurements";
-        if std::path::Path::new(log_path).exists() {
+        if std::fs::File::open(log_path).is_ok() {
             let handler = UefiLogHandler::new(log_path)
                 .expect("Failed to parse UEFI log");
             assert!(!handler.get_active_algorithms().is_empty());
