@@ -85,6 +85,7 @@ mod tests {
     #[tokio::test]
     async fn test_context_with_avoid_tpm_flag() {
         // Lock mutex to avoid race condition accessing the TPM
+        // Use temporary directory instead of assuming /var/lib/keylime exists
         let _mutex = testing::lock_tests().await;
         let tmpdir = tempfile::tempdir().expect("failed to create tmpdir");
         let config = get_testing_config(tmpdir.path());
@@ -101,16 +102,15 @@ mod tests {
     }
 
     #[tokio::test]
-    #[cfg(feature = "testing")]
     async fn test_init_and_get_context() {
-        use keylime::tpm::testing;
+        // Lock mutex to avoid race condition accessing the TPM
+        // Use temporary directory instead of assuming /var/lib/keylime exists
         let _mutex = testing::lock_tests().await;
-        use keylime::config::AgentConfig;
+        let tmpdir = tempfile::tempdir().expect("failed to create tmpdir");
+        let config = get_testing_config(tmpdir.path());
+
         const DONT_AVOID_TPM: bool = false;
-        let config = AgentConfig::new();
-        assert!(config.is_ok(), "Failed to create AgentConfig");
-        let conf = config.unwrap(); //#[allow-ci]
-        let init_res = init_context_info(&conf, DONT_AVOID_TPM);
+        let init_res = init_context_info(&config, DONT_AVOID_TPM);
         assert!(init_res.is_ok());
         let context_res = get_context_info(DONT_AVOID_TPM);
         assert!(context_res.is_ok());
