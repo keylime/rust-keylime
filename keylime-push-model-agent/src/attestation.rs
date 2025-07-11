@@ -39,6 +39,9 @@ pub struct AttestationClient {
 
 impl AttestationClient {
     pub fn new(config: &NegotiationConfig<'_>) -> Result<Self> {
+        if config.url.is_empty() {
+            return Err(anyhow::anyhow!("URL cannot be empty"));
+        }
         let base_client = if config.url.starts_with("https://") {
             Some(keylime::https_client::get_https_client(
                 &keylime::https_client::ClientArgs {

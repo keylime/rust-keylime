@@ -17,6 +17,9 @@ fn get_api_version(args: &UrlArgs) -> String {
 }
 
 pub fn get_negotiations_request_url(args: &UrlArgs) -> String {
+    if args.verifier_url.is_empty() {
+        return "ERROR: No verifier URL provided".to_string();
+    }
     let id = match args.agent_identifier {
         Some(ref identifier) => identifier.clone(),
         None => return "ERROR: No agent identifier provided".to_string(),
