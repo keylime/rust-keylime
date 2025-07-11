@@ -8,6 +8,7 @@ mod attestation;
 mod context_info_handler;
 mod registration;
 mod response_handler;
+mod state_machine;
 mod struct_filler;
 mod url_selector;
 
@@ -124,12 +125,6 @@ async fn run(args: &Args) -> Result<()> {
             return Err(e);
         }
     };
-    let res =
-        crate::registration::check_registration(&config, ctx_info).await;
-    match res {
-        Ok(_) => {}
-        Err(ref e) => error!("Could not register appropriately: {e:?}"),
-    }
     let agent_identifier = match &args.agent_identifier {
         Some(id) => id.clone(),
         None => config.uuid().to_string(),
@@ -141,6 +136,9 @@ async fn run(args: &Args) -> Result<()> {
             agent_identifier: Some(agent_identifier.clone()),
             location: None,
         });
+    if negotiations_request_url.starts_with("ERROR:") {
+        return Err(anyhow::anyhow!(negotiations_request_url));
+    }
     debug!("Negotiations request URL: {negotiations_request_url}");
     let neg_config = attestation::NegotiationConfig {
         avoid_tpm,
@@ -158,69 +156,13 @@ async fn run(args: &Args) -> Result<()> {
     };
     let attestation_client =
         attestation::AttestationClient::new(&neg_config)?;
-    let neg_response = attestation_client.send_negotiation(&neg_config).await;
-
-    let neg_response_data = match neg_response {
-        Ok(ref neg) => {
-            info!("Request sent successfully");
-            info!(
-                "Returned response code: {:?}",
-                neg_response.as_ref().unwrap().status_code
-            );
-            info!(
-                "Returned response headers: {:?}",
-                neg_response.as_ref().unwrap().headers
-            );
-            info!(
-                "Returned response body: {:?}",
-                neg_response.as_ref().unwrap().body
-            );
-            neg
-        }
-        Err(ref e) => {
-            error!("Error: {e:?}");
-            &attestation::ResponseInformation {
-                status_code: reqwest::StatusCode::INTERNAL_SERVER_ERROR,
-                body: e.to_string(),
-                headers: reqwest::header::HeaderMap::new(),
-            }
-        }
-    };
-
-    if neg_response_data.status_code != reqwest::StatusCode::CREATED {
-        error!(
-            "Negotiation failed with status code: {}",
-            neg_response_data.status_code
-        );
-        return Err(anyhow::anyhow!(
-            "Negotiation failed with status code: {}",
-            neg_response_data.status_code
-        ));
-    }
-
-    let evidence_config: attestation::NegotiationConfig<'_> =
-        attestation::NegotiationConfig {
-            url: &args.verifier_url,
-            ..neg_config.clone()
-        };
-
-    let evidence_response = attestation_client
-        .handle_evidence_submission(
-            neg_response_data.clone(),
-            &evidence_config,
-        )
-        .await?;
-
-    if evidence_response.status_code == reqwest::StatusCode::ACCEPTED {
-        info!("SUCCESS! Evidence accepted by the Verifier.");
-        info!("Response body: {}", evidence_response.body);
-    } else {
-        error!(
-            "Verifier rejected the evidence with code: {}",
-            evidence_response.status_code
-        );
-        error!("Response body: {}", evidence_response.body);
-    }
+    let mut state_machine = state_machine::StateMachine::new(
+        &config,
+        attestation_client,
+        neg_config,
+        ctx_info,
+    );
+    state_machine.run().await;
     Ok(())
 }
 
