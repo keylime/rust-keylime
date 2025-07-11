@@ -553,6 +553,7 @@ mod tests {
             }
         } //#[allow_ci]
     } // deserialize_evidence_handling_request_invalid_entries
+
     #[test]
     fn deserialize_evidence_handling_request_invalid_entry_count() {
         let json = r#"{
@@ -580,6 +581,35 @@ mod tests {
             }
         }
     } // deserialize_evidence_handling_request_invalid_entry_count
+
+    #[test]
+    fn deserialize_evidence_handling_request_invalid_entry_count_format() {
+        let json = r#"{
+    "data": {
+        "type": "attestation",
+        "attributes": {
+            "evidence_collected": [
+                {
+                    "evidence_class": "log",
+                    "evidence_type": "ima_log",
+                    "data": {
+                        "entry_count": -1,
+                        "entries": "valid_entries"
+                    }
+                }
+            ]
+        }
+    }
+}"#;
+        match serde_json::from_str::<EvidenceHandlingRequest>(json) {
+            Ok(_) => panic!("Expected error"), //#[allow_ci]
+            Err(e) => {
+                print!("Error: {e:?}"); //#[allow_ci]
+                assert!(e.to_string().contains("Invalid entry_count field")); //#[allow_ci]
+            }
+        }
+    } // deserialize_evidence_handling_request_invalid_entry_count_format
+
     #[test]
     fn deserialize_evidence_handling_missing_entries_field() {
         let json = r#"{
@@ -606,6 +636,7 @@ mod tests {
             }
         }
     } // deserialize_evidence_handling_missing_entries_field
+
     #[test]
     fn deserialize_evidence_handling_invalid_entries_field() {
         let json = r#"{
