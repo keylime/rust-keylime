@@ -96,6 +96,10 @@ pub struct ResponseData {
 pub struct ResponseAttributes {
     pub stage: String,
     pub evidence_requested: Vec<EvidenceRequested>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub capabilities_received_at: Option<DateTime<Utc>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub challenges_expire_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -679,6 +683,9 @@ mod tests {
                             }))),
                         },
                     ],
+                    capabilities_received_at: Some("2025-07-11T08:49:51.734539Z".parse().unwrap()), //#[allow_ci]
+                    challenges_expire_at: Some("2025-07-12T08:49:51.734539Z".parse().unwrap()), //#[allow_ci]
+
                 },
             },
         };
@@ -720,7 +727,9 @@ mod tests {
             "signature_scheme": "rsassa"
           }
         }
-      ]
+      ],
+      "capabilities_received_at": "2025-07-11T08:49:51.734539Z",
+      "challenges_expire_at": "2025-07-12T08:49:51.734539Z"
     }
   }
 }"#
@@ -772,6 +781,8 @@ mod tests {
                             })),
                         },
                     ],
+                    capabilities_received_at: Some("2025-07-11T08:49:51.734539Z".parse().unwrap()), //#[allow_ci]
+                    challenges_expire_at: Some("2025-07-12T08:49:51.734539Z".parse().unwrap()), //#[allow_ci]
                 },
             },
         };
@@ -829,7 +840,9 @@ mod tests {
             "starting_offset": 25
           }
         }
-      ]
+      ],
+      "capabilities_received_at": "2025-07-11T08:49:51.734539Z",
+      "challenges_expire_at": "2025-07-12T08:49:51.734539Z"
     }
   }
 }"#
