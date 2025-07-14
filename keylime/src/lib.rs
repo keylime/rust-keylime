@@ -19,6 +19,7 @@ pub mod list_parser;
 pub mod permissions;
 pub mod quote;
 pub mod registrar_client;
+pub mod resilient_client;
 pub mod secure_mount;
 pub mod serialization;
 pub mod structures;
