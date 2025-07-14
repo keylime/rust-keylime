@@ -98,6 +98,11 @@ pub const DEFAULT_UEFI_LOGS_SUPPORTS_PARTIAL_ACCESS: bool = true;
 pub const DEFAULT_UEFI_LOGS_BINARY_FILE_PATH: &str =
     "/sys/kernel/security/tpm0/binary_bios_measurements";
 
+// Default values for exponential backoff
+pub const DEFAULT_EXP_BACKOFF_INITIAL_DELAY: u32 = 2000; // 1 second
+pub const DEFAULT_EXP_BACKOFF_MAX_RETRIES: u32 = 5;
+pub const DEFAULT_EXP_BACKOFF_MAX_DELAY: u32 = 60000; // 60 seconds
+
 // TODO These should be temporary
 pub const DEFAULT_CERTIFICATION_KEYS_SERVER_IDENTIFIER: &str = "ak";
 pub static DEFAULT_PUSH_API_VERSIONS: &[&str] = &["3.0"];
@@ -109,6 +114,9 @@ pub struct AgentConfig {
     pub api_versions: String,
     pub disabled_signing_algorithms: Vec<String>,
     pub ek_handle: String,
+    pub expbackoff_max_delay: Option<u64>,
+    pub expbackoff_max_retries: Option<u32>,
+    pub expbackoff_initial_delay: Option<u64>,
     pub enable_iak_idevid: bool,
     pub iak_cert: String,
     pub iak_handle: String,
@@ -264,6 +272,11 @@ impl Default for AgentConfig {
             enable_revocation_notifications:
                 DEFAULT_ENABLE_REVOCATION_NOTIFICATIONS,
             enc_keyname: DEFAULT_ENC_KEYNAME.to_string(),
+            expbackoff_max_delay: Some(DEFAULT_EXP_BACKOFF_MAX_DELAY as u64),
+            expbackoff_max_retries: Some(DEFAULT_EXP_BACKOFF_MAX_RETRIES),
+            expbackoff_initial_delay: Some(
+                DEFAULT_EXP_BACKOFF_INITIAL_DELAY as u64,
+            ),
             extract_payload_zip: DEFAULT_EXTRACT_PAYLOAD_ZIP,
             iak_cert: "default".to_string(),
             iak_handle: DEFAULT_IAK_HANDLE.to_string(),
