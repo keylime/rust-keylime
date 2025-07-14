@@ -681,17 +681,23 @@ mod tests {
                                 component_version: "2.0".to_string(),
                                 hash_algorithms: vec!["sha3_512".to_string()],
                                 signature_schemes: vec!["rsassa".to_string()],
-                                available_subjects: ShaValues {
-                                    sha1: vec![0x01, 0x02, 0x03],
-                                    sha256: vec![0x04, 0x05, 0x06],
+                                available_subjects: PcrBanks {
+                                    sha1: Some(vec![0x01, 0x02, 0x03]),
+                                    sha256: Some(vec![0x04, 0x05, 0x06]),
+                                    sha384: None,
+                                    sha512: None,
+                                    sm3_256: None,
                                 },
                                 certification_keys: vec![],
                             },
                             chosen_parameters: Some(ChosenParameters::Parameters(Box::new(CertificationParameters {
                                 challenge: Some("challenge".to_string()),
-                                selected_subjects: Some(ShaValues {
-                                    sha1: vec![0x01, 0x02, 0x03],
-                                    sha256: vec![0x04, 0x05, 0x06],
+                                selected_subjects: Some(PcrBanks {
+                                    sha1: Some(vec![0x01, 0x02, 0x03]),
+                                    sha256: Some(vec![0x04, 0x05, 0x06]),
+                                    sha384: None,
+                                    sha512: None,
+                                    sm3_256: None,
                                 }),
                                 hash_algorithm: Some("sha384".to_string()),
                                 signature_scheme: Some("rsassa".to_string()),
@@ -717,17 +723,23 @@ mod tests {
                                 component_version: "2.0".to_string(),
                                 hash_algorithms: vec!["sha3_512".to_string()],
                                 signature_schemes: vec!["rsassa".to_string()],
-                                available_subjects: ShaValues {
-                                    sha1: vec![0x01, 0x02, 0x03],
-                                    sha256: vec![0x04, 0x05, 0x06],
+                                available_subjects: PcrBanks {
+                                    sha1: Some(vec![0x01, 0x02, 0x03]),
+                                    sha256: Some(vec![0x04, 0x05, 0x06]),
+                                    sha384: None,
+                                    sha512: None,
+                                    sm3_256: None,
                                 },
                                 certification_keys: vec![],
                             },
                             chosen_parameters: Some(ChosenParameters::Parameters(Box::new(CertificationParameters {
                                 challenge: Some("challenge".to_string()),
-                                selected_subjects: Some(ShaValues {
-                                    sha1: vec![0x01, 0x02, 0x03],
-                                    sha256: vec![0x04, 0x05, 0x06],
+                                selected_subjects: Some(PcrBanks {
+                                    sha1: Some(vec![0x01, 0x02, 0x03]),
+                                    sha256: Some(vec![0x04, 0x05, 0x06]),
+                                    sha384: None,
+                                    sha512: None,
+                                    sm3_256: None,
                                 }),
                                 hash_algorithm: Some("sha384".to_string()),
                                 signature_scheme: Some("rsassa".to_string()),
@@ -751,9 +763,12 @@ mod tests {
                                 component_version: "2.0".to_string(),
                                 hash_algorithms: vec!["sha3_512".to_string()],
                                 signature_schemes: vec!["rsassa".to_string()],
-                                available_subjects: ShaValues {
-                                    sha1: vec![0x01, 0x02, 0x03],
-                                    sha256: vec![0x04, 0x05, 0x06],
+                                available_subjects: PcrBanks {
+                                    sha1: Some(vec![0x01, 0x02, 0x03]),
+                                    sha256: Some(vec![0x04, 0x05, 0x06]),
+                                    sha384: None,
+                                    sha512: None,
+                                    sm3_256: None,
                                 },
                                 certification_keys: vec![],
                             },
@@ -1169,14 +1184,14 @@ mod tests {
                 .capabilities
                 .available_subjects
                 .sha1,
-            vec![0x01, 0x02, 0x03]
+            Some(vec![0x01, 0x02, 0x03])
         );
         assert_eq!(
             deserialized.data.attributes.evidence[0]
                 .capabilities
                 .available_subjects
                 .sha256,
-            vec![0x04, 0x05, 0x06]
+            Some(vec![0x04, 0x05, 0x06])
         );
         let some_certification_keys = deserialized.data.attributes.evidence
             [0]
@@ -1204,11 +1219,11 @@ mod tests {
                 assert_eq!(params.challenge, Some("challenge".to_string()));
                 assert_eq!(
                     params.selected_subjects.clone().unwrap().sha1, //#[allow_ci]
-                    vec![0x01, 0x02, 0x03]
+                    Some(vec![0x01, 0x02, 0x03])
                 );
                 assert_eq!(
                     params.selected_subjects.clone().unwrap().sha256, //#[allow_ci]
-                    vec![0x04, 0x05, 0x06]
+                    Some(vec![0x04, 0x05, 0x06])
                 );
                 assert_eq!(params.hash_algorithm, Some("sha384".to_string()));
                 assert_eq!(

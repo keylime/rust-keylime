@@ -55,15 +55,10 @@ pub fn process_negotiation_response(
                 .hash_algorithm
                 .clone()
                 .unwrap_or_default(),
-            selected_subjects: params_box.selected_subjects.as_ref().map_or(
-                Default::default(),
-                |s| {
-                    let mut map = std::collections::HashMap::new();
-                    map.insert("sha1".to_string(), s.sha1.clone());
-                    map.insert("sha256".to_string(), s.sha256.clone());
-                    map
-                },
-            ),
+            selected_subjects: params_box
+                .selected_subjects
+                .as_ref()
+                .map_or(Default::default(), |s| s.to_map()),
             ima_log_path: None,
             ima_offset,
             ima_entry_count,
