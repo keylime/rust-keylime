@@ -87,23 +87,47 @@ impl<'a> FillerFromHardware<'a> {
         // TODO Modify this to not panic on failure
         let config =
             AgentConfig::new().expect("failed to load configuration");
-        let tpmc_ref = self.tpm_context_info.get_mutable_tpm_context();
-        let tpm_banks_sha1 =
-            tpmc_ref.pcr_banks(HashAlgorithm::Sha1).unwrap_or_else(|_| {
-                error!("Failed to get PCR banks for SHA1");
-                vec![]
-            });
-        let tpm_banks_sha256 = tpmc_ref
-            .pcr_banks(HashAlgorithm::Sha256)
+
+        // Get all supported hash algorithms from the TPM
+        let supported_algorithms = self
+            .tpm_context_info
+            .get_supported_hash_algorithms()
             .unwrap_or_else(|_| {
-                error!("Failed to get PCR banks for SHA256");
+                error!("Failed to get supported hash algorithms");
                 vec![]
             });
-        // TODO: Change this to avoid loading the configuration multiple times
-        // TODO Modify this to not panic on failure
-        let default =
-            AgentConfig::new().expect("failed to load default config");
-        let ima_log_parser = ImaLog::new(default.ima_ml_path.as_str());
+
+        let tpmc_ref = self.tpm_context_info.get_mutable_tpm_context();
+
+        // Build PCR banks for all supported algorithms
+        let mut pcr_banks_builder = structures::PcrBanks::builder();
+
+        for algorithm_str in supported_algorithms {
+            // Convert string to HashAlgorithm enum
+            if let Ok(algorithm) =
+                HashAlgorithm::try_from(algorithm_str.as_str())
+            {
+                let banks =
+                    tpmc_ref.pcr_banks(algorithm).unwrap_or_else(|_| {
+                        error!("Failed to get PCR banks for {algorithm:?}");
+                        vec![]
+                    });
+
+                pcr_banks_builder = match algorithm {
+                    HashAlgorithm::Sha1 => pcr_banks_builder.sha1(banks),
+                    HashAlgorithm::Sha256 => pcr_banks_builder.sha256(banks),
+                    HashAlgorithm::Sha384 => pcr_banks_builder.sha384(banks),
+                    HashAlgorithm::Sha512 => pcr_banks_builder.sha512(banks),
+                    HashAlgorithm::Sm3_256 => {
+                        pcr_banks_builder.sm3_256(banks)
+                    }
+                };
+            } else {
+                error!("Unsupported hash algorithm: {algorithm_str}");
+            }
+        }
+
+        let ima_log_parser = ImaLog::new(config.ima_ml_path.as_str());
         let ima_log_count = match ima_log_parser {
             Ok(ima_log) => ima_log.entry_count(),
             Err(e) => {
@@ -130,10 +154,7 @@ impl<'a> FillerFromHardware<'a> {
                                 signature_schemes: self.tpm_context_info.get_supported_signing_schemes().expect(
                                     "Failed to get supported signing schemes"
                                 ),
-                                available_subjects: structures::ShaValues {
-                                    sha1: tpm_banks_sha1,
-                                    sha256: tpm_banks_sha256,
-                                },
+                                available_subjects: pcr_banks_builder.build(),
                                 certification_keys: vec![
                                     self.tpm_context_info.get_ak_certification_data().expect(
                                         "Failed to get AK certification data"
@@ -349,10 +370,10 @@ fn get_attestation_request_from_code() -> structures::AttestationRequest {
                             component_version: "2.0".to_string(),
                             hash_algorithms: vec!["sha3_512".to_string()],
                             signature_schemes: vec!["rsassa".to_string()],
-                            available_subjects: structures::ShaValues {
-                                sha1: vec![0x04, 0x05, 0x06],
-                                sha256: vec![0x01, 0x02, 0x03],
-                            },
+                            available_subjects: structures::PcrBanks::builder()
+                                .sha1(vec![0x04, 0x05, 0x06])
+                                .sha256(vec![0x01, 0x02, 0x03])
+                                .build(),
                             certification_keys: vec![
                                 structures::CertificationKey {
                                     local_identifier: "localid".to_string(),
@@ -463,11 +484,11 @@ mod tests {
                 assert_eq!(capabilities.signature_schemes[0], "rsassa");
                 assert!(
                     capabilities.available_subjects.sha1
-                        == vec![0x04, 0x05, 0x06]
+                        == Some(vec![0x04, 0x05, 0x06])
                 );
                 assert!(
                     capabilities.available_subjects.sha256
-                        == vec![0x01, 0x02, 0x03]
+                        == Some(vec![0x01, 0x02, 0x03])
                 );
                 let some_certification_keys =
                     capabilities.certification_keys.first();
@@ -503,11 +524,11 @@ mod tests {
                 assert_eq!(capabilities.signature_schemes[0], "rsassa");
                 assert!(
                     capabilities.available_subjects.sha1
-                        == vec![0x04, 0x05, 0x06]
+                        == Some(vec![0x04, 0x05, 0x06])
                 );
                 assert!(
                     capabilities.available_subjects.sha256
-                        == vec![0x01, 0x02, 0x03]
+                        == Some(vec![0x01, 0x02, 0x03])
                 );
                 let some_certification_keys =
                     capabilities.certification_keys.first();
@@ -549,11 +570,11 @@ mod tests {
                 assert_eq!(capabilities.signature_schemes[0], "rsassa");
                 assert!(
                     capabilities.available_subjects.sha1
-                        == vec![0x01, 0x02, 0x03]
+                        == Some(vec![0x01, 0x02, 0x03])
                 );
                 assert!(
                     capabilities.available_subjects.sha256
-                        == vec![0x04, 0x05, 0x06]
+                        == Some(vec![0x04, 0x05, 0x06])
                 );
                 let some_certification_keys =
                     capabilities.certification_keys.first();
