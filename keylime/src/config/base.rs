@@ -99,7 +99,7 @@ pub const DEFAULT_UEFI_LOGS_BINARY_FILE_PATH: &str =
     "/sys/kernel/security/tpm0/binary_bios_measurements";
 
 // Default values for exponential backoff
-pub const DEFAULT_EXP_BACKOFF_INITIAL_DELAY: u32 = 2000; // 1 second
+pub const DEFAULT_EXP_BACKOFF_INITIAL_DELAY: u32 = 2000; // 2 seconds
 pub const DEFAULT_EXP_BACKOFF_MAX_RETRIES: u32 = 5;
 pub const DEFAULT_EXP_BACKOFF_MAX_DELAY: u32 = 60000; // 60 seconds
 
