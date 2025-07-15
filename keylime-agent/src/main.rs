@@ -627,6 +627,7 @@ async fn main() -> Result<()> {
         attest,
         signature,
         ak_handle,
+        retry_config: None,
     };
     match keylime::agent_registration::register_agent(aa, &mut ctx).await {
         Ok(()) => (),

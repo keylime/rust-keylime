@@ -25,6 +25,13 @@ pub struct AgentRegistrationConfig {
     pub registrar_port: u32,
 }
 
+#[derive(Debug, Default, Clone)]
+pub struct RetryConfig {
+    pub max_retries: u32,
+    pub initial_delay_ms: u64,
+    pub max_delay_ms: Option<u64>,
+}
+
 #[derive(Debug)]
 pub struct AgentRegistration {
     pub ak: tpm::AKResult,
@@ -37,6 +44,7 @@ pub struct AgentRegistration {
     pub attest: Option<tss_esapi::structures::Attest>,
     pub signature: Option<tss_esapi::structures::Signature>,
     pub ak_handle: KeyHandle,
+    pub retry_config: Option<RetryConfig>,
 }
 
 pub async fn register_agent(
@@ -105,16 +113,20 @@ pub async fn register_agent(
     let ai = ai_builder.build().await?;
 
     let ac = &aa.agent_registration_config;
+
     // Build the registrar client
     // Create a RegistrarClientBuilder and set the parameters
     let mut registrar_client = RegistrarClientBuilder::new()
         .registrar_address(ac.registrar_ip.clone())
         .registrar_port(ac.registrar_port)
+        .retry_config(aa.retry_config.clone())
         .build()
         .await?;
 
     // Request keyblob material
-    let keyblob = registrar_client.register_agent(&ai).await?;
+    let keyblob = registrar_client
+        .register_agent(&ai, aa.retry_config)
+        .await?;
 
     info!("SUCCESS: Agent {} registered", &aa.agent_uuid);
 

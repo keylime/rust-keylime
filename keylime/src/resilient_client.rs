@@ -74,6 +74,11 @@ impl ResilientClient {
         }
     }
 
+    /// Sends a non JSON request using the client.
+    pub fn get_request(&self, method: Method, url: &str) -> RequestBuilder {
+        self.client.request(method, url)
+    }
+
     /// Prepares a request with a JSON body, returning a Result.
     pub fn send_json<T: Serialize>(
         &self,
