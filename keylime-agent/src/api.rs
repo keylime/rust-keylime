@@ -123,6 +123,8 @@ pub(crate) fn get_api_scope(version: &str) -> Result<Scope, APIError> {
             .configure(configure_api_v2_1)),
         "2.2" => Ok(web::scope(format!("v{version}").as_ref())
             .configure(configure_api_v2_2)),
+        "2.4" => Ok(web::scope(format!("v{version}").as_ref())
+            .configure(configure_api_v2_2)),
         _ => Err(APIError::UnsupportedVersion(version.into())),
     }
 }
