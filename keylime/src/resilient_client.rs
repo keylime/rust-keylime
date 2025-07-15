@@ -80,7 +80,7 @@ impl ResilientClient {
     }
 
     /// Prepares a request with a JSON body, returning a Result.
-    pub fn send_json<T: Serialize>(
+    pub fn get_json_request<T: Serialize>(
         &self,
         method: Method,
         url: &str,
@@ -175,7 +175,7 @@ mod tests {
         );
 
         let response = client
-            .send_json(
+            .get_json_request(
                 Method::POST,
                 &format!("{}/submit", &mock_server.uri()),
                 &json!({}),
@@ -210,7 +210,7 @@ mod tests {
         );
 
         let response = client
-            .send_json(
+            .get_json_request(
                 Method::POST,
                 &format!("{}/submit", &mock_server.uri()),
                 &json!({}),
@@ -246,7 +246,7 @@ mod tests {
         );
 
         let response = client
-            .send_json(
+            .get_json_request(
                 Method::POST,
                 &format!("{}/submit", &mock_server.uri()),
                 &json!({}),
@@ -292,7 +292,7 @@ mod tests {
         );
 
         let response = client
-            .send_json(Method::GET, &unreachable_url, &json!({}))
+            .get_json_request(Method::GET, &unreachable_url, &json!({}))
             .unwrap() //#[allow_ci]
             .send()
             .await;
@@ -302,5 +302,41 @@ mod tests {
             response.is_err(),
             "Expected the request to fail with a network error"
         );
+    }
+
+    #[tokio::test]
+    async fn test_get_request_without_body() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/health"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("OK"))
+            .mount(&mock_server)
+            .await;
+
+        let client = ResilientClient::new(
+            None,
+            Duration::from_millis(10),
+            3,
+            &[StatusCode::OK],
+            None,
+        );
+
+        let response = client
+            .get_request(
+                Method::GET,
+                &format!("{}/health", &mock_server.uri()),
+            )
+            .send()
+            .await;
+
+        assert!(response.is_ok());
+        let res = response.unwrap(); //#[allow_ci]
+        assert_eq!(res.status(), StatusCode::OK);
+        assert_eq!(res.text().await.unwrap(), "OK"); //#[allow_ci]
+
+        let received_requests =
+            mock_server.received_requests().await.unwrap(); //#[allow_ci]
+        assert_eq!(received_requests.len(), 1);
     }
 }

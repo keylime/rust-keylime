@@ -127,8 +127,7 @@ impl RegistrarClientBuilder {
         info!("Requesting registrar API version to {addr}");
 
         let resp = if let Some(retry_config) = &self.retry_config {
-            // If retry config is present, use the ResilientClient
-            info!(
+            debug!(
                 "Using ResilientClient for version check with {} retries.",
                 retry_config.max_retries
             );
@@ -194,16 +193,16 @@ impl RegistrarClientBuilder {
                 },
             };
 
-        let resilient_client = match self.retry_config {
-            Some(ref retry_config) => Some(ResilientClient::new(
-                None,
-                Duration::from_millis(retry_config.initial_delay_ms),
-                retry_config.max_retries,
-                &[StatusCode::OK, StatusCode::CREATED, StatusCode::ACCEPTED],
-                retry_config.max_delay_ms.map(Duration::from_millis),
-            )),
-            None => None,
-        };
+        let resilient_client =
+            self.retry_config.as_ref().map(|retry_config| {
+                ResilientClient::new(
+                    None,
+                    Duration::from_millis(retry_config.initial_delay_ms),
+                    retry_config.max_retries,
+                    &[StatusCode::OK],
+                    retry_config.max_delay_ms.map(Duration::from_millis),
+                )
+            });
 
         Ok(RegistrarClient {
             supported_api_versions: self
@@ -368,11 +367,11 @@ impl RegistrarClient {
 
         let resp = match self.resilient_client {
             Some(ref client) => client
-                .send_json(reqwest::Method::POST, &addr, &data)
-                .map_err(|e| RegistrarClientError::Serde(e))?
+                .get_json_request(reqwest::Method::POST, &addr, &data)
+                .map_err(RegistrarClientError::Serde)?
                 .send()
                 .await
-                .map_err(|em| RegistrarClientError::Middleware(em))?,
+                .map_err(RegistrarClientError::Middleware)?,
             None => {
                 reqwest::Client::new()
                     .post(&addr)
@@ -408,24 +407,6 @@ impl RegistrarClient {
         }
     }
 
-    // Helper to create a new client with a specific retry configuration for a single operation.
-    fn create_new_client_with_retry_config(
-        &self,
-        retry_config: &RetryConfig,
-    ) -> Self {
-        let new_resilient_client = ResilientClient::new(
-            None, // Use a new default reqwest client
-            Duration::from_millis(retry_config.initial_delay_ms),
-            retry_config.max_retries,
-            &[StatusCode::OK, StatusCode::CREATED, StatusCode::ACCEPTED],
-            retry_config.max_delay_ms.map(Duration::from_millis),
-        );
-
-        let mut new_client = self.clone();
-        new_client.resilient_client = Some(new_resilient_client);
-        new_client
-    }
-
     /// Register the agent using the previously set of parameters and receive the encrypted
     /// challenge as a binary blob.
     ///
@@ -438,19 +419,10 @@ impl RegistrarClient {
     pub async fn register_agent(
         &mut self,
         ai: &AgentIdentity<'_>,
-        retry_config: Option<RetryConfig>,
     ) -> Result<Vec<u8>, RegistrarClientError> {
-        let client_to_use = if let Some(ref retry_config) = retry_config {
-            self.create_new_client_with_retry_config(retry_config)
-        } else {
-            self.clone()
-        };
-
         // The current Registrar API version is enabled and should work
         if ai.enabled_api_versions.contains(&self.api_version.as_ref()) {
-            return client_to_use
-                .try_register_agent(ai, &self.api_version)
-                .await;
+            return self.try_register_agent(ai, &self.api_version).await;
         }
 
         // In case the registrar does not support the '/version' endpoint, try the enabled API
@@ -459,8 +431,7 @@ impl RegistrarClient {
             // Assume the list of enabled versions is ordered from the oldest to the newest
             for api_version in ai.enabled_api_versions.iter().rev() {
                 info!("Trying to register agent using API version {api_version}");
-                let r =
-                    client_to_use.try_register_agent(ai, api_version).await;
+                let r = self.try_register_agent(ai, api_version).await;
 
                 // If successful, cache the API version for future requests
                 if r.is_ok() {

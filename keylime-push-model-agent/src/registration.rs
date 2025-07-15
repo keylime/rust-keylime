@@ -34,7 +34,7 @@ fn get_retry_config<T: PushModelConfigTrait>(
         Some(RetryConfig {
             max_retries: config.expbackoff_max_retries().unwrap_or(0),
             initial_delay_ms: config.expbackoff_initial_delay().unwrap_or(0),
-            max_delay_ms: config.expbackoff_max_delay().clone(),
+            max_delay_ms: *config.expbackoff_max_delay(),
         })
     }
 }
@@ -117,7 +117,7 @@ mod tests {
     async fn test_register_agent() {
         let _mutex = testing::lock_tests().await;
         let tmpdir = tempfile::tempdir().expect("failed to create tmpdir");
-        let config = get_testing_config(tmpdir.path());
+        let mut config = get_testing_config(tmpdir.path());
         let alg_config = AlgorithmConfigurationString {
             tpm_encryption_alg: "rsa".to_string(),
             tpm_hash_alg: "sha256".to_string(),
@@ -125,6 +125,10 @@ mod tests {
             agent_data_path: "".to_string(),
             disabled_signing_algorithms: vec![],
         };
+        config.expbackoff_initial_delay = None;
+        config.expbackoff_max_retries = None;
+        config.expbackoff_max_delay = None;
+
         let mut context_info = ContextInfo::new_from_str(alg_config)
             .expect("Failed to create context info from string");
         let result = register_agent(&config, &mut context_info).await;

@@ -124,9 +124,7 @@ pub async fn register_agent(
         .await?;
 
     // Request keyblob material
-    let keyblob = registrar_client
-        .register_agent(&ai, aa.retry_config)
-        .await?;
+    let keyblob = registrar_client.register_agent(&ai).await?;
 
     info!("SUCCESS: Agent {} registered", &aa.agent_uuid);
 
