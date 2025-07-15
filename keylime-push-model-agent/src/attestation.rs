@@ -1,8 +1,8 @@
 use crate::{
     context_info_handler, response_handler, struct_filler, url_selector,
 };
-use anyhow::{Context, Result};
-use keylime::https_client;
+use anyhow::Result;
+use keylime::resilient_client::ResilientClient;
 use log::{debug, info};
 use reqwest::header::HeaderMap;
 use reqwest::header::LOCATION;
@@ -27,36 +27,43 @@ pub struct NegotiationConfig<'a> {
     pub insecure: Option<bool>,
     pub ima_log_path: Option<&'a str>,
     pub uefi_log_path: Option<&'a str>,
+    pub max_retries: u32,
+    pub initial_delay_ms: u64,
+    pub max_delay_ms: Option<u64>,
 }
-
-const HTTPS_PREFIX: &str = "https://";
 
 #[derive(Debug, Clone)]
 pub struct AttestationClient {
-    pub client: reqwest::Client,
-}
-
-fn get_client(config: NegotiationConfig<'_>) -> Result<reqwest::Client> {
-    if config.url.starts_with(HTTPS_PREFIX) {
-        return https_client::get_https_client(
-            &keylime::https_client::ClientArgs {
-                ca_certificate: config.ca_certificate.to_string().clone(),
-                certificate: config.client_certificate.to_string().clone(),
-                key: config.key.to_string().clone(),
-                insecure: config.insecure,
-                timeout: config.timeout,
-            },
-        );
-    }
-    reqwest::Client::builder()
-        .timeout(Duration::from_millis(config.timeout))
-        .build()
-        .context("Failed to build plain HTTP client")
+    pub client: ResilientClient,
 }
 
 impl AttestationClient {
     pub fn new(config: &NegotiationConfig<'_>) -> Result<Self> {
-        let client = get_client(config.clone())?;
+        let base_client = if config.url.starts_with("https://") {
+            Some(keylime::https_client::get_https_client(
+                &keylime::https_client::ClientArgs {
+                    ca_certificate: config.ca_certificate.to_string(),
+                    certificate: config.client_certificate.to_string(),
+                    key: config.key.to_string(),
+                    insecure: config.insecure,
+                    timeout: config.timeout,
+                },
+            )?)
+        } else {
+            None
+        };
+
+        debug!("ResilientClient: initial delay: {} ms, max retries: {}, max delay: {:?} ms", 
+            config.initial_delay_ms, config.max_retries, config.max_delay_ms);
+        let client = ResilientClient::new(
+            base_client,
+            Duration::from_millis(config.initial_delay_ms),
+            config.max_retries,
+            // The success codes that stop retries
+            &[StatusCode::OK, StatusCode::CREATED, StatusCode::ACCEPTED],
+            config.max_delay_ms.map(Duration::from_millis),
+        );
+
         Ok(AttestationClient { client })
     }
 
@@ -70,18 +77,13 @@ impl AttestationClient {
         let mut filler =
             struct_filler::get_filler_request(None, context_info.as_mut());
 
-        let json_value =
-            serde_json::to_value(filler.get_attestation_request());
-        let reqcontent = json_value?.to_string();
-        debug!("Request body: {reqcontent:?}");
+        let req = filler.get_attestation_request();
+        debug!("Request body: {:?}", serde_json::to_string(&req));
 
+        // --- Now using send_json, which has the retry logic ---
         let response = self
             .client
-            .post(config.url)
-            .body(reqcontent)
-            .header("Content-Type", "application/json")
-            .header("Accept", "application/json")
-            .timeout(Duration::from_millis(config.timeout))
+            .send_json(reqwest::Method::POST, config.url, &req)?
             .send()
             .await?;
 
@@ -112,11 +114,7 @@ impl AttestationClient {
 
         let response = self
             .client
-            .patch(config.url)
-            .body(json_body)
-            .header("Content-Type", "application/json")
-            .header("Accept", "application/json")
-            .timeout(Duration::from_millis(config.timeout))
+            .send_json(reqwest::Method::PATCH, config.url, &json_body)?
             .send()
             .await?;
 
@@ -203,6 +201,8 @@ mod tests {
     use super::*;
     use std::fs::File;
     use tempfile::tempdir;
+    use wiremock::matchers::{body_string, method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
 
     const TEST_TIMEOUT_MILLIS: u64 = 1000;
 
@@ -222,7 +222,46 @@ mod tests {
             insecure: Some(false),
             ima_log_path: None,
             uefi_log_path: None,
+            max_retries: 0, // By default, don't retry in the old tests
+            initial_delay_ms: 0, // No initial delay in the old tests
+            max_delay_ms: None, // No max delay in the old tests
         }
+    }
+
+    #[actix_rt::test]
+    async fn test_attestation_with_retries() {
+        let mock_server = MockServer::start().await;
+
+        // Simulate the server failing twice and succeeding on the third attempt
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(503))
+            .up_to_n_times(2)
+            .mount(&mock_server)
+            .await;
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(201).insert_header(
+                "Location",
+                "/v3.0/agents/some-id/attestations/1",
+            ))
+            .mount(&mock_server)
+            .await;
+
+        let uri = mock_server.uri().clone();
+        let mut config = create_test_config(&uri, "", "", "");
+        config.max_retries = 3; // Allow up to 3 retries
+
+        let client = AttestationClient::new(&config).unwrap();
+        let result = client.send_negotiation(&config).await;
+
+        // The final request should be successful
+        assert!(result.is_ok());
+        let response = result.unwrap();
+        assert_eq!(response.status_code, StatusCode::CREATED);
+
+        // The server should have received 3 requests in total (2 failures + 1 success)
+        let received_requests =
+            mock_server.received_requests().await.unwrap();
+        assert_eq!(received_requests.len(), 3);
     }
 
     #[actix_rt::test]
@@ -230,7 +269,7 @@ mod tests {
         let negotiation_config =
             create_test_config("http://127.0.0.1:9999/test", "", "", "");
 
-        let client = AttestationClient::new(&negotiation_config).unwrap(); //#[allow_ci]
+        let client = AttestationClient::new(&negotiation_config).unwrap();
         let result =
             client.send_negotiation(&negotiation_config.clone()).await;
 
@@ -257,20 +296,20 @@ mod tests {
 
     #[actix_rt::test]
     async fn test_send_negotiation_bad_certs() {
-        let temp_dir = tempdir().unwrap(); //#[allow_ci]
+        let temp_dir = tempdir().unwrap();
         let ca_path = temp_dir.path().join("ca.pem");
         let cert_path = temp_dir.path().join("cert.pem");
         let key_path = temp_dir.path().join("key.pem");
 
-        File::create(&ca_path).unwrap(); //#[allow_ci]
-        File::create(&cert_path).unwrap(); //#[allow_ci]
-        File::create(&key_path).unwrap(); //#[allow_ci]
+        File::create(&ca_path).unwrap();
+        File::create(&cert_path).unwrap();
+        File::create(&key_path).unwrap();
 
         let config = create_test_config(
             "https://1.2.3.4:9999/test",
-            ca_path.to_str().unwrap(),   //#[allow_ci]
-            cert_path.to_str().unwrap(), //#[allow_ci]
-            key_path.to_str().unwrap(),  //#[allow_ci]
+            ca_path.to_str().unwrap(),
+            cert_path.to_str().unwrap(),
+            key_path.to_str().unwrap(),
         );
 
         let client_result = AttestationClient::new(&config);
@@ -291,7 +330,7 @@ mod tests {
             "", "", "",
         );
 
-        let client = AttestationClient::new(&config).unwrap(); //#[allow_ci]
+        let client = AttestationClient::new(&config).unwrap();
         let result = client.send_negotiation(&config).await;
 
         assert!(
@@ -299,7 +338,7 @@ mod tests {
             "Request to mockoon failed: {:?}",
             result.err()
         );
-        let response_info = result.unwrap(); //#[allow_ci]
+        let response_info = result.unwrap();
         assert_eq!(
             response_info.status_code,
             StatusCode::CREATED,
@@ -312,12 +351,12 @@ mod tests {
     #[actix_rt::test]
     async fn test_handle_evidence_submission_no_location_header() {
         let config = create_test_config("http://localhost:3000", "", "", "");
-        let client = AttestationClient::new(&config).unwrap(); //#[allow_ci]
+        let client = AttestationClient::new(&config).unwrap();
 
         // Create a response with no Location header
         let neg_response = ResponseInformation {
             status_code: StatusCode::CREATED,
-            headers: HeaderMap::new(), // Empty headers
+            headers: HeaderMap::new(),
             body: "{}".to_string(),
         };
 
@@ -330,5 +369,47 @@ mod tests {
             .unwrap_err()
             .to_string()
             .contains("missing 'Location' header"));
+    }
+
+    #[actix_rt::test]
+    async fn test_send_evidence() {
+        // Setup a mock server
+        let mock_server = MockServer::start().await;
+
+        let sample_evidence_struct = serde_json::json!({
+            "data": "sample_evidence"
+        });
+
+        let single_serialized_body = sample_evidence_struct.to_string();
+
+        let expected_incorrect_body =
+            serde_json::to_string(&single_serialized_body).unwrap();
+
+        Mock::given(method("PATCH"))
+            .and(path("/evidence"))
+            .and(body_string(expected_incorrect_body))
+            .respond_with(ResponseTemplate::new(202))
+            .mount(&mock_server)
+            .await;
+
+        // Create a config pointing to the mock server's URI
+        let uri = format!("{}/evidence", mock_server.uri());
+        let config = create_test_config(&uri, "", "", "");
+
+        // Create the client
+        let client = AttestationClient::new(&config).unwrap();
+
+        let result =
+            client.send_evidence(single_serialized_body, &config).await;
+
+        // Assertions
+        assert!(result.is_ok(), "send_evidence should succeed");
+        let response = result.unwrap();
+        assert_eq!(response.status_code, StatusCode::ACCEPTED);
+
+        // Verify that the mock server received exactly one request.
+        let received_requests =
+            mock_server.received_requests().await.unwrap();
+        assert_eq!(received_requests.len(), 1);
     }
 }

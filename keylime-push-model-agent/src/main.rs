@@ -152,6 +152,9 @@ async fn run(args: &Args) -> Result<()> {
         insecure: args.insecure,
         ima_log_path: Some(config.ima_ml_path.as_str()),
         uefi_log_path: Some(config.measuredboot_ml_path.as_str()),
+        max_retries: config.expbackoff_max_retries.unwrap_or(5),
+        initial_delay_ms: config.expbackoff_initial_delay.unwrap_or(1000),
+        max_delay_ms: config.expbackoff_max_delay,
     };
     let attestation_client =
         attestation::AttestationClient::new(&neg_config)?;
