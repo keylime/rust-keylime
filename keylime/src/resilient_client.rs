@@ -3,8 +3,8 @@ use reqwest_middleware::{
     ClientBuilder, ClientWithMiddleware, Error, RequestBuilder,
 };
 use reqwest_retry::{
-    policies::ExponentialBackoff, RetryTransientMiddleware, Retryable,
-    RetryableStrategy,
+    policies::ExponentialBackoff, Jitter, RetryTransientMiddleware,
+    Retryable, RetryableStrategy,
 };
 use serde::Serialize;
 use std::time::Duration;
@@ -57,6 +57,7 @@ impl ResilientClient {
 
         let retry_policy = ExponentialBackoff::builder()
             .retry_bounds(initial_delay, final_max_delay)
+            .jitter(Jitter::None)
             .build_with_max_retries(max_retries);
 
         let client_with_middleware = ClientBuilder::new(base_client)
