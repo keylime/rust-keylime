@@ -708,6 +708,8 @@ mod tests {
                                     local_identifier: "att_local_identifier".to_string(),
                                     key_algorithm: "rsa".to_string(),
                                     public: "OTgtMjkzODQ1LTg5MjMtNDk1OGlrYXNkamZnO2Frc2pka2ZqYXM7a2RqZjtramJrY3hqejk4MS0zMjQ5MDhpLWpmZDth".to_string(),
+                                    allowable_hash_algorithms: None,
+                                    allowable_signature_schemes: None,
                                 }),
                             }))),
                             data: EvidenceData::TpmQuoteData {
@@ -750,6 +752,8 @@ mod tests {
                                     local_identifier: "att_local_identifier".to_string(),
                                     key_algorithm: "rsa".to_string(),
                                     public: "OTgtMjkzODQ1LTg5MjMtNDk1OGlrYXNkamZnO2Frc2pka2ZqYXM7a2RqZjtramJrY3hqejk4MS0zMjQ5MDhpLWpmZDth".to_string(),
+                                    allowable_hash_algorithms: None,
+                                    allowable_signature_schemes: None,
                                 }),
                             }))),
                             data: EvidenceData::UefiLog {

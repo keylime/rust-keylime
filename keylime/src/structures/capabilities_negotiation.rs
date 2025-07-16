@@ -188,6 +188,10 @@ pub struct CertificationKey {
     pub server_identifier: String,
     pub local_identifier: String,
     pub public: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub allowable_hash_algorithms: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub allowable_signature_schemes: Option<Vec<String>>,
 }
 
 // Define the structure for the AttestationResponse:
@@ -321,6 +325,8 @@ mod tests {
                                         key_size: 2048,
                                         server_identifier: "ak".to_string(),
                                         public: "OTgtMjkzODQ1LTg5MjMtNDk1OGlrYXNkamZnO2Frc2pka2ZqYXM7a2RqZjtramJrY3hqejk4MS0zMjQ5MDhpLWpmZDth".to_string(),
+                                        allowable_hash_algorithms: None,
+                                        allowable_signature_schemes: None,
                                     },
                                 ],
                             },
@@ -496,6 +502,8 @@ mod tests {
                                         local_identifier: "att_local_identifier".to_string(),
                                         key_algorithm: "rsa".to_string(),
                                         public: "OTgtMjkzODQ1LTg5MjMtNDk1OGlrYXNkamZnO2Frc2pka2ZqYXM7a2RqZjtramJrY3hqejk4MS0zMjQ5MDhpLWpmZDth".to_string(),
+                                        allowable_hash_algorithms: None,
+                                        allowable_signature_schemes: None,
                                     },
                                 ],
                             },
@@ -822,6 +830,8 @@ mod tests {
                                     local_identifier: "att_local_identifier".to_string(),
                                     key_algorithm: "rsa".to_string(),
                                     public: "OTgtMjkzODQ1LTg5MjMtNDk1OGlrYXNkamZnO2Frc2pka2ZqYXM7a2RqZjtramJrY3hqejk4MS0zMjQ5MDhpLWpmZDth".to_string(),
+                                    allowable_hash_algorithms: None,
+                                    allowable_signature_schemes: None,
                                 }),
                             }))),
                         },
@@ -915,6 +925,8 @@ mod tests {
                                     local_identifier: "att_local_identifier".to_string(),
                                     key_algorithm: "rsa".to_string(),
                                     public: "OTgtMjkzODQ1LTg5MjMtNDk1OGlrYXNkamZnO2Frc2pka2ZqYXM7a2RqZjtramJrY3hqejk4MS0zMjQ5MDhpLWpmZDth".to_string(),
+                                    allowable_hash_algorithms: None,
+                                    allowable_signature_schemes: None,
                                 }),
                             }))),
                         },
