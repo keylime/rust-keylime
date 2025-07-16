@@ -367,7 +367,7 @@ impl RegistrarClient {
 
         let resp = match self.resilient_client {
             Some(ref client) => client
-                .get_json_request(reqwest::Method::POST, &addr, &data)
+                .get_json_request(reqwest::Method::POST, &addr, &data, None)
                 .map_err(RegistrarClientError::Serde)?
                 .send()
                 .await
