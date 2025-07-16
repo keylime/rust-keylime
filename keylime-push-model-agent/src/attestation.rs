@@ -82,7 +82,12 @@ impl AttestationClient {
 
         let response = self
             .client
-            .get_json_request(reqwest::Method::POST, config.url, &req)?
+            .get_json_request(
+                reqwest::Method::POST,
+                config.url,
+                &req,
+                Some("application/vnd.api+json".to_string()),
+            )?
             .send()
             .await?;
 
@@ -113,7 +118,12 @@ impl AttestationClient {
 
         let response = self
             .client
-            .get_json_request(reqwest::Method::PATCH, config.url, &json_body)?
+            .get_json_request(
+                reqwest::Method::PATCH,
+                config.url,
+                &json_body,
+                Some("application/vnd.api+json".to_string()),
+            )?
             .send()
             .await?;
 

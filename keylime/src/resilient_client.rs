@@ -85,18 +85,20 @@ impl ResilientClient {
         method: Method,
         url: &str,
         json_serializable: &T,
+        custom_content_type: Option<String>,
     ) -> Result<RequestBuilder, serde_json::Error> {
-        // Use the `?` operator to propagate a serialization error instead of panicking.
         let body_as_string = serde_json::to_string(json_serializable)?;
 
-        let builder = self
-            .client
-            .request(method, url)
-            .header(reqwest::header::CONTENT_TYPE, "application/json")
-            .body(body_as_string);
+        let builder = self.client.request(method, url).body(body_as_string);
 
-        // Wrap the successful result in Ok().
-        Ok(builder)
+        match custom_content_type {
+            Some(ct) => Ok(builder
+                .header("Content-Type", ct.clone())
+                .header("Accept", ct)),
+            None => Ok(builder
+                .header("Content-Type", "application/json")
+                .header("Accept", "application/json")),
+        }
     }
 }
 
@@ -149,6 +151,38 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_custom_content_type_client_creation() {
+        let mock_server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/submit"))
+            .and(header("Content-Type", "application/vnd.api+json"))
+            .respond_with(ResponseTemplate::new(200)) // The server will succeed with 200
+            .mount(&mock_server)
+            .await;
+        let client = ResilientClient::new(
+            None,
+            Duration::from_millis(10),
+            3,
+            &[StatusCode::OK],
+            None,
+        );
+
+        let response = client
+            .get_json_request(
+                Method::POST,
+                &format!("{}/submit", &mock_server.uri()),
+                &json!({}),
+                Some("application/vnd.api+json".to_string()),
+            )
+            .unwrap() //#[allow_ci]
+            .send()
+            .await;
+
+        assert!(response.is_ok());
+        assert_eq!(response.unwrap().status(), StatusCode::OK); //#[allow_ci]
+    }
+
+    #[tokio::test]
     async fn test_retry_on_server_error_then_success() {
         let mock_server = MockServer::start().await;
 
@@ -179,6 +213,7 @@ mod tests {
                 Method::POST,
                 &format!("{}/submit", &mock_server.uri()),
                 &json!({}),
+                None,
             )
             .unwrap() //#[allow_ci]
             .send()
@@ -214,6 +249,7 @@ mod tests {
                 Method::POST,
                 &format!("{}/submit", &mock_server.uri()),
                 &json!({}),
+                None,
             )
             .unwrap() //#[allow_ci]
             .send()
@@ -250,6 +286,7 @@ mod tests {
                 Method::POST,
                 &format!("{}/submit", &mock_server.uri()),
                 &json!({}),
+                None,
             )
             .unwrap() //#[allow_ci]
             .send()
@@ -292,7 +329,7 @@ mod tests {
         );
 
         let response = client
-            .get_json_request(Method::GET, &unreachable_url, &json!({}))
+            .get_json_request(Method::GET, &unreachable_url, &json!({}), None)
             .unwrap() //#[allow_ci]
             .send()
             .await;
