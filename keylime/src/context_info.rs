@@ -363,9 +363,16 @@ impl ContextInfo {
     }
 
     pub fn get_ak_certification_data(
-        &self,
+        &mut self,
     ) -> Result<CertificationKey, ContextInfoError> {
+        // TODO Receive the configuration instead of reading it again
         let config = AgentConfig::new()?;
+
+        // Extract the AK's actual signing scheme and hash algorithm
+        let (ak_signing_scheme, ak_hash_algorithm) = self
+            .tpm_context
+            .extract_ak_scheme_and_hash(self.ak_handle)?;
+
         Ok(CertificationKey {
             key_class: self.get_ak_key_class_str(),
             key_algorithm: self.get_ak_key_algorithm_str(),
@@ -375,6 +382,8 @@ impl ContextInfo {
                 .to_string(),
             local_identifier: self.get_ak_local_identifier_str()?,
             public: self.get_ak_public_key_as_base64()?,
+            allowable_hash_algorithms: Some(vec![ak_hash_algorithm]),
+            allowable_signature_schemes: Some(vec![ak_signing_scheme]),
         })
     }
 

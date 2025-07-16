@@ -382,6 +382,8 @@ fn get_attestation_request_from_code() -> structures::AttestationRequest {
                                     key_size: 2048,
                                     server_identifier: "ak".to_string(),
                                     public: "VGhpcyBpcyBhIHRlc3QgZm9yIGEgYmFzZTY0IGVuY29kZWQgZm9ybWF0IHN0cmluZw==".to_string(),
+                                    allowable_hash_algorithms: None,
+                                    allowable_signature_schemes: None,
                                 },
                             ],
                         },
