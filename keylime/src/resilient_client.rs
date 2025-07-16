@@ -1,3 +1,4 @@
+use log::{debug, warn};
 use reqwest::{Client, Method, Response, StatusCode};
 use reqwest_middleware::{
     ClientBuilder, ClientWithMiddleware, Error, RequestBuilder,
@@ -25,14 +26,25 @@ impl RetryableStrategy for StopOnSuccessStrategy {
             Ok(response) => {
                 // If the status code is one of our defined success codes, it's NOT retryable.
                 if self.success_codes.contains(&response.status()) {
+                    debug!(
+                        "Received expected success status code: {}",
+                        response.status()
+                    );
                     None
                 } else {
                     // For any other status, let the default strategy decide if it's a transient error.
+                    warn!(
+                        "Received non-success status code: {}",
+                        response.status()
+                    );
                     Some(Retryable::Transient)
                 }
             }
             // If there was a network error, it's always a transient error.
-            Err(_) => Some(Retryable::Transient),
+            Err(e) => {
+                warn!("Network error: {}", e);
+                Some(Retryable::Transient)
+            }
         }
     }
 }
