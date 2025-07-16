@@ -80,10 +80,9 @@ impl AttestationClient {
         let req = filler.get_attestation_request();
         debug!("Request body: {:?}", serde_json::to_string(&req));
 
-        // --- Now using send_json, which has the retry logic ---
         let response = self
             .client
-            .send_json(reqwest::Method::POST, config.url, &req)?
+            .get_json_request(reqwest::Method::POST, config.url, &req)?
             .send()
             .await?;
 
@@ -114,7 +113,7 @@ impl AttestationClient {
 
         let response = self
             .client
-            .send_json(reqwest::Method::PATCH, config.url, &json_body)?
+            .get_json_request(reqwest::Method::PATCH, config.url, &json_body)?
             .send()
             .await?;
 

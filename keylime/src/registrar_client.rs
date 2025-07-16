@@ -1,8 +1,14 @@
-use crate::{agent_identity::AgentIdentity, serialization::*};
+use crate::resilient_client::ResilientClient;
+use crate::{
+    agent_identity::AgentIdentity, agent_registration::RetryConfig,
+    serialization::*,
+};
 use log::*;
+use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
 use serde_json::Number;
 use std::net::IpAddr;
+use std::time::Duration;
 use thiserror::Error;
 
 use crate::version::KeylimeRegistrarVersion;
@@ -30,6 +36,10 @@ pub enum RegistrarClientBuilderError {
     /// Reqwest error
     #[error("Reqwest error: {0}")]
     Reqwest(#[from] reqwest::Error),
+
+    /// Middleware error
+    #[error("Middleware error: {0}")]
+    Middleware(#[from] reqwest_middleware::Error),
 }
 
 #[derive(Debug, Default)]
@@ -38,6 +48,7 @@ pub struct RegistrarClientBuilder {
     registrar_supported_api_versions: Option<Vec<String>>,
     registrar_address: Option<String>,
     registrar_port: Option<u32>,
+    retry_config: Option<RetryConfig>,
 }
 
 impl RegistrarClientBuilder {
@@ -64,6 +75,16 @@ impl RegistrarClientBuilder {
     /// * port (u32): The port to contact when registering the agent
     pub fn registrar_port(mut self, port: u32) -> Self {
         self.registrar_port = Some(port);
+        self
+    }
+
+    /// Set the RetryConfig for the registrar client
+    ///
+    /// # Arguments:
+    ///
+    /// * rt: RetryConfig: The retry configuration to use for the registrar client
+    pub fn retry_config(mut self, rt: Option<RetryConfig>) -> Self {
+        self.retry_config = rt;
         self
     }
 
@@ -105,11 +126,30 @@ impl RegistrarClientBuilder {
 
         info!("Requesting registrar API version to {addr}");
 
-        let resp = reqwest::Client::new()
-            .get(&addr)
-            .send()
-            .await
-            .map_err(RegistrarClientBuilderError::Reqwest)?;
+        let resp = if let Some(retry_config) = &self.retry_config {
+            debug!(
+                "Using ResilientClient for version check with {} retries.",
+                retry_config.max_retries
+            );
+            let client = ResilientClient::new(
+                None,
+                Duration::from_millis(retry_config.initial_delay_ms),
+                retry_config.max_retries,
+                &[StatusCode::OK],
+                retry_config.max_delay_ms.map(Duration::from_millis),
+            );
+
+            client
+                .get_request(reqwest::Method::GET, &addr)
+                .send()
+                .await?
+        } else {
+            reqwest::Client::new()
+                .get(&addr)
+                .send()
+                .await
+                .map_err(RegistrarClientBuilderError::Reqwest)?
+        };
 
         if !resp.status().is_success() {
             info!("Registrar at '{addr}' does not support the '/version' endpoint");
@@ -153,6 +193,17 @@ impl RegistrarClientBuilder {
                 },
             };
 
+        let resilient_client =
+            self.retry_config.as_ref().map(|retry_config| {
+                ResilientClient::new(
+                    None,
+                    Duration::from_millis(retry_config.initial_delay_ms),
+                    retry_config.max_retries,
+                    &[StatusCode::OK],
+                    retry_config.max_delay_ms.map(Duration::from_millis),
+                )
+            });
+
         Ok(RegistrarClient {
             supported_api_versions: self
                 .registrar_supported_api_versions
@@ -160,6 +211,7 @@ impl RegistrarClientBuilder {
             api_version: registrar_api_version,
             registrar_ip,
             registrar_port,
+            resilient_client,
         })
     }
 }
@@ -196,14 +248,23 @@ pub enum RegistrarClientError {
     /// Reqwest error
     #[error("Reqwest error: {0}")]
     Reqwest(#[from] reqwest::Error),
+
+    /// Serde error
+    #[error("Serde error: {0}")]
+    Serde(#[from] serde_json::Error),
+
+    /// Middleware error
+    #[error("Middleware error: {0}")]
+    Middleware(#[from] reqwest_middleware::Error),
 }
 
-#[derive(Default, Debug)]
+#[derive(Clone, Default, Debug)]
 pub struct RegistrarClient {
     api_version: String,
     supported_api_versions: Option<Vec<String>>,
     registrar_ip: String,
     registrar_port: u32,
+    resilient_client: Option<ResilientClient>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -304,11 +365,21 @@ impl RegistrarClient {
             &addr, &ai.uuid
         );
 
-        let resp = reqwest::Client::new()
-            .post(&addr)
-            .json(&data)
-            .send()
-            .await?;
+        let resp = match self.resilient_client {
+            Some(ref client) => client
+                .get_json_request(reqwest::Method::POST, &addr, &data)
+                .map_err(RegistrarClientError::Serde)?
+                .send()
+                .await
+                .map_err(RegistrarClientError::Middleware)?,
+            None => {
+                reqwest::Client::new()
+                    .post(&addr)
+                    .json(&data)
+                    .send()
+                    .await?
+            }
+        };
 
         if !resp.status().is_success() {
             return Err(RegistrarClientError::Registration {
