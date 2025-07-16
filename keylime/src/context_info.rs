@@ -12,6 +12,7 @@ use base64::{
     engine::general_purpose::STANDARD as base64_standard, Engine as _,
 };
 use hex;
+use log::*;
 use openssl::hash::{Hasher, MessageDigest};
 use openssl::{
     bn::BigNum,
@@ -38,6 +39,15 @@ pub enum ContextInfoError {
     /// Invalid algorithm
     #[error("Invalid Algorithm")]
     InvalidAlgorithm(#[from] algorithms::AlgorithmError),
+
+    /// Mismatching AK signing scheme algorithms
+    #[error("Mismatching AK signing scheme algorithms. From parameters: {param_sign}, {param_hash}; supported by AK: {ak_sign}, {ak_hash}")]
+    MismatchingAKSigningScheme {
+        ak_sign: String,
+        ak_hash: String,
+        param_sign: String,
+        param_hash: String,
+    },
 
     /// OpenSSL error
     #[error("OpenSSL error")]
@@ -397,12 +407,35 @@ impl ContextInfo {
         &mut self,
         params: &AttestationRequiredParams,
     ) -> Result<AttestationEvidence, ContextInfoError> {
-        let sign_alg_enum = algorithms::SignAlgorithm::try_from(
+        // Get signing scheme and hash algorithm from the parameters
+        let param_sign_scheme = algorithms::SignAlgorithm::try_from(
             params.signature_scheme.as_str(),
         )?;
-        let hash_alg_enum = algorithms::HashAlgorithm::try_from(
+        let param_hash_alg = algorithms::HashAlgorithm::try_from(
             params.hash_algorithm.as_str(),
         )?;
+
+        // Extract signing scheme and hash algorithm from the AK
+        let (ak_sig_str, ak_hash_str) = self
+            .tpm_context
+            .extract_ak_scheme_and_hash(self.ak_handle)?;
+        let ak_sign_scheme =
+            algorithms::SignAlgorithm::try_from(ak_sig_str.as_str())?;
+        let ak_hash_alg =
+            algorithms::HashAlgorithm::try_from(ak_hash_str.as_str())?;
+
+        if (param_sign_scheme != ak_sign_scheme)
+            || (param_hash_alg != ak_hash_alg)
+        {
+            error!("Mismatching AK signing scheme algorithms. From parameters: {param_sign_scheme}, {param_hash_alg}; supported by AK: {ak_sig_str}, {ak_hash_str}");
+            return Err(ContextInfoError::MismatchingAKSigningScheme {
+                ak_sign: ak_sig_str,
+                ak_hash: ak_hash_str,
+                param_sign: params.signature_scheme.clone(),
+                param_hash: params.hash_algorithm.clone(),
+            });
+        }
+
         let mut pcr_mask: u32 = 0;
         if let Some(pcr_indices) =
             params.selected_subjects.get(&params.hash_algorithm)
@@ -424,8 +457,8 @@ impl ContextInfo {
                 pcr_mask,
                 &pubkey_for_quote,
                 ak_handle,
-                hash_alg_enum,
-                sign_alg_enum,
+                ak_hash_alg,
+                ak_sign_scheme,
             )
         })
         .await
@@ -491,17 +524,15 @@ impl ContextInfo {
     }
 }
 
-// tests
+#[cfg(feature = "testing")]
 #[cfg(test)]
 mod tests {
 
-    #[cfg(feature = "testing")]
     use super::*;
+    use crate::tpm::testing;
 
     #[tokio::test]
-    #[cfg(feature = "testing")]
     async fn test_basic_creation() {
-        use crate::tpm::testing;
         let _mutex = testing::lock_tests().await;
         let config = AlgorithmConfigurationString {
             tpm_encryption_alg: "rsa".to_string(),
@@ -517,9 +548,7 @@ mod tests {
     }
 
     #[tokio::test]
-    #[cfg(feature = "testing")]
     async fn test_creation_and_get_data() {
-        use crate::tpm::testing;
         let _mutex = testing::lock_tests().await;
         let config = AlgorithmConfigurationString {
             tpm_encryption_alg: "rsa".to_string(),
@@ -547,9 +576,7 @@ mod tests {
     }
 
     #[tokio::test]
-    #[cfg(feature = "testing")]
     async fn test_ak_persistence_and_reload() {
-        use crate::tpm::testing;
         let _mutex = testing::lock_tests().await;
         // The `tempdir` object provides a temporary directory. When it goes out
         // of scope at the end of this test, the directory and all its contents
@@ -591,7 +618,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[cfg(feature = "testing")]
     async fn test_new_from_str_errors_on_bad_enc_alg() {
         let _mutex = crate::tpm::testing::lock_tests().await;
         let config = AlgorithmConfigurationString {
@@ -621,7 +647,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[cfg(feature = "testing")]
     async fn test_new_from_str_errors_on_bad_sign_alg() {
         let _mutex = crate::tpm::testing::lock_tests().await;
         let config = AlgorithmConfigurationString {
@@ -636,9 +661,7 @@ mod tests {
     }
 
     #[tokio::test]
-    #[cfg(feature = "testing")]
     async fn test_creation_and_get_all_data() {
-        use crate::tpm::testing;
         let _mutex = testing::lock_tests().await;
         let config = AlgorithmConfigurationString {
             tpm_encryption_alg: "rsa".to_string(),
@@ -663,9 +686,7 @@ mod tests {
     }
 
     #[tokio::test]
-    #[cfg(feature = "testing")]
     async fn test_ak_persistence_with_invalid_data() {
-        use crate::tpm::testing;
         let _mutex = testing::lock_tests().await;
         let tempdir = tempfile::tempdir().unwrap(); //#[allow_ci]
         let data_path = tempdir.path().join("agent_data.json");
@@ -708,9 +729,7 @@ mod tests {
     }
 
     #[tokio::test]
-    #[cfg(feature = "testing")]
     async fn test_ak_persistence_with_corrupt_file() {
-        use crate::tpm::testing;
         use std::fs::File;
         use std::io::Write;
         let _mutex = testing::lock_tests().await;
@@ -742,9 +761,7 @@ mod tests {
     }
 
     #[tokio::test]
-    #[cfg(feature = "testing")]
     async fn test_perform_attestation() {
-        use crate::tpm::testing;
         let _mutex = testing::lock_tests().await;
         let config = AlgorithmConfigurationString {
             tpm_encryption_alg: "rsa".to_string(),
@@ -780,9 +797,7 @@ mod tests {
     }
 
     #[tokio::test]
-    #[cfg(feature = "testing")]
     async fn test_perform_attestation_with_invalid_algs() {
-        use crate::tpm::testing;
         let _mutex = testing::lock_tests().await;
         let config = AlgorithmConfigurationString {
             tpm_encryption_alg: "rsa".to_string(),
@@ -822,9 +837,50 @@ mod tests {
     }
 
     #[tokio::test]
-    #[cfg(feature = "testing")]
+    async fn test_perform_attestation_with_mismatching_algs() {
+        let _mutex = testing::lock_tests().await;
+        let config = AlgorithmConfigurationString {
+            tpm_encryption_alg: "rsa".to_string(),
+            tpm_hash_alg: "sha256".to_string(),
+            tpm_signing_alg: "rsassa".to_string(),
+            agent_data_path: "".to_string(),
+            disabled_signing_algorithms: vec![],
+        };
+
+        let context_result = ContextInfo::new_from_str(config);
+        assert!(context_result.is_ok());
+        let mut context_info = context_result.unwrap(); //#[allow_ci]
+
+        let mut subjects = HashMap::new();
+        subjects.insert("sha256".to_string(), vec![10]);
+
+        let params = AttestationRequiredParams {
+            challenge: "test_challenge".to_string(),
+            signature_scheme: "rsassa".to_string(),
+            hash_algorithm: "sha384".to_string(), // mismatching hash alg
+            selected_subjects: subjects,
+            ima_log_path: Some("test-data/ima_log.txt".to_string()),
+            ima_offset: 0,
+            ima_entry_count: Some(1),
+            uefi_log_path: Some("test-data/uefi_log.bin".to_string()),
+        };
+
+        let result = context_info.perform_attestation(&params).await;
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            ContextInfoError::MismatchingAKSigningScheme {
+                ak_sign: _,
+                ak_hash: _,
+                param_sign: _,
+                param_hash: _
+            },
+        ));
+        context_info.flush_context().unwrap(); //#[allow_ci]
+    }
+
+    #[tokio::test]
     async fn test_verifier_subjects() {
-        use crate::tpm::testing;
         let _mutex = testing::lock_tests().await;
         let config = AlgorithmConfigurationString {
             tpm_encryption_alg: "rsa".to_string(),

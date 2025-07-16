@@ -482,6 +482,14 @@ pub enum TpmError {
     /// Error trying to read key name from bytes
     #[error("Name From Bytes Error: {0}")]
     NameFromBytesError(String),
+
+    /// Error setting authentication to object handle
+    #[error("Error setting authentication to object handle")]
+    TSSSetAuthError { source: tss_esapi::Error },
+
+    /// Error extracting scheme and hash algorithm from AK handle
+    #[error("Error extracting scheme and hash algorithm from AK handle")]
+    TSSExtractAkSchemeAndHashError { source: tss_esapi::Error },
 }
 
 impl From<tss_esapi::Error> for TpmError {
@@ -579,6 +587,22 @@ pub struct IAKPublic {
 #[derive(Debug, Clone)]
 pub struct Context<'a> {
     inner: &'a Arc<Mutex<tss_esapi::Context>>,
+}
+
+/// Helper function to convert TSS ESAPI hashing algorithm to string representation
+fn hash_alg_to_string(hash_alg: TssEsapiHashingAlgorithm) -> Result<String> {
+    match hash_alg {
+        TssEsapiHashingAlgorithm::Sha1 => Ok("sha1".to_string()),
+        TssEsapiHashingAlgorithm::Sha256 => Ok("sha256".to_string()),
+        TssEsapiHashingAlgorithm::Sha384 => Ok("sha384".to_string()),
+        TssEsapiHashingAlgorithm::Sha512 => Ok("sha512".to_string()),
+        TssEsapiHashingAlgorithm::Sm3_256 => Ok("sm3_256".to_string()),
+        _ => Err(TpmError::TSSReadPublicError {
+            source: tss_esapi::Error::WrapperError(
+                tss_esapi::WrapperErrorKind::UnsupportedParam,
+            ),
+        }),
+    }
 }
 
 static TPM_CTX: OnceLock<Arc<Mutex<tss_esapi::Context>>> = OnceLock::new();
@@ -1817,6 +1841,141 @@ impl Context<'_> {
             supported_algs.iter().map(|alg| alg.to_string()).collect();
 
         Ok(alg_strings)
+    }
+
+    /// Set authentication to object handle
+    ///
+    /// # Arguments:
+    ///
+    /// * handle (ObjectHandle): The object handle to set auth to
+    /// * auth_value (Auth): The auth value
+    pub fn set_handle_auth(
+        &mut self,
+        handle: ObjectHandle,
+        auth_value: Auth,
+    ) -> Result<()> {
+        self.inner
+            .lock()
+            .unwrap() //#[allow_ci]
+            .tr_set_auth(handle, auth_value)
+            .map_err(|source| TpmError::TSSSetAuthError { source })
+    }
+
+    /// Extract the signing scheme and hash algorithm from an AK handle
+    ///
+    /// This method reads the public area of the AK and extracts the signing scheme
+    /// and hash algorithm configured in its template when it was created.
+    ///
+    /// # Arguments
+    ///
+    /// * `ak_handle` - The AK (Attestation Key) handle to extract information from
+    ///
+    /// # Returns
+    ///
+    /// A tuple containing (signing_scheme_string, hash_algorithm_string), or an
+    /// error if extraction fails.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use keylime::tpm::Context;
+    /// use keylime::algorithms::{EncryptionAlgorithm, HashAlgorithm, SignAlgorithm};
+    /// use tss_esapi::handles::ObjectHandle;
+    ///
+    /// let mut ctx = Context::new().expect("failed to create TPM context");
+    /// let enc_alg = EncryptionAlgorithm::Rsa2048;
+    /// let hash_alg = HashAlgorithm::Sha256;
+    /// let signing_alg = SignAlgorithm::RsaSsa;
+    /// let ek_result = ctx.create_ek(enc_alg, None).expect("failed to create EK");
+    /// let ak_result = ctx
+    ///     .create_ak(ek_result.key_handle, hash_alg, enc_alg, signing_alg)
+    ///     .expect("failed to create AK");
+    /// let ak_handle = ctx.load_ak(ek_result.key_handle, &ak_result)
+    ///     .expect("failed to load AK");
+    /// let (sign_scheme, hash_alg) = ctx.extract_ak_scheme_and_hash(ak_handle)
+    ///     .expect("failed to extract signing scheme and hash algorithm");
+    ///
+    /// // Do not forget to flush_context to remove transient objects
+    /// ctx.flush_context(ObjectHandle::from(ek_result.key_handle))
+    ///     .expect("failed to flush EK context");
+    /// ctx.flush_context(ObjectHandle::from(ak_handle))
+    ///     .expect("failed to flush AK context");
+    /// ```
+    pub fn extract_ak_scheme_and_hash(
+        &mut self,
+        ak_handle: KeyHandle,
+    ) -> Result<(String, String)> {
+        let mut ctx = self.inner.lock().unwrap(); //#[allow_ci]
+
+        // Read the public area of the AK
+        let (public, _, _) = ctx
+            .read_public(ak_handle)
+            .map_err(|source| TpmError::TSSReadPublicError { source })?;
+
+        // Extract scheme and hash algorithm information based on the key type
+        match public {
+            TssPublic::Rsa { parameters, .. } => {
+                // Extract scheme from RSA parameters
+                let scheme_str = match parameters.rsa_scheme() {
+                    tss_esapi::structures::RsaScheme::RsaPss(hash_scheme) => {
+                        let hash_alg = hash_scheme.hashing_algorithm();
+                        let hash_str = hash_alg_to_string(hash_alg)?;
+                        ("rsapss".to_string(), hash_str)
+                    }
+                    tss_esapi::structures::RsaScheme::RsaSsa(hash_scheme) => {
+                        let hash_alg = hash_scheme.hashing_algorithm();
+                        let hash_str = hash_alg_to_string(hash_alg)?;
+                        ("rsassa".to_string(), hash_str)
+                    }
+                    tss_esapi::structures::RsaScheme::Null => {
+                        // Default to RSASSA with SHA256 for null scheme
+                        ("rsassa".to_string(), "sha256".to_string())
+                    }
+                    _ => {
+                        return Err(TpmError::TSSReadPublicError {
+                            source: tss_esapi::Error::WrapperError(
+                                tss_esapi::WrapperErrorKind::UnsupportedParam,
+                            ),
+                        });
+                    }
+                };
+                Ok(scheme_str)
+            }
+            TssPublic::Ecc { parameters, .. } => {
+                // Extract scheme from ECC parameters
+                let scheme_str = match parameters.ecc_scheme() {
+                    tss_esapi::structures::EccScheme::EcDsa(hash_scheme) => {
+                        let hash_alg = hash_scheme.hashing_algorithm();
+                        let hash_str = hash_alg_to_string(hash_alg)?;
+                        ("ecdsa".to_string(), hash_str)
+                    }
+                    tss_esapi::structures::EccScheme::EcSchnorr(
+                        hash_scheme,
+                    ) => {
+                        let hash_alg = hash_scheme.hashing_algorithm();
+                        let hash_str = hash_alg_to_string(hash_alg)?;
+                        ("ecschnorr".to_string(), hash_str)
+                    }
+                    tss_esapi::structures::EccScheme::Null => {
+                        // Default to ECDSA with SHA256 for null scheme
+                        ("ecdsa".to_string(), "sha256".to_string())
+                    }
+                    _ => {
+                        return Err(TpmError::TSSReadPublicError {
+                            source: tss_esapi::Error::WrapperError(
+                                tss_esapi::WrapperErrorKind::UnsupportedParam,
+                            ),
+                        });
+                    }
+                };
+                Ok(scheme_str)
+            }
+            _ => Err(TpmError::TSSReadPublicError {
+                source: tss_esapi::Error::WrapperError(
+                    tss_esapi::WrapperErrorKind::UnsupportedParam,
+                ),
+            }),
+        }
     }
 }
 
@@ -3107,6 +3266,7 @@ pub mod tests {
     #[tokio::test]
     #[cfg(feature = "testing")]
     async fn test_algorithms() {
+        use crate::tpm::testing;
         let _mutex = testing::lock_tests().await;
         let mut ctx = Context::new().unwrap(); //#[allow_ci]
         let mut algs = ctx.get_supported_hash_algorithms_as_strings();
@@ -3116,4 +3276,42 @@ pub mod tests {
         assert!(algs.is_ok(), "Result: {algs:?}");
         assert!(!algs.unwrap().is_empty(), "No signing algorithms found"); //#[allow_ci]
     } // test_algorithms
+
+    #[tokio::test]
+    #[cfg(feature = "testing")]
+    async fn test_extract_ak_scheme_and_hash() {
+        use crate::tpm::testing;
+        let _mutex = testing::lock_tests().await;
+        let mut ctx = Context::new().expect("failed to create TPM context");
+        let enc_alg = EncryptionAlgorithm::Rsa2048;
+        let hash_alg = HashAlgorithm::Sha256;
+        let signing_alg = SignAlgorithm::RsaSsa;
+
+        // Generate an EK
+        let ek_result =
+            ctx.create_ek(enc_alg, None).expect("failed to create EK");
+
+        // Create an AK using the EK
+        let ak_result = ctx
+            .create_ak(ek_result.key_handle, hash_alg, enc_alg, signing_alg)
+            .expect("failed to create AK");
+        let ak_handle = ctx
+            .load_ak(ek_result.key_handle, &ak_result)
+            .expect("failed to load AK");
+
+        // Test the new method to extract scheme and hash algorithm
+        let (extracted_scheme, extracted_hash) = ctx
+            .extract_ak_scheme_and_hash(ak_handle)
+            .expect("failed to extract signing scheme and hash algorithm");
+
+        // Verify that the extracted values match what we expect
+        assert_eq!(extracted_scheme, "rsassa");
+        assert_eq!(extracted_hash, "sha256");
+
+        // Flush context to clean up
+        ctx.flush_context(ObjectHandle::from(ek_result.key_handle))
+            .expect("failed to flush EK context");
+        ctx.flush_context(ObjectHandle::from(ak_handle))
+            .expect("failed to flush AK context");
+    } // test_extract_ak_scheme_and_hash
 }
