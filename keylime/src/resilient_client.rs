@@ -92,16 +92,17 @@ impl ResilientClient {
     }
 
     /// Prepares a request with a JSON body, returning a Result.
-    pub fn get_json_request<T: Serialize>(
+    pub fn get_json_request(
         &self,
         method: Method,
         url: &str,
-        json_serializable: &T,
+        json_string: &str,
         custom_content_type: Option<String>,
     ) -> Result<RequestBuilder, serde_json::Error> {
-        let body_as_string = serde_json::to_string(json_serializable)?;
-
-        let builder = self.client.request(method, url).body(body_as_string);
+        let builder = self
+            .client
+            .request(method, url)
+            .body(json_string.to_string());
 
         match custom_content_type {
             Some(ct) => Ok(builder
@@ -111,6 +112,24 @@ impl ResilientClient {
                 .header("Content-Type", "application/json")
                 .header("Accept", "application/json")),
         }
+    }
+
+    /// Prepares a request with a JSON body, returning a Result.
+    pub fn get_json_request_from_struct<T: Serialize>(
+        &self,
+        method: Method,
+        url: &str,
+        json_serializable: &T,
+        custom_content_type: Option<String>,
+    ) -> Result<RequestBuilder, serde_json::Error> {
+        let body_as_string = serde_json::to_string(json_serializable)?;
+
+        self.get_json_request(
+            method,
+            url,
+            &body_as_string,
+            custom_content_type,
+        )
     }
 }
 
@@ -180,7 +199,7 @@ mod tests {
         );
 
         let response = client
-            .get_json_request(
+            .get_json_request_from_struct(
                 Method::POST,
                 &format!("{}/submit", &mock_server.uri()),
                 &json!({}),
@@ -221,7 +240,7 @@ mod tests {
         );
 
         let response = client
-            .get_json_request(
+            .get_json_request_from_struct(
                 Method::POST,
                 &format!("{}/submit", &mock_server.uri()),
                 &json!({}),
@@ -257,7 +276,7 @@ mod tests {
         );
 
         let response = client
-            .get_json_request(
+            .get_json_request_from_struct(
                 Method::POST,
                 &format!("{}/submit", &mock_server.uri()),
                 &json!({}),
@@ -294,7 +313,7 @@ mod tests {
         );
 
         let response = client
-            .get_json_request(
+            .get_json_request_from_struct(
                 Method::POST,
                 &format!("{}/submit", &mock_server.uri()),
                 &json!({}),
@@ -341,7 +360,12 @@ mod tests {
         );
 
         let response = client
-            .get_json_request(Method::GET, &unreachable_url, &json!({}), None)
+            .get_json_request_from_struct(
+                Method::GET,
+                &unreachable_url,
+                &json!({}),
+                None,
+            )
             .unwrap() //#[allow_ci]
             .send()
             .await;

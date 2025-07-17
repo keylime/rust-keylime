@@ -82,7 +82,7 @@ impl AttestationClient {
 
         let response = self
             .client
-            .get_json_request(
+            .get_json_request_from_struct(
                 reqwest::Method::POST,
                 config.url,
                 &req,
@@ -391,12 +391,9 @@ mod tests {
 
         let single_serialized_body = sample_evidence_struct.to_string();
 
-        let expected_incorrect_body =
-            serde_json::to_string(&single_serialized_body).unwrap();
-
         Mock::given(method("PATCH"))
             .and(path("/evidence"))
-            .and(body_string(expected_incorrect_body))
+            .and(body_string(single_serialized_body.clone()))
             .respond_with(ResponseTemplate::new(202))
             .mount(&mock_server)
             .await;
