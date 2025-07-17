@@ -35,10 +35,7 @@ impl<'a> StateMachine<'a> {
         negotiation_config: NegotiationConfig<'a>,
         context_info: Option<ContextInfo>,
     ) -> Self {
-        let initial_state = match &context_info {
-            Some(ctx) => State::Registered(ctx.clone()),
-            None => State::Unregistered,
-        };
+        let initial_state = State::Unregistered;
 
         Self {
             state: initial_state,
