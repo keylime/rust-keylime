@@ -8,7 +8,7 @@ use crate::registration;
 use anyhow::anyhow;
 use keylime::config::AgentConfig;
 use keylime::context_info::ContextInfo;
-use log::{error, info};
+use log::*;
 
 #[derive(Debug)]
 pub enum State {
@@ -56,15 +56,19 @@ impl<'a> StateMachine<'a> {
 
             match current_state {
                 State::Unregistered => {
+                    debug!("Registering");
                     self.register().await;
                 }
                 State::Registered(ctx_info) => {
+                    debug!("Negotiating");
                     self.negotiate(ctx_info).await;
                 }
                 State::Negotiating(ctx_info) => {
+                    debug!("Handling negotiation");
                     self.handle_negotiation(ctx_info).await;
                 }
                 State::Attesting(ctx_info, neg_response) => {
+                    debug!("Attesting");
                     self.attest(ctx_info, neg_response).await;
                 }
                 State::Complete => {

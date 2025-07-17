@@ -1,6 +1,4 @@
-use crate::{
-    context_info_handler, response_handler, struct_filler, url_selector,
-};
+use crate::{context_info_handler, struct_filler, url_selector};
 use anyhow::Result;
 use keylime::resilient_client::ResilientClient;
 use log::{debug, info};
@@ -117,7 +115,7 @@ impl AttestationClient {
         json_body: String,
         config: &NegotiationConfig<'_>,
     ) -> Result<ResponseInformation> {
-        debug!("PATCH Request body: {json_body:?}");
+        debug!("PATCH Request body: {json_body}");
 
         let response = self
             .client
@@ -169,36 +167,26 @@ impl AttestationClient {
                 location: Some(location_header.to_string()),
             },
         );
+
         info!("Sending evidence (PATCH) to: {patch_url}");
-        let mut attestation_params =
-            response_handler::process_negotiation_response(
-                &neg_response.body,
-            )?;
-        attestation_params.ima_log_path =
-            config.ima_log_path.map(|path| path.to_string());
-        attestation_params.uefi_log_path =
-            config.uefi_log_path.map(|path| path.to_string());
-        debug!("Attestation parameters: {attestation_params:?}");
+
+        // Use struct_filler to handle evidence collection and construction
         let mut context_info =
-            context_info_handler::get_context_info(config.avoid_tpm)?
-                .ok_or_else(|| {
-                    anyhow::anyhow!(
-                        "TPM context is required for evidence submission"
-                    )
-                })?;
-        debug!("Getting filler");
+            context_info_handler::get_context_info(config.avoid_tpm)?;
         let mut filler =
-            struct_filler::get_filler_request(None, Some(&mut context_info));
-        debug!("Calling filler to get evidence request struct");
+            struct_filler::get_filler_request(None, context_info.as_mut());
+
         let evidence_request_struct = filler
-            .get_evidence_handling_request(&attestation_params)
+            .get_evidence_handling_request(&neg_response, config)
             .await;
-        let evidence_json_body =
-            serde_json::to_string(&evidence_request_struct)?;
+
         let evidence_config = NegotiationConfig {
             url: &patch_url,
             ..*config
         };
+
+        let evidence_json_body =
+            serde_json::to_string(&evidence_request_struct)?;
 
         let evidence_response = self
             .send_evidence(evidence_json_body, &evidence_config)

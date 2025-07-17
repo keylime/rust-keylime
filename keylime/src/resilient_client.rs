@@ -42,7 +42,7 @@ impl RetryableStrategy for StopOnSuccessStrategy {
             }
             // If there was a network error, it's always a transient error.
             Err(e) => {
-                warn!("Network error: {}", e);
+                warn!("Network error: {e}");
                 Some(Retryable::Transient)
             }
         }

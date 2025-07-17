@@ -2,6 +2,7 @@ use super::capabilities_negotiation::*;
 use serde::{Deserialize, Serialize};
 use serde_json::to_value;
 use serde_json::Value as JsonValue;
+use std::collections::HashMap;
 use std::convert::From;
 use std::convert::TryFrom;
 
@@ -26,11 +27,31 @@ pub struct EvidenceCollected {
     pub data: EvidenceData,
 }
 
+#[derive(Debug, Clone)]
+pub enum EvidenceRequest {
+    TpmQuote {
+        challenge: String,
+        signature_scheme: String,
+        hash_algorithm: String,
+        selected_subjects: HashMap<String, Vec<u32>>,
+    },
+    ImaLog {
+        starting_offset: Option<usize>,
+        entry_count: Option<usize>,
+        format: Option<String>,
+        log_path: Option<String>,
+    },
+    UefiLog {
+        format: Option<String>,
+        log_path: Option<String>,
+    },
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(try_from = "JsonValue", into = "JsonValue")]
 #[serde(untagged)]
 pub enum EvidenceData {
-    TpmQuoteData {
+    TpmQuote {
         subject_data: String,
         message: String,
         signature: String,
@@ -64,7 +85,7 @@ impl TryFrom<JsonValue> for EvidenceData {
                     .as_str()
                     .ok_or_else(|| "Invalid signature field".to_string())?
                     .to_string();
-                return Ok(EvidenceData::TpmQuoteData {
+                return Ok(EvidenceData::TpmQuote {
                     subject_data: subject_data.to_string(),
                     message,
                     signature,
@@ -111,7 +132,7 @@ impl TryFrom<JsonValue> for EvidenceData {
 impl From<EvidenceData> for JsonValue {
     fn from(data: EvidenceData) -> Self {
         match data {
-            EvidenceData::TpmQuoteData {
+            EvidenceData::TpmQuote {
                 subject_data,
                 message,
                 signature,
@@ -149,6 +170,43 @@ impl From<EvidenceData> for JsonValue {
     }
 }
 
+impl From<EvidenceData> for EvidenceCollected {
+    fn from(evidence_data: EvidenceData) -> Self {
+        match evidence_data {
+            EvidenceData::TpmQuote {
+                subject_data,
+                message,
+                signature,
+            } => EvidenceCollected {
+                evidence_class: "certification".to_string(),
+                evidence_type: "tpm_quote".to_string(),
+                data: EvidenceData::TpmQuote {
+                    subject_data,
+                    message,
+                    signature,
+                },
+            },
+            EvidenceData::ImaLog { entries, .. } => {
+                // Count the number of entries (lines)
+                let entry_count = entries.lines().count();
+                EvidenceCollected {
+                    evidence_class: "log".to_string(),
+                    evidence_type: "ima_log".to_string(),
+                    data: EvidenceData::ImaLog {
+                        entry_count,
+                        entries,
+                    },
+                }
+            }
+            EvidenceData::UefiLog { entries } => EvidenceCollected {
+                evidence_class: "log".to_string(),
+                evidence_type: "uefi_log".to_string(),
+                data: EvidenceData::UefiLog { entries },
+            },
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, Debug)]
 pub struct EvidenceHandlingResponse {
     pub data: EvidenceHandlingResponseData,
@@ -180,8 +238,65 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_evidence_data_to_evidence_collected_conversion() {
+        // Test TpmQuoteData conversion
+        let tpm_evidence = EvidenceData::TpmQuote {
+            subject_data: "test_subject".to_string(),
+            message: "test_message".to_string(),
+            signature: "test_signature".to_string(),
+        };
+        let tpm_collected: EvidenceCollected = tpm_evidence.into();
+        assert_eq!(tpm_collected.evidence_class, "certification");
+        assert_eq!(tpm_collected.evidence_type, "tpm_quote");
+        if let EvidenceData::TpmQuote {
+            subject_data,
+            message,
+            signature,
+        } = tpm_collected.data
+        {
+            assert_eq!(subject_data, "test_subject");
+            assert_eq!(message, "test_message");
+            assert_eq!(signature, "test_signature");
+        } else {
+            panic!("Expected TpmQuote"); //#[allow_ci]
+        }
+
+        // Test ImaLog conversion
+        let ima_evidence = EvidenceData::ImaLog {
+            entry_count: 0, // This should be recalculated
+            entries: "line1\nline2\nline3".to_string(),
+        };
+        let ima_collected: EvidenceCollected = ima_evidence.into();
+        assert_eq!(ima_collected.evidence_class, "log");
+        assert_eq!(ima_collected.evidence_type, "ima_log");
+        if let EvidenceData::ImaLog {
+            entry_count,
+            entries,
+        } = ima_collected.data
+        {
+            assert_eq!(entry_count, 3); // Should be recalculated from lines
+            assert_eq!(entries, "line1\nline2\nline3");
+        } else {
+            panic!("Expected ImaLog"); //#[allow_ci]
+        }
+
+        // Test UefiLog conversion
+        let uefi_evidence = EvidenceData::UefiLog {
+            entries: "uefi_entries".to_string(),
+        };
+        let uefi_collected: EvidenceCollected = uefi_evidence.into();
+        assert_eq!(uefi_collected.evidence_class, "log");
+        assert_eq!(uefi_collected.evidence_type, "uefi_log");
+        if let EvidenceData::UefiLog { entries } = uefi_collected.data {
+            assert_eq!(entries, "uefi_entries");
+        } else {
+            panic!("Expected UefiLog"); //#[allow_ci]
+        }
+    }
+
+    #[test]
     fn serialize_evidence_handling_request() {
-        let tpm_evidence_data = EvidenceData::TpmQuoteData {
+        let tpm_evidence_data = EvidenceData::TpmQuote {
             subject_data: "subject_data".to_string(),
             message: "message".to_string(),
             signature: "signature".to_string(),
@@ -314,7 +429,7 @@ mod tests {
             deserialized.data.attributes.evidence_collected[0].evidence_type,
             "tpm_quote"
         );
-        if let EvidenceData::TpmQuoteData {
+        if let EvidenceData::TpmQuote {
             subject_data,
             message,
             signature,
@@ -712,7 +827,7 @@ mod tests {
                                     allowable_signature_schemes: None,
                                 }),
                             }))),
-                            data: EvidenceData::TpmQuoteData {
+                            data: EvidenceData::TpmQuote {
                                 subject_data: "subject_data".to_string(),
                                 message: "message".to_string(),
                                 signature: "signature".to_string(),
@@ -1153,7 +1268,7 @@ mod tests {
             deserialized.data.attributes.evidence[0].evidence_type,
             "tpm_quote"
         );
-        if let EvidenceData::TpmQuoteData {
+        if let EvidenceData::TpmQuote {
             subject_data,
             message,
             signature,
