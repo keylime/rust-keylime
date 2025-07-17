@@ -118,6 +118,9 @@ impl<'a> StateMachine<'a> {
             .send_negotiation(&self.negotiation_config)
             .await;
 
+        debug!("Negotiation response: {neg_response:?}");
+        debug!("Negotiation config: {:?}", self.negotiation_config);
+
         match neg_response {
             Ok(neg) => {
                 if neg.status_code == reqwest::StatusCode::CREATED {
@@ -197,17 +200,18 @@ mod tests {
     ) -> NegotiationConfig<'a> {
         NegotiationConfig {
             avoid_tpm: true,
-            url,
-            timeout,
             ca_certificate: "",
             client_certificate: "",
-            key: "",
-            insecure: Some(true),
             ima_log_path: None,
-            uefi_log_path: None,
-            max_retries,
             initial_delay_ms,
+            insecure: Some(true),
+            key: "",
             max_delay_ms,
+            max_retries,
+            timeout,
+            uefi_log_path: None,
+            url,
+            verifier_url: "http://verifier.example.com",
         }
     }
 

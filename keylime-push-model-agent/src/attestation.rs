@@ -17,17 +17,18 @@ pub struct ResponseInformation {
 #[derive(Debug, Clone)]
 pub struct NegotiationConfig<'a> {
     pub avoid_tpm: bool,
-    pub url: &'a str,
-    pub timeout: u64,
     pub ca_certificate: &'a str,
     pub client_certificate: &'a str,
-    pub key: &'a str,
-    pub insecure: Option<bool>,
     pub ima_log_path: Option<&'a str>,
-    pub uefi_log_path: Option<&'a str>,
-    pub max_retries: u32,
     pub initial_delay_ms: u64,
+    pub insecure: Option<bool>,
+    pub key: &'a str,
     pub max_delay_ms: Option<u64>,
+    pub max_retries: u32,
+    pub timeout: u64,
+    pub uefi_log_path: Option<&'a str>,
+    pub url: &'a str,
+    pub verifier_url: &'a str,
 }
 
 #[derive(Debug, Clone)]
@@ -161,13 +162,15 @@ impl AttestationClient {
 
         let patch_url = url_selector::get_evidence_submission_request_url(
             &url_selector::UrlArgs {
-                verifier_url: config.url.to_string(),
+                verifier_url: config.verifier_url.to_string(),
                 agent_identifier: None,
                 api_version: None,
                 location: Some(location_header.to_string()),
             },
         );
 
+        info!("Config URL: {}", config.url);
+        info!("Location header: {location_header}");
         info!("Sending evidence (PATCH) to: {patch_url}");
 
         // Use struct_filler to handle evidence collection and construction
@@ -214,17 +217,18 @@ mod tests {
     ) -> NegotiationConfig<'a> {
         NegotiationConfig {
             avoid_tpm: true,
-            url,
-            timeout: TEST_TIMEOUT_MILLIS,
             ca_certificate: ca_path,
             client_certificate: cert_path,
-            key: key_path,
-            insecure: Some(false),
             ima_log_path: None,
-            uefi_log_path: None,
-            max_retries: 0, // By default, don't retry in the old tests
             initial_delay_ms: 0, // No initial delay in the old tests
+            insecure: Some(false),
+            key: key_path,
             max_delay_ms: None, // No max delay in the old tests
+            max_retries: 0,     // By default, don't retry in the old tests
+            timeout: TEST_TIMEOUT_MILLIS,
+            uefi_log_path: None,
+            url,
+            verifier_url: "http://verifier.example.com",
         }
     }
 
