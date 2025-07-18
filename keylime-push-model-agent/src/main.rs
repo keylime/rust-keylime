@@ -15,6 +15,8 @@ mod url_selector;
 const DEFAULT_TIMEOUT_MILLIS: &str = "5000";
 const DEFAULT_METHOD: &str = "POST";
 const DEFAULT_MESSAGE_TYPE_STR: &str = "Attestation";
+const DEFAULT_EXP_BACKOFF_INITIAL_DELAY: u64 = 10000; // 10 seconds
+const DEFAULT_EXP_BACKOFF_RETRIES: u32 = 5;
 
 pub enum MessageType {
     Attestation,
@@ -145,16 +147,21 @@ async fn run(args: &Args) -> Result<()> {
         ca_certificate: &args.ca_certificate,
         client_certificate: &args.certificate,
         ima_log_path: Some(config.ima_ml_path.as_str()),
-        initial_delay_ms: config.expbackoff_initial_delay.unwrap_or(1000),
+        initial_delay_ms: config
+            .expbackoff_initial_delay
+            .unwrap_or(DEFAULT_EXP_BACKOFF_INITIAL_DELAY),
         insecure: args.insecure,
         key: &args.key,
         max_delay_ms: config.expbackoff_max_delay,
-        max_retries: config.expbackoff_max_retries.unwrap_or(5),
+        max_retries: config
+            .expbackoff_max_retries
+            .unwrap_or(DEFAULT_EXP_BACKOFF_RETRIES),
         timeout: args.timeout,
         uefi_log_path: Some(config.measuredboot_ml_path.as_str()),
         url: &negotiations_request_url,
         verifier_url: &args.verifier_url,
     };
+    debug!("Negotiations config: {neg_config:?}");
     let attestation_client =
         attestation::AttestationClient::new(&neg_config)?;
     let mut state_machine = state_machine::StateMachine::new(
