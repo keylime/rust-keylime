@@ -4,13 +4,16 @@ use reqwest_middleware::{
     ClientBuilder, ClientWithMiddleware, Error, RequestBuilder,
 };
 use reqwest_retry::{
+    default_on_request_failure, default_on_request_success,
     policies::ExponentialBackoff, Jitter, RetryTransientMiddleware,
     Retryable, RetryableStrategy,
 };
 use serde::Serialize;
 use std::time::Duration;
 
-const DEFAULT_MAX_DELAY: Duration = Duration::from_secs(60);
+// We define a default maximum delay for retries, which in the pracitical sense
+// is set to 1 hour. This can be adjusted based on the application's needs.
+const DEFAULT_MAX_DELAY: Duration = Duration::from_secs(3600);
 
 /// Custom strategy to determine which responses are retryable.
 /// It considers any status code NOT in the `success_codes` list as a potential transient error.
@@ -37,13 +40,13 @@ impl RetryableStrategy for StopOnSuccessStrategy {
                         "Received non-success status code: {}",
                         response.status()
                     );
-                    Some(Retryable::Transient)
+                    default_on_request_success(response)
                 }
             }
             // If there was a network error, it's always a transient error.
             Err(e) => {
                 warn!("Network error: {e}");
-                Some(Retryable::Transient)
+                default_on_request_failure(e)
             }
         }
     }
