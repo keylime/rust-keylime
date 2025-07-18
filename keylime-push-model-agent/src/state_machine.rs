@@ -8,7 +8,7 @@ use crate::registration;
 use anyhow::anyhow;
 use keylime::config::AgentConfig;
 use keylime::context_info::ContextInfo;
-use log::{error, info};
+use log::*;
 
 #[derive(Debug)]
 pub enum State {
@@ -35,10 +35,7 @@ impl<'a> StateMachine<'a> {
         negotiation_config: NegotiationConfig<'a>,
         context_info: Option<ContextInfo>,
     ) -> Self {
-        let initial_state = match &context_info {
-            Some(ctx) => State::Registered(ctx.clone()),
-            None => State::Unregistered,
-        };
+        let initial_state = State::Unregistered;
 
         Self {
             state: initial_state,
@@ -56,15 +53,19 @@ impl<'a> StateMachine<'a> {
 
             match current_state {
                 State::Unregistered => {
+                    debug!("Registering");
                     self.register().await;
                 }
                 State::Registered(ctx_info) => {
+                    debug!("Negotiating");
                     self.negotiate(ctx_info).await;
                 }
                 State::Negotiating(ctx_info) => {
+                    debug!("Handling negotiation");
                     self.handle_negotiation(ctx_info).await;
                 }
                 State::Attesting(ctx_info, neg_response) => {
+                    debug!("Attesting");
                     self.attest(ctx_info, neg_response).await;
                 }
                 State::Complete => {
@@ -113,6 +114,9 @@ impl<'a> StateMachine<'a> {
             .attestation_client
             .send_negotiation(&self.negotiation_config)
             .await;
+
+        debug!("Negotiation response: {neg_response:?}");
+        debug!("Negotiation config: {:?}", self.negotiation_config);
 
         match neg_response {
             Ok(neg) => {
@@ -193,17 +197,18 @@ mod tests {
     ) -> NegotiationConfig<'a> {
         NegotiationConfig {
             avoid_tpm: true,
-            url,
-            timeout,
             ca_certificate: "",
             client_certificate: "",
-            key: "",
-            insecure: Some(true),
             ima_log_path: None,
-            uefi_log_path: None,
-            max_retries,
             initial_delay_ms,
+            insecure: Some(true),
+            key: "",
             max_delay_ms,
+            max_retries,
+            timeout,
+            uefi_log_path: None,
+            url,
+            verifier_url: "http://verifier.example.com",
         }
     }
 

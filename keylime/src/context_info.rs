@@ -4,7 +4,7 @@ use crate::{
     config::{AgentConfig, KeylimeConfigError, PushModelConfigTrait},
     hash_ek,
     ima::ImaLog,
-    structures::CertificationKey,
+    structures::{CertificationKey, EvidenceData, EvidenceRequest},
     tpm,
     uefi::UefiLogHandler,
 };
@@ -104,27 +104,6 @@ pub struct ContextInfo {
     pub ak: tpm::AKResult,
     pub ak_handle: KeyHandle,
     pub disabled_signing_algorithms: Vec<String>,
-}
-
-#[derive(Debug, Clone)]
-pub struct AttestationRequiredParams {
-    pub challenge: String,
-    pub signature_scheme: String,
-    pub hash_algorithm: String,
-    pub selected_subjects: HashMap<String, Vec<u32>>,
-    pub ima_log_path: Option<String>,
-    pub ima_offset: usize,
-    pub ima_entry_count: Option<usize>,
-    pub uefi_log_path: Option<String>,
-}
-
-#[derive(Debug, Clone)]
-pub struct AttestationEvidence {
-    pub quote_message: String,
-    pub quote_signature: String,
-    pub pcr_values: String,
-    pub ima_log_entries: String,
-    pub uefi_log: String,
 }
 
 impl ContextInfo {
@@ -412,17 +391,18 @@ impl ContextInfo {
         }
     }
 
-    pub async fn perform_attestation(
+    pub async fn generate_tpm_quote_evidence(
         &mut self,
-        params: &AttestationRequiredParams,
-    ) -> Result<AttestationEvidence, ContextInfoError> {
+        challenge: &str,
+        signature_scheme: &str,
+        hash_algorithm: &str,
+        selected_subjects: &HashMap<String, Vec<u32>>,
+    ) -> Result<EvidenceData, ContextInfoError> {
         // Get signing scheme and hash algorithm from the parameters
-        let param_sign_scheme = algorithms::SignAlgorithm::try_from(
-            params.signature_scheme.as_str(),
-        )?;
-        let param_hash_alg = algorithms::HashAlgorithm::try_from(
-            params.hash_algorithm.as_str(),
-        )?;
+        let param_sign_scheme =
+            algorithms::SignAlgorithm::try_from(signature_scheme)?;
+        let param_hash_alg =
+            algorithms::HashAlgorithm::try_from(hash_algorithm)?;
 
         // Extract signing scheme and hash algorithm from the AK
         let (ak_sig_str, ak_hash_str) = self
@@ -440,24 +420,21 @@ impl ContextInfo {
             return Err(ContextInfoError::MismatchingAKSigningScheme {
                 ak_sign: ak_sig_str,
                 ak_hash: ak_hash_str,
-                param_sign: params.signature_scheme.clone(),
-                param_hash: params.hash_algorithm.clone(),
+                param_sign: signature_scheme.to_string(),
+                param_hash: hash_algorithm.to_string(),
             });
         }
 
         let mut pcr_mask: u32 = 0;
-        if let Some(pcr_indices) =
-            params.selected_subjects.get(&params.hash_algorithm)
-        {
+        if let Some(pcr_indices) = selected_subjects.get(hash_algorithm) {
             for &pcr_index in pcr_indices {
                 pcr_mask |= 1 << pcr_index;
             }
         }
-        let pubkey_for_quote = self.build_openssl_pkey_from_params()?;
 
+        let pubkey_for_quote = self.build_openssl_pkey_from_params()?;
         let ak_handle = self.ak_handle;
-        let challenge = params.challenge.clone();
-        let challenge_bytes = challenge.into_bytes();
+        let challenge_bytes = challenge.to_string().into_bytes();
         let mut tpm_context = self.get_mutable_tpm_context().clone();
 
         let full_quote_str = task::spawn_blocking(move || {
@@ -481,55 +458,120 @@ impl ContextInfo {
 
         let quote_message =
             parts[0].strip_prefix('r').unwrap_or(parts[0]).to_string();
-
         let quote_signature = parts[1].to_string();
         let pcr_values = parts[2].to_string();
 
-        let ima_log_path = match params.ima_log_path.clone() {
-            Some(path) => path,
-            None => {
-                return Err(ContextInfoError::Keylime(
-                    "IMA log path is required for attestation".to_string(),
-                ));
-            }
-        };
-        let ima_log = ImaLog::new(ima_log_path.as_str()).map_err(|e| {
-            ContextInfoError::Keylime(format!(
-                "Failed to read IMA log: {e:?}",
-            ))
-        })?;
-        let result_string = ima_log
-            .get_entries_as_string(params.ima_offset, params.ima_entry_count);
-        let uefi_log_path = match params.uefi_log_path.clone() {
-            Some(path) => path,
-            None => {
-                return Err(ContextInfoError::Keylime(
-                    "UEFI log path is required for attestation".to_string(),
-                ));
-            }
-        };
-        let uefi_log_handler = UefiLogHandler::new(uefi_log_path.as_str())
-            .map_err(|e| {
+        Ok(EvidenceData::TpmQuote {
+            message: quote_message,
+            signature: quote_signature,
+            subject_data: pcr_values,
+        })
+    }
+
+    pub async fn generate_ima_log_evidence(
+        &mut self,
+        log_path: Option<&str>,
+        _format: Option<&str>,
+        starting_offset: Option<usize>,
+        entry_count: Option<usize>,
+    ) -> Result<EvidenceData, ContextInfoError> {
+        let entries = if let Some(ima_log_path) = log_path {
+            let ima_log = ImaLog::new(ima_log_path).map_err(|e| {
                 ContextInfoError::Keylime(format!(
-                    "Failed to create UEFI log handler: {e:?}",
+                    "Failed to read IMA log: {e:?}",
                 ))
             })?;
-        let uefi_log = match uefi_log_handler.base_64() {
-            Ok(content) => content,
-            Err(e) => {
-                return Err(ContextInfoError::Keylime(format!(
-                    "Failed to read UEFI log: {e:?}",
-                )));
-            }
+            ima_log.get_entries_as_string(
+                starting_offset.unwrap_or(0),
+                entry_count,
+            )
+        } else {
+            String::new()
         };
 
-        Ok(AttestationEvidence {
-            quote_message,
-            quote_signature,
-            pcr_values,
-            ima_log_entries: result_string,
-            uefi_log,
+        let entry_count = entries.lines().count();
+        Ok(EvidenceData::ImaLog {
+            entry_count,
+            entries,
         })
+    }
+
+    pub async fn generate_uefi_log_evidence(
+        &mut self,
+        log_path: Option<&str>,
+    ) -> Result<EvidenceData, ContextInfoError> {
+        let content = if let Some(uefi_log_path) = log_path {
+            let uefi_log_handler = UefiLogHandler::new(uefi_log_path)
+                .map_err(|e| {
+                    ContextInfoError::Keylime(format!(
+                        "Failed to create UEFI log handler: {e:?}",
+                    ))
+                })?;
+            match uefi_log_handler.base_64() {
+                Ok(content) => content,
+                Err(e) => {
+                    return Err(ContextInfoError::Keylime(format!(
+                        "Failed to read UEFI log: {e:?}",
+                    )));
+                }
+            }
+        } else {
+            String::new()
+        };
+
+        Ok(EvidenceData::UefiLog { entries: content })
+    }
+
+    pub async fn collect_evidences(
+        &mut self,
+        evidence_requests: &[EvidenceRequest],
+    ) -> Result<Vec<EvidenceData>, ContextInfoError> {
+        let mut evidence_results = Vec::new();
+
+        for request in evidence_requests {
+            match request {
+                EvidenceRequest::TpmQuote {
+                    challenge,
+                    signature_scheme,
+                    hash_algorithm,
+                    selected_subjects,
+                } => {
+                    let evidence = self
+                        .generate_tpm_quote_evidence(
+                            challenge,
+                            signature_scheme,
+                            hash_algorithm,
+                            selected_subjects,
+                        )
+                        .await?;
+                    evidence_results.push(evidence);
+                }
+                EvidenceRequest::ImaLog {
+                    starting_offset,
+                    entry_count,
+                    format,
+                    log_path,
+                } => {
+                    let evidence = self
+                        .generate_ima_log_evidence(
+                            log_path.as_deref(),
+                            format.as_deref(),
+                            *starting_offset,
+                            *entry_count,
+                        )
+                        .await?;
+                    evidence_results.push(evidence);
+                }
+                EvidenceRequest::UefiLog { log_path, .. } => {
+                    let evidence = self
+                        .generate_uefi_log_evidence(log_path.as_deref())
+                        .await?;
+                    evidence_results.push(evidence);
+                }
+            }
+        }
+
+        Ok(evidence_results)
     }
 }
 
@@ -786,22 +828,41 @@ mod tests {
         subjects
             .insert("sha256".to_string(), vec![0, 1, 2, 3, 4, 5, 6, 7, 10]);
 
-        let params = AttestationRequiredParams {
-            challenge: "test_challenge".to_string(),
-            signature_scheme: "rsassa".to_string(),
-            hash_algorithm: "sha256".to_string(),
-            selected_subjects: subjects,
-            ima_log_path: Some("test-data/ima_log.txt".to_string()),
-            ima_offset: 0,
-            ima_entry_count: Some(1),
-            uefi_log_path: Some("test-data/uefi_log.bin".to_string()),
-        };
+        let evidence_requests = vec![
+            EvidenceRequest::TpmQuote {
+                challenge: "test_challenge".to_string(),
+                signature_scheme: "rsassa".to_string(),
+                hash_algorithm: "sha256".to_string(),
+                selected_subjects: subjects,
+            },
+            EvidenceRequest::ImaLog {
+                starting_offset: Some(0),
+                entry_count: Some(1),
+                format: None,
+                log_path: Some("test-data/ima_log.txt".to_string()),
+            },
+            EvidenceRequest::UefiLog {
+                format: None,
+                log_path: Some("test-data/uefi_log.bin".to_string()),
+            },
+        ];
         let mut context_info = context_result.unwrap(); //#[allow_ci]
-        let result = context_info.perform_attestation(&params).await;
+        let result = context_info.collect_evidences(&evidence_requests).await;
         assert!(result.is_ok());
-        let evidence = result.unwrap(); //#[allow_ci]
-        assert!(!evidence.quote_message.is_empty());
-        assert!(!evidence.quote_signature.is_empty());
+        let evidence_results = result.unwrap(); //#[allow_ci]
+        assert_eq!(evidence_results.len(), 3);
+
+        // Check TPM quote evidence
+        if let EvidenceData::TpmQuote {
+            message, signature, ..
+        } = &evidence_results[0]
+        {
+            assert!(!message.is_empty());
+            assert!(!signature.is_empty());
+        } else {
+            panic!("Expected TPM quote evidence"); //#[allow_ci]
+        }
+
         context_info.flush_context().unwrap(); //#[allow_ci]
     }
 
@@ -823,18 +884,14 @@ mod tests {
         let mut subjects = HashMap::new();
         subjects.insert("sha256".to_string(), vec![10]);
 
-        let params = AttestationRequiredParams {
+        let evidence_requests = vec![EvidenceRequest::TpmQuote {
             challenge: "test_challenge".to_string(),
             signature_scheme: "invalid-algorithm".to_string(),
             hash_algorithm: "sha256".to_string(),
             selected_subjects: subjects,
-            ima_log_path: Some("test-data/ima_log.txt".to_string()),
-            ima_offset: 0,
-            ima_entry_count: Some(1),
-            uefi_log_path: Some("test-data/uefi_log.bin".to_string()),
-        };
+        }];
 
-        let result = context_info.perform_attestation(&params).await;
+        let result = context_info.collect_evidences(&evidence_requests).await;
         assert!(result.is_err());
         assert!(matches!(
             result.unwrap_err(),
@@ -863,18 +920,14 @@ mod tests {
         let mut subjects = HashMap::new();
         subjects.insert("sha256".to_string(), vec![10]);
 
-        let params = AttestationRequiredParams {
+        let evidence_requests = vec![EvidenceRequest::TpmQuote {
             challenge: "test_challenge".to_string(),
             signature_scheme: "rsassa".to_string(),
             hash_algorithm: "sha384".to_string(), // mismatching hash alg
             selected_subjects: subjects,
-            ima_log_path: Some("test-data/ima_log.txt".to_string()),
-            ima_offset: 0,
-            ima_entry_count: Some(1),
-            uefi_log_path: Some("test-data/uefi_log.bin".to_string()),
-        };
+        }];
 
-        let result = context_info.perform_attestation(&params).await;
+        let result = context_info.collect_evidences(&evidence_requests).await;
         assert!(result.is_err());
         assert!(matches!(
             result.unwrap_err(),
@@ -912,17 +965,25 @@ mod tests {
             ],
         );
         subjects.insert("sha256".to_string(), vec![10]);
-        let params = AttestationRequiredParams {
-            challenge: "test_challenge".to_string(),
-            signature_scheme: "rsassa".to_string(),
-            hash_algorithm: "sha256".to_string(),
-            selected_subjects: subjects,
-            ima_log_path: Some("test-data/ima_log.txt".to_string()),
-            ima_offset: 0,
-            ima_entry_count: Some(1),
-            uefi_log_path: Some("test-data/uefi_log.bin".to_string()),
-        };
-        let result = context_info.perform_attestation(&params).await;
+        let evidence_requests = vec![
+            EvidenceRequest::TpmQuote {
+                challenge: "test_challenge".to_string(),
+                signature_scheme: "rsassa".to_string(),
+                hash_algorithm: "sha256".to_string(),
+                selected_subjects: subjects,
+            },
+            EvidenceRequest::ImaLog {
+                starting_offset: Some(0),
+                entry_count: Some(1),
+                format: None,
+                log_path: Some("test-data/ima_log.txt".to_string()),
+            },
+            EvidenceRequest::UefiLog {
+                format: None,
+                log_path: Some("test-data/uefi_log.bin".to_string()),
+            },
+        ];
+        let result = context_info.collect_evidences(&evidence_requests).await;
         assert!(result.is_ok());
         context_info.flush_context().unwrap(); //#[allow_ci]
     }

@@ -1,6 +1,4 @@
-use crate::{
-    context_info_handler, response_handler, struct_filler, url_selector,
-};
+use crate::{context_info_handler, struct_filler, url_selector};
 use anyhow::Result;
 use keylime::resilient_client::ResilientClient;
 use log::{debug, info};
@@ -19,17 +17,18 @@ pub struct ResponseInformation {
 #[derive(Debug, Clone)]
 pub struct NegotiationConfig<'a> {
     pub avoid_tpm: bool,
-    pub url: &'a str,
-    pub timeout: u64,
     pub ca_certificate: &'a str,
     pub client_certificate: &'a str,
-    pub key: &'a str,
-    pub insecure: Option<bool>,
     pub ima_log_path: Option<&'a str>,
-    pub uefi_log_path: Option<&'a str>,
-    pub max_retries: u32,
     pub initial_delay_ms: u64,
+    pub insecure: Option<bool>,
+    pub key: &'a str,
     pub max_delay_ms: Option<u64>,
+    pub max_retries: u32,
+    pub timeout: u64,
+    pub uefi_log_path: Option<&'a str>,
+    pub url: &'a str,
+    pub verifier_url: &'a str,
 }
 
 #[derive(Debug, Clone)]
@@ -117,7 +116,7 @@ impl AttestationClient {
         json_body: String,
         config: &NegotiationConfig<'_>,
     ) -> Result<ResponseInformation> {
-        debug!("PATCH Request body: {json_body:?}");
+        debug!("PATCH Request body: {json_body}");
 
         let response = self
             .client
@@ -163,42 +162,34 @@ impl AttestationClient {
 
         let patch_url = url_selector::get_evidence_submission_request_url(
             &url_selector::UrlArgs {
-                verifier_url: config.url.to_string(),
+                verifier_url: config.verifier_url.to_string(),
                 agent_identifier: None,
                 api_version: None,
                 location: Some(location_header.to_string()),
             },
         );
+
+        info!("Config URL: {}", config.url);
+        info!("Location header: {location_header}");
         info!("Sending evidence (PATCH) to: {patch_url}");
-        let mut attestation_params =
-            response_handler::process_negotiation_response(
-                &neg_response.body,
-            )?;
-        attestation_params.ima_log_path =
-            config.ima_log_path.map(|path| path.to_string());
-        attestation_params.uefi_log_path =
-            config.uefi_log_path.map(|path| path.to_string());
-        debug!("Attestation parameters: {attestation_params:?}");
+
+        // Use struct_filler to handle evidence collection and construction
         let mut context_info =
-            context_info_handler::get_context_info(config.avoid_tpm)?
-                .ok_or_else(|| {
-                    anyhow::anyhow!(
-                        "TPM context is required for evidence submission"
-                    )
-                })?;
-        debug!("Getting filler");
+            context_info_handler::get_context_info(config.avoid_tpm)?;
         let mut filler =
-            struct_filler::get_filler_request(None, Some(&mut context_info));
-        debug!("Calling filler to get evidence request struct");
+            struct_filler::get_filler_request(None, context_info.as_mut());
+
         let evidence_request_struct = filler
-            .get_evidence_handling_request(&attestation_params)
+            .get_evidence_handling_request(&neg_response, config)
             .await;
-        let evidence_json_body =
-            serde_json::to_string(&evidence_request_struct)?;
+
         let evidence_config = NegotiationConfig {
             url: &patch_url,
             ..*config
         };
+
+        let evidence_json_body =
+            serde_json::to_string(&evidence_request_struct)?;
 
         let evidence_response = self
             .send_evidence(evidence_json_body, &evidence_config)
@@ -226,17 +217,18 @@ mod tests {
     ) -> NegotiationConfig<'a> {
         NegotiationConfig {
             avoid_tpm: true,
-            url,
-            timeout: TEST_TIMEOUT_MILLIS,
             ca_certificate: ca_path,
             client_certificate: cert_path,
-            key: key_path,
-            insecure: Some(false),
             ima_log_path: None,
-            uefi_log_path: None,
-            max_retries: 0, // By default, don't retry in the old tests
             initial_delay_ms: 0, // No initial delay in the old tests
+            insecure: Some(false),
+            key: key_path,
             max_delay_ms: None, // No max delay in the old tests
+            max_retries: 0,     // By default, don't retry in the old tests
+            timeout: TEST_TIMEOUT_MILLIS,
+            uefi_log_path: None,
+            url,
+            verifier_url: "http://verifier.example.com",
         }
     }
 
