@@ -1877,7 +1877,7 @@ impl Context<'_> {
     ///
     /// # Example
     ///
-    /// ```rust
+    /// ```no_run
     /// use keylime::tpm::Context;
     /// use keylime::algorithms::{EncryptionAlgorithm, HashAlgorithm, SignAlgorithm};
     /// use tss_esapi::handles::ObjectHandle;
