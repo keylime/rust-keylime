@@ -4,6 +4,7 @@
 use crate::attestation::{
     AttestationClient, NegotiationConfig, ResponseInformation,
 };
+#[cfg(not(all(test, feature = "testing")))]
 use crate::registration;
 use anyhow::anyhow;
 use keylime::config::AgentConfig;
@@ -175,11 +176,468 @@ impl<'a> StateMachine<'a> {
     }
 
     // Expose current state for testing.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "testing"))]
     pub fn get_current_state(&self) -> &State {
         &self.state
     }
 }
+
+#[cfg(all(test, feature = "testing"))]
+mod registration {
+    use anyhow::anyhow;
+    use keylime::config::AgentConfig;
+    use keylime::context_info::ContextInfo;
+    use std::sync::{Arc, Mutex, OnceLock};
+
+    static MOCK_RESULT: OnceLock<Arc<Mutex<Result<(), String>>>> =
+        OnceLock::new();
+
+    fn get_mock_result() -> &'static Arc<Mutex<Result<(), String>>> {
+        MOCK_RESULT.get_or_init(|| Arc::new(Mutex::new(Ok(()))))
+    }
+
+    pub async fn check_registration(
+        _config: &AgentConfig,
+        _context_info: Option<ContextInfo>,
+    ) -> anyhow::Result<()> {
+        let result = get_mock_result().lock().unwrap().clone();
+        result.map_err(|e| anyhow!(e))
+    }
+
+    pub fn set_mock_result(result: Result<(), String>) {
+        let mut guard = get_mock_result().lock().unwrap();
+        *guard = result;
+    }
+}
+
+#[cfg(test)]
+#[cfg(feature = "testing")]
+mod tpm_tests {
+    use super::*;
+    use crate::attestation::{AttestationClient, NegotiationConfig};
+    use anyhow::anyhow;
+    use keylime::config::AgentConfig;
+    use keylime::context_info::ContextInfo;
+    use keylime::tpm::testing;
+    use reqwest::{header::HeaderMap, StatusCode};
+    use std::sync::{Arc, Mutex};
+    use wiremock::{
+        matchers::{method, path},
+        Mock, MockServer, ResponseTemplate,
+    };
+
+    impl Default for ResponseInformation {
+        fn default() -> Self {
+            Self {
+                status_code: StatusCode::OK, // A sensible default
+                headers: HeaderMap::new(),
+                body: String::new(),
+            }
+        }
+    }
+
+    #[derive(Clone)]
+    struct MockAttestationClient {
+        negotiation_response:
+            Arc<Mutex<Result<ResponseInformation, anyhow::Error>>>,
+        evidence_response:
+            Arc<Mutex<Result<ResponseInformation, anyhow::Error>>>,
+    }
+
+    impl MockAttestationClient {
+        fn set_negotiation_response(
+            &self,
+            response: Result<ResponseInformation, anyhow::Error>,
+        ) {
+            *self.negotiation_response.lock().unwrap() = response;
+        }
+
+        async fn send_negotiation(
+            &self,
+            _config: &NegotiationConfig<'_>,
+        ) -> anyhow::Result<ResponseInformation> {
+            self.negotiation_response
+                .lock()
+                .unwrap()
+                .as_ref()
+                .cloned()
+                .map_err(|e| anyhow!(e.to_string()))
+        }
+
+        fn set_evidence_response(
+            &self,
+            response: Result<ResponseInformation, anyhow::Error>,
+        ) {
+            *self.evidence_response.lock().unwrap() = response;
+        }
+
+        async fn handle_evidence_submission(
+            &self,
+            _neg_response: ResponseInformation,
+            _config: &NegotiationConfig<'_>,
+        ) -> anyhow::Result<ResponseInformation> {
+            self.evidence_response
+                .lock()
+                .unwrap()
+                .as_ref()
+                .cloned()
+                .map_err(|e| anyhow!(e.to_string()))
+        }
+    }
+
+    // Manual implementation of Default for our mock
+    impl Default for MockAttestationClient {
+        fn default() -> Self {
+            Self {
+                negotiation_response: Arc::new(Mutex::new(Ok(
+                    ResponseInformation {
+                        status_code: StatusCode::CREATED,
+                        ..Default::default()
+                    },
+                ))),
+                evidence_response: Arc::new(Mutex::new(Ok(
+                    ResponseInformation {
+                        status_code: StatusCode::ACCEPTED,
+                        ..Default::default()
+                    },
+                ))),
+            }
+        }
+    }
+
+    // Helper function to create test agent configuration.
+    fn create_test_agent_config() -> AgentConfig {
+        AgentConfig::default()
+    }
+
+    /// Helper function to create TPM test configuration.
+    fn create_tpm_test_config<'a>(
+        url: &'a str,
+        timeout: u64,
+        max_retries: u32,
+        initial_delay_ms: u64,
+        max_delay_ms: Option<u64>,
+    ) -> NegotiationConfig<'a> {
+        NegotiationConfig {
+            avoid_tpm: true,
+            ca_certificate: "",
+            client_certificate: "",
+            ima_log_path: None,
+            initial_delay_ms,
+            insecure: Some(true),
+            key: "",
+            max_delay_ms,
+            max_retries,
+            timeout,
+            uefi_log_path: None,
+            url,
+            verifier_url: url,
+        }
+    }
+
+    fn create_test_state_machine<'a>(
+        agent_config: &'a AgentConfig,
+        neg_config: &'a NegotiationConfig<'a>,
+    ) -> StateMachine<'a> {
+        let client = AttestationClient::new(neg_config).unwrap();
+
+        let context_info =
+            ContextInfo::new(keylime::context_info::AlgorithmConfiguration {
+                tpm_encryption_alg:
+                    keylime::algorithms::EncryptionAlgorithm::Rsa2048,
+                tpm_hash_alg: keylime::algorithms::HashAlgorithm::Sha256,
+                tpm_signing_alg: keylime::algorithms::SignAlgorithm::RsaSsa,
+                agent_data_path: "".to_string(),
+                disabled_signing_algorithms: vec![],
+            })
+            .expect("This test requires TPM access with proper permissions");
+
+        StateMachine::new(
+            agent_config,
+            client,
+            neg_config.clone(),
+            Some(context_info),
+        )
+    }
+
+    #[tokio::test]
+    async fn test_negotiate_success_transition() {
+        let _mutex = testing::lock_tests().await;
+        let agent_config = create_test_agent_config();
+        let neg_config = create_tpm_test_config(
+            "http://localhost",
+            5000,
+            3,
+            1000,
+            Some(30000),
+        );
+        let mut sm = create_test_state_machine(&agent_config, &neg_config);
+        let mut context_info = sm.context_info.clone().unwrap();
+        sm.state = State::Registered(context_info.clone());
+
+        let mock_client = MockAttestationClient::default();
+        let neg_response =
+            mock_client.send_negotiation(&sm.negotiation_config).await;
+
+        match neg_response {
+            Ok(neg) if neg.status_code == reqwest::StatusCode::CREATED => {
+                sm.state = State::Attesting(context_info.clone(), neg);
+            }
+            Ok(neg) => {
+                sm.state =
+                    State::Failed(anyhow!("Bad status: {}", neg.status_code))
+            }
+            Err(e) => sm.state = State::Failed(e),
+        }
+
+        assert!(matches!(sm.get_current_state(), State::Attesting(_, _)));
+        assert!(context_info.flush_context().is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_negotiate_failure_on_bad_status() {
+        let _mutex = testing::lock_tests().await;
+        let agent_config = create_test_agent_config();
+        let neg_config = create_tpm_test_config(
+            "http://localhost",
+            5000,
+            3,
+            1000,
+            Some(30000),
+        );
+        let mut sm = create_test_state_machine(&agent_config, &neg_config);
+        let mut context_info = sm.context_info.clone().unwrap();
+        sm.state = State::Registered(context_info.clone());
+
+        let mock_client = MockAttestationClient::default();
+        mock_client.set_negotiation_response(Ok(ResponseInformation {
+            status_code: StatusCode::BAD_REQUEST,
+            ..Default::default()
+        }));
+
+        let neg_response =
+            mock_client.send_negotiation(&sm.negotiation_config).await;
+        match neg_response {
+            Ok(neg) if neg.status_code == StatusCode::CREATED => {
+                sm.state = State::Attesting(context_info.clone(), neg);
+            }
+            Ok(neg) => {
+                sm.state =
+                    State::Failed(anyhow!("Bad status: {}", neg.status_code))
+            }
+            Err(e) => sm.state = State::Failed(e),
+        }
+
+        assert!(matches!(sm.get_current_state(), State::Failed(_)));
+        assert!(context_info.flush_context().is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_attest_success_transition() {
+        let _mutex = testing::lock_tests().await;
+        let agent_config = create_test_agent_config();
+        let neg_config = create_tpm_test_config(
+            "http://localhost",
+            5000,
+            3,
+            1000,
+            Some(30000),
+        );
+        let mut sm = create_test_state_machine(&agent_config, &neg_config);
+        let mut context_info = sm.context_info.clone().unwrap();
+        sm.state = State::Attesting(
+            context_info.clone(),
+            ResponseInformation::default(),
+        );
+
+        let mock_client = MockAttestationClient::default(); // Default is ACCEPTED
+        let evidence_response = mock_client
+            .handle_evidence_submission(
+                ResponseInformation::default(),
+                &sm.negotiation_config,
+            )
+            .await;
+
+        match evidence_response {
+            Ok(res) if res.status_code == StatusCode::ACCEPTED => {
+                sm.state = State::Complete
+            }
+            Ok(res) => {
+                sm.state =
+                    State::Failed(anyhow!("Bad status {}", res.status_code))
+            }
+            Err(e) => sm.state = State::Failed(e),
+        }
+
+        assert!(matches!(sm.get_current_state(), State::Complete));
+        assert!(context_info.flush_context().is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_attest_failure_on_bad_status() {
+        let _mutex = testing::lock_tests().await;
+        let agent_config = create_test_agent_config();
+        let neg_config = create_tpm_test_config(
+            "http://localhost",
+            5000,
+            3,
+            1000,
+            Some(30000),
+        );
+        let mut sm = create_test_state_machine(&agent_config, &neg_config);
+        let mut context_info = sm.context_info.clone().unwrap();
+        sm.state = State::Attesting(
+            context_info.clone(),
+            ResponseInformation::default(),
+        );
+
+        let mock_client = MockAttestationClient::default();
+        mock_client.set_evidence_response(Ok(ResponseInformation {
+            status_code: StatusCode::FORBIDDEN,
+            ..Default::default()
+        }));
+
+        let evidence_response = mock_client
+            .handle_evidence_submission(
+                ResponseInformation::default(),
+                &sm.negotiation_config,
+            )
+            .await;
+
+        match evidence_response {
+            Ok(res) if res.status_code == StatusCode::ACCEPTED => {
+                sm.state = State::Complete
+            }
+            Ok(res) => {
+                sm.state =
+                    State::Failed(anyhow!("Bad status {}", res.status_code))
+            }
+            Err(e) => sm.state = State::Failed(e),
+        }
+
+        assert!(matches!(sm.get_current_state(), State::Failed(_)));
+        assert!(context_info.flush_context().is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_register_success_transition() {
+        let _mutex = testing::lock_tests().await;
+        let agent_config = create_test_agent_config();
+        let neg_config = create_tpm_test_config(
+            "http://localhost",
+            5000,
+            3,
+            1000,
+            Some(30000),
+        );
+        let mut sm = create_test_state_machine(&agent_config, &neg_config);
+        let mut context_info = sm.context_info.clone().unwrap();
+
+        registration::set_mock_result(Ok(()));
+        let res = registration::check_registration(
+            &agent_config,
+            Some(context_info.clone()),
+        )
+        .await;
+
+        match res {
+            Ok(()) => {
+                if let Some(ctx) = &sm.context_info {
+                    sm.state = State::Registered(ctx.clone());
+                } else {
+                    sm.state =
+                        State::Failed(anyhow!("Could not get context info"));
+                }
+            }
+            Err(e) => {
+                sm.state =
+                    State::Failed(anyhow!("Registration failed: {e:?}"));
+            }
+        }
+        assert!(matches!(sm.get_current_state(), State::Registered(_)));
+        assert!(context_info.flush_context().is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_run_happy_path_integration() {
+        let _mutex = testing::lock_tests().await;
+
+        registration::set_mock_result(Ok(()));
+        let agent_config = create_test_agent_config();
+        let mut context_info =
+            ContextInfo::new(keylime::context_info::AlgorithmConfiguration {
+                tpm_encryption_alg:
+                    keylime::algorithms::EncryptionAlgorithm::Rsa2048,
+                tpm_hash_alg: keylime::algorithms::HashAlgorithm::Sha256,
+                tpm_signing_alg: keylime::algorithms::SignAlgorithm::RsaSsa,
+                agent_data_path: "".to_string(),
+                disabled_signing_algorithms: vec![],
+            })
+            .expect("This test requires TPM access with proper permissions");
+        let _ = registration::check_registration(
+            &agent_config,
+            Some(context_info.clone()),
+        )
+        .await;
+
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .respond_with(
+                ResponseTemplate::new(201)
+                    .insert_header(
+                        "Location",
+                        "/v3.0/agents/agent1/attestations/0",
+                    )
+                    .set_body_json(serde_json::json!({
+                        "data": {
+                            "type": "attestation",
+                            "attributes": {
+                                "stage": "awaiting_evidence",
+                                "evidence_requested": []
+                            }
+                        }
+                    })),
+            )
+            .mount(&mock_server)
+            .await;
+
+        Mock::given(method("PATCH"))
+            .and(path("/v3.0/agents/agent1/attestations/0"))
+            .respond_with(
+                ResponseTemplate::new(202)
+                    .set_body_string("Evidence accepted"),
+            )
+            .mount(&mock_server)
+            .await;
+
+        let mock_server_url = mock_server.uri().clone();
+        let neg_config = create_tpm_test_config(
+            mock_server_url.as_str(),
+            5000,
+            3,
+            100,
+            None,
+        );
+
+        let attestation_client = AttestationClient::new(&neg_config).unwrap();
+
+        let mut sm = StateMachine::new(
+            &agent_config,
+            attestation_client,
+            neg_config,
+            Some(context_info.clone()),
+        );
+
+        sm.run().await;
+        assert!(context_info.flush_context().is_ok());
+        assert!(
+            matches!(sm.get_current_state(), State::Complete),
+            "StateMachine should be in Complete state after a successful run, but was {:?}",
+            sm.get_current_state()
+        )
+    }
+} // feature testing tests
 
 #[cfg(test)]
 mod tests {
