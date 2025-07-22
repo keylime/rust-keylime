@@ -77,7 +77,7 @@ impl AttestationClient {
         let mut context_info =
             context_info_handler::get_context_info(config.avoid_tpm)?;
         let mut filler =
-            struct_filler::get_filler_request(None, context_info.as_mut());
+            struct_filler::get_filler_request(context_info.as_mut());
 
         let req = filler.get_attestation_request();
         debug!("Request body: {:?}", serde_json::to_string(&req));
@@ -177,7 +177,7 @@ impl AttestationClient {
         let mut context_info =
             context_info_handler::get_context_info(config.avoid_tpm)?;
         let mut filler =
-            struct_filler::get_filler_request(None, context_info.as_mut());
+            struct_filler::get_filler_request(context_info.as_mut());
 
         let evidence_request_struct = filler
             .get_evidence_handling_request(&neg_response, config)
