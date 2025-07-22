@@ -362,6 +362,78 @@ mod tests {
     } // test_attestation_request
 
     #[tokio::test]
+    async fn test_filler_from_hardware_get_attestation_request() {
+        let _mutex = testing::lock_tests().await;
+        let context_info_result = context_info::ContextInfo::new_from_str(
+            context_info::AlgorithmConfigurationString {
+                tpm_encryption_alg: "rsa".to_string(),
+                tpm_hash_alg: "sha256".to_string(),
+                tpm_signing_alg: "rsassa".to_string(),
+                agent_data_path: "".to_string(),
+                disabled_signing_algorithms: vec![],
+            },
+        );
+
+        let mut context_info = match context_info_result {
+            Ok(ctx) => ctx,
+            Err(e) => {
+                println!("Skipping test_filler_from_hardware_get_attestation_request: TPM not available or failed to init: {e:?}");
+                return;
+            }
+        };
+
+        let mut filler = FillerFromHardware::new(&mut context_info);
+
+        let request = filler.get_attestation_request();
+
+        assert_eq!(request.data.type_, "attestation");
+        let attributes = request.data.attributes;
+        assert_eq!(
+            attributes.evidence_supported.len(),
+            3,
+            "Should contain tpm_quote, uefi_log, and ima_log evidence"
+        );
+
+        let tpm_quote_evidence = attributes.evidence_supported.iter().find(|e| {
+            matches!(e, structures::EvidenceSupported::Certification { evidence_type, .. } if evidence_type == "tpm_quote")
+        }).expect("tpm_quote evidence not found");
+
+        if let structures::EvidenceSupported::Certification {
+            capabilities,
+            ..
+        } = tpm_quote_evidence
+        {
+            assert!(
+                !capabilities.hash_algorithms.is_empty(),
+                "Hash algorithms should be populated from TPM"
+            );
+            assert!(
+                !capabilities.signature_schemes.is_empty(),
+                "Signature schemes should be populated from TPM"
+            );
+            assert!(
+                capabilities.available_subjects.sha256.is_some(),
+                "SHA256 PCR banks should be populated"
+            );
+            assert!(
+                !capabilities.certification_keys.is_empty(),
+                "AK certification key should be present"
+            );
+        } else {
+            panic!("Expected Certification evidence for tpm_quote");
+        }
+
+        let _ = attributes.evidence_supported.iter().find(|e| {
+            matches!(e, structures::EvidenceSupported::EvidenceLog { evidence_type, .. } if evidence_type == "ima_log")
+        }).expect("ima_log evidence not found");
+
+        let _ = attributes.evidence_supported.iter().find(|e| {
+            matches!(e, structures::EvidenceSupported::EvidenceLog { evidence_type, .. } if evidence_type == "uefi_log")
+        }).expect("uefi_log evidence not found");
+        assert!(context_info.flush_context().is_ok());
+    }
+
+    #[tokio::test]
     async fn test_session_request() {
         use keylime::context_info;
         let _mutex = testing::lock_tests().await;
@@ -481,5 +553,179 @@ mod tests {
             )
             .await;
         assert!(context_info.flush_context().is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_get_filler_request_with_tpm() {
+        let _mutex = testing::lock_tests().await;
+        let context_info_result = context_info::ContextInfo::new_from_str(
+            context_info::AlgorithmConfigurationString {
+                tpm_encryption_alg: "rsa".to_string(),
+                tpm_hash_alg: "sha256".to_string(),
+                tpm_signing_alg: "rsassa".to_string(),
+                agent_data_path: "".to_string(),
+                disabled_signing_algorithms: vec![],
+            },
+        );
+
+        if let Ok(mut ctx) = context_info_result {
+            {
+                let mut filler = get_filler_request(Some(&mut ctx));
+                // To check the type, we can't directly compare types of Box<dyn Trait>.
+                // A simple way is to check the output of a method.
+                let req = filler.get_session_request();
+                // FillerFromHardware returns a specific agent_id
+                assert_eq!(req.data.attributes.agent_id, "example-agent");
+            }
+            assert!(ctx.clone().flush_context().is_ok());
+        }
+    }
+
+    #[tokio::test]
+    async fn test_get_filler_request_without_tpm() {
+        let mut filler = get_filler_request(None);
+        // TestingFiller returns an empty auth_supported vector
+        let req = filler.get_session_request();
+        assert!(req.data.attributes.auth_supported.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_testing_filler_methods() {
+        let mut filler = TestingFiller::new();
+
+        // Test get_attestation_request
+        let attestation_req = filler.get_attestation_request();
+        assert_eq!(attestation_req.data.type_, "attestation");
+        assert!(attestation_req
+            .data
+            .attributes
+            .evidence_supported
+            .is_empty());
+
+        // Test get_session_request
+        let session_req = filler.get_session_request();
+        assert_eq!(session_req.data.data_type, "session");
+        assert!(session_req.data.attributes.auth_supported.is_empty());
+
+        // Test get_evidence_handling_request
+        let dummy_response = crate::attestation::ResponseInformation {
+            status_code: reqwest::StatusCode::OK,
+            headers: reqwest::header::HeaderMap::new(),
+            body: "{}".to_string(),
+        };
+        let dummy_config = crate::attestation::NegotiationConfig {
+            avoid_tpm: true,
+            url: "",
+            timeout: 0,
+            ca_certificate: "",
+            client_certificate: "",
+            key: "",
+            insecure: None,
+            ima_log_path: None,
+            uefi_log_path: None,
+            max_retries: 0,
+            initial_delay_ms: 0,
+            max_delay_ms: None,
+            verifier_url: "",
+        };
+        let evidence_req = filler
+            .get_evidence_handling_request(&dummy_response, &dummy_config)
+            .await;
+        assert_eq!(evidence_req.data.data_type, "error");
+        assert!(evidence_req.data.attributes.evidence_collected.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_filler_from_hardware_new_with_uefi_error() {
+        let _mutex = testing::lock_tests().await;
+        let context_info_result = context_info::ContextInfo::new_from_str(
+            context_info::AlgorithmConfigurationString {
+                tpm_encryption_alg: "rsa".to_string(),
+                tpm_hash_alg: "sha256".to_string(),
+                tpm_signing_alg: "rsassa".to_string(),
+                agent_data_path: "".to_string(),
+                disabled_signing_algorithms: vec![],
+            },
+        );
+
+        if let Ok(mut ctx) = context_info_result {
+            // Temporarily override config to point to a non-existent path
+            let original_path =
+                std::env::var("KEYLIME_CONFIG_PATH").unwrap_or_default();
+            std::env::set_var(
+                "KEYLIME_CONFIG_PATH",
+                "test-data/non-existent-config.conf",
+            );
+
+            // Create a temporary config file with an invalid path for measuredboot_ml_path
+            let temp_dir = tempfile::tempdir().unwrap();
+            let config_path = temp_dir.path().join("keylime.conf");
+            let mut file = std::fs::File::create(&config_path).unwrap();
+            use std::io::Write;
+            writeln!(file, "[agent]").unwrap();
+            writeln!(
+                file,
+                "measuredboot_ml_path = /path/to/non/existent/log"
+            )
+            .unwrap();
+            std::env::set_var("KEYLIME_CONFIG_PATH", config_path);
+
+            let filler = FillerFromHardware::new(&mut ctx);
+            assert!(filler.uefi_log_handler.is_none());
+
+            // Restore original config path
+            std::env::set_var("KEYLIME_CONFIG_PATH", original_path);
+            assert!(ctx.flush_context().is_ok());
+        }
+    }
+
+    #[tokio::test]
+    async fn test_get_evidence_handling_request_final_with_parsing_error() {
+        let _mutex = testing::lock_tests().await;
+        let context_info_result = context_info::ContextInfo::new_from_str(
+            context_info::AlgorithmConfigurationString {
+                tpm_encryption_alg: "rsa".to_string(),
+                tpm_hash_alg: "sha256".to_string(),
+                tpm_signing_alg: "rsassa".to_string(),
+                agent_data_path: "".to_string(),
+                disabled_signing_algorithms: vec![],
+            },
+        );
+
+        if let Ok(mut ctx) = context_info_result {
+            let mut filler = FillerFromHardware::new(&mut ctx);
+            let malformed_response =
+                crate::attestation::ResponseInformation {
+                    status_code: reqwest::StatusCode::CREATED,
+                    headers: reqwest::header::HeaderMap::new(),
+                    body: "this is not valid json".to_string(),
+                };
+            let dummy_config = crate::attestation::NegotiationConfig {
+                avoid_tpm: true,
+                url: "",
+                timeout: 0,
+                ca_certificate: "",
+                client_certificate: "",
+                key: "",
+                insecure: None,
+                ima_log_path: None,
+                uefi_log_path: None,
+                max_retries: 0,
+                initial_delay_ms: 0,
+                max_delay_ms: None,
+                verifier_url: "",
+            };
+
+            let result = filler
+                .get_evidence_handling_request_final(
+                    &malformed_response,
+                    &dummy_config,
+                )
+                .await;
+
+            assert_eq!(result.data.data_type, "error");
+            assert!(result.data.attributes.evidence_collected.is_empty());
+            assert!(ctx.flush_context().is_ok());
+        }
     }
 }
