@@ -66,6 +66,7 @@ pub struct PushModelConfig {
     #[transform(using = parse_list, error = ListParsingError)]
     uefi_logs_formats: Vec<&str>,
     uuid: String,
+    verifier_url: String,
 }
 
 #[cfg(feature = "testing")]
@@ -175,5 +176,6 @@ mod tests {
             DEFAULT_REGISTRAR_API_VERSIONS
         );
         assert_eq!(config.uuid(), DEFAULT_UUID);
+        assert_eq!(config.verifier_url(), DEFAULT_VERIFIER_URL);
     } // create_default_config_test
 }
