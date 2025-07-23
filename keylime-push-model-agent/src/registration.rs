@@ -25,16 +25,20 @@ pub async fn check_registration<T: PushModelConfigTrait>(
 fn get_retry_config<T: PushModelConfigTrait>(
     config: &T,
 ) -> Option<RetryConfig> {
-    if config.expbackoff_max_retries().is_none()
-        && config.expbackoff_initial_delay().is_none()
-        && config.expbackoff_max_delay().is_none()
+    if config.exponential_backoff_max_retries().is_none()
+        && config.exponential_backoff_initial_delay().is_none()
+        && config.exponential_backoff_max_delay().is_none()
     {
         None
     } else {
         Some(RetryConfig {
-            max_retries: config.expbackoff_max_retries().unwrap_or(0),
-            initial_delay_ms: config.expbackoff_initial_delay().unwrap_or(0),
-            max_delay_ms: *config.expbackoff_max_delay(),
+            max_retries: config
+                .exponential_backoff_max_retries()
+                .unwrap_or(0),
+            initial_delay_ms: config
+                .exponential_backoff_initial_delay()
+                .unwrap_or(0),
+            max_delay_ms: *config.exponential_backoff_max_delay(),
         })
     }
 }
@@ -125,9 +129,9 @@ mod tests {
             agent_data_path: "".to_string(),
             disabled_signing_algorithms: vec![],
         };
-        config.expbackoff_initial_delay = None;
-        config.expbackoff_max_retries = None;
-        config.expbackoff_max_delay = None;
+        config.exponential_backoff_initial_delay = None;
+        config.exponential_backoff_max_retries = None;
+        config.exponential_backoff_max_delay = None;
 
         let mut context_info = ContextInfo::new_from_str(alg_config)
             .expect("Failed to create context info from string");

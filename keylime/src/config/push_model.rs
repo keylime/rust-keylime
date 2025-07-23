@@ -37,9 +37,9 @@ pub struct PushModelConfig {
     contact_ip: String,
     contact_port: u32,
     disabled_signing_algorithms: Vec<String>,
-    expbackoff_max_delay: Option<u64>,
-    expbackoff_max_retries: Option<u32>,
-    expbackoff_initial_delay: Option<u64>,
+    exponential_backoff_max_delay: Option<u64>,
+    exponential_backoff_max_retries: Option<u32>,
+    exponential_backoff_initial_delay: Option<u64>,
     enable_iak_idevid: bool,
     #[transform(using = override_default_ek_handle, error = OverrideError)]
     ek_handle: String,

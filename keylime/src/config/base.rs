@@ -114,9 +114,9 @@ pub struct AgentConfig {
     pub api_versions: String,
     pub disabled_signing_algorithms: Vec<String>,
     pub ek_handle: String,
-    pub expbackoff_max_delay: Option<u64>,
-    pub expbackoff_max_retries: Option<u32>,
-    pub expbackoff_initial_delay: Option<u64>,
+    pub exponential_backoff_max_delay: Option<u64>,
+    pub exponential_backoff_max_retries: Option<u32>,
+    pub exponential_backoff_initial_delay: Option<u64>,
     pub enable_iak_idevid: bool,
     pub iak_cert: String,
     pub iak_handle: String,
@@ -272,9 +272,13 @@ impl Default for AgentConfig {
             enable_revocation_notifications:
                 DEFAULT_ENABLE_REVOCATION_NOTIFICATIONS,
             enc_keyname: DEFAULT_ENC_KEYNAME.to_string(),
-            expbackoff_max_delay: Some(DEFAULT_EXP_BACKOFF_MAX_DELAY as u64),
-            expbackoff_max_retries: Some(DEFAULT_EXP_BACKOFF_MAX_RETRIES),
-            expbackoff_initial_delay: Some(
+            exponential_backoff_max_delay: Some(
+                DEFAULT_EXP_BACKOFF_MAX_DELAY as u64,
+            ),
+            exponential_backoff_max_retries: Some(
+                DEFAULT_EXP_BACKOFF_MAX_RETRIES,
+            ),
+            exponential_backoff_initial_delay: Some(
                 DEFAULT_EXP_BACKOFF_INITIAL_DELAY as u64,
             ),
             extract_payload_zip: DEFAULT_EXTRACT_PAYLOAD_ZIP,
