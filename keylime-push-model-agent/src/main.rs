@@ -145,11 +145,13 @@ async fn run(args: &Args) -> Result<()> {
         ca_certificate: &args.ca_certificate,
         client_certificate: &args.certificate,
         ima_log_path: Some(config.ima_ml_path.as_str()),
-        initial_delay_ms: config.expbackoff_initial_delay.unwrap_or(1000),
+        initial_delay_ms: config
+            .exponential_backoff_initial_delay
+            .unwrap_or(1000),
         insecure: args.insecure,
         key: &args.key,
-        max_delay_ms: config.expbackoff_max_delay,
-        max_retries: config.expbackoff_max_retries.unwrap_or(5),
+        max_delay_ms: config.exponential_backoff_max_delay,
+        max_retries: config.exponential_backoff_max_retries.unwrap_or(5),
         timeout: args.timeout,
         uefi_log_path: Some(config.measuredboot_ml_path.as_str()),
         url: &negotiations_request_url,
