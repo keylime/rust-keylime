@@ -86,8 +86,8 @@ struct Args {
     #[arg(long, default_value = DEFAULT_TIMEOUT_MILLIS)]
     timeout: u64,
     /// Verifier URL
-    #[arg(short, long, default_value = "https://127.0.0.1:8881")]
-    verifier_url: String,
+    #[arg(short, long)]
+    verifier_url: Option<String>,
     /// avoid tpm
     /// Default: false
     #[arg(long, action, default_missing_value = "false")]
@@ -99,7 +99,12 @@ fn get_avoid_tpm_from_args(args: &Args) -> bool {
 }
 
 async fn run(args: &Args) -> Result<()> {
-    info!("Verifier URL: {}", args.verifier_url);
+    match args.verifier_url {
+        Some(ref url) if url.is_empty() => {
+            info!("Verifier URL: {}", url);
+        }
+        _ => {}
+    };
     info!("Registrar URL: {}", args.registrar_url);
     debug!("Timeout: {}", args.timeout);
     debug!("CA certificate file: {}", args.ca_certificate);
@@ -129,9 +134,13 @@ async fn run(args: &Args) -> Result<()> {
         Some(id) => id.clone(),
         None => config.uuid().to_string(),
     };
+    let verifier_url = match args.verifier_url {
+        Some(ref url) => url.clone(),
+        _ => config.verifier_url().to_string(),
+    };
     let negotiations_request_url =
         url_selector::get_negotiations_request_url(&url_selector::UrlArgs {
-            verifier_url: args.verifier_url.clone(),
+            verifier_url: verifier_url.clone(),
             api_version: args.api_version.clone(),
             agent_identifier: Some(agent_identifier.clone()),
             location: None,
@@ -155,7 +164,7 @@ async fn run(args: &Args) -> Result<()> {
         timeout: args.timeout,
         uefi_log_path: Some(config.measuredboot_ml_path.as_str()),
         url: &negotiations_request_url,
-        verifier_url: &args.verifier_url,
+        verifier_url: verifier_url.as_str(),
     };
     let attestation_client =
         attestation::AttestationClient::new(&neg_config)?;
@@ -187,7 +196,7 @@ mod tests {
             api_version: None,
             avoid_tpm: Some(true),
             registrar_url: "".to_string(),
-            verifier_url: "".to_string(),
+            verifier_url: Some("".to_string()),
             timeout: 0,
             ca_certificate: "".to_string(),
             certificate: "".to_string(),
@@ -212,7 +221,7 @@ mod tests {
             api_version: None,
             avoid_tpm: Some(true),
             registrar_url: "".to_string(),
-            verifier_url: "".to_string(),
+            verifier_url: Some("".to_string()),
             timeout: 0,
             ca_certificate: "".to_string(),
             certificate: "".to_string(),

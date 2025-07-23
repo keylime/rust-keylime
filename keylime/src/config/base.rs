@@ -108,6 +108,8 @@ pub const DEFAULT_CERTIFICATION_KEYS_SERVER_IDENTIFIER: &str = "ak";
 pub static DEFAULT_PUSH_API_VERSIONS: &[&str] = &["3.0"];
 pub static DEFAULT_PUSH_EK_HANDLE: &str = "";
 
+pub static DEFAULT_VERIFIER_URL: &str = "https://localhost:8881";
+
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 pub struct AgentConfig {
     pub agent_data_path: String,
@@ -176,6 +178,7 @@ pub struct AgentConfig {
     pub uefi_logs_supports_partial_access: bool,
     pub uefi_logs_appendable: bool,
     pub uefi_logs_formats: String,
+    pub verifier_url: String,
 }
 
 impl AgentConfig {
@@ -336,6 +339,7 @@ impl Default for AgentConfig {
                 DEFAULT_UEFI_LOGS_SUPPORTS_PARTIAL_ACCESS,
             uefi_logs_appendable: DEFAULT_UEFI_LOGS_APPENDABLE,
             uefi_logs_formats: DEFAULT_UEFI_LOGS_FORMATS.to_string(),
+            verifier_url: DEFAULT_VERIFIER_URL.to_string(),
         }
     }
 }
