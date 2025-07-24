@@ -18,6 +18,7 @@ pub enum State {
     Negotiating(ContextInfo),
     Attesting(ContextInfo, ResponseInformation),
     Complete,
+    RegistrationFailed(anyhow::Error),
     Failed(anyhow::Error),
 }
 
@@ -74,6 +75,11 @@ impl<'a> StateMachine<'a> {
                     self.state = State::Complete;
                     break;
                 }
+                State::RegistrationFailed(e) => {
+                    error!("Registration failed: {e:?}");
+                    debug!("Resetting state to Unregistered and retrying");
+                    self.state = State::Unregistered;
+                }
                 State::Failed(e) => {
                     error!("Attestation failed: {e:?}");
                     self.state = State::Failed(e);
@@ -100,8 +106,9 @@ impl<'a> StateMachine<'a> {
                 }
             }
             Err(e) => {
-                self.state =
-                    State::Failed(anyhow!("Registration failed: {e:?}"));
+                self.state = State::RegistrationFailed(anyhow!(
+                    "Registration failed: {e:?}"
+                ));
             }
         }
     }
