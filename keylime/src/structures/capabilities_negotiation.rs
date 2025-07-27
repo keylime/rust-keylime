@@ -1,7 +1,7 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::{from_value, to_value, Value as JsonValue};
-use std::convert::TryFrom;
+use std::{collections::HashMap, convert::TryFrom};
 
 // Define the structure for the AttestationRequest:
 #[derive(Serialize, Deserialize, Debug)]
@@ -57,15 +57,127 @@ pub struct Capabilities {
     pub component_version: String,
     pub hash_algorithms: Vec<String>,
     pub signature_schemes: Vec<String>,
-    pub available_subjects: ShaValues,
+    pub available_subjects: PcrBanks,
     pub certification_keys: Vec<CertificationKey>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 // Do not serialize the struct name, only the fields
-pub struct ShaValues {
-    pub sha1: Vec<u32>,
-    pub sha256: Vec<u32>,
+pub struct PcrBanks {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sha1: Option<Vec<u32>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sha256: Option<Vec<u32>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sha384: Option<Vec<u32>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sha512: Option<Vec<u32>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sm3_256: Option<Vec<u32>>,
+}
+
+/// Builder for PcrBanks structure
+///
+/// # Example Usage
+/// ```
+/// use keylime::structures::PcrBanks;
+///
+/// // Basic usage with method chaining
+/// let banks = PcrBanks::builder()
+///     .sha1(vec![1, 2, 3])
+///     .sha256(vec![4, 5, 6])
+///     .build();
+///
+/// // Empty vectors are automatically set to None
+/// let banks = PcrBanks::builder()
+///     .sha1(vec![1, 2, 3])      // Will be Some(vec![1, 2, 3])
+///     .sha256(vec![])           // Will be None
+///     .sha384(vec![7, 8, 9])    // Will be Some(vec![7, 8, 9])
+///     .build();
+/// ```
+#[derive(Debug, Clone, Default)]
+pub struct PcrBanksBuilder {
+    sha1: Option<Vec<u32>>,
+    sha256: Option<Vec<u32>>,
+    sha384: Option<Vec<u32>>,
+    sha512: Option<Vec<u32>>,
+    sm3_256: Option<Vec<u32>>,
+}
+
+impl PcrBanksBuilder {
+    /// Create a new PcrBanksBuilder
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Set SHA1 PCR banks (empty vectors are set to None)
+    pub fn sha1(mut self, slots: Vec<u32>) -> Self {
+        self.sha1 = if slots.is_empty() { None } else { Some(slots) };
+        self
+    }
+
+    /// Set SHA256 PCR banks (empty vectors are set to None)
+    pub fn sha256(mut self, slots: Vec<u32>) -> Self {
+        self.sha256 = if slots.is_empty() { None } else { Some(slots) };
+        self
+    }
+
+    /// Set SHA384 PCR banks (empty vectors are set to None)
+    pub fn sha384(mut self, slots: Vec<u32>) -> Self {
+        self.sha384 = if slots.is_empty() { None } else { Some(slots) };
+        self
+    }
+
+    /// Set SHA512 PCR banks (empty vectors are set to None)
+    pub fn sha512(mut self, slots: Vec<u32>) -> Self {
+        self.sha512 = if slots.is_empty() { None } else { Some(slots) };
+        self
+    }
+
+    /// Set SM3_256 PCR banks (empty vectors are set to None)
+    pub fn sm3_256(mut self, slots: Vec<u32>) -> Self {
+        self.sm3_256 = if slots.is_empty() { None } else { Some(slots) };
+        self
+    }
+
+    /// Build the final PcrBanks structure
+    pub fn build(self) -> PcrBanks {
+        PcrBanks {
+            sha1: self.sha1,
+            sha256: self.sha256,
+            sha384: self.sha384,
+            sha512: self.sha512,
+            sm3_256: self.sm3_256,
+        }
+    }
+}
+
+impl PcrBanks {
+    /// Converts the PcrBanks into a HashMap of algorithm names to PCR lists.
+    pub fn to_map(&self) -> HashMap<String, Vec<u32>> {
+        let mut map = HashMap::new();
+        if let Some(v) = &self.sha1 {
+            map.insert("sha1".to_string(), v.clone());
+        }
+        if let Some(v) = &self.sha256 {
+            map.insert("sha256".to_string(), v.clone());
+        }
+        if let Some(v) = &self.sha384 {
+            map.insert("sha384".to_string(), v.clone());
+        }
+        if let Some(v) = &self.sha512 {
+            map.insert("sha512".to_string(), v.clone());
+        }
+        if let Some(v) = &self.sm3_256 {
+            map.insert("sm3_256".to_string(), v.clone());
+        }
+        map
+    }
+
+    /// Create a new builder for PcrBanks
+    pub fn builder() -> PcrBanksBuilder {
+        PcrBanksBuilder::new()
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -76,6 +188,10 @@ pub struct CertificationKey {
     pub server_identifier: String,
     pub local_identifier: String,
     pub public: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub allowable_hash_algorithms: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub allowable_signature_schemes: Option<Vec<String>>,
 }
 
 // Define the structure for the AttestationResponse:
@@ -120,7 +236,7 @@ pub struct CertificationParameters {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub challenge: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub selected_subjects: Option<ShaValues>,
+    pub selected_subjects: Option<PcrBanks>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hash_algorithm: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -194,9 +310,12 @@ mod tests {
                                 component_version: "2.0".to_string(),
                                 hash_algorithms: vec!["sha3_512".to_string()],
                                 signature_schemes: vec!["rsassa".to_string()],
-                                available_subjects: ShaValues {
-                                    sha1: vec![0x01, 0x02, 0x03],
-                                    sha256: vec![0x04, 0x05, 0x06],
+                                available_subjects: PcrBanks {
+                                    sha1: Some(vec![0x01, 0x02, 0x03]),
+                                    sha256: Some(vec![0x04, 0x05, 0x06]),
+                                    sha384: Some(vec![0x07, 0x08, 0x09]),
+                                    sha512: Some(vec![0x0A, 0x0B, 0x0C]),
+                                    sm3_256: None,
                                 },
                                 certification_keys: vec![
                                     CertificationKey {
@@ -206,6 +325,8 @@ mod tests {
                                         key_size: 2048,
                                         server_identifier: "ak".to_string(),
                                         public: "OTgtMjkzODQ1LTg5MjMtNDk1OGlrYXNkamZnO2Frc2pka2ZqYXM7a2RqZjtramJrY3hqejk4MS0zMjQ5MDhpLWpmZDth".to_string(),
+                                        allowable_hash_algorithms: None,
+                                        allowable_signature_schemes: None,
                                     },
                                 ],
                             },
@@ -248,6 +369,16 @@ mod tests {
                 4,
                 5,
                 6
+              ],
+              "sha384": [
+                7,
+                8,
+                9
+              ],
+              "sha512": [
+                10,
+                11,
+                12
               ]
             },
             "certification_keys": [
@@ -356,9 +487,12 @@ mod tests {
                                 component_version: "2.0".to_string(),
                                 hash_algorithms: vec!["sha3_512".to_string()],
                                 signature_schemes: vec!["rsassa".to_string()],
-                                available_subjects: ShaValues {
-                                    sha1: vec![0x01, 0x02, 0x03],
-                                    sha256: vec![0x04, 0x05, 0x06],
+                                available_subjects: PcrBanks {
+                                    sha1: Some(vec![0x01, 0x02, 0x03]),
+                                    sha256: Some(vec![0x04, 0x05, 0x06]),
+                                    sha384: Some(vec![0x07, 0x08, 0x09]),
+                                    sha512: Some(vec![0x0A, 0x0B, 0x0C]),
+                                    sm3_256: None,
                                 },
                                 certification_keys: vec![
                                     CertificationKey {
@@ -368,6 +502,8 @@ mod tests {
                                         local_identifier: "att_local_identifier".to_string(),
                                         key_algorithm: "rsa".to_string(),
                                         public: "OTgtMjkzODQ1LTg5MjMtNDk1OGlrYXNkamZnO2Frc2pka2ZqYXM7a2RqZjtramJrY3hqejk4MS0zMjQ5MDhpLWpmZDth".to_string(),
+                                        allowable_hash_algorithms: None,
+                                        allowable_signature_schemes: None,
                                     },
                                 ],
                             },
@@ -428,6 +564,16 @@ mod tests {
                 4,
                 5,
                 6
+              ],
+              "sha384": [
+                7,
+                8,
+                9
+              ],
+              "sha512": [
+                10,
+                11,
+                12
               ]
             },
             "certification_keys": [
@@ -534,12 +680,14 @@ mod tests {
                 assert_eq!(capabilities.signature_schemes[0], "rsassa");
                 assert!(
                     capabilities.available_subjects.sha1
-                        == vec![0x01, 0x02, 0x03]
+                        == Some(vec![0x01, 0x02, 0x03])
                 );
                 assert!(
                     capabilities.available_subjects.sha256
-                        == vec![0x04, 0x05, 0x06]
+                        == Some(vec![0x04, 0x05, 0x06])
                 );
+                assert!(capabilities.available_subjects.sha384.is_none());
+                assert!(capabilities.available_subjects.sha512.is_none());
                 let some_certification_keys =
                     capabilities.certification_keys.first();
                 assert!(some_certification_keys.is_some());
@@ -666,9 +814,12 @@ mod tests {
                             evidence_type: "tpm_quote".to_string(),
                             chosen_parameters: Some(ChosenParameters::Parameters(Box::new(CertificationParameters {
                                 challenge: Some("challenge".to_string()),
-                                selected_subjects: Some(ShaValues {
-                                    sha1: vec![0x01, 0x02, 0x03],
-                                    sha256: vec![0x04, 0x05, 0x06],
+                                selected_subjects: Some(PcrBanks {
+                                    sha1: Some(vec![0x01, 0x02, 0x03]),
+                                    sha256: Some(vec![0x04, 0x05, 0x06]),
+                                    sha384: Some(vec![0x07, 0x08, 0x09]),
+                                    sha512: Some(vec![0x0A, 0x0B, 0x0C]),
+                                    sm3_256: None,
                                 }),
                                 hash_algorithm: Some("sha384".to_string()),
                                 signature_scheme: Some("rsassa".to_string()),
@@ -679,6 +830,8 @@ mod tests {
                                     local_identifier: "att_local_identifier".to_string(),
                                     key_algorithm: "rsa".to_string(),
                                     public: "OTgtMjkzODQ1LTg5MjMtNDk1OGlrYXNkamZnO2Frc2pka2ZqYXM7a2RqZjtramJrY3hqejk4MS0zMjQ5MDhpLWpmZDth".to_string(),
+                                    allowable_hash_algorithms: None,
+                                    allowable_signature_schemes: None,
                                 }),
                             }))),
                         },
@@ -722,6 +875,16 @@ mod tests {
                 4,
                 5,
                 6
+              ],
+              "sha384": [
+                7,
+                8,
+                9
+              ],
+              "sha512": [
+                10,
+                11,
+                12
               ]
             },
             "signature_scheme": "rsassa"
@@ -746,9 +909,12 @@ mod tests {
                             evidence_type: "tpm_quote".to_string(),
                             chosen_parameters: Some(ChosenParameters::Parameters(Box::new(CertificationParameters {
                                 challenge: Some("challenge".to_string()),
-                                selected_subjects: Some(ShaValues {
-                                    sha1: vec![0x01, 0x02, 0x03],
-                                    sha256: vec![0x04, 0x05, 0x06],
+                                selected_subjects: Some(PcrBanks {
+                                    sha1: Some(vec![0x01, 0x02, 0x03]),
+                                    sha256: Some(vec![0x04, 0x05, 0x06]),
+                                    sha384: Some(vec![0x07, 0x08, 0x09]),
+                                    sha512: Some(vec![0x0A, 0x0B, 0x0C]),
+                                    sm3_256: None,
                                 }),
                                 hash_algorithm: Some("sha384".to_string()),
                                 signature_scheme: Some("rsassa".to_string()),
@@ -759,6 +925,8 @@ mod tests {
                                     local_identifier: "att_local_identifier".to_string(),
                                     key_algorithm: "rsa".to_string(),
                                     public: "OTgtMjkzODQ1LTg5MjMtNDk1OGlrYXNkamZnO2Frc2pka2ZqYXM7a2RqZjtramJrY3hqejk4MS0zMjQ5MDhpLWpmZDth".to_string(),
+                                    allowable_hash_algorithms: None,
+                                    allowable_signature_schemes: None,
                                 }),
                             }))),
                         },
@@ -819,6 +987,16 @@ mod tests {
                 4,
                 5,
                 6
+              ],
+              "sha384": [
+                7,
+                8,
+                9
+              ],
+              "sha512": [
+                10,
+                11,
+                12
               ]
             },
             "signature_scheme": "rsassa"
@@ -920,11 +1098,19 @@ mod tests {
                 assert_eq!(params.challenge, Some("challenge".to_string()));
                 assert_eq!(
                     params.selected_subjects.clone().unwrap().sha1, //#[allow_ci]
-                    vec![0x01, 0x02, 0x03]
+                    Some(vec![0x01, 0x02, 0x03])
                 );
                 assert_eq!(
                     params.selected_subjects.clone().unwrap().sha256, //#[allow_ci]
-                    vec![0x04, 0x05, 0x06]
+                    Some(vec![0x04, 0x05, 0x06])
+                );
+                assert_eq!(
+                    params.selected_subjects.clone().unwrap().sha384, //#[allow_ci]
+                    None
+                );
+                assert_eq!(
+                    params.selected_subjects.clone().unwrap().sha512, //#[allow_ci]
+                    None
                 );
                 assert_eq!(params.hash_algorithm, Some("sha384".to_string()));
                 assert_eq!(
@@ -1028,5 +1214,174 @@ mod tests {
                 assert_ne!(e.to_string().len(), 0);
             }
         }
+    }
+
+    #[test]
+    fn test_pcr_banks_builder_basic() {
+        let banks = PcrBanks::builder()
+            .sha1(vec![1, 2, 3])
+            .sha256(vec![4, 5, 6])
+            .build();
+
+        assert_eq!(banks.sha1, Some(vec![1, 2, 3]));
+        assert_eq!(banks.sha256, Some(vec![4, 5, 6]));
+        assert_eq!(banks.sha384, None);
+        assert_eq!(banks.sha512, None);
+        assert_eq!(banks.sm3_256, None);
+    }
+
+    #[test]
+    fn test_pcr_banks_builder_all_fields() {
+        let banks = PcrBanks::builder()
+            .sha1(vec![1, 2, 3])
+            .sha256(vec![4, 5, 6])
+            .sha384(vec![7, 8, 9])
+            .sha512(vec![10, 11, 12])
+            .sm3_256(vec![13, 14, 15])
+            .build();
+
+        assert_eq!(banks.sha1, Some(vec![1, 2, 3]));
+        assert_eq!(banks.sha256, Some(vec![4, 5, 6]));
+        assert_eq!(banks.sha384, Some(vec![7, 8, 9]));
+        assert_eq!(banks.sha512, Some(vec![10, 11, 12]));
+        assert_eq!(banks.sm3_256, Some(vec![13, 14, 15]));
+    }
+
+    #[test]
+    fn test_pcr_banks_builder_empty() {
+        let banks = PcrBanks::builder().build();
+
+        assert_eq!(banks.sha1, None);
+        assert_eq!(banks.sha256, None);
+        assert_eq!(banks.sha384, None);
+        assert_eq!(banks.sha512, None);
+        assert_eq!(banks.sm3_256, None);
+    }
+
+    #[test]
+    fn test_pcr_banks_builder_empty_vectors() {
+        let banks = PcrBanks::builder()
+            .sha1(vec![1, 2, 3])
+            .sha256(vec![]) // Empty vector should be set to None
+            .sha384(vec![7, 8, 9])
+            .sha512(vec![]) // Empty vector should be set to None
+            .build();
+
+        assert_eq!(banks.sha1, Some(vec![1, 2, 3]));
+        assert_eq!(banks.sha256, None);
+        assert_eq!(banks.sha384, Some(vec![7, 8, 9]));
+        assert_eq!(banks.sha512, None);
+        assert_eq!(banks.sm3_256, None);
+    }
+
+    #[test]
+    fn test_pcr_banks_builder_mixed_empty_non_empty() {
+        let banks = PcrBanks::builder()
+            .sha1(vec![1, 2, 3])
+            .sha256(vec![]) // Empty vector should be set to None
+            .sha384(vec![7, 8, 9])
+            .sha512(vec![10, 11, 12])
+            .build();
+
+        assert_eq!(banks.sha1, Some(vec![1, 2, 3]));
+        assert_eq!(banks.sha256, None);
+        assert_eq!(banks.sha384, Some(vec![7, 8, 9]));
+        assert_eq!(banks.sha512, Some(vec![10, 11, 12]));
+        assert_eq!(banks.sm3_256, None);
+    }
+
+    #[test]
+    fn test_pcr_banks_builder_overwrite() {
+        let banks = PcrBanks::builder()
+            .sha1(vec![1, 2, 3])
+            .sha1(vec![4, 5, 6]) // Should overwrite the previous value
+            .build();
+
+        assert_eq!(banks.sha1, Some(vec![4, 5, 6]));
+        assert_eq!(banks.sha256, None);
+        assert_eq!(banks.sha384, None);
+        assert_eq!(banks.sha512, None);
+        assert_eq!(banks.sm3_256, None);
+    }
+
+    #[test]
+    fn test_pcr_banks_builder_overwrite_with_empty() {
+        let banks = PcrBanks::builder()
+            .sha1(vec![1, 2, 3])
+            .sha1(vec![]) // Should overwrite with None
+            .build();
+
+        assert_eq!(banks.sha1, None);
+        assert_eq!(banks.sha256, None);
+        assert_eq!(banks.sha384, None);
+        assert_eq!(banks.sha512, None);
+        assert_eq!(banks.sm3_256, None);
+    }
+
+    #[test]
+    fn test_pcr_banks_builder_direct_instantiation() {
+        let builder = PcrBanksBuilder::new();
+        let banks = builder.sha1(vec![1, 2, 3]).build();
+
+        assert_eq!(banks.sha1, Some(vec![1, 2, 3]));
+        assert_eq!(banks.sha256, None);
+        assert_eq!(banks.sha384, None);
+        assert_eq!(banks.sha512, None);
+        assert_eq!(banks.sm3_256, None);
+    }
+
+    #[test]
+    fn test_pcr_banks_builder_clone() {
+        let builder = PcrBanks::builder()
+            .sha1(vec![1, 2, 3])
+            .sha256(vec![4, 5, 6]);
+
+        let builder_clone = builder.clone();
+        let banks = builder_clone.build();
+
+        assert_eq!(banks.sha1, Some(vec![1, 2, 3]));
+        assert_eq!(banks.sha256, Some(vec![4, 5, 6]));
+        assert_eq!(banks.sha384, None);
+        assert_eq!(banks.sha512, None);
+        assert_eq!(banks.sm3_256, None);
+    }
+
+    #[test]
+    fn test_pcr_banks_builder_sm3_256() {
+        let banks = PcrBanks::builder().sm3_256(vec![16, 17, 18]).build();
+
+        assert_eq!(banks.sha1, None);
+        assert_eq!(banks.sha256, None);
+        assert_eq!(banks.sha384, None);
+        assert_eq!(banks.sha512, None);
+        assert_eq!(banks.sm3_256, Some(vec![16, 17, 18]));
+    }
+
+    #[test]
+    fn test_pcr_banks_builder_sm3_256_empty() {
+        let banks = PcrBanks::builder()
+            .sm3_256(vec![]) // Empty vector should be set to None
+            .build();
+
+        assert_eq!(banks.sha1, None);
+        assert_eq!(banks.sha256, None);
+        assert_eq!(banks.sha384, None);
+        assert_eq!(banks.sha512, None);
+        assert_eq!(banks.sm3_256, None);
+    }
+
+    #[test]
+    fn test_pcr_banks_builder_sm3_256_with_others() {
+        let banks = PcrBanks::builder()
+            .sha256(vec![1, 2, 3])
+            .sm3_256(vec![16, 17, 18])
+            .sha512(vec![4, 5, 6])
+            .build();
+
+        assert_eq!(banks.sha1, None);
+        assert_eq!(banks.sha256, Some(vec![1, 2, 3]));
+        assert_eq!(banks.sha384, None);
+        assert_eq!(banks.sha512, Some(vec![4, 5, 6]));
+        assert_eq!(banks.sm3_256, Some(vec![16, 17, 18]));
     }
 }

@@ -37,6 +37,9 @@ pub struct PushModelConfig {
     contact_ip: String,
     contact_port: u32,
     disabled_signing_algorithms: Vec<String>,
+    exponential_backoff_max_delay: Option<u64>,
+    exponential_backoff_max_retries: Option<u32>,
+    exponential_backoff_initial_delay: Option<u64>,
     enable_iak_idevid: bool,
     #[transform(using = override_default_ek_handle, error = OverrideError)]
     ek_handle: String,
@@ -63,6 +66,7 @@ pub struct PushModelConfig {
     #[transform(using = parse_list, error = ListParsingError)]
     uefi_logs_formats: Vec<&str>,
     uuid: String,
+    verifier_url: String,
 }
 
 #[cfg(feature = "testing")]
@@ -172,5 +176,6 @@ mod tests {
             DEFAULT_REGISTRAR_API_VERSIONS
         );
         assert_eq!(config.uuid(), DEFAULT_UUID);
+        assert_eq!(config.verifier_url(), DEFAULT_VERIFIER_URL);
     } // create_default_config_test
 }

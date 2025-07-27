@@ -4,7 +4,7 @@ use crate::{
     config::{AgentConfig, KeylimeConfigError, PushModelConfigTrait},
     hash_ek,
     ima::ImaLog,
-    structures::CertificationKey,
+    structures::{CertificationKey, EvidenceData, EvidenceRequest},
     tpm,
     uefi::UefiLogHandler,
 };
@@ -12,6 +12,7 @@ use base64::{
     engine::general_purpose::STANDARD as base64_standard, Engine as _,
 };
 use hex;
+use log::*;
 use openssl::hash::{Hasher, MessageDigest};
 use openssl::{
     bn::BigNum,
@@ -38,6 +39,15 @@ pub enum ContextInfoError {
     /// Invalid algorithm
     #[error("Invalid Algorithm")]
     InvalidAlgorithm(#[from] algorithms::AlgorithmError),
+
+    /// Mismatching AK signing scheme algorithms
+    #[error("Mismatching AK signing scheme algorithms. From parameters: {param_sign}, {param_hash}; supported by AK: {ak_sign}, {ak_hash}")]
+    MismatchingAKSigningScheme {
+        ak_sign: String,
+        ak_hash: String,
+        param_sign: String,
+        param_hash: String,
+    },
 
     /// OpenSSL error
     #[error("OpenSSL error")]
@@ -94,27 +104,6 @@ pub struct ContextInfo {
     pub ak: tpm::AKResult,
     pub ak_handle: KeyHandle,
     pub disabled_signing_algorithms: Vec<String>,
-}
-
-#[derive(Debug, Clone)]
-pub struct AttestationRequiredParams {
-    pub challenge: String,
-    pub signature_scheme: String,
-    pub hash_algorithm: String,
-    pub selected_subjects: HashMap<String, Vec<u32>>,
-    pub ima_log_path: Option<String>,
-    pub ima_offset: usize,
-    pub ima_entry_count: Option<usize>,
-    pub uefi_log_path: Option<String>,
-}
-
-#[derive(Debug, Clone)]
-pub struct AttestationEvidence {
-    pub quote_message: String,
-    pub quote_signature: String,
-    pub pcr_values: String,
-    pub ima_log_entries: String,
-    pub uefi_log: String,
 }
 
 impl ContextInfo {
@@ -353,9 +342,16 @@ impl ContextInfo {
     }
 
     pub fn get_ak_certification_data(
-        &self,
+        &mut self,
     ) -> Result<CertificationKey, ContextInfoError> {
+        // TODO Receive the configuration instead of reading it again
         let config = AgentConfig::new()?;
+
+        // Extract the AK's actual signing scheme and hash algorithm
+        let (ak_signing_scheme, ak_hash_algorithm) = self
+            .tpm_context
+            .extract_ak_scheme_and_hash(self.ak_handle)?;
+
         Ok(CertificationKey {
             key_class: self.get_ak_key_class_str(),
             key_algorithm: self.get_ak_key_algorithm_str(),
@@ -365,6 +361,8 @@ impl ContextInfo {
                 .to_string(),
             local_identifier: self.get_ak_local_identifier_str()?,
             public: self.get_ak_public_key_as_base64()?,
+            allowable_hash_algorithms: Some(vec![ak_hash_algorithm]),
+            allowable_signature_schemes: Some(vec![ak_signing_scheme]),
         })
     }
 
@@ -393,29 +391,50 @@ impl ContextInfo {
         }
     }
 
-    pub async fn perform_attestation(
+    pub async fn generate_tpm_quote_evidence(
         &mut self,
-        params: &AttestationRequiredParams,
-    ) -> Result<AttestationEvidence, ContextInfoError> {
-        let sign_alg_enum = algorithms::SignAlgorithm::try_from(
-            params.signature_scheme.as_str(),
-        )?;
-        let hash_alg_enum = algorithms::HashAlgorithm::try_from(
-            params.hash_algorithm.as_str(),
-        )?;
-        let mut pcr_mask: u32 = 0;
-        if let Some(pcr_indices) =
-            params.selected_subjects.get(&params.hash_algorithm)
+        challenge: &str,
+        signature_scheme: &str,
+        hash_algorithm: &str,
+        selected_subjects: &HashMap<String, Vec<u32>>,
+    ) -> Result<EvidenceData, ContextInfoError> {
+        // Get signing scheme and hash algorithm from the parameters
+        let param_sign_scheme =
+            algorithms::SignAlgorithm::try_from(signature_scheme)?;
+        let param_hash_alg =
+            algorithms::HashAlgorithm::try_from(hash_algorithm)?;
+
+        // Extract signing scheme and hash algorithm from the AK
+        let (ak_sig_str, ak_hash_str) = self
+            .tpm_context
+            .extract_ak_scheme_and_hash(self.ak_handle)?;
+        let ak_sign_scheme =
+            algorithms::SignAlgorithm::try_from(ak_sig_str.as_str())?;
+        let ak_hash_alg =
+            algorithms::HashAlgorithm::try_from(ak_hash_str.as_str())?;
+
+        if (param_sign_scheme != ak_sign_scheme)
+            || (param_hash_alg != ak_hash_alg)
         {
+            error!("Mismatching AK signing scheme algorithms. From parameters: {param_sign_scheme}, {param_hash_alg}; supported by AK: {ak_sig_str}, {ak_hash_str}");
+            return Err(ContextInfoError::MismatchingAKSigningScheme {
+                ak_sign: ak_sig_str,
+                ak_hash: ak_hash_str,
+                param_sign: signature_scheme.to_string(),
+                param_hash: hash_algorithm.to_string(),
+            });
+        }
+
+        let mut pcr_mask: u32 = 0;
+        if let Some(pcr_indices) = selected_subjects.get(hash_algorithm) {
             for &pcr_index in pcr_indices {
                 pcr_mask |= 1 << pcr_index;
             }
         }
-        let pubkey_for_quote = self.build_openssl_pkey_from_params()?;
 
+        let pubkey_for_quote = self.build_openssl_pkey_from_params()?;
         let ak_handle = self.ak_handle;
-        let challenge = params.challenge.clone();
-        let challenge_bytes = challenge.into_bytes();
+        let challenge_bytes = challenge.to_string().into_bytes();
         let mut tpm_context = self.get_mutable_tpm_context().clone();
 
         let full_quote_str = task::spawn_blocking(move || {
@@ -424,8 +443,8 @@ impl ContextInfo {
                 pcr_mask,
                 &pubkey_for_quote,
                 ak_handle,
-                hash_alg_enum,
-                sign_alg_enum,
+                ak_hash_alg,
+                ak_sign_scheme,
             )
         })
         .await
@@ -439,69 +458,132 @@ impl ContextInfo {
 
         let quote_message =
             parts[0].strip_prefix('r').unwrap_or(parts[0]).to_string();
-
         let quote_signature = parts[1].to_string();
         let pcr_values = parts[2].to_string();
 
-        let ima_log_path = match params.ima_log_path.clone() {
-            Some(path) => path,
-            None => {
-                return Err(ContextInfoError::Keylime(
-                    "IMA log path is required for attestation".to_string(),
-                ));
-            }
-        };
-        let ima_log = ImaLog::new(ima_log_path.as_str()).map_err(|e| {
-            ContextInfoError::Keylime(format!(
-                "Failed to read IMA log: {e:?}",
-            ))
-        })?;
-        let result_string = ima_log
-            .get_entries_as_string(params.ima_offset, params.ima_entry_count);
-        let uefi_log_path = match params.uefi_log_path.clone() {
-            Some(path) => path,
-            None => {
-                return Err(ContextInfoError::Keylime(
-                    "UEFI log path is required for attestation".to_string(),
-                ));
-            }
-        };
-        let uefi_log_handler = UefiLogHandler::new(uefi_log_path.as_str())
-            .map_err(|e| {
+        Ok(EvidenceData::TpmQuote {
+            message: quote_message,
+            signature: quote_signature,
+            subject_data: pcr_values,
+        })
+    }
+
+    pub async fn generate_ima_log_evidence(
+        &mut self,
+        log_path: Option<&str>,
+        _format: Option<&str>,
+        starting_offset: Option<usize>,
+        entry_count: Option<usize>,
+    ) -> Result<EvidenceData, ContextInfoError> {
+        let entries = if let Some(ima_log_path) = log_path {
+            let ima_log = ImaLog::new(ima_log_path).map_err(|e| {
                 ContextInfoError::Keylime(format!(
-                    "Failed to create UEFI log handler: {e:?}",
+                    "Failed to read IMA log: {e:?}",
                 ))
             })?;
-        let uefi_log = match uefi_log_handler.base_64() {
-            Ok(content) => content,
-            Err(e) => {
-                return Err(ContextInfoError::Keylime(format!(
-                    "Failed to read UEFI log: {e:?}",
-                )));
-            }
+            ima_log.get_entries_as_string(
+                starting_offset.unwrap_or(0),
+                entry_count,
+            )
+        } else {
+            String::new()
         };
 
-        Ok(AttestationEvidence {
-            quote_message,
-            quote_signature,
-            pcr_values,
-            ima_log_entries: result_string,
-            uefi_log,
+        let entry_count = entries.lines().count();
+        Ok(EvidenceData::ImaLog {
+            entry_count,
+            entries,
         })
+    }
+
+    pub async fn generate_uefi_log_evidence(
+        &mut self,
+        log_path: Option<&str>,
+    ) -> Result<EvidenceData, ContextInfoError> {
+        let content = if let Some(uefi_log_path) = log_path {
+            let uefi_log_handler = UefiLogHandler::new(uefi_log_path)
+                .map_err(|e| {
+                    ContextInfoError::Keylime(format!(
+                        "Failed to create UEFI log handler: {e:?}",
+                    ))
+                })?;
+            match uefi_log_handler.base_64() {
+                Ok(content) => content,
+                Err(e) => {
+                    return Err(ContextInfoError::Keylime(format!(
+                        "Failed to read UEFI log: {e:?}",
+                    )));
+                }
+            }
+        } else {
+            String::new()
+        };
+
+        Ok(EvidenceData::UefiLog { entries: content })
+    }
+
+    pub async fn collect_evidences(
+        &mut self,
+        evidence_requests: &[EvidenceRequest],
+    ) -> Result<Vec<EvidenceData>, ContextInfoError> {
+        let mut evidence_results = Vec::new();
+
+        for request in evidence_requests {
+            match request {
+                EvidenceRequest::TpmQuote {
+                    challenge,
+                    signature_scheme,
+                    hash_algorithm,
+                    selected_subjects,
+                } => {
+                    let evidence = self
+                        .generate_tpm_quote_evidence(
+                            challenge,
+                            signature_scheme,
+                            hash_algorithm,
+                            selected_subjects,
+                        )
+                        .await?;
+                    evidence_results.push(evidence);
+                }
+                EvidenceRequest::ImaLog {
+                    starting_offset,
+                    entry_count,
+                    format,
+                    log_path,
+                } => {
+                    let evidence = self
+                        .generate_ima_log_evidence(
+                            log_path.as_deref(),
+                            format.as_deref(),
+                            *starting_offset,
+                            *entry_count,
+                        )
+                        .await?;
+                    evidence_results.push(evidence);
+                }
+                EvidenceRequest::UefiLog { log_path, .. } => {
+                    let evidence = self
+                        .generate_uefi_log_evidence(log_path.as_deref())
+                        .await?;
+                    evidence_results.push(evidence);
+                }
+            }
+        }
+
+        Ok(evidence_results)
     }
 }
 
-// tests
+#[cfg(feature = "testing")]
 #[cfg(test)]
 mod tests {
 
-    #[cfg(feature = "testing")]
     use super::*;
+    use crate::tpm::testing;
 
     #[tokio::test]
-    #[cfg(feature = "testing")]
     async fn test_basic_creation() {
-        use crate::tpm::testing;
         let _mutex = testing::lock_tests().await;
         let config = AlgorithmConfigurationString {
             tpm_encryption_alg: "rsa".to_string(),
@@ -517,9 +599,7 @@ mod tests {
     }
 
     #[tokio::test]
-    #[cfg(feature = "testing")]
     async fn test_creation_and_get_data() {
-        use crate::tpm::testing;
         let _mutex = testing::lock_tests().await;
         let config = AlgorithmConfigurationString {
             tpm_encryption_alg: "rsa".to_string(),
@@ -547,9 +627,7 @@ mod tests {
     }
 
     #[tokio::test]
-    #[cfg(feature = "testing")]
     async fn test_ak_persistence_and_reload() {
-        use crate::tpm::testing;
         let _mutex = testing::lock_tests().await;
         // The `tempdir` object provides a temporary directory. When it goes out
         // of scope at the end of this test, the directory and all its contents
@@ -591,7 +669,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[cfg(feature = "testing")]
     async fn test_new_from_str_errors_on_bad_enc_alg() {
         let _mutex = crate::tpm::testing::lock_tests().await;
         let config = AlgorithmConfigurationString {
@@ -621,7 +698,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[cfg(feature = "testing")]
     async fn test_new_from_str_errors_on_bad_sign_alg() {
         let _mutex = crate::tpm::testing::lock_tests().await;
         let config = AlgorithmConfigurationString {
@@ -636,9 +712,7 @@ mod tests {
     }
 
     #[tokio::test]
-    #[cfg(feature = "testing")]
     async fn test_creation_and_get_all_data() {
-        use crate::tpm::testing;
         let _mutex = testing::lock_tests().await;
         let config = AlgorithmConfigurationString {
             tpm_encryption_alg: "rsa".to_string(),
@@ -663,9 +737,7 @@ mod tests {
     }
 
     #[tokio::test]
-    #[cfg(feature = "testing")]
     async fn test_ak_persistence_with_invalid_data() {
-        use crate::tpm::testing;
         let _mutex = testing::lock_tests().await;
         let tempdir = tempfile::tempdir().unwrap(); //#[allow_ci]
         let data_path = tempdir.path().join("agent_data.json");
@@ -708,9 +780,7 @@ mod tests {
     }
 
     #[tokio::test]
-    #[cfg(feature = "testing")]
     async fn test_ak_persistence_with_corrupt_file() {
-        use crate::tpm::testing;
         use std::fs::File;
         use std::io::Write;
         let _mutex = testing::lock_tests().await;
@@ -742,9 +812,7 @@ mod tests {
     }
 
     #[tokio::test]
-    #[cfg(feature = "testing")]
     async fn test_perform_attestation() {
-        use crate::tpm::testing;
         let _mutex = testing::lock_tests().await;
         let config = AlgorithmConfigurationString {
             tpm_encryption_alg: "rsa".to_string(),
@@ -760,29 +828,46 @@ mod tests {
         subjects
             .insert("sha256".to_string(), vec![0, 1, 2, 3, 4, 5, 6, 7, 10]);
 
-        let params = AttestationRequiredParams {
-            challenge: "test_challenge".to_string(),
-            signature_scheme: "rsassa".to_string(),
-            hash_algorithm: "sha256".to_string(),
-            selected_subjects: subjects,
-            ima_log_path: Some("test-data/ima_log.txt".to_string()),
-            ima_offset: 0,
-            ima_entry_count: Some(1),
-            uefi_log_path: Some("test-data/uefi_log.bin".to_string()),
-        };
+        let evidence_requests = vec![
+            EvidenceRequest::TpmQuote {
+                challenge: "test_challenge".to_string(),
+                signature_scheme: "rsassa".to_string(),
+                hash_algorithm: "sha256".to_string(),
+                selected_subjects: subjects,
+            },
+            EvidenceRequest::ImaLog {
+                starting_offset: Some(0),
+                entry_count: Some(1),
+                format: None,
+                log_path: Some("test-data/ima_log.txt".to_string()),
+            },
+            EvidenceRequest::UefiLog {
+                format: None,
+                log_path: Some("test-data/uefi_log.bin".to_string()),
+            },
+        ];
         let mut context_info = context_result.unwrap(); //#[allow_ci]
-        let result = context_info.perform_attestation(&params).await;
+        let result = context_info.collect_evidences(&evidence_requests).await;
         assert!(result.is_ok());
-        let evidence = result.unwrap(); //#[allow_ci]
-        assert!(!evidence.quote_message.is_empty());
-        assert!(!evidence.quote_signature.is_empty());
+        let evidence_results = result.unwrap(); //#[allow_ci]
+        assert_eq!(evidence_results.len(), 3);
+
+        // Check TPM quote evidence
+        if let EvidenceData::TpmQuote {
+            message, signature, ..
+        } = &evidence_results[0]
+        {
+            assert!(!message.is_empty());
+            assert!(!signature.is_empty());
+        } else {
+            panic!("Expected TPM quote evidence"); //#[allow_ci]
+        }
+
         context_info.flush_context().unwrap(); //#[allow_ci]
     }
 
     #[tokio::test]
-    #[cfg(feature = "testing")]
     async fn test_perform_attestation_with_invalid_algs() {
-        use crate::tpm::testing;
         let _mutex = testing::lock_tests().await;
         let config = AlgorithmConfigurationString {
             tpm_encryption_alg: "rsa".to_string(),
@@ -799,18 +884,14 @@ mod tests {
         let mut subjects = HashMap::new();
         subjects.insert("sha256".to_string(), vec![10]);
 
-        let params = AttestationRequiredParams {
+        let evidence_requests = vec![EvidenceRequest::TpmQuote {
             challenge: "test_challenge".to_string(),
             signature_scheme: "invalid-algorithm".to_string(),
             hash_algorithm: "sha256".to_string(),
             selected_subjects: subjects,
-            ima_log_path: Some("test-data/ima_log.txt".to_string()),
-            ima_offset: 0,
-            ima_entry_count: Some(1),
-            uefi_log_path: Some("test-data/uefi_log.bin".to_string()),
-        };
+        }];
 
-        let result = context_info.perform_attestation(&params).await;
+        let result = context_info.collect_evidences(&evidence_requests).await;
         assert!(result.is_err());
         assert!(matches!(
             result.unwrap_err(),
@@ -822,9 +903,46 @@ mod tests {
     }
 
     #[tokio::test]
-    #[cfg(feature = "testing")]
+    async fn test_perform_attestation_with_mismatching_algs() {
+        let _mutex = testing::lock_tests().await;
+        let config = AlgorithmConfigurationString {
+            tpm_encryption_alg: "rsa".to_string(),
+            tpm_hash_alg: "sha256".to_string(),
+            tpm_signing_alg: "rsassa".to_string(),
+            agent_data_path: "".to_string(),
+            disabled_signing_algorithms: vec![],
+        };
+
+        let context_result = ContextInfo::new_from_str(config);
+        assert!(context_result.is_ok());
+        let mut context_info = context_result.unwrap(); //#[allow_ci]
+
+        let mut subjects = HashMap::new();
+        subjects.insert("sha256".to_string(), vec![10]);
+
+        let evidence_requests = vec![EvidenceRequest::TpmQuote {
+            challenge: "test_challenge".to_string(),
+            signature_scheme: "rsassa".to_string(),
+            hash_algorithm: "sha384".to_string(), // mismatching hash alg
+            selected_subjects: subjects,
+        }];
+
+        let result = context_info.collect_evidences(&evidence_requests).await;
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            ContextInfoError::MismatchingAKSigningScheme {
+                ak_sign: _,
+                ak_hash: _,
+                param_sign: _,
+                param_hash: _
+            },
+        ));
+        context_info.flush_context().unwrap(); //#[allow_ci]
+    }
+
+    #[tokio::test]
     async fn test_verifier_subjects() {
-        use crate::tpm::testing;
         let _mutex = testing::lock_tests().await;
         let config = AlgorithmConfigurationString {
             tpm_encryption_alg: "rsa".to_string(),
@@ -847,17 +965,25 @@ mod tests {
             ],
         );
         subjects.insert("sha256".to_string(), vec![10]);
-        let params = AttestationRequiredParams {
-            challenge: "test_challenge".to_string(),
-            signature_scheme: "rsassa".to_string(),
-            hash_algorithm: "sha256".to_string(),
-            selected_subjects: subjects,
-            ima_log_path: Some("test-data/ima_log.txt".to_string()),
-            ima_offset: 0,
-            ima_entry_count: Some(1),
-            uefi_log_path: Some("test-data/uefi_log.bin".to_string()),
-        };
-        let result = context_info.perform_attestation(&params).await;
+        let evidence_requests = vec![
+            EvidenceRequest::TpmQuote {
+                challenge: "test_challenge".to_string(),
+                signature_scheme: "rsassa".to_string(),
+                hash_algorithm: "sha256".to_string(),
+                selected_subjects: subjects,
+            },
+            EvidenceRequest::ImaLog {
+                starting_offset: Some(0),
+                entry_count: Some(1),
+                format: None,
+                log_path: Some("test-data/ima_log.txt".to_string()),
+            },
+            EvidenceRequest::UefiLog {
+                format: None,
+                log_path: Some("test-data/uefi_log.bin".to_string()),
+            },
+        ];
+        let result = context_info.collect_evidences(&evidence_requests).await;
         assert!(result.is_ok());
         context_info.flush_context().unwrap(); //#[allow_ci]
     }

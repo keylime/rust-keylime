@@ -8,6 +8,9 @@ echo "-------- Running clippy"
 # The cargo denies are currently disabled, because that will require a bunch of dep cleanup
 cargo clippy --all-targets --all-features -- -D clippy::all  # -D clippy::cargo
 
+echo "-------- Running documentation tests"
+cargo test --all-features --doc
+
 echo "-------- Building"
 RUST_BACKTRACE=1 cargo build
 

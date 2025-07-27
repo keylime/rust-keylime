@@ -98,10 +98,17 @@ pub const DEFAULT_UEFI_LOGS_SUPPORTS_PARTIAL_ACCESS: bool = true;
 pub const DEFAULT_UEFI_LOGS_BINARY_FILE_PATH: &str =
     "/sys/kernel/security/tpm0/binary_bios_measurements";
 
+// Default values for exponential backoff
+pub const DEFAULT_EXP_BACKOFF_INITIAL_DELAY: u32 = 10000; // 10 seconds
+pub const DEFAULT_EXP_BACKOFF_MAX_RETRIES: u32 = 5;
+pub const DEFAULT_EXP_BACKOFF_MAX_DELAY: u32 = 300000; // 300 seconds
+
 // TODO These should be temporary
 pub const DEFAULT_CERTIFICATION_KEYS_SERVER_IDENTIFIER: &str = "ak";
 pub static DEFAULT_PUSH_API_VERSIONS: &[&str] = &["3.0"];
 pub static DEFAULT_PUSH_EK_HANDLE: &str = "";
+
+pub static DEFAULT_VERIFIER_URL: &str = "https://localhost:8881";
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 pub struct AgentConfig {
@@ -109,6 +116,9 @@ pub struct AgentConfig {
     pub api_versions: String,
     pub disabled_signing_algorithms: Vec<String>,
     pub ek_handle: String,
+    pub exponential_backoff_max_delay: Option<u64>,
+    pub exponential_backoff_max_retries: Option<u32>,
+    pub exponential_backoff_initial_delay: Option<u64>,
     pub enable_iak_idevid: bool,
     pub iak_cert: String,
     pub iak_handle: String,
@@ -168,6 +178,7 @@ pub struct AgentConfig {
     pub uefi_logs_supports_partial_access: bool,
     pub uefi_logs_appendable: bool,
     pub uefi_logs_formats: String,
+    pub verifier_url: String,
 }
 
 impl AgentConfig {
@@ -264,6 +275,15 @@ impl Default for AgentConfig {
             enable_revocation_notifications:
                 DEFAULT_ENABLE_REVOCATION_NOTIFICATIONS,
             enc_keyname: DEFAULT_ENC_KEYNAME.to_string(),
+            exponential_backoff_max_delay: Some(
+                DEFAULT_EXP_BACKOFF_MAX_DELAY as u64,
+            ),
+            exponential_backoff_max_retries: Some(
+                DEFAULT_EXP_BACKOFF_MAX_RETRIES,
+            ),
+            exponential_backoff_initial_delay: Some(
+                DEFAULT_EXP_BACKOFF_INITIAL_DELAY as u64,
+            ),
             extract_payload_zip: DEFAULT_EXTRACT_PAYLOAD_ZIP,
             iak_cert: "default".to_string(),
             iak_handle: DEFAULT_IAK_HANDLE.to_string(),
@@ -319,6 +339,7 @@ impl Default for AgentConfig {
                 DEFAULT_UEFI_LOGS_SUPPORTS_PARTIAL_ACCESS,
             uefi_logs_appendable: DEFAULT_UEFI_LOGS_APPENDABLE,
             uefi_logs_formats: DEFAULT_UEFI_LOGS_FORMATS.to_string(),
+            verifier_url: DEFAULT_VERIFIER_URL.to_string(),
         }
     }
 }

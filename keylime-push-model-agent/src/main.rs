@@ -8,6 +8,7 @@ mod attestation;
 mod context_info_handler;
 mod registration;
 mod response_handler;
+mod state_machine;
 mod struct_filler;
 mod url_selector;
 
@@ -85,8 +86,8 @@ struct Args {
     #[arg(long, default_value = DEFAULT_TIMEOUT_MILLIS)]
     timeout: u64,
     /// Verifier URL
-    #[arg(short, long, default_value = "https://127.0.0.1:8881")]
-    verifier_url: String,
+    #[arg(short, long)]
+    verifier_url: Option<String>,
     /// avoid tpm
     /// Default: false
     #[arg(long, action, default_missing_value = "false")]
@@ -98,7 +99,12 @@ fn get_avoid_tpm_from_args(args: &Args) -> bool {
 }
 
 async fn run(args: &Args) -> Result<()> {
-    info!("Verifier URL: {}", args.verifier_url);
+    match args.verifier_url {
+        Some(ref url) if url.is_empty() => {
+            info!("Verifier URL: {}", url);
+        }
+        _ => {}
+    };
     info!("Registrar URL: {}", args.registrar_url);
     debug!("Timeout: {}", args.timeout);
     debug!("CA certificate file: {}", args.ca_certificate);
@@ -124,100 +130,51 @@ async fn run(args: &Args) -> Result<()> {
             return Err(e);
         }
     };
-    let res =
-        crate::registration::check_registration(&config, ctx_info).await;
-    match res {
-        Ok(_) => {}
-        Err(ref e) => error!("Could not register appropriately: {e:?}"),
-    }
     let agent_identifier = match &args.agent_identifier {
         Some(id) => id.clone(),
         None => config.uuid().to_string(),
     };
+    let verifier_url = match args.verifier_url {
+        Some(ref url) => url.clone(),
+        _ => config.verifier_url().to_string(),
+    };
     let negotiations_request_url =
         url_selector::get_negotiations_request_url(&url_selector::UrlArgs {
-            verifier_url: args.verifier_url.clone(),
+            verifier_url: verifier_url.clone(),
             api_version: args.api_version.clone(),
             agent_identifier: Some(agent_identifier.clone()),
             location: None,
         });
+    if negotiations_request_url.starts_with("ERROR:") {
+        return Err(anyhow::anyhow!(negotiations_request_url));
+    }
     debug!("Negotiations request URL: {negotiations_request_url}");
     let neg_config = attestation::NegotiationConfig {
         avoid_tpm,
-        url: &negotiations_request_url,
-        timeout: args.timeout,
         ca_certificate: &args.ca_certificate,
         client_certificate: &args.certificate,
-        key: &args.key,
-        insecure: args.insecure,
         ima_log_path: Some(config.ima_ml_path.as_str()),
+        initial_delay_ms: config
+            .exponential_backoff_initial_delay
+            .unwrap_or(1000),
+        insecure: args.insecure,
+        key: &args.key,
+        max_delay_ms: config.exponential_backoff_max_delay,
+        max_retries: config.exponential_backoff_max_retries.unwrap_or(5),
+        timeout: args.timeout,
         uefi_log_path: Some(config.measuredboot_ml_path.as_str()),
+        url: &negotiations_request_url,
+        verifier_url: verifier_url.as_str(),
     };
     let attestation_client =
         attestation::AttestationClient::new(&neg_config)?;
-    let neg_response = attestation_client.send_negotiation(&neg_config).await;
-
-    let neg_response_data = match neg_response {
-        Ok(ref neg) => {
-            info!("Request sent successfully");
-            info!(
-                "Returned response code: {:?}",
-                neg_response.as_ref().unwrap().status_code
-            );
-            info!(
-                "Returned response headers: {:?}",
-                neg_response.as_ref().unwrap().headers
-            );
-            info!(
-                "Returned response body: {:?}",
-                neg_response.as_ref().unwrap().body
-            );
-            neg
-        }
-        Err(ref e) => {
-            error!("Error: {e:?}");
-            &attestation::ResponseInformation {
-                status_code: reqwest::StatusCode::INTERNAL_SERVER_ERROR,
-                body: e.to_string(),
-                headers: reqwest::header::HeaderMap::new(),
-            }
-        }
-    };
-
-    if neg_response_data.status_code != reqwest::StatusCode::CREATED {
-        error!(
-            "Negotiation failed with status code: {}",
-            neg_response_data.status_code
-        );
-        return Err(anyhow::anyhow!(
-            "Negotiation failed with status code: {}",
-            neg_response_data.status_code
-        ));
-    }
-
-    let evidence_config: attestation::NegotiationConfig<'_> =
-        attestation::NegotiationConfig {
-            url: &args.verifier_url,
-            ..neg_config.clone()
-        };
-
-    let evidence_response = attestation_client
-        .handle_evidence_submission(
-            neg_response_data.clone(),
-            &evidence_config,
-        )
-        .await?;
-
-    if evidence_response.status_code == reqwest::StatusCode::ACCEPTED {
-        info!("SUCCESS! Evidence accepted by the Verifier.");
-        info!("Response body: {}", evidence_response.body);
-    } else {
-        error!(
-            "Verifier rejected the evidence with code: {}",
-            evidence_response.status_code
-        );
-        error!("Response body: {}", evidence_response.body);
-    }
+    let mut state_machine = state_machine::StateMachine::new(
+        &config,
+        attestation_client,
+        neg_config,
+        ctx_info,
+    );
+    state_machine.run().await;
     Ok(())
 }
 
@@ -239,7 +196,7 @@ mod tests {
             api_version: None,
             avoid_tpm: Some(true),
             registrar_url: "".to_string(),
-            verifier_url: "".to_string(),
+            verifier_url: Some("".to_string()),
             timeout: 0,
             ca_certificate: "".to_string(),
             certificate: "".to_string(),
@@ -264,7 +221,7 @@ mod tests {
             api_version: None,
             avoid_tpm: Some(true),
             registrar_url: "".to_string(),
-            verifier_url: "".to_string(),
+            verifier_url: Some("".to_string()),
             timeout: 0,
             ca_certificate: "".to_string(),
             certificate: "".to_string(),
