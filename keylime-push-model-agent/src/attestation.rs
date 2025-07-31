@@ -14,6 +14,16 @@ pub struct ResponseInformation {
     pub body: String,
 }
 
+impl Default for ResponseInformation {
+    fn default() -> Self {
+        Self {
+            status_code: StatusCode::OK,
+            headers: HeaderMap::new(),
+            body: String::new(),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct NegotiationConfig<'a> {
     pub avoid_tpm: bool,

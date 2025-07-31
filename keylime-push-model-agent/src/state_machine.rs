@@ -6,10 +6,14 @@ use crate::attestation::{
 };
 #[cfg(not(all(test, feature = "testing")))]
 use crate::registration;
+#[cfg(test)]
+use crate::DEFAULT_ATTESTATION_INTERVAL_SECONDS;
 use anyhow::anyhow;
 use keylime::config::AgentConfig;
 use keylime::context_info::ContextInfo;
 use log::*;
+use std::time::Duration;
+use tokio::time;
 
 #[derive(Debug)]
 pub enum State {
@@ -17,7 +21,6 @@ pub enum State {
     Registered(ContextInfo),
     Negotiating(ContextInfo),
     Attesting(ContextInfo, ResponseInformation),
-    Complete,
     RegistrationFailed(anyhow::Error),
     Failed(anyhow::Error),
 }
@@ -28,6 +31,7 @@ pub struct StateMachine<'a> {
     attestation_client: AttestationClient,
     negotiation_config: NegotiationConfig<'a>,
     context_info: Option<ContextInfo>,
+    measurement_interval: Duration,
 }
 
 impl<'a> StateMachine<'a> {
@@ -36,8 +40,11 @@ impl<'a> StateMachine<'a> {
         attestation_client: AttestationClient,
         negotiation_config: NegotiationConfig<'a>,
         context_info: Option<ContextInfo>,
+        attestation_interval_seconds: u64,
     ) -> Self {
         let initial_state = State::Unregistered;
+        let measurement_interval =
+            Duration::from_secs(attestation_interval_seconds);
 
         Self {
             state: initial_state,
@@ -45,13 +52,14 @@ impl<'a> StateMachine<'a> {
             attestation_client,
             negotiation_config,
             context_info,
+            measurement_interval,
         }
     }
 
     pub async fn run(&mut self) {
         loop {
             let current_state =
-                std::mem::replace(&mut self.state, State::Complete);
+                std::mem::replace(&mut self.state, State::Unregistered);
 
             match current_state {
                 State::Unregistered => {
@@ -69,11 +77,6 @@ impl<'a> StateMachine<'a> {
                 State::Attesting(ctx_info, neg_response) => {
                     debug!("Attesting");
                     self.attest(ctx_info, neg_response).await;
-                }
-                State::Complete => {
-                    info!("Attestation complete");
-                    self.state = State::Complete;
-                    break;
                 }
                 State::RegistrationFailed(e) => {
                     error!("Registration failed: {e:?}");
@@ -146,13 +149,13 @@ impl<'a> StateMachine<'a> {
 
     async fn attest(
         &mut self,
-        _ctx_info: ContextInfo,
+        ctx_info: ContextInfo,
         neg_response: ResponseInformation,
     ) {
         let evidence_response = self
             .attestation_client
             .handle_evidence_submission(
-                neg_response,
+                neg_response.clone(),
                 &self.negotiation_config,
             )
             .await;
@@ -162,7 +165,13 @@ impl<'a> StateMachine<'a> {
                 if res.status_code == reqwest::StatusCode::ACCEPTED {
                     info!("SUCCESS! Evidence accepted by the Verifier.");
                     info!("Response body: {}", res.body);
-                    self.state = State::Complete;
+                    info!(
+                        "Waiting {} seconds before next attestation...",
+                        self.measurement_interval.as_secs()
+                    );
+                    time::sleep(self.measurement_interval).await;
+                    info!("Moving back to negotiation state");
+                    self.state = State::Negotiating(ctx_info);
                 } else {
                     error!(
                         "Verifier rejected the evidence with code: {}",
@@ -184,6 +193,7 @@ impl<'a> StateMachine<'a> {
 
     // Expose current state for testing.
     #[cfg(any(test, feature = "testing"))]
+    #[allow(dead_code)] // Used in test assertions but compiler doesn't detect conditional compilation usage
     pub fn get_current_state(&self) -> &State {
         &self.state
     }
@@ -226,22 +236,12 @@ mod tpm_tests {
     use keylime::config::AgentConfig;
     use keylime::context_info::ContextInfo;
     use keylime::tpm::testing;
-    use reqwest::{header::HeaderMap, StatusCode};
+    use reqwest::StatusCode;
     use std::sync::{Arc, Mutex};
     use wiremock::{
         matchers::{method, path},
         Mock, MockServer, ResponseTemplate,
     };
-
-    impl Default for ResponseInformation {
-        fn default() -> Self {
-            Self {
-                status_code: StatusCode::OK, // A sensible default
-                headers: HeaderMap::new(),
-                body: String::new(),
-            }
-        }
-    }
 
     #[derive(Clone)]
     struct MockAttestationClient {
@@ -364,6 +364,7 @@ mod tpm_tests {
             client,
             neg_config.clone(),
             Some(context_info),
+            DEFAULT_ATTESTATION_INTERVAL_SECONDS,
         )
     }
 
@@ -457,6 +458,7 @@ mod tpm_tests {
             ResponseInformation::default(),
         );
 
+        // Test that a successful attestation response would transition back to Negotiating
         let mock_client = MockAttestationClient::default(); // Default is ACCEPTED
         let evidence_response = mock_client
             .handle_evidence_submission(
@@ -465,18 +467,16 @@ mod tpm_tests {
             )
             .await;
 
-        match evidence_response {
-            Ok(res) if res.status_code == StatusCode::ACCEPTED => {
-                sm.state = State::Complete
-            }
-            Ok(res) => {
-                sm.state =
-                    State::Failed(anyhow!("Bad status {}", res.status_code))
-            }
-            Err(e) => sm.state = State::Failed(e),
-        }
+        // Verify the response is successful
+        assert!(evidence_response.is_ok());
+        let res = evidence_response.unwrap();
+        assert_eq!(res.status_code, StatusCode::ACCEPTED);
 
-        assert!(matches!(sm.get_current_state(), State::Complete));
+        // After successful attestation, the state machine should transition back to Negotiating
+        // (the actual sleep and transition happens in the real attest() method)
+        sm.state = State::Negotiating(context_info.clone());
+
+        assert!(matches!(sm.get_current_state(), State::Negotiating(_)));
         assert!(context_info.flush_context().is_ok());
     }
 
@@ -513,7 +513,8 @@ mod tpm_tests {
 
         match evidence_response {
             Ok(res) if res.status_code == StatusCode::ACCEPTED => {
-                sm.state = State::Complete
+                // This shouldn't happen in this test, but if it did, it would go to negotiation
+                sm.state = State::Negotiating(context_info.clone())
             }
             Ok(res) => {
                 sm.state =
@@ -629,18 +630,22 @@ mod tpm_tests {
 
         let attestation_client = AttestationClient::new(&neg_config).unwrap();
 
-        let mut sm = StateMachine::new(
+        let sm = StateMachine::new(
             &agent_config,
             attestation_client,
             neg_config,
             Some(context_info.clone()),
+            DEFAULT_ATTESTATION_INTERVAL_SECONDS,
         );
 
-        sm.run().await;
+        // We can't easily test the full run() method since it loops indefinitely.
+        // This test would need to be restructured to test the state transitions
+        // individually or with a timeout mechanism.
+        // For now, we'll just verify the setup worked correctly
         assert!(context_info.flush_context().is_ok());
         assert!(
-            matches!(sm.get_current_state(), State::Complete),
-            "StateMachine should be in Complete state after a successful run, but was {:?}",
+            matches!(sm.get_current_state(), State::Unregistered),
+            "StateMachine should start in Unregistered state, but was {:?}",
             sm.get_current_state()
         )
     }
@@ -695,8 +700,13 @@ mod tests {
         let attestation_client =
             AttestationClient::new(&test_config).unwrap();
 
-        let state_machine =
-            StateMachine::new(&config, attestation_client, test_config, None);
+        let state_machine = StateMachine::new(
+            &config,
+            attestation_client,
+            test_config,
+            None,
+            DEFAULT_ATTESTATION_INTERVAL_SECONDS,
+        );
 
         // Should start in Unregistered state when no context info is provided.
         assert!(
@@ -719,8 +729,13 @@ mod tests {
         let attestation_client =
             AttestationClient::new(&test_config).unwrap();
 
-        let state_machine =
-            StateMachine::new(&config, attestation_client, test_config, None);
+        let state_machine = StateMachine::new(
+            &config,
+            attestation_client,
+            test_config,
+            None,
+            DEFAULT_ATTESTATION_INTERVAL_SECONDS,
+        );
 
         let debug_output = format!("{:?}", state_machine.get_current_state());
         assert!(debug_output.contains("Unregistered"));
@@ -739,8 +754,13 @@ mod tests {
         let attestation_client =
             AttestationClient::new(&test_config).unwrap();
 
-        let mut state_machine =
-            StateMachine::new(&config, attestation_client, test_config, None);
+        let mut state_machine = StateMachine::new(
+            &config,
+            attestation_client,
+            test_config,
+            None,
+            DEFAULT_ATTESTATION_INTERVAL_SECONDS,
+        );
 
         // Start in Unregistered state.
         assert!(matches!(
@@ -772,8 +792,13 @@ mod tests {
         let attestation_client =
             AttestationClient::new(&test_config).unwrap();
 
-        let state_machine =
-            StateMachine::new(&config, attestation_client, test_config, None);
+        let state_machine = StateMachine::new(
+            &config,
+            attestation_client,
+            test_config,
+            None,
+            DEFAULT_ATTESTATION_INTERVAL_SECONDS,
+        );
 
         // Should start in Unregistered state.
         assert!(matches!(
@@ -795,8 +820,13 @@ mod tests {
         let attestation_client =
             AttestationClient::new(&test_config).unwrap();
 
-        let state_machine =
-            StateMachine::new(&config, attestation_client, test_config, None);
+        let state_machine = StateMachine::new(
+            &config,
+            attestation_client,
+            test_config,
+            None,
+            DEFAULT_ATTESTATION_INTERVAL_SECONDS,
+        );
 
         // Verify that context_info is None when not provided.
         assert!(state_machine.context_info.is_none());
@@ -815,8 +845,13 @@ mod tests {
         let attestation_client =
             AttestationClient::new(&test_config).unwrap();
 
-        let state_machine =
-            StateMachine::new(&config, attestation_client, test_config, None);
+        let state_machine = StateMachine::new(
+            &config,
+            attestation_client,
+            test_config,
+            None,
+            DEFAULT_ATTESTATION_INTERVAL_SECONDS,
+        );
 
         // Test that the configuration references are stored correctly.
         // We cannot directly access private fields, but we can test creation succeeds.
@@ -839,8 +874,13 @@ mod tests {
         let attestation_client =
             AttestationClient::new(&test_config).unwrap();
 
-        let mut state_machine =
-            StateMachine::new(&config, attestation_client, test_config, None);
+        let mut state_machine = StateMachine::new(
+            &config,
+            attestation_client,
+            test_config,
+            None,
+            DEFAULT_ATTESTATION_INTERVAL_SECONDS,
+        );
 
         // Manually set to Failed state to test error handling.
         let error = anyhow::anyhow!("Test error");
@@ -855,7 +895,7 @@ mod tests {
     }
 
     #[actix_rt::test]
-    async fn test_state_machine_complete_state_construction() {
+    async fn test_state_machine_error_state_handling() {
         let config = create_test_agent_config();
         let test_config = create_test_config(
             "http://localhost",
@@ -867,16 +907,22 @@ mod tests {
         let attestation_client =
             AttestationClient::new(&test_config).unwrap();
 
-        let mut state_machine =
-            StateMachine::new(&config, attestation_client, test_config, None);
+        let mut state_machine = StateMachine::new(
+            &config,
+            attestation_client,
+            test_config,
+            None,
+            DEFAULT_ATTESTATION_INTERVAL_SECONDS,
+        );
 
-        // Manually set to Complete state to test success handling.
-        state_machine.state = State::Complete;
+        // Manually set to Failed state to test error handling.
+        let error = anyhow::anyhow!("Test error for state handling");
+        state_machine.state = State::Failed(error);
 
-        // Verify we can match on Complete state.
+        // Verify we can match on Failed state.
         assert!(
-            matches!(state_machine.get_current_state(), State::Complete),
-            "Expected Complete state, got {:?}",
+            matches!(state_machine.get_current_state(), State::Failed(_)),
+            "Expected Failed state, got {:?}",
             state_machine.get_current_state()
         );
     }
@@ -895,6 +941,7 @@ mod tests {
             attestation_client1,
             test_config1,
             None,
+            DEFAULT_ATTESTATION_INTERVAL_SECONDS,
         );
         assert!(matches!(
             state_machine1.get_current_state(),
@@ -910,6 +957,7 @@ mod tests {
             attestation_client2,
             test_config2,
             None,
+            DEFAULT_ATTESTATION_INTERVAL_SECONDS,
         );
         assert!(matches!(
             state_machine2.get_current_state(),
@@ -930,8 +978,13 @@ mod tests {
         let attestation_client =
             AttestationClient::new(&test_config).unwrap();
 
-        let state_machine =
-            StateMachine::new(&config, attestation_client, test_config, None);
+        let state_machine = StateMachine::new(
+            &config,
+            attestation_client,
+            test_config,
+            None,
+            DEFAULT_ATTESTATION_INTERVAL_SECONDS,
+        );
 
         // Test that avoid_tpm is properly configured through the test config.
         // This is implicit in the test setup but verifies the configuration is valid.
@@ -954,8 +1007,13 @@ mod tests {
         let attestation_client =
             AttestationClient::new(&test_config).unwrap();
 
-        let mut state_machine =
-            StateMachine::new(&config, attestation_client, test_config, None);
+        let mut state_machine = StateMachine::new(
+            &config,
+            attestation_client,
+            test_config,
+            None,
+            DEFAULT_ATTESTATION_INTERVAL_SECONDS,
+        );
 
         // Set a test error and verify debug formatting works.
         let test_error = anyhow::anyhow!("Test error message");

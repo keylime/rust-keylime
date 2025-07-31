@@ -15,6 +15,7 @@ mod url_selector;
 const DEFAULT_TIMEOUT_MILLIS: &str = "5000";
 const DEFAULT_METHOD: &str = "POST";
 const DEFAULT_MESSAGE_TYPE_STR: &str = "Attestation";
+const DEFAULT_ATTESTATION_INTERVAL_SECONDS: u64 = 60;
 
 pub enum MessageType {
     Attestation,
@@ -92,6 +93,10 @@ struct Args {
     /// Default: false
     #[arg(long, action, default_missing_value = "false")]
     avoid_tpm: Option<bool>,
+    /// Interval in seconds between the attestations happening after the first successful attestation
+    /// Default: 60
+    #[arg(long, default_value_t = DEFAULT_ATTESTATION_INTERVAL_SECONDS)]
+    attestation_interval_seconds: u64,
 }
 
 fn get_avoid_tpm_from_args(args: &Args) -> bool {
@@ -101,7 +106,7 @@ fn get_avoid_tpm_from_args(args: &Args) -> bool {
 async fn run(args: &Args) -> Result<()> {
     match args.verifier_url {
         Some(ref url) if url.is_empty() => {
-            info!("Verifier URL: {}", url);
+            info!("Verifier URL: {url}");
         }
         _ => {}
     };
@@ -173,6 +178,7 @@ async fn run(args: &Args) -> Result<()> {
         attestation_client,
         neg_config,
         ctx_info,
+        args.attestation_interval_seconds,
     );
     state_machine.run().await;
     Ok(())
@@ -208,6 +214,8 @@ mod tests {
             method: None,
             attestation_index: None,
             session_index: None,
+            attestation_interval_seconds:
+                DEFAULT_ATTESTATION_INTERVAL_SECONDS,
         };
         let res = run(&args);
         assert!(res.await.is_err());
@@ -233,6 +241,8 @@ mod tests {
             method: None,
             attestation_index: None,
             session_index: None,
+            attestation_interval_seconds:
+                DEFAULT_ATTESTATION_INTERVAL_SECONDS,
         };
         let avoid_tpm = get_avoid_tpm_from_args(&args);
         assert!(avoid_tpm);
