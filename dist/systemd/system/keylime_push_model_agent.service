@@ -1,0 +1,24 @@
+[Unit]
+Description=The Keylime push model agent
+StartLimitInterval=10s
+StartLimitBurst=5
+After=network-online.target
+Wants=network-online.target
+Wants=tpm2-abrmd.service
+After=tpm2-abrmd.service
+# If the service should start only when hardware TPMs are available, uncomment the below lines
+#ConditionPathExistsGlob=/dev/tpm[0-9]*
+#ConditionPathExistsGlob=/dev/tpmrm[0-9]*
+
+[Service]
+ExecStart=/usr/bin/keylime_push_model_agent
+TimeoutSec=60s
+Restart=on-failure
+RestartSec=120s
+Environment="RUST_LOG=keylime_push_model_agent=info,keylime=info"
+# If using swtpm with tpm2-abrmd service, uncomment the line below to set TCTI
+# variable on the service environment
+#Environment="TCTI=tabrmd:"
+
+[Install]
+WantedBy=default.target
