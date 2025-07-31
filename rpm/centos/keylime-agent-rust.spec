@@ -30,7 +30,7 @@ Summary:        Rust agent for Keylime
 #   Unlicense or MIT
 #   zlib or ASL 2.0 or MIT
 #
-License:        ASL 2.0 and BSD and MIT
+License: (Apache-2.0 OR MIT) AND BSD-3-Clause AND (MIT OR Apache-2.0) AND Unicode-DFS-2016 AND (Apache-2.0 OR Apache-2.0 WITH LLVM-exception OR MIT) AND (Apache-2.0 OR BSL-1.0) AND (Apache-2.0 OR MIT) AND (Apache-2.0 OR MIT OR Zlib) AND Apache-2.0 WITH LLVM-exception AND ISC AND MIT AND (MIT OR Unlicense)
 URL:            https://github.com/keylime/rust-keylime/
 Source0:        rust-keylime-v%{version}.tar.gz
 # The vendor tarball is created using cargo-vendor-filterer to remove Windows
@@ -45,6 +45,8 @@ Source0:        rust-keylime-v%{version}.tar.gz
 #       --exclude-crate-path "libloading#tests"
 #   tar jcf rust-keylime-%%{version}-vendor.tar.xz vendor
 Source1:        rust-keylime-vendor.tar.xz
+# Drop deprecated features and workaround unavailable components
+Patch0:         rust-keylime-metadata.patch
 
 ExclusiveArch:  %{rust_arches}
 
@@ -63,16 +65,34 @@ BuildRequires:  tpm2-tss-devel
 BuildRequires:  clang
 BuildRequires:  rust-toolset
 
-# Virtual Provides to support swapping between Python and Rust implementation
+# Virtual Provides to support swapping between different agent implementations
 Provides:       keylime-agent
 Conflicts:      keylime-agent
 
 %description
 Rust agent for Keylime
 
+%package push
+Summary:        Rust push-model agent for Keylime
+Requires:       tpm2-tss
+Requires:       util-linux-core
+
+# The keylime-base package provides the keylime user creation. It is available
+# from Fedora 36
+%if 0%{?fedora} >= 36 || 0%{?rhel} >= 9
+Requires:       keylime-base
+%endif
+
+# Virtual Provides to support swapping between pull and push model agents
+Provides:       keylime-agent
+Conflicts:      keylime-agent
+
+%description push
+Rust push-model agent for Keylime
+
 %prep
 %autosetup -n rust-keylime-%{version} -N
-%autopatch -m 100 -p1
+%autopatch -p1
 # Source1 is vendored dependencies
 %cargo_prep -V 1
 
@@ -100,6 +120,9 @@ install -Dpm 644 ./dist/systemd/system/keylime_agent.service \
 install -Dpm 644 ./dist/systemd/system/var-lib-keylime-secure.mount \
     %{buildroot}%{_unitdir}/var-lib-keylime-secure.mount
 
+install -Dpm 644 ./dist/systemd/system/keylime_push_model_agent.service \
+    %{buildroot}%{_unitdir}/keylime_push_model_agent.service
+
 # Setting up the agent to use keylime:keylime user/group after dropping privileges.
 cat > %{buildroot}/%{_sysconfdir}/keylime/agent.conf.d/001-run_as.conf << EOF
 [agent]
@@ -112,6 +135,9 @@ install -Dpm 0755 \
 install -Dpm 0755 \
     -t %{buildroot}%{_bindir} \
     ./target/release/keylime_ima_emulator
+install -Dpm 0755 \
+    -t %{buildroot}%{_bindir} \
+    ./target/release/keylime_push_model_agent
 
 %posttrans
 chmod 500 %{_sysconfdir}/keylime/agent.conf.d
@@ -141,6 +167,12 @@ chown -R keylime:keylime %{_sysconfdir}/keylime
 %attr(700,keylime,keylime) %{_libexecdir}/keylime
 %{_bindir}/keylime_agent
 %{_bindir}/keylime_ima_emulator
+
+%files push
+%license LICENSE
+%doc README.md
+%{_bindir}/keylime_push_model_agent
+%{_unitdir}/keylime_push_model_agent.service
 
 %if %{with check}
 %check

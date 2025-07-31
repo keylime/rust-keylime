@@ -39,6 +39,7 @@ install: all
 		install -D -t ${DESTDIR}/usr/bin "$$f"; \
 	done
 	install -D -m 644 -t ${DESTDIR}$(systemdsystemunitdir) dist/systemd/system/keylime_agent.service
+	install -D -m 644 -t ${DESTDIR}$(systemdsystemunitdir) dist/systemd/system/keylime_push_model_agent.service
 	install -D -m 644 -t ${DESTDIR}$(systemdsystemunitdir) dist/systemd/system/var-lib-keylime-secure.mount
 	# Remove when https://github.com/keylime/rust-keylime/issues/325 is fixed
 	install -D -t ${DESTDIR}/usr/libexec/keylime keylime-agent/tests/actions/shim.py
