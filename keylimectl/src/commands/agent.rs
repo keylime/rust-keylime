@@ -342,7 +342,7 @@ async fn add_agent(
     // Step 1: Get agent data from registrar
     output.step(1, 4, "Retrieving agent data from registrar");
 
-    let registrar_client = RegistrarClient::new(config)?;
+    let registrar_client = RegistrarClient::new(config).await?;
     let agent_data = registrar_client
         .get_agent(&agent_uuid.to_string())
         .await
@@ -416,7 +416,7 @@ async fn add_agent(
     // Step 4: Add agent to verifier
     output.step(4, 4, "Adding agent to verifier");
 
-    let verifier_client = VerifierClient::new(config)?;
+    let verifier_client = VerifierClient::new(config).await?;
 
     // Build the request payload
     let cv_agent_ip = params.verifier_ip.unwrap_or(&agent_ip);
@@ -486,7 +486,7 @@ async fn remove_agent(
 
     output.info(format!("Removing agent {agent_uuid} from verifier"));
 
-    let verifier_client = VerifierClient::new(config)?;
+    let verifier_client = VerifierClient::new(config).await?;
 
     // Check if agent exists on verifier (unless force is used)
     if !force {
@@ -547,7 +547,7 @@ async fn remove_agent(
             "Removing agent from registrar",
         );
 
-        let registrar_client = RegistrarClient::new(config)?;
+        let registrar_client = RegistrarClient::new(config).await?;
         let registrar_response = registrar_client
             .delete_agent(&agent_uuid.to_string())
             .await
@@ -637,7 +637,7 @@ async fn get_agent_status(
     if !verifier_only {
         output.progress("Checking registrar status");
 
-        let registrar_client = RegistrarClient::new(config)?;
+        let registrar_client = RegistrarClient::new(config).await?;
         match registrar_client.get_agent(&agent_uuid.to_string()).await {
             Ok(Some(agent_data)) => {
                 results["registrar"] = json!({
@@ -663,7 +663,7 @@ async fn get_agent_status(
     if !registrar_only {
         output.progress("Checking verifier status");
 
-        let verifier_client = VerifierClient::new(config)?;
+        let verifier_client = VerifierClient::new(config).await?;
         match verifier_client.get_agent(&agent_uuid.to_string()).await {
             Ok(Some(agent_data)) => {
                 results["verifier"] = json!({
@@ -702,7 +702,7 @@ async fn reactivate_agent(
 
     output.info(format!("Reactivating agent {agent_uuid}"));
 
-    let verifier_client = VerifierClient::new(config)?;
+    let verifier_client = VerifierClient::new(config).await?;
     let response = verifier_client
         .reactivate_agent(&agent_uuid.to_string())
         .await
