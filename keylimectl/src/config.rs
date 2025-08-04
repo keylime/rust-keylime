@@ -94,7 +94,7 @@ use std::path::{Path, PathBuf};
 /// - `registrar`: Configuration for connecting to the Keylime registrar service
 /// - `tls`: TLS/SSL security configuration
 /// - `client`: HTTP client behavior and retry configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     /// Verifier configuration
     pub verifier: VerifierConfig,
@@ -268,17 +268,6 @@ impl Default for ClientConfig {
     }
 }
 
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            verifier: VerifierConfig::default(),
-            registrar: RegistrarConfig::default(),
-            tls: TlsConfig::default(),
-            client: ClientConfig::default(),
-        }
-    }
-}
-
 impl Config {
     /// Load configuration from multiple sources
     ///
@@ -290,7 +279,7 @@ impl Config {
     /// # Arguments
     ///
     /// * `config_path` - Optional explicit path to configuration file.
-    ///                   If None, searches standard locations.
+    ///   If None, searches standard locations.
     ///
     /// # Returns
     ///
@@ -533,8 +522,7 @@ impl Config {
         if let Some(ref cert_path) = self.tls.client_cert {
             if !Path::new(cert_path).exists() {
                 return Err(ConfigError::Message(format!(
-                    "Client certificate file not found: {}",
-                    cert_path
+                    "Client certificate file not found: {cert_path}"
                 )));
             }
         }
@@ -542,8 +530,7 @@ impl Config {
         if let Some(ref key_path) = self.tls.client_key {
             if !Path::new(key_path).exists() {
                 return Err(ConfigError::Message(format!(
-                    "Client key file not found: {}",
-                    key_path
+                    "Client key file not found: {key_path}"
                 )));
             }
         }
@@ -739,7 +726,10 @@ mod tests {
 
         let result = config.validate();
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("Verifier IP cannot be empty"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Verifier IP cannot be empty"));
     }
 
     #[test]
@@ -754,7 +744,10 @@ mod tests {
 
         let result = config.validate();
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("Registrar IP cannot be empty"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Registrar IP cannot be empty"));
     }
 
     #[test]
@@ -770,7 +763,10 @@ mod tests {
 
         let result = config.validate();
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("Verifier port cannot be 0"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Verifier port cannot be 0"));
     }
 
     #[test]
@@ -785,7 +781,10 @@ mod tests {
 
         let result = config.validate();
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("Registrar port cannot be 0"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Registrar port cannot be 0"));
     }
 
     #[test]
@@ -800,7 +799,10 @@ mod tests {
 
         let result = config.validate();
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("Client certificate file not found"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Client certificate file not found"));
     }
 
     #[test]
@@ -815,7 +817,10 @@ mod tests {
 
         let result = config.validate();
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("Client key file not found"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Client key file not found"));
     }
 
     #[test]
@@ -832,7 +837,10 @@ mod tests {
 
         let result = config.validate();
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("Client timeout cannot be 0"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Client timeout cannot be 0"));
     }
 
     #[test]
@@ -849,7 +857,10 @@ mod tests {
 
         let result = config.validate();
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("Retry interval must be positive"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Retry interval must be positive"));
     }
 
     #[test]
@@ -866,7 +877,10 @@ mod tests {
 
         let result = config.validate();
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("Retry interval must be positive"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Retry interval must be positive"));
     }
 
     #[test]
@@ -877,8 +891,12 @@ mod tests {
 
         let config = Config {
             tls: TlsConfig {
-                client_cert: Some(cert_file.path().to_string_lossy().to_string()),
-                client_key: Some(key_file.path().to_string_lossy().to_string()),
+                client_cert: Some(
+                    cert_file.path().to_string_lossy().to_string(),
+                ),
+                client_key: Some(
+                    key_file.path().to_string_lossy().to_string(),
+                ),
                 ..TlsConfig::default()
             },
             ..Config::default()
@@ -916,7 +934,8 @@ retry_interval = 2.0
         temp_file.write_all(toml_content.as_bytes()).unwrap();
         temp_file.flush().unwrap();
 
-        let config = Config::load(Some(temp_file.path().to_str().unwrap())).unwrap();
+        let config =
+            Config::load(Some(temp_file.path().to_str().unwrap())).unwrap();
 
         assert_eq!(config.verifier.ip, "10.0.0.1");
         assert_eq!(config.verifier.port, 9001);
@@ -971,7 +990,9 @@ retry_interval = 2.0
         assert!(paths.contains(&PathBuf::from("keylimectl.toml")));
         assert!(paths.contains(&PathBuf::from("keylimectl.conf")));
         assert!(paths.contains(&PathBuf::from("/etc/keylime/tenant.conf")));
-        assert!(paths.contains(&PathBuf::from("/usr/etc/keylime/tenant.conf")));
+        assert!(
+            paths.contains(&PathBuf::from("/usr/etc/keylime/tenant.conf"))
+        );
     }
 
     #[test]

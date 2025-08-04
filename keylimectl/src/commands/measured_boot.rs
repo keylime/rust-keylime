@@ -53,8 +53,7 @@ async fn create_mb_policy(
     let _policy_json: Value = serde_json::from_str(&policy_content)
         .with_context(|| {
             format!(
-                "Failed to parse measured boot policy as JSON: {}",
-                file_path
+                "Failed to parse measured boot policy as JSON: {file_path}"
             )
         })?;
 
@@ -79,8 +78,7 @@ async fn create_mb_policy(
         })?;
 
     output.info(format!(
-        "Measured boot policy '{}' created successfully",
-        name
+        "Measured boot policy '{name}' created successfully"
     ));
 
     Ok(json!({
@@ -133,8 +131,7 @@ async fn update_mb_policy(
     let _policy_json: Value = serde_json::from_str(&policy_content)
         .with_context(|| {
             format!(
-                "Failed to parse measured boot policy as JSON: {}",
-                file_path
+                "Failed to parse measured boot policy as JSON: {file_path}"
             )
         })?;
 
@@ -159,8 +156,7 @@ async fn update_mb_policy(
         })?;
 
     output.info(format!(
-        "Measured boot policy '{}' updated successfully",
-        name
+        "Measured boot policy '{name}' updated successfully"
     ));
 
     Ok(json!({
@@ -188,8 +184,7 @@ async fn delete_mb_policy(
         })?;
 
     output.info(format!(
-        "Measured boot policy '{}' deleted successfully",
-        name
+        "Measured boot policy '{name}' deleted successfully"
     ));
 
     Ok(json!({

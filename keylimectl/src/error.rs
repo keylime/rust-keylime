@@ -408,11 +408,15 @@ mod tests {
         let error = KeylimectlError::api_error(
             404,
             "Not found".to_string(),
-            Some(json!({"error": "agent not found"}))
+            Some(json!({"error": "agent not found"})),
         );
 
         match error {
-            KeylimectlError::Api { status, message, response } => {
+            KeylimectlError::Api {
+                status,
+                message,
+                response,
+            } => {
                 assert_eq!(status, 404);
                 assert_eq!(message, "Not found");
                 assert!(response.is_some());
@@ -459,9 +463,18 @@ mod tests {
 
     #[test]
     fn test_error_codes() {
-        assert_eq!(KeylimectlError::validation("test").error_code(), "VALIDATION_ERROR");
-        assert_eq!(KeylimectlError::agent_not_found("test", "verifier").error_code(), "AGENT_NOT_FOUND");
-        assert_eq!(KeylimectlError::policy_not_found("test").error_code(), "POLICY_NOT_FOUND");
+        assert_eq!(
+            KeylimectlError::validation("test").error_code(),
+            "VALIDATION_ERROR"
+        );
+        assert_eq!(
+            KeylimectlError::agent_not_found("test", "verifier").error_code(),
+            "AGENT_NOT_FOUND"
+        );
+        assert_eq!(
+            KeylimectlError::policy_not_found("test").error_code(),
+            "POLICY_NOT_FOUND"
+        );
     }
 
     #[test]
@@ -469,17 +482,24 @@ mod tests {
         // Test API errors
 
         // 5xx errors should be retryable
-        let server_error = KeylimectlError::api_error(500, "Internal error".to_string(), None);
+        let server_error = KeylimectlError::api_error(
+            500,
+            "Internal error".to_string(),
+            None,
+        );
         assert!(server_error.is_retryable());
 
-        let bad_gateway = KeylimectlError::api_error(502, "Bad gateway".to_string(), None);
+        let bad_gateway =
+            KeylimectlError::api_error(502, "Bad gateway".to_string(), None);
         assert!(bad_gateway.is_retryable());
 
         // 4xx errors should not be retryable
-        let client_error = KeylimectlError::api_error(400, "Bad request".to_string(), None);
+        let client_error =
+            KeylimectlError::api_error(400, "Bad request".to_string(), None);
         assert!(!client_error.is_retryable());
 
-        let not_found = KeylimectlError::api_error(404, "Not found".to_string(), None);
+        let not_found =
+            KeylimectlError::api_error(404, "Not found".to_string(), None);
         assert!(!not_found.is_retryable());
 
         // Validation errors should not be retryable
@@ -489,7 +509,7 @@ mod tests {
         // IO errors should not be retryable
         let io_error = KeylimectlError::Io(std::io::Error::new(
             std::io::ErrorKind::NotFound,
-            "file not found"
+            "file not found",
         ));
         assert!(!io_error.is_retryable());
     }
@@ -507,7 +527,11 @@ mod tests {
     #[test]
     fn test_api_error_to_json() {
         let response = json!({"error": "not found"});
-        let error = KeylimectlError::api_error(404, "Not found".to_string(), Some(response.clone()));
+        let error = KeylimectlError::api_error(
+            404,
+            "Not found".to_string(),
+            Some(response.clone()),
+        );
         let json = error.to_json();
 
         assert_eq!(json["error"]["code"], "API_ERROR");
@@ -529,10 +553,11 @@ mod tests {
     fn test_with_context() {
         let io_error: Result<(), std::io::Error> = Err(std::io::Error::new(
             std::io::ErrorKind::NotFound,
-            "file not found"
+            "file not found",
         ));
 
-        let result = io_error.with_context(|| "Failed to read config file".to_string());
+        let result = io_error
+            .with_context(|| "Failed to read config file".to_string());
 
         assert!(result.is_err());
         let error = result.unwrap_err();
@@ -544,7 +569,7 @@ mod tests {
     fn test_validate() {
         let result: Result<(), std::io::Error> = Err(std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
-            "invalid"
+            "invalid",
         ));
 
         let validated = result.validate(|| "Invalid UUID format".to_string());
@@ -552,6 +577,9 @@ mod tests {
         assert!(validated.is_err());
         let error = validated.unwrap_err();
         assert_eq!(error.error_code(), "VALIDATION_ERROR");
-        assert_eq!(error.to_string(), "Validation error: Invalid UUID format");
+        assert_eq!(
+            error.to_string(),
+            "Validation error: Invalid UUID format"
+        );
     }
 }
