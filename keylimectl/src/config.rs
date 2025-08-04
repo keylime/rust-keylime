@@ -221,10 +221,14 @@ pub struct TlsConfig {
 impl Default for TlsConfig {
     fn default() -> Self {
         Self {
-            client_cert: None,
-            client_key: None,
+            client_cert: Some(
+                "/var/lib/keylime/cv_ca/client-cert.crt".to_string(),
+            ),
+            client_key: Some(
+                "/var/lib/keylime/cv_ca/client-private.pem".to_string(),
+            ),
             client_key_password: None,
-            trusted_ca: vec![],
+            trusted_ca: vec!["/var/lib/keylime/cv_ca/cacert.crt".to_string()],
             verify_server_cert: true,
             enable_agent_mtls: true,
         }
@@ -626,8 +630,14 @@ mod tests {
         assert_eq!(config.registrar.ip, "127.0.0.1");
         assert_eq!(config.registrar.port, 8891);
 
-        assert!(config.tls.client_cert.is_none());
-        assert!(config.tls.client_key.is_none());
+        assert_eq!(
+            config.tls.client_cert,
+            Some("/var/lib/keylime/cv_ca/client-cert.crt".to_string())
+        );
+        assert_eq!(
+            config.tls.client_key,
+            Some("/var/lib/keylime/cv_ca/client-private.pem".to_string())
+        );
         assert!(config.tls.verify_server_cert);
         assert!(config.tls.enable_agent_mtls);
 
@@ -744,7 +754,8 @@ mod tests {
     #[test]
     fn test_validate_default_config() {
         let config = Config::default();
-        assert!(config.validate().is_ok());
+        // Default config will fail validation since certificate files don't exist in test environment
+        assert!(config.validate().is_err());
     }
 
     #[test]
@@ -843,7 +854,9 @@ mod tests {
     fn test_validate_nonexistent_key_file() {
         let config = Config {
             tls: TlsConfig {
+                client_cert: None,
                 client_key: Some("/nonexistent/key.pem".to_string()),
+                trusted_ca: vec![],
                 ..TlsConfig::default()
             },
             ..Config::default()
@@ -860,6 +873,12 @@ mod tests {
     #[test]
     fn test_validate_zero_timeout() {
         let config = Config {
+            tls: TlsConfig {
+                client_cert: None,
+                client_key: None,
+                trusted_ca: vec![],
+                ..TlsConfig::default()
+            },
             client: ClientConfig {
                 timeout: 0,
                 retry_interval: 1.0,
@@ -880,6 +899,12 @@ mod tests {
     #[test]
     fn test_validate_negative_retry_interval() {
         let config = Config {
+            tls: TlsConfig {
+                client_cert: None,
+                client_key: None,
+                trusted_ca: vec![],
+                ..TlsConfig::default()
+            },
             client: ClientConfig {
                 timeout: 60,
                 retry_interval: -1.0,
@@ -900,6 +925,12 @@ mod tests {
     #[test]
     fn test_validate_zero_retry_interval() {
         let config = Config {
+            tls: TlsConfig {
+                client_cert: None,
+                client_key: None,
+                trusted_ca: vec![],
+                ..TlsConfig::default()
+            },
             client: ClientConfig {
                 timeout: 60,
                 retry_interval: 0.0,
@@ -1060,10 +1091,19 @@ retry_interval = 2.0
     fn test_tls_config_defaults() {
         let tls_config = TlsConfig::default();
 
-        assert!(tls_config.client_cert.is_none());
-        assert!(tls_config.client_key.is_none());
+        assert_eq!(
+            tls_config.client_cert,
+            Some("/var/lib/keylime/cv_ca/client-cert.crt".to_string())
+        );
+        assert_eq!(
+            tls_config.client_key,
+            Some("/var/lib/keylime/cv_ca/client-private.pem".to_string())
+        );
         assert!(tls_config.client_key_password.is_none());
-        assert!(tls_config.trusted_ca.is_empty());
+        assert_eq!(
+            tls_config.trusted_ca,
+            vec!["/var/lib/keylime/cv_ca/cacert.crt".to_string()]
+        );
         assert!(tls_config.verify_server_cert);
         assert!(tls_config.enable_agent_mtls);
     }
