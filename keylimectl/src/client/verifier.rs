@@ -1098,6 +1098,11 @@ impl VerifierClient {
         self.handle_response(response).await
     }
 
+    /// Get the detected API version
+    pub fn api_version(&self) -> &str {
+        &self.api_version
+    }
+
     /// Create HTTP client with TLS configuration
     ///
     /// Initializes a reqwest HTTP client with the TLS settings specified

@@ -3,5 +3,6 @@
 
 //! Client implementations for communicating with Keylime services
 
+pub mod agent;
 pub mod registrar;
 pub mod verifier;
