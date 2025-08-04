@@ -4,6 +4,7 @@ members = [
     "keylime-agent", "keylime-macros",
     "keylime-ima-emulator",
     "keylime-push-model-agent",
+    "keylimectl",
 ]
 resolver = "2"
 
