@@ -13,9 +13,9 @@
 //!
 //! # Configuration Sources
 //!
-//! ## Configuration Files
-//! The configuration system searches for TOML files in the following order:
-//! - Explicit path provided via CLI argument
+//! ## Configuration Files (Optional)
+//! Configuration files are completely optional. The system searches for TOML files in the following order:
+//! - Explicit path provided via CLI argument (required to exist if specified)
 //! - `keylimectl.toml` (current directory)
 //! - `keylimectl.conf` (current directory)
 //! - `/etc/keylime/tenant.conf` (system-wide)
@@ -23,6 +23,8 @@
 //! - `~/.config/keylime/tenant.conf` (user-specific)
 //! - `~/.keylimectl.toml` (user-specific)
 //! - `$XDG_CONFIG_HOME/keylime/tenant.conf` (XDG standard)
+//!
+//! If no configuration files are found, keylimectl will work perfectly with defaults and environment variables.
 //!
 //! ## Environment Variables
 //! Environment variables use the prefix `KEYLIME_` with double underscores as separators:
@@ -208,6 +210,7 @@ pub struct TlsConfig {
     /// Client key password
     pub client_key_password: Option<String>,
     /// Trusted CA certificates
+    #[serde(default)]
     pub trusted_ca: Vec<String>,
     /// Verify server certificates
     pub verify_server_cert: bool,
@@ -273,27 +276,32 @@ impl Config {
     ///
     /// Loads configuration with the following precedence (highest to lowest):
     /// 1. Environment variables (KEYLIME_*)
-    /// 2. Configuration files (TOML format)
+    /// 2. Configuration files (TOML format) - **OPTIONAL**
     /// 3. Default values
+    ///
+    /// Configuration files are completely optional. If no configuration files are found,
+    /// the system will use default values combined with any environment variables.
+    /// This allows keylimectl to work out-of-the-box without requiring any configuration.
     ///
     /// # Arguments
     ///
     /// * `config_path` - Optional explicit path to configuration file.
-    ///   If None, searches standard locations.
+    ///   If None, searches standard locations. If Some() but file doesn't exist, returns error.
     ///
     /// # Returns
     ///
-    /// Returns the merged configuration or a ConfigError if loading fails.
+    /// Returns the merged configuration. Will not fail if no config files are found when
+    /// using automatic discovery (config_path = None).
     ///
     /// # Examples
     ///
     /// ```rust
     /// use keylimectl::config::Config;
     ///
-    /// // Load from standard locations
+    /// // Works with no config files - uses defaults + env vars
     /// let config = Config::load(None)?;
     ///
-    /// // Load from specific file
+    /// // Load from specific file (errors if file doesn't exist)
     /// let config = Config::load(Some("/path/to/config.toml"))?;
     /// # Ok::<(), config::ConfigError>(())
     /// ```
@@ -301,20 +309,33 @@ impl Config {
     /// # Errors
     ///
     /// Returns ConfigError if:
+    /// - Explicit configuration file path provided but file doesn't exist
     /// - Configuration file has invalid syntax
     /// - Environment variables have invalid values
-    /// - Required configuration is missing
     pub fn load(config_path: Option<&str>) -> Result<Self, ConfigError> {
         let mut builder = config::Config::builder()
             .add_source(config::Config::try_from(&Config::default())?);
 
         // Add configuration file sources
         let config_paths = Self::get_config_paths(config_path);
+        let mut config_file_found = false;
+
         for path in config_paths {
             if path.exists() {
+                config_file_found = true;
+                log::debug!("Loading config from: {}", path.display());
                 builder = builder.add_source(
                     File::from(path).format(FileFormat::Toml).required(false),
                 );
+            }
+        }
+
+        // If an explicit config path was provided but the file doesn't exist, that's an error
+        if let Some(explicit_path) = config_path {
+            if !PathBuf::from(explicit_path).exists() {
+                return Err(ConfigError::Message(format!(
+                    "Specified configuration file not found: {explicit_path}"
+                )));
             }
         }
 
@@ -326,7 +347,18 @@ impl Config {
                 .try_parsing(true),
         );
 
-        builder.build()?.try_deserialize()
+        let config = builder.build()?.try_deserialize()?;
+
+        // Log information about configuration sources used
+        if config_file_found {
+            log::debug!(
+                "Configuration loaded successfully with config files"
+            );
+        } else {
+            log::info!("No configuration files found, using defaults and environment variables");
+        }
+
+        Ok(config)
     }
 
     /// Apply command-line argument overrides
@@ -956,23 +988,35 @@ retry_interval = 2.0
     #[test]
     fn test_load_config_no_files() {
         // Test loading config when no config files exist
-        // This should succeed with defaults
+        // This should always succeed with defaults since config files are optional
         let result = Config::load(None);
 
-        // This may fail due to config crate serialization issues with empty Vec
-        // If it fails, that's actually expected behavior - let's test that
+        // Should always succeed now that config files are optional
         match result {
             Ok(config) => {
                 assert_eq!(config.verifier.ip, "127.0.0.1"); // Default value
+                assert_eq!(config.verifier.port, 8881); // Default value
+                assert_eq!(config.registrar.ip, "127.0.0.1"); // Default value
+                assert_eq!(config.registrar.port, 8891); // Default value
             }
-            Err(_) => {
-                // This is acceptable - the config crate may have issues with
-                // serializing/deserializing empty Vecs or other edge cases
-                // The important thing is that Config::default() works
-                let default_config = Config::default();
-                assert_eq!(default_config.verifier.ip, "127.0.0.1");
+            Err(e) => {
+                panic!("Config loading should succeed with no files, but got error: {e:?}");
             }
         }
+    }
+
+    #[test]
+    fn test_load_config_explicit_file_not_found() {
+        // Test that explicit config file paths are still required to exist
+        let result = Config::load(Some("/nonexistent/path/config.toml"));
+
+        assert!(
+            result.is_err(),
+            "Should error when explicit config file doesn't exist"
+        );
+        let error_msg = result.unwrap_err().to_string();
+        assert!(error_msg.contains("Specified configuration file not found"));
+        assert!(error_msg.contains("/nonexistent/path/config.toml"));
     }
 
     #[test]
