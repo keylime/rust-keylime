@@ -776,6 +776,26 @@ impl RegistrarClient {
             warn!("Server certificate verification is disabled");
         }
 
+        // Add trusted CA certificates for server verification
+        for ca_path in &config.tls.trusted_ca {
+            if std::path::Path::new(ca_path).exists() {
+                let ca_cert = std::fs::read(ca_path).with_context(|| {
+                    format!(
+                        "Failed to read trusted CA certificate: {ca_path}"
+                    )
+                })?;
+
+                let ca_cert = reqwest::Certificate::from_pem(&ca_cert)
+                    .with_context(|| {
+                        format!("Failed to parse CA certificate: {ca_path}")
+                    })?;
+
+                builder = builder.add_root_certificate(ca_cert);
+            } else {
+                warn!("Trusted CA certificate file not found: {ca_path}");
+            }
+        }
+
         // Add client certificate if configured
         if let (Some(cert_path), Some(key_path)) =
             (&config.tls.client_cert, &config.tls.client_key)
