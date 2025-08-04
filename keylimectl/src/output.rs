@@ -328,8 +328,7 @@ impl OutputHandler {
                             if results_map.len() == 1 {
                                 let (uuid, agent_data) =
                                     results_map.iter().next().unwrap();
-                                output
-                                    .push_str(&format!("Agent: {uuid}\n"));
+                                output.push_str(&format!("Agent: {uuid}\n"));
                                 output.push_str(
                                     &self.format_agent_table(agent_data),
                                 );
@@ -337,8 +336,7 @@ impl OutputHandler {
                                 // Multiple agents
                                 output.push_str("Agents:\n");
                                 for (uuid, agent_data) in results_map {
-                                    output
-                                        .push_str(&format!("  {uuid}:\n"));
+                                    output.push_str(&format!("  {uuid}:\n"));
                                     output.push_str(
                                         &self.format_agent_table_indented(
                                             agent_data,
@@ -352,13 +350,15 @@ impl OutputHandler {
                             if results_array.is_empty() {
                                 output.push_str("(no results)\n");
                             } else {
-                                for (i, item) in results_array.iter().enumerate()
+                                for (i, item) in
+                                    results_array.iter().enumerate()
                                 {
                                     if i > 0 {
                                         output.push('\n');
                                     }
-                                    output
-                                        .push_str(&self.format_table_item(item));
+                                    output.push_str(
+                                        &self.format_table_item(item),
+                                    );
                                 }
                             }
                         }
@@ -564,9 +564,7 @@ impl OutputHandler {
                 for (key, value) in map {
                     match value {
                         Value::Object(_) | Value::Array(_) => {
-                            output.push_str(&format!(
-                                "{indent_str}{key}:\n"
-                            ));
+                            output.push_str(&format!("{indent_str}{key}:\n"));
                             output.push_str(
                                 &self.value_to_yaml(value, indent + 1),
                             );
@@ -629,7 +627,8 @@ mod tests {
         assert_eq!(handler.format, Format::Json);
         assert!(!handler.quiet);
 
-        let quiet_handler = OutputHandler::new(crate::OutputFormat::Table, true);
+        let quiet_handler =
+            OutputHandler::new(crate::OutputFormat::Table, true);
         assert_eq!(quiet_handler.format, Format::Table);
         assert!(quiet_handler.quiet);
     }
@@ -654,8 +653,14 @@ mod tests {
         assert_eq!(handler.format_value_brief(&json!(null)), "null");
         assert_eq!(handler.format_value_brief(&json!([])), "[]");
         assert_eq!(handler.format_value_brief(&json!({})), "{}");
-        assert_eq!(handler.format_value_brief(&json!([1, 2, 3])), "[3 items]");
-        assert_eq!(handler.format_value_brief(&json!({"a": 1, "b": 2})), "{2 fields}");
+        assert_eq!(
+            handler.format_value_brief(&json!([1, 2, 3])),
+            "[3 items]"
+        );
+        assert_eq!(
+            handler.format_value_brief(&json!({"a": 1, "b": 2})),
+            "{2 fields}"
+        );
     }
 
     #[test]
