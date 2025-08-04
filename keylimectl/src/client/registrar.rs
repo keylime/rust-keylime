@@ -846,7 +846,7 @@ mod tests {
         let client = RegistrarClient::new(&config).unwrap();
 
         // Test that Debug trait is implemented
-        let debug_string = format!("{:?}", client);
+        let debug_string = format!("{client:?}");
         assert!(debug_string.contains("RegistrarClient"));
     }
 
