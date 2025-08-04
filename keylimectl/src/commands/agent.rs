@@ -841,7 +841,7 @@ mod tests {
 
             for uuid_str in &valid_uuids {
                 let result = Uuid::parse_str(uuid_str);
-                assert!(result.is_ok(), "UUID {} should be valid", uuid_str);
+                assert!(result.is_ok(), "UUID {uuid_str} should be valid");
             }
         }
 
@@ -859,11 +859,7 @@ mod tests {
 
             for uuid_str in &invalid_uuids {
                 let result = Uuid::parse_str(uuid_str);
-                assert!(
-                    result.is_err(),
-                    "UUID {} should be invalid",
-                    uuid_str
-                );
+                assert!(result.is_err(), "UUID {uuid_str} should be invalid");
             }
         }
     }
