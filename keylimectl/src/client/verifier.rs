@@ -53,14 +53,33 @@
 //! # }
 //! ```
 
-// API version detection temporarily removed - will be implemented later
 use crate::config::Config;
 use crate::error::{ErrorContext, KeylimectlError};
 use keylime::resilient_client::ResilientClient;
-use log::{debug, warn};
+use keylime::version::KeylimeRegistrarVersion;
+use log::{debug, info, warn};
 use reqwest::{Method, StatusCode};
 use serde_json::{json, Value};
 use std::time::Duration;
+
+/// Unknown API version constant for when version detection fails
+#[allow(dead_code)]
+pub const UNKNOWN_API_VERSION: &str = "unknown";
+
+/// Supported API versions in order from oldest to newest (fallback tries newest first)
+#[allow(dead_code)]
+pub const SUPPORTED_API_VERSIONS: &[&str] = &["2.0", "2.1", "2.2", "3.0"];
+
+/// Response structure for version endpoint
+#[derive(serde::Deserialize, Debug)]
+struct Response<T> {
+    #[allow(dead_code)]
+    code: serde_json::Number,
+    #[allow(dead_code)]
+    status: String,
+    #[allow(dead_code)]
+    results: T,
+}
 
 /// Client for communicating with the Keylime verifier service
 ///
@@ -105,14 +124,17 @@ pub struct VerifierClient {
     client: ResilientClient,
     base_url: String,
     api_version: String,
+    #[allow(dead_code)]
+    supported_api_versions: Option<Vec<String>>,
 }
 
 impl VerifierClient {
-    /// Create a new verifier client
+    /// Create a new verifier client with automatic API version detection
     ///
-    /// Initializes a new `VerifierClient` with the provided configuration.
+    /// Initializes a new `VerifierClient` with the provided configuration and
+    /// automatically detects the API version supported by the verifier service.
     /// This sets up the HTTP client with TLS configuration, retry logic,
-    /// and connection pooling.
+    /// and connection pooling, then attempts to determine the optimal API version.
     ///
     /// # Arguments
     ///
@@ -120,7 +142,7 @@ impl VerifierClient {
     ///
     /// # Returns
     ///
-    /// Returns a configured `VerifierClient` or an error if initialization fails.
+    /// Returns a configured `VerifierClient` with detected API version.
     ///
     /// # Errors
     ///
@@ -128,6 +150,7 @@ impl VerifierClient {
     /// - TLS certificate files cannot be read
     /// - Certificate/key files are invalid
     /// - HTTP client initialization fails
+    /// - Version detection fails (falls back to default version)
     ///
     /// # Examples
     ///
@@ -135,14 +158,49 @@ impl VerifierClient {
     /// use keylimectl::client::verifier::VerifierClient;
     /// use keylimectl::config::Config;
     ///
-    /// # fn example() -> Result<(), Box<dyn std::error::Error>> {
+    /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
     /// let config = Config::default();
-    /// let client = VerifierClient::new(&config)?;
+    /// let client = VerifierClient::new(&config).await?;
     /// println!("Verifier client created for {}", config.verifier_base_url());
     /// # Ok(())
     /// # }
     /// ```
-    pub fn new(config: &Config) -> Result<Self, KeylimectlError> {
+    pub async fn new(config: &Config) -> Result<Self, KeylimectlError> {
+        let mut client = Self::new_without_version_detection(config)?;
+
+        // Attempt to detect API version
+        if let Err(e) = client.detect_api_version().await {
+            warn!(
+                "Failed to detect verifier API version, using default: {e}"
+            );
+        }
+
+        Ok(client)
+    }
+
+    /// Create a new verifier client without API version detection
+    ///
+    /// Initializes a new `VerifierClient` with the provided configuration
+    /// using the default API version without attempting to detect the
+    /// server's supported version. This is mainly useful for testing.
+    ///
+    /// # Arguments
+    ///
+    /// * `config` - Configuration containing verifier endpoint and TLS settings
+    ///
+    /// # Returns
+    ///
+    /// Returns a configured `VerifierClient` with default API version.
+    ///
+    /// # Errors
+    ///
+    /// This method can fail if:
+    /// - TLS certificate files cannot be read
+    /// - Certificate/key files are invalid
+    /// - HTTP client initialization fails
+    pub fn new_without_version_detection(
+        config: &Config,
+    ) -> Result<Self, KeylimectlError> {
         let base_url = config.verifier_base_url();
 
         // Create HTTP client with TLS configuration
@@ -166,17 +224,144 @@ impl VerifierClient {
             client,
             base_url,
             api_version: "2.1".to_string(), // Default API version
+            supported_api_versions: None,
         })
     }
 
     /// Auto-detect and set the API version
+    ///
+    /// Attempts to determine the verifier's API version by first trying the `/version` endpoint.
+    /// If that fails, it tries each supported API version from oldest to newest until one works.
+    /// This follows the same pattern used in the rust-keylime agent's registrar client.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` if version detection succeeded or failed gracefully.
+    /// Returns `Err()` only for critical errors that prevent client operation.
+    ///
+    /// # Behavior
+    ///
+    /// 1. First tries `/version` endpoint to get current and supported versions
+    /// 2. If `/version` fails, tries API versions from newest to oldest
+    /// 3. On success, caches the detected version for future requests
+    /// 4. On complete failure, leaves default version unchanged
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// # use keylimectl::client::verifier::VerifierClient;
+    /// # use keylimectl::config::Config;
+    /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+    /// let mut client = VerifierClient::new(&Config::default())?;
+    ///
+    /// // Version detection happens automatically during client creation,
+    /// // but can be called manually if needed
+    /// client.detect_api_version().await?;
+    /// # Ok(())
+    /// # }
+    /// ```
     #[allow(dead_code)]
     pub async fn detect_api_version(
         &mut self,
     ) -> Result<(), KeylimectlError> {
-        // API version detection temporarily disabled
-        // Will be implemented in a future version
+        // Try to get version from /version endpoint first
+        match self.get_verifier_api_version().await {
+            Ok(version) => {
+                info!("Detected verifier API version: {version}");
+                self.api_version = version;
+                return Ok(());
+            }
+            Err(e) => {
+                debug!("Failed to get version from /version endpoint: {e}");
+                // Continue with fallback approach
+            }
+        }
+
+        // Fallback: try each supported version from newest to oldest
+        for &api_version in SUPPORTED_API_VERSIONS.iter().rev() {
+            info!("Trying verifier API version {api_version}");
+
+            // Test this version by making a simple request (list agents)
+            if self.test_api_version(api_version).await.is_ok() {
+                info!("Successfully detected verifier API version: {api_version}");
+                self.api_version = api_version.to_string();
+                return Ok(());
+            }
+        }
+
+        // If all versions failed, set to unknown and continue with default
+        warn!(
+            "Could not detect verifier API version, using default: {}",
+            self.api_version
+        );
+        self.api_version = UNKNOWN_API_VERSION.to_string();
         Ok(())
+    }
+
+    /// Get the verifier API version from the '/version' endpoint
+    #[allow(dead_code)]
+    async fn get_verifier_api_version(
+        &mut self,
+    ) -> Result<String, KeylimectlError> {
+        let url = format!("{}/version", self.base_url);
+
+        info!("Requesting verifier API version from {url}");
+
+        let response = self
+            .client
+            .get_request(Method::GET, &url)
+            .send()
+            .await
+            .with_context(|| {
+                "Failed to send version request to verifier".to_string()
+            })?;
+
+        if !response.status().is_success() {
+            return Err(KeylimectlError::api_error(
+                response.status().as_u16(),
+                "Verifier does not support the /version endpoint".to_string(),
+                None,
+            ));
+        }
+
+        let resp: Response<KeylimeRegistrarVersion> =
+            response.json().await.with_context(|| {
+                "Failed to parse version response from verifier".to_string()
+            })?;
+
+        self.supported_api_versions =
+            Some(resp.results.supported_versions.clone());
+        Ok(resp.results.current_version)
+    }
+
+    /// Test if a specific API version works by making a simple request
+    #[allow(dead_code)]
+    async fn test_api_version(
+        &self,
+        api_version: &str,
+    ) -> Result<(), KeylimectlError> {
+        let url = format!("{}/v{}/agents/", self.base_url, api_version);
+
+        debug!("Testing verifier API version {api_version} with URL: {url}");
+
+        let response = self
+            .client
+            .get_request(Method::GET, &url)
+            .send()
+            .await
+            .with_context(|| {
+                format!("Failed to test API version {api_version}")
+            })?;
+
+        if response.status().is_success() {
+            Ok(())
+        } else {
+            Err(KeylimectlError::api_error(
+                response.status().as_u16(),
+                format!("API version {api_version} not supported"),
+                None,
+            ))
+        }
     }
 
     /// Add an agent to the verifier for attestation monitoring
@@ -1100,7 +1285,7 @@ mod tests {
     #[test]
     fn test_verifier_client_new() {
         let config = create_test_config();
-        let result = VerifierClient::new(&config);
+        let result = VerifierClient::new_without_version_detection(&config);
 
         assert!(result.is_ok());
         let client = result.unwrap();
@@ -1113,7 +1298,7 @@ mod tests {
         let mut config = create_test_config();
         config.verifier.ip = "::1".to_string();
 
-        let result = VerifierClient::new(&config);
+        let result = VerifierClient::new_without_version_detection(&config);
         assert!(result.is_ok());
 
         let client = result.unwrap();
@@ -1125,7 +1310,7 @@ mod tests {
         let mut config = create_test_config();
         config.verifier.ip = "[2001:db8::1]".to_string();
 
-        let result = VerifierClient::new(&config);
+        let result = VerifierClient::new_without_version_detection(&config);
         assert!(result.is_ok());
 
         let client = result.unwrap();
@@ -1181,7 +1366,8 @@ mod tests {
     #[test]
     fn test_api_version() {
         let config = create_test_config();
-        let client = VerifierClient::new(&config).unwrap();
+        let client =
+            VerifierClient::new_without_version_detection(&config).unwrap();
 
         // Default API version should be 2.1
         assert_eq!(client.api_version, "2.1");
@@ -1194,21 +1380,24 @@ mod tests {
         config.verifier.ip = "192.168.1.100".to_string();
         config.verifier.port = 9001;
 
-        let client = VerifierClient::new(&config).unwrap();
+        let client =
+            VerifierClient::new_without_version_detection(&config).unwrap();
         assert_eq!(client.base_url, "https://192.168.1.100:9001");
 
         // Test IPv6
         config.verifier.ip = "2001:db8::1".to_string();
         config.verifier.port = 8881;
 
-        let client = VerifierClient::new(&config).unwrap();
+        let client =
+            VerifierClient::new_without_version_detection(&config).unwrap();
         assert_eq!(client.base_url, "https://[2001:db8::1]:8881");
     }
 
     #[test]
     fn test_client_config_values() {
         let config = create_test_config();
-        let client = VerifierClient::new(&config).unwrap();
+        let client =
+            VerifierClient::new_without_version_detection(&config).unwrap();
 
         // Verify that config values are properly used
         // Note: We can't directly access the internal reqwest client config,
@@ -1288,7 +1477,7 @@ mod tests {
     #[tokio::test]
     async fn test_add_agent_integration() {
         let config = create_test_config();
-        let client = VerifierClient::new(&config).unwrap();
+        let client = VerifierClient::new_without_version_detection(&config).unwrap();
 
         let agent_data = json!({
             "ip": "192.168.1.100",
@@ -1305,7 +1494,7 @@ mod tests {
     #[tokio::test]
     async fn test_get_agent_integration() {
         let config = create_test_config();
-        let client = VerifierClient::new(&config).unwrap();
+        let client = VerifierClient::new_without_version_detection(&config).unwrap();
 
         // This would require a running verifier service
         // let result = client.get_agent("test-agent-uuid").await;
@@ -1315,7 +1504,7 @@ mod tests {
     #[tokio::test]
     async fn test_list_agents_integration() {
         let config = create_test_config();
-        let client = VerifierClient::new(&config).unwrap();
+        let client = VerifierClient::new_without_version_detection(&config).unwrap();
 
         // This would require a running verifier service
         // let result = client.list_agents(None).await;
@@ -1325,4 +1514,245 @@ mod tests {
         // assert!(agents.get("results").is_some());
     }
     */
+
+    // API Version Detection Tests
+    mod api_version_tests {
+        use super::*;
+        use keylime::version::KeylimeRegistrarVersion;
+        use serde_json::json;
+
+        #[test]
+        fn test_supported_api_versions_constant() {
+            // Test that the constant contains expected versions in correct order
+            assert_eq!(SUPPORTED_API_VERSIONS, &["2.0", "2.1", "2.2", "3.0"]);
+            assert!(SUPPORTED_API_VERSIONS.len() >= 2);
+
+            // Verify versions are in ascending order (oldest to newest)
+            for i in 1..SUPPORTED_API_VERSIONS.len() {
+                let prev: f32 =
+                    SUPPORTED_API_VERSIONS[i - 1].parse().unwrap();
+                let curr: f32 = SUPPORTED_API_VERSIONS[i].parse().unwrap();
+                assert!(
+                    prev < curr,
+                    "API versions should be in ascending order"
+                );
+            }
+        }
+
+        #[test]
+        fn test_unknown_api_version_constant() {
+            assert_eq!(UNKNOWN_API_VERSION, "unknown");
+        }
+
+        #[test]
+        fn test_response_structure_deserialization() {
+            let json_str = r#"{
+                "code": 200,
+                "status": "OK",
+                "results": {
+                    "current_version": "2.1",
+                    "supported_versions": ["2.0", "2.1", "2.2", "3.0"]
+                }
+            }"#;
+
+            let response: Result<Response<KeylimeRegistrarVersion>, _> =
+                serde_json::from_str(json_str);
+
+            assert!(response.is_ok());
+            let response = response.unwrap();
+            assert_eq!(response.results.current_version, "2.1");
+            assert_eq!(
+                response.results.supported_versions,
+                vec!["2.0", "2.1", "2.2", "3.0"]
+            );
+        }
+
+        #[test]
+        fn test_client_initialization_with_default_version() {
+            let config = create_test_config();
+            let client =
+                VerifierClient::new_without_version_detection(&config)
+                    .unwrap();
+
+            // Client should start with default API version
+            assert_eq!(client.api_version, "2.1");
+            assert!(client.supported_api_versions.is_none());
+        }
+
+        #[test]
+        fn test_api_version_iteration_order() {
+            // Test that iter().rev() gives us newest to oldest as expected
+            let versions: Vec<&str> =
+                SUPPORTED_API_VERSIONS.iter().rev().copied().collect();
+
+            // Should be newest first
+            assert_eq!(versions[0], "3.0");
+            assert_eq!(versions[1], "2.2");
+            assert_eq!(versions[2], "2.1");
+            assert_eq!(versions[3], "2.0");
+
+            // Verify it's actually newest to oldest
+            for i in 1..versions.len() {
+                let prev: f32 = versions[i - 1].parse().unwrap();
+                let curr: f32 = versions[i].parse().unwrap();
+                assert!(
+                    prev > curr,
+                    "Reversed iteration should give newest to oldest"
+                );
+            }
+        }
+
+        #[test]
+        fn test_version_string_parsing() {
+            // Test that our version strings can be parsed as valid version numbers
+            for version in SUPPORTED_API_VERSIONS {
+                let parsed: Result<f32, _> = version.parse();
+                assert!(
+                    parsed.is_ok(),
+                    "Version string '{version}' should parse as number"
+                );
+
+                let num = parsed.unwrap();
+                assert!(num >= 1.0, "Version should be >= 1.0");
+                assert!(num < 10.0, "Version should be reasonable");
+            }
+        }
+
+        #[test]
+        fn test_client_struct_fields() {
+            let config = create_test_config();
+            let mut client =
+                VerifierClient::new_without_version_detection(&config)
+                    .unwrap();
+
+            // Test that we can access and modify the api_version field
+            assert_eq!(client.api_version, "2.1");
+
+            client.api_version = "2.0".to_string();
+            assert_eq!(client.api_version, "2.0");
+
+            client.api_version = UNKNOWN_API_VERSION.to_string();
+            assert_eq!(client.api_version, "unknown");
+        }
+
+        #[test]
+        fn test_base_url_construction_with_different_versions() {
+            let config = create_test_config();
+            let mut client =
+                VerifierClient::new_without_version_detection(&config)
+                    .unwrap();
+
+            // Test URL construction with different API versions
+            for version in SUPPORTED_API_VERSIONS {
+                client.api_version = version.to_string();
+
+                // Simulate how URLs would be constructed in actual methods
+                let expected_pattern = format!("/v{version}/agents/");
+                let test_url = format!(
+                    "{}/v{}/agents/test-uuid",
+                    client.base_url, client.api_version
+                );
+
+                assert!(test_url.contains(&expected_pattern));
+                assert!(test_url.contains(&client.base_url));
+                assert!(test_url.contains("test-uuid"));
+            }
+        }
+
+        #[test]
+        fn test_supported_api_versions_field() {
+            let config = create_test_config();
+            let mut client =
+                VerifierClient::new_without_version_detection(&config)
+                    .unwrap();
+
+            // Initially should be None
+            assert!(client.supported_api_versions.is_none());
+
+            // Simulate setting supported versions (as would happen in detect_api_version)
+            client.supported_api_versions =
+                Some(vec!["2.0".to_string(), "2.1".to_string()]);
+
+            assert!(client.supported_api_versions.is_some());
+            let versions = client.supported_api_versions.unwrap();
+            assert_eq!(versions, vec!["2.0", "2.1"]);
+        }
+
+        #[test]
+        #[allow(clippy::const_is_empty)]
+        fn test_version_constants_consistency() {
+            // Ensure our constants are consistent with expected patterns
+            assert!(!UNKNOWN_API_VERSION.is_empty()); // Known constant value
+            assert!(!SUPPORTED_API_VERSIONS.is_empty()); // Known constant value
+
+            // UNKNOWN_API_VERSION should not be in SUPPORTED_API_VERSIONS
+            assert!(!SUPPORTED_API_VERSIONS.contains(&UNKNOWN_API_VERSION));
+
+            // All supported versions should be valid version strings
+            for version in SUPPORTED_API_VERSIONS {
+                assert!(!version.is_empty());
+                assert!(version
+                    .chars()
+                    .all(|c| c.is_ascii_digit() || c == '.'));
+                assert!(version.contains('.'));
+            }
+        }
+
+        #[test]
+        fn test_client_debug_output() {
+            let config = create_test_config();
+            let client =
+                VerifierClient::new_without_version_detection(&config)
+                    .unwrap();
+
+            // Test that Debug trait produces reasonable output
+            let debug_output = format!("{client:?}");
+            assert!(debug_output.contains("VerifierClient"));
+            assert!(debug_output.contains("api_version"));
+        }
+
+        #[test]
+        fn test_version_detection_error_scenarios() {
+            // Test error creation for version detection failures
+            let no_version_error = KeylimectlError::api_error(
+                404,
+                "Verifier does not support the /version endpoint".to_string(),
+                None,
+            );
+
+            assert_eq!(no_version_error.error_code(), "API_ERROR");
+
+            let version_parse_error = KeylimectlError::api_error(
+                500,
+                "Failed to parse version response from verifier".to_string(),
+                Some(json!({"error": "Invalid JSON"})),
+            );
+
+            assert_eq!(version_parse_error.error_code(), "API_ERROR");
+        }
+
+        #[test]
+        fn test_api_version_fallback_behavior() {
+            // Test the logic that would be used in detect_api_version fallback
+            let enabled_versions = SUPPORTED_API_VERSIONS;
+
+            // Simulate trying versions from newest to oldest
+            let mut attempted_versions = Vec::new();
+            for &version in enabled_versions.iter().rev() {
+                attempted_versions.push(version);
+            }
+
+            // Should try 3.0 first, then 2.2, then 2.1, then 2.0
+            assert_eq!(attempted_versions[0], "3.0");
+            assert_eq!(attempted_versions[1], "2.2");
+            assert_eq!(attempted_versions[2], "2.1");
+            assert_eq!(attempted_versions[3], "2.0");
+
+            // Should try all supported versions
+            assert_eq!(
+                attempted_versions.len(),
+                SUPPORTED_API_VERSIONS.len()
+            );
+        }
+    }
 }

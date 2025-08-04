@@ -212,7 +212,7 @@ async fn create_mb_policy(
         // TODO: Add other measured boot policy-related fields as needed
     });
 
-    let verifier_client = VerifierClient::new(config)?;
+    let verifier_client = VerifierClient::new(config).await?;
     let response = verifier_client
         .add_mb_policy(name, policy_data)
         .await
@@ -240,7 +240,7 @@ async fn show_mb_policy(
 ) -> Result<Value, KeylimectlError> {
     output.info(format!("Retrieving measured boot policy '{name}'"));
 
-    let verifier_client = VerifierClient::new(config)?;
+    let verifier_client = VerifierClient::new(config).await?;
     let policy =
         verifier_client.get_mb_policy(name).await.with_context(|| {
             format!("Failed to retrieve measured boot policy '{name}'")
@@ -290,7 +290,7 @@ async fn update_mb_policy(
         // TODO: Add other measured boot policy-related fields as needed
     });
 
-    let verifier_client = VerifierClient::new(config)?;
+    let verifier_client = VerifierClient::new(config).await?;
     let response = verifier_client
         .update_mb_policy(name, policy_data)
         .await
@@ -318,7 +318,7 @@ async fn delete_mb_policy(
 ) -> Result<Value, KeylimectlError> {
     output.info(format!("Deleting measured boot policy '{name}'"));
 
-    let verifier_client = VerifierClient::new(config)?;
+    let verifier_client = VerifierClient::new(config).await?;
     let response = verifier_client
         .delete_mb_policy(name)
         .await

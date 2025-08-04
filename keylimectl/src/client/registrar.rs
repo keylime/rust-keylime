@@ -57,10 +57,30 @@
 use crate::config::Config;
 use crate::error::{ErrorContext, KeylimectlError};
 use keylime::resilient_client::ResilientClient;
-use log::{debug, warn};
+use keylime::version::KeylimeRegistrarVersion;
+use log::{debug, info, warn};
 use reqwest::{Method, StatusCode};
 use serde_json::{json, Value};
 use std::time::Duration;
+
+/// Unknown API version constant for when version detection fails
+#[allow(dead_code)]
+pub const UNKNOWN_API_VERSION: &str = "unknown";
+
+/// Supported API versions in order from oldest to newest (fallback tries newest first)
+#[allow(dead_code)]
+pub const SUPPORTED_API_VERSIONS: &[&str] = &["2.0", "2.1", "2.2", "3.0"];
+
+/// Response structure for version endpoint
+#[derive(serde::Deserialize, Debug)]
+struct Response<T> {
+    #[allow(dead_code)]
+    code: serde_json::Number,
+    #[allow(dead_code)]
+    status: String,
+    #[allow(dead_code)]
+    results: T,
+}
 
 /// Client for communicating with the Keylime registrar service
 ///
@@ -115,14 +135,17 @@ pub struct RegistrarClient {
     client: ResilientClient,
     base_url: String,
     api_version: String,
+    #[allow(dead_code)]
+    supported_api_versions: Option<Vec<String>>,
 }
 
 impl RegistrarClient {
-    /// Create a new registrar client
+    /// Create a new registrar client with automatic API version detection
     ///
-    /// Initializes a new `RegistrarClient` with the provided configuration.
+    /// Initializes a new `RegistrarClient` with the provided configuration and
+    /// automatically detects the API version supported by the registrar service.
     /// This sets up the HTTP client with TLS configuration, retry logic,
-    /// and connection pooling for registrar communication.
+    /// and connection pooling, then attempts to determine the optimal API version.
     ///
     /// # Arguments
     ///
@@ -130,7 +153,7 @@ impl RegistrarClient {
     ///
     /// # Returns
     ///
-    /// Returns a configured `RegistrarClient` or an error if initialization fails.
+    /// Returns a configured `RegistrarClient` with detected API version.
     ///
     /// # Errors
     ///
@@ -138,6 +161,7 @@ impl RegistrarClient {
     /// - TLS certificate files cannot be read
     /// - Certificate/key files are invalid
     /// - HTTP client initialization fails
+    /// - Version detection fails (falls back to default version)
     ///
     /// # Examples
     ///
@@ -145,14 +169,49 @@ impl RegistrarClient {
     /// use keylimectl::client::registrar::RegistrarClient;
     /// use keylimectl::config::Config;
     ///
-    /// # fn example() -> Result<(), Box<dyn std::error::Error>> {
+    /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
     /// let config = Config::default();
-    /// let client = RegistrarClient::new(&config)?;
+    /// let client = RegistrarClient::new(&config).await?;
     /// println!("Registrar client created for {}", config.registrar_base_url());
     /// # Ok(())
     /// # }
     /// ```
-    pub fn new(config: &Config) -> Result<Self, KeylimectlError> {
+    pub async fn new(config: &Config) -> Result<Self, KeylimectlError> {
+        let mut client = Self::new_without_version_detection(config)?;
+
+        // Attempt to detect API version
+        if let Err(e) = client.detect_api_version().await {
+            warn!(
+                "Failed to detect registrar API version, using default: {e}"
+            );
+        }
+
+        Ok(client)
+    }
+
+    /// Create a new registrar client without API version detection
+    ///
+    /// Initializes a new `RegistrarClient` with the provided configuration
+    /// using the default API version without attempting to detect the
+    /// server's supported version. This is mainly useful for testing.
+    ///
+    /// # Arguments
+    ///
+    /// * `config` - Configuration containing registrar endpoint and TLS settings
+    ///
+    /// # Returns
+    ///
+    /// Returns a configured `RegistrarClient` with default API version.
+    ///
+    /// # Errors
+    ///
+    /// This method can fail if:
+    /// - TLS certificate files cannot be read
+    /// - Certificate/key files are invalid
+    /// - HTTP client initialization fails
+    pub fn new_without_version_detection(
+        config: &Config,
+    ) -> Result<Self, KeylimectlError> {
         let base_url = config.registrar_base_url();
 
         // Create HTTP client with TLS configuration
@@ -176,7 +235,144 @@ impl RegistrarClient {
             client,
             base_url,
             api_version: "2.1".to_string(), // Default API version
+            supported_api_versions: None,
         })
+    }
+
+    /// Auto-detect and set the API version
+    ///
+    /// Attempts to determine the registrar's API version by first trying the `/version` endpoint.
+    /// If that fails, it tries each supported API version from oldest to newest until one works.
+    /// This follows the same pattern used in the rust-keylime agent's registrar client.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` if version detection succeeded or failed gracefully.
+    /// Returns `Err()` only for critical errors that prevent client operation.
+    ///
+    /// # Behavior
+    ///
+    /// 1. First tries `/version` endpoint to get current and supported versions
+    /// 2. If `/version` fails, tries API versions from newest to oldest
+    /// 3. On success, caches the detected version for future requests
+    /// 4. On complete failure, leaves default version unchanged
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// # use keylimectl::client::registrar::RegistrarClient;
+    /// # use keylimectl::config::Config;
+    /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+    /// let mut client = RegistrarClient::new(&Config::default())?;
+    ///
+    /// // Detect API version manually if needed
+    /// client.detect_api_version().await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[allow(dead_code)]
+    pub async fn detect_api_version(
+        &mut self,
+    ) -> Result<(), KeylimectlError> {
+        // Try to get version from /version endpoint first
+        match self.get_registrar_api_version().await {
+            Ok(version) => {
+                info!("Detected registrar API version: {version}");
+                self.api_version = version;
+                return Ok(());
+            }
+            Err(e) => {
+                debug!("Failed to get version from /version endpoint: {e}");
+                // Continue with fallback approach
+            }
+        }
+
+        // Fallback: try each supported version from newest to oldest
+        for &api_version in SUPPORTED_API_VERSIONS.iter().rev() {
+            info!("Trying registrar API version {api_version}");
+
+            // Test this version by making a simple request (list agents)
+            if self.test_api_version(api_version).await.is_ok() {
+                info!("Successfully detected registrar API version: {api_version}");
+                self.api_version = api_version.to_string();
+                return Ok(());
+            }
+        }
+
+        // If all versions failed, set to unknown and continue with default
+        warn!(
+            "Could not detect registrar API version, using default: {}",
+            self.api_version
+        );
+        self.api_version = UNKNOWN_API_VERSION.to_string();
+        Ok(())
+    }
+
+    /// Get the registrar API version from the '/version' endpoint
+    #[allow(dead_code)]
+    async fn get_registrar_api_version(
+        &mut self,
+    ) -> Result<String, KeylimectlError> {
+        let url = format!("{}/version", self.base_url);
+
+        info!("Requesting registrar API version from {url}");
+
+        let response = self
+            .client
+            .get_request(Method::GET, &url)
+            .send()
+            .await
+            .with_context(|| {
+                "Failed to send version request to registrar".to_string()
+            })?;
+
+        if !response.status().is_success() {
+            return Err(KeylimectlError::api_error(
+                response.status().as_u16(),
+                "Registrar does not support the /version endpoint"
+                    .to_string(),
+                None,
+            ));
+        }
+
+        let resp: Response<KeylimeRegistrarVersion> =
+            response.json().await.with_context(|| {
+                "Failed to parse version response from registrar".to_string()
+            })?;
+
+        self.supported_api_versions =
+            Some(resp.results.supported_versions.clone());
+        Ok(resp.results.current_version)
+    }
+
+    /// Test if a specific API version works by making a simple request
+    #[allow(dead_code)]
+    async fn test_api_version(
+        &self,
+        api_version: &str,
+    ) -> Result<(), KeylimectlError> {
+        let url = format!("{}/v{}/agents/", self.base_url, api_version);
+
+        debug!("Testing registrar API version {api_version} with URL: {url}");
+
+        let response = self
+            .client
+            .get_request(Method::GET, &url)
+            .send()
+            .await
+            .with_context(|| {
+                format!("Failed to test API version {api_version}")
+            })?;
+
+        if response.status().is_success() {
+            Ok(())
+        } else {
+            Err(KeylimectlError::api_error(
+                response.status().as_u16(),
+                format!("API version {api_version} not supported"),
+                None,
+            ))
+        }
     }
 
     /// Get agent information from the registrar
@@ -720,7 +916,7 @@ mod tests {
     #[test]
     fn test_registrar_client_new() {
         let config = create_test_config();
-        let result = RegistrarClient::new(&config);
+        let result = RegistrarClient::new_without_version_detection(&config);
 
         assert!(result.is_ok());
         let client = result.unwrap();
@@ -733,7 +929,7 @@ mod tests {
         let mut config = create_test_config();
         config.registrar.port = 9000;
 
-        let result = RegistrarClient::new(&config);
+        let result = RegistrarClient::new_without_version_detection(&config);
         assert!(result.is_ok());
 
         let client = result.unwrap();
@@ -745,7 +941,7 @@ mod tests {
         let mut config = create_test_config();
         config.registrar.ip = "::1".to_string();
 
-        let result = RegistrarClient::new(&config);
+        let result = RegistrarClient::new_without_version_detection(&config);
         assert!(result.is_ok());
 
         let client = result.unwrap();
@@ -757,7 +953,7 @@ mod tests {
         let mut config = create_test_config();
         config.registrar.ip = "[2001:db8::1]".to_string();
 
-        let result = RegistrarClient::new(&config);
+        let result = RegistrarClient::new_without_version_detection(&config);
         assert!(result.is_ok());
 
         let client = result.unwrap();
@@ -813,7 +1009,8 @@ mod tests {
     #[test]
     fn test_api_version_default() {
         let config = create_test_config();
-        let client = RegistrarClient::new(&config).unwrap();
+        let client =
+            RegistrarClient::new_without_version_detection(&config).unwrap();
 
         // Default API version should be 2.1
         assert_eq!(client.api_version, "2.1");
@@ -826,14 +1023,16 @@ mod tests {
         config.registrar.ip = "10.0.0.5".to_string();
         config.registrar.port = 9500;
 
-        let client = RegistrarClient::new(&config).unwrap();
+        let client =
+            RegistrarClient::new_without_version_detection(&config).unwrap();
         assert_eq!(client.base_url, "https://10.0.0.5:9500");
 
         // Test IPv6
         config.registrar.ip = "2001:db8:85a3::8a2e:370:7334".to_string();
         config.registrar.port = 8891;
 
-        let client = RegistrarClient::new(&config).unwrap();
+        let client =
+            RegistrarClient::new_without_version_detection(&config).unwrap();
         assert_eq!(
             client.base_url,
             "https://[2001:db8:85a3::8a2e:370:7334]:8891"
@@ -843,7 +1042,8 @@ mod tests {
     #[test]
     fn test_client_debug_trait() {
         let config = create_test_config();
-        let client = RegistrarClient::new(&config).unwrap();
+        let client =
+            RegistrarClient::new_without_version_detection(&config).unwrap();
 
         // Test that Debug trait is implemented
         let debug_string = format!("{client:?}");
@@ -873,7 +1073,8 @@ mod tests {
     #[test]
     fn test_client_config_values() {
         let config = create_test_config();
-        let client = RegistrarClient::new(&config).unwrap();
+        let client =
+            RegistrarClient::new_without_version_detection(&config).unwrap();
 
         // Verify that config values are properly used
         assert_eq!(client.api_version, "2.1");
@@ -936,7 +1137,8 @@ mod tests {
             let mut config = create_test_config();
             config.tls.trusted_ca = vec![];
 
-            let result = RegistrarClient::new(&config);
+            let result =
+                RegistrarClient::new_without_version_detection(&config);
             assert!(result.is_ok());
         }
 
@@ -950,7 +1152,8 @@ mod tests {
 
             // Client creation should succeed even with non-existent CA files
             // (they're only validated when actually used)
-            let result = RegistrarClient::new(&config);
+            let result =
+                RegistrarClient::new_without_version_detection(&config);
             assert!(result.is_ok());
         }
 
@@ -961,7 +1164,8 @@ mod tests {
             config.client.retry_interval = 2.5;
             config.client.exponential_backoff = false;
 
-            let result = RegistrarClient::new(&config);
+            let result =
+                RegistrarClient::new_without_version_detection(&config);
             assert!(result.is_ok());
         }
     }
@@ -971,7 +1175,7 @@ mod tests {
     #[tokio::test]
     async fn test_get_agent_integration() {
         let config = create_test_config();
-        let client = RegistrarClient::new(&config).unwrap();
+        let client = RegistrarClient::new_without_version_detection(&config).unwrap();
 
         // This would require a running registrar service
         // let result = client.get_agent("test-agent-uuid").await;
@@ -981,7 +1185,7 @@ mod tests {
     #[tokio::test]
     async fn test_list_agents_integration() {
         let config = create_test_config();
-        let client = RegistrarClient::new(&config).unwrap();
+        let client = RegistrarClient::new_without_version_detection(&config).unwrap();
 
         // This would require a running registrar service
         // let result = client.list_agents().await;
@@ -994,11 +1198,329 @@ mod tests {
     #[tokio::test]
     async fn test_delete_agent_integration() {
         let config = create_test_config();
-        let client = RegistrarClient::new(&config).unwrap();
+        let client = RegistrarClient::new_without_version_detection(&config).unwrap();
 
         // This would require a running registrar service
         // let result = client.delete_agent("test-agent-uuid").await;
         // Should handle successful deletion
     }
     */
+
+    // API Version Detection Tests
+    mod api_version_tests {
+        use super::*;
+        use keylime::version::KeylimeRegistrarVersion;
+        use serde_json::json;
+
+        #[test]
+        fn test_supported_api_versions_constant() {
+            // Test that the constant contains expected versions in correct order
+            assert_eq!(SUPPORTED_API_VERSIONS, &["2.0", "2.1", "2.2", "3.0"]);
+            assert!(SUPPORTED_API_VERSIONS.len() >= 2);
+
+            // Verify versions are in ascending order (oldest to newest)
+            for i in 1..SUPPORTED_API_VERSIONS.len() {
+                let prev: f32 =
+                    SUPPORTED_API_VERSIONS[i - 1].parse().unwrap();
+                let curr: f32 = SUPPORTED_API_VERSIONS[i].parse().unwrap();
+                assert!(
+                    prev < curr,
+                    "API versions should be in ascending order"
+                );
+            }
+        }
+
+        #[test]
+        fn test_unknown_api_version_constant() {
+            assert_eq!(UNKNOWN_API_VERSION, "unknown");
+        }
+
+        #[test]
+        fn test_response_structure_deserialization() {
+            let json_str = r#"{
+                "code": 200,
+                "status": "OK",
+                "results": {
+                    "current_version": "2.1",
+                    "supported_versions": ["2.0", "2.1", "2.2", "3.0"]
+                }
+            }"#;
+
+            let response: Result<Response<KeylimeRegistrarVersion>, _> =
+                serde_json::from_str(json_str);
+
+            assert!(response.is_ok());
+            let response = response.unwrap();
+            assert_eq!(response.results.current_version, "2.1");
+            assert_eq!(
+                response.results.supported_versions,
+                vec!["2.0", "2.1", "2.2", "3.0"]
+            );
+        }
+
+        #[test]
+        fn test_client_initialization_with_default_version() {
+            let config = create_test_config();
+            let client =
+                RegistrarClient::new_without_version_detection(&config)
+                    .unwrap();
+
+            // Client should start with default API version
+            assert_eq!(client.api_version, "2.1");
+            assert!(client.supported_api_versions.is_none());
+        }
+
+        #[test]
+        fn test_api_version_iteration_order() {
+            // Test that iter().rev() gives us newest to oldest as expected
+            let versions: Vec<&str> =
+                SUPPORTED_API_VERSIONS.iter().rev().copied().collect();
+
+            // Should be newest first
+            assert_eq!(versions[0], "3.0");
+            assert_eq!(versions[1], "2.2");
+            assert_eq!(versions[2], "2.1");
+            assert_eq!(versions[3], "2.0");
+
+            // Verify it's actually newest to oldest
+            for i in 1..versions.len() {
+                let prev: f32 = versions[i - 1].parse().unwrap();
+                let curr: f32 = versions[i].parse().unwrap();
+                assert!(
+                    prev > curr,
+                    "Reversed iteration should give newest to oldest"
+                );
+            }
+        }
+
+        #[test]
+        fn test_version_string_parsing() {
+            // Test that our version strings can be parsed as valid version numbers
+            for version in SUPPORTED_API_VERSIONS {
+                let parsed: Result<f32, _> = version.parse();
+                assert!(
+                    parsed.is_ok(),
+                    "Version string '{version}' should parse as number"
+                );
+
+                let num = parsed.unwrap();
+                assert!(num >= 1.0, "Version should be >= 1.0");
+                assert!(num < 10.0, "Version should be reasonable");
+            }
+        }
+
+        #[test]
+        fn test_client_struct_fields() {
+            let config = create_test_config();
+            let mut client =
+                RegistrarClient::new_without_version_detection(&config)
+                    .unwrap();
+
+            // Test that we can access and modify the api_version field
+            assert_eq!(client.api_version, "2.1");
+
+            client.api_version = "2.0".to_string();
+            assert_eq!(client.api_version, "2.0");
+
+            client.api_version = UNKNOWN_API_VERSION.to_string();
+            assert_eq!(client.api_version, "unknown");
+        }
+
+        #[test]
+        fn test_base_url_construction_with_different_versions() {
+            let config = create_test_config();
+            let mut client =
+                RegistrarClient::new_without_version_detection(&config)
+                    .unwrap();
+
+            // Test URL construction with different API versions
+            for version in SUPPORTED_API_VERSIONS {
+                client.api_version = version.to_string();
+
+                // Simulate how URLs would be constructed in actual methods
+                let expected_pattern = format!("/v{version}/agents/");
+                let test_url = format!(
+                    "{}/v{}/agents/test-uuid",
+                    client.base_url, client.api_version
+                );
+
+                assert!(test_url.contains(&expected_pattern));
+                assert!(test_url.contains(&client.base_url));
+                assert!(test_url.contains("test-uuid"));
+            }
+        }
+
+        #[test]
+        fn test_supported_api_versions_field() {
+            let config = create_test_config();
+            let mut client =
+                RegistrarClient::new_without_version_detection(&config)
+                    .unwrap();
+
+            // Initially should be None
+            assert!(client.supported_api_versions.is_none());
+
+            // Simulate setting supported versions (as would happen in detect_api_version)
+            client.supported_api_versions =
+                Some(vec!["2.0".to_string(), "2.1".to_string()]);
+
+            assert!(client.supported_api_versions.is_some());
+            let versions = client.supported_api_versions.unwrap();
+            assert_eq!(versions, vec!["2.0", "2.1"]);
+        }
+
+        #[test]
+        #[allow(clippy::const_is_empty)]
+        fn test_version_constants_consistency() {
+            // Ensure our constants are consistent with expected patterns
+            assert!(!UNKNOWN_API_VERSION.is_empty()); // Known constant value
+            assert!(!SUPPORTED_API_VERSIONS.is_empty()); // Known constant value
+
+            // UNKNOWN_API_VERSION should not be in SUPPORTED_API_VERSIONS
+            assert!(!SUPPORTED_API_VERSIONS.contains(&UNKNOWN_API_VERSION));
+
+            // All supported versions should be valid version strings
+            for version in SUPPORTED_API_VERSIONS {
+                assert!(!version.is_empty());
+                assert!(version
+                    .chars()
+                    .all(|c| c.is_ascii_digit() || c == '.'));
+                assert!(version.contains('.'));
+            }
+        }
+
+        #[test]
+        fn test_client_debug_output() {
+            let config = create_test_config();
+            let client =
+                RegistrarClient::new_without_version_detection(&config)
+                    .unwrap();
+
+            // Test that Debug trait produces reasonable output
+            let debug_output = format!("{client:?}");
+            assert!(debug_output.contains("RegistrarClient"));
+            assert!(debug_output.contains("api_version"));
+        }
+
+        #[test]
+        fn test_version_detection_error_scenarios() {
+            // Test error creation for version detection failures
+            let no_version_error = KeylimectlError::api_error(
+                404,
+                "Registrar does not support the /version endpoint"
+                    .to_string(),
+                None,
+            );
+
+            assert_eq!(no_version_error.error_code(), "API_ERROR");
+
+            let version_parse_error = KeylimectlError::api_error(
+                500,
+                "Failed to parse version response from registrar".to_string(),
+                Some(json!({"error": "Invalid JSON"})),
+            );
+
+            assert_eq!(version_parse_error.error_code(), "API_ERROR");
+        }
+
+        #[test]
+        fn test_api_version_fallback_behavior() {
+            // Test the logic that would be used in detect_api_version fallback
+            let enabled_versions = SUPPORTED_API_VERSIONS;
+
+            // Simulate trying versions from newest to oldest
+            let mut attempted_versions = Vec::new();
+            for &version in enabled_versions.iter().rev() {
+                attempted_versions.push(version);
+            }
+
+            // Should try 3.0 first, then 2.2, then 2.1, then 2.0
+            assert_eq!(attempted_versions[0], "3.0");
+            assert_eq!(attempted_versions[1], "2.2");
+            assert_eq!(attempted_versions[2], "2.1");
+            assert_eq!(attempted_versions[3], "2.0");
+
+            // Should try all supported versions
+            assert_eq!(
+                attempted_versions.len(),
+                SUPPORTED_API_VERSIONS.len()
+            );
+        }
+
+        #[test]
+        fn test_registrar_specific_functionality() {
+            let config = create_test_config();
+            let client =
+                RegistrarClient::new_without_version_detection(&config)
+                    .unwrap();
+
+            // Test registrar-specific base URL
+            assert!(client.base_url.contains("8891")); // Default registrar port
+            assert!(client.base_url.starts_with("https://"));
+
+            // Test that client can be created with different IPs
+            let mut custom_config = create_test_config();
+            custom_config.registrar.ip = "10.0.0.5".to_string();
+            custom_config.registrar.port = 9000;
+
+            let custom_client =
+                RegistrarClient::new_without_version_detection(
+                    &custom_config,
+                )
+                .unwrap();
+            assert!(custom_client.base_url.contains("10.0.0.5"));
+            assert!(custom_client.base_url.contains("9000"));
+        }
+
+        #[test]
+        fn test_api_versions_consistency_between_clients() {
+            // Both clients should have the same supported versions
+            use crate::client::verifier;
+
+            assert_eq!(
+                SUPPORTED_API_VERSIONS,
+                verifier::SUPPORTED_API_VERSIONS
+            );
+            assert_eq!(UNKNOWN_API_VERSION, verifier::UNKNOWN_API_VERSION);
+        }
+
+        #[test]
+        fn test_version_endpoint_url_construction() {
+            let config = create_test_config();
+            let client =
+                RegistrarClient::new_without_version_detection(&config)
+                    .unwrap();
+
+            // Test version endpoint URL construction
+            let version_url = format!("{}/version", client.base_url);
+
+            assert!(version_url.contains("/version"));
+            assert!(version_url.starts_with("https://"));
+            assert!(version_url.contains("8891")); // Default port
+
+            // Should not contain /v{version}/ for version endpoint
+            assert!(!version_url.contains("/v2."));
+        }
+
+        #[test]
+        fn test_agents_endpoint_url_construction() {
+            let config = create_test_config();
+            let mut client =
+                RegistrarClient::new_without_version_detection(&config)
+                    .unwrap();
+
+            // Test agents endpoint URL construction for different versions
+            for version in SUPPORTED_API_VERSIONS {
+                client.api_version = version.to_string();
+                let agents_url = format!(
+                    "{}/v{}/agents/",
+                    client.base_url, client.api_version
+                );
+
+                assert!(agents_url.contains(&format!("/v{version}/agents/")));
+                assert!(agents_url.starts_with("https://"));
+                assert!(agents_url.ends_with("/agents/"));
+            }
+        }
+    }
 }

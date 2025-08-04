@@ -224,7 +224,7 @@ async fn create_policy(
         // TODO: Add other policy-related fields as needed
     });
 
-    let verifier_client = VerifierClient::new(config)?;
+    let verifier_client = VerifierClient::new(config).await?;
     let response = verifier_client
         .add_runtime_policy(name, policy_data)
         .await
@@ -250,7 +250,7 @@ async fn show_policy(
 ) -> Result<Value, KeylimectlError> {
     output.info(format!("Retrieving runtime policy '{name}'"));
 
-    let verifier_client = VerifierClient::new(config)?;
+    let verifier_client = VerifierClient::new(config).await?;
     let policy = verifier_client
         .get_runtime_policy(name)
         .await
@@ -300,7 +300,7 @@ async fn update_policy(
         // TODO: Add other policy-related fields as needed
     });
 
-    let verifier_client = VerifierClient::new(config)?;
+    let verifier_client = VerifierClient::new(config).await?;
     let response = verifier_client
         .update_runtime_policy(name, policy_data)
         .await
@@ -326,7 +326,7 @@ async fn delete_policy(
 ) -> Result<Value, KeylimectlError> {
     output.info(format!("Deleting runtime policy '{name}'"));
 
-    let verifier_client = VerifierClient::new(config)?;
+    let verifier_client = VerifierClient::new(config).await?;
     let response = verifier_client
         .delete_runtime_policy(name)
         .await
