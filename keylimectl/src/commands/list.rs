@@ -1,7 +1,80 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2025 Keylime Authors
 
-//! List commands for various resources
+//! List commands for various Keylime resources
+//!
+//! This module provides comprehensive listing functionality for all major Keylime resources,
+//! including agents, runtime policies, and measured boot policies. It offers both basic
+//! and detailed views depending on user requirements.
+//!
+//! # Resource Types
+//!
+//! The list command supports several resource types:
+//!
+//! 1. **Agents**: List all agents registered with the system
+//!    - Basic view: Shows agent status from verifier
+//!    - Detailed view: Combines data from both verifier and registrar
+//! 2. **Runtime Policies**: List all runtime/IMA policies
+//! 3. **Measured Boot Policies**: List all measured boot policies
+//!
+//! # Agent Listing Modes
+//!
+//! ## Basic Mode
+//! - Retrieves agent list from verifier only
+//! - Shows operational state and basic status
+//! - Faster operation, suitable for quick status checks
+//! - Shows: UUID, operational state
+//!
+//! ## Detailed Mode
+//! - Retrieves comprehensive data from both verifier and registrar
+//! - Shows complete agent information including TPM data
+//! - Slower operation but provides complete picture
+//! - Shows: UUID, operational state, IP, port, TPM keys, registration info
+//!
+//! # Policy Listing
+//!
+//! Policy listing provides an overview of all configured policies:
+//! - Policy names and metadata
+//! - Creation and modification timestamps
+//! - Policy status and validation state
+//!
+//! # Performance Considerations
+//!
+//! - Basic agent listing is optimized for speed
+//! - Detailed listing may take longer with many agents
+//! - Policy listing is generally fast as policies are typically fewer
+//! - Results are paginated automatically for large deployments
+//!
+//! # Examples
+//!
+//! ```rust
+//! use keylimectl::commands::list;
+//! use keylimectl::config::Config;
+//! use keylimectl::output::OutputHandler;
+//! use keylimectl::ListResource;
+//!
+//! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+//! let config = Config::default();
+//! let output = OutputHandler::new(crate::OutputFormat::Json, false);
+//!
+//! // List agents with basic information
+//! let basic_agents = ListResource::Agents { detailed: false };
+//! let result = list::execute(&basic_agents, &config, &output).await?;
+//!
+//! // List agents with detailed information
+//! let detailed_agents = ListResource::Agents { detailed: true };
+//! let result = list::execute(&detailed_agents, &config, &output).await?;
+//!
+//! // List runtime policies
+//! let policies = ListResource::Policies;
+//! let result = list::execute(&policies, &config, &output).await?;
+//!
+//! // List measured boot policies
+//! let mb_policies = ListResource::MeasuredBootPolicies;
+//! let result = list::execute(&mb_policies, &config, &output).await?;
+//! # Ok(())
+//! # }
+//! ```
 
 use crate::client::{registrar::RegistrarClient, verifier::VerifierClient};
 use crate::config::Config;
@@ -10,7 +83,109 @@ use crate::output::OutputHandler;
 use crate::ListResource;
 use serde_json::{json, Value};
 
-/// Execute a list command
+/// Execute a resource listing command
+///
+/// This is the main entry point for all resource listing operations. It dispatches
+/// to the appropriate handler based on the resource type and manages the complete
+/// operation lifecycle including data retrieval, formatting, and result reporting.
+///
+/// # Arguments
+///
+/// * `resource` - The specific resource type to list (Agents, Policies, or MeasuredBootPolicies)
+/// * `config` - Configuration containing service endpoints and authentication settings
+/// * `output` - Output handler for progress reporting and result formatting
+///
+/// # Returns
+///
+/// Returns a JSON value containing the listing results. The structure varies by resource type:
+///
+/// ## Agent Listing (Basic)
+/// ```json
+/// {
+///   "results": {
+///     "agent-uuid-1": "operational_state",
+///     "agent-uuid-2": "operational_state"
+///   }
+/// }
+/// ```
+///
+/// ## Agent Listing (Detailed)
+/// ```json
+/// {
+///   "detailed": true,
+///   "verifier": {
+///     "results": {
+///       "agent-uuid-1": {
+///         "operational_state": "Get Quote",
+///         "ip": "192.168.1.100",
+///         "port": 9002
+///       }
+///     }
+///   },
+///   "registrar": {
+///     "results": {
+///       "agent-uuid-1": {
+///         "aik_tpm": "base64-encoded-key",
+///         "ek_tpm": "base64-encoded-key",
+///         "ip": "192.168.1.100",
+///         "port": 9002,
+///         "active": true
+///       }
+///     }
+///   }
+/// }
+/// ```
+///
+/// ## Policy Listing
+/// ```json
+/// {
+///   "results": {
+///     "policy-name-1": {
+///       "created": "2025-01-01T00:00:00Z",
+///       "last_modified": "2025-01-02T12:00:00Z"
+///     }
+///   }
+/// }
+/// ```
+///
+/// # Error Handling
+///
+/// This function handles various error conditions:
+/// - Network failures when communicating with services
+/// - Service unavailability (verifier or registrar down)
+/// - Authentication/authorization failures
+/// - Empty result sets (no resources found)
+///
+/// # Performance Notes
+///
+/// - Basic agent listing is optimized for speed
+/// - Detailed agent listing requires two API calls (verifier + registrar)
+/// - Policy listing is typically fast due to smaller data volumes
+/// - Large deployments may experience longer response times
+///
+/// # Examples
+///
+/// ```rust
+/// use keylimectl::commands::list;
+/// use keylimectl::config::Config;
+/// use keylimectl::output::OutputHandler;
+/// use keylimectl::ListResource;
+///
+/// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+/// let config = Config::default();
+/// let output = OutputHandler::new(crate::OutputFormat::Json, false);
+///
+/// // List agents (basic)
+/// let agents = ListResource::Agents { detailed: false };
+/// let result = list::execute(&agents, &config, &output).await?;
+/// println!("Found {} agents", result["results"].as_object().unwrap().len());
+///
+/// // List policies
+/// let policies = ListResource::Policies;
+/// let result = list::execute(&policies, &config, &output).await?;
+/// # Ok(())
+/// # }
+/// ```
 pub async fn execute(
     resource: &ListResource,
     config: &Config,

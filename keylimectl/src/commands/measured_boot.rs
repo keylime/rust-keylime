@@ -729,8 +729,9 @@ mod tests {
                     "file not found",
                 ));
 
-            let contextual_error = io_error
-                .with_context(|| "Failed to read measured boot policy file".to_string());
+            let contextual_error = io_error.with_context(|| {
+                "Failed to read measured boot policy file".to_string()
+            });
 
             assert!(contextual_error.is_err());
             let error = contextual_error.unwrap_err();
