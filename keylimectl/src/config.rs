@@ -18,11 +18,11 @@
 //! - Explicit path provided via CLI argument (required to exist if specified)
 //! - `keylimectl.toml` (current directory)
 //! - `keylimectl.conf` (current directory)
-//! - `/etc/keylime/tenant.conf` (system-wide)
-//! - `/usr/etc/keylime/tenant.conf` (alternative system-wide)
-//! - `~/.config/keylime/tenant.conf` (user-specific)
+//! - `/etc/keylime/keylimectl.conf` (system-wide)
+//! - `/usr/etc/keylime/keylimectl.conf` (alternative system-wide)
+//! - `~/.config/keylime/keylimectl.conf` (user-specific)
 //! - `~/.keylimectl.toml` (user-specific)
-//! - `$XDG_CONFIG_HOME/keylime/tenant.conf` (XDG standard)
+//! - `$XDG_CONFIG_HOME/keylime/keylimectl.conf` (XDG standard)
 //!
 //! If no configuration files are found, keylimectl will work perfectly with defaults and environment variables.
 //!
@@ -418,20 +418,22 @@ impl Config {
         paths.extend([
             PathBuf::from("keylimectl.toml"),
             PathBuf::from("keylimectl.conf"),
-            PathBuf::from("/etc/keylime/tenant.conf"),
-            PathBuf::from("/usr/etc/keylime/tenant.conf"),
+            PathBuf::from("/etc/keylime/keylimectl.conf"),
+            PathBuf::from("/usr/etc/keylime/keylimectl.conf"),
         ]);
 
         // Home directory config
         if let Some(home) = std::env::var_os("HOME") {
             let home_path = PathBuf::from(home);
-            paths.push(home_path.join(".config/keylime/tenant.conf"));
+            paths.push(home_path.join(".config/keylime/keylimectl.conf"));
             paths.push(home_path.join(".keylimectl.toml"));
         }
 
         // XDG config directory
         if let Some(xdg_config) = std::env::var_os("XDG_CONFIG_HOME") {
-            paths.push(PathBuf::from(xdg_config).join("keylime/tenant.conf"));
+            paths.push(
+                PathBuf::from(xdg_config).join("keylime/keylimectl.conf"),
+            );
         }
 
         paths
@@ -1033,10 +1035,11 @@ retry_interval = 2.0
         // Should include standard paths
         assert!(paths.contains(&PathBuf::from("keylimectl.toml")));
         assert!(paths.contains(&PathBuf::from("keylimectl.conf")));
-        assert!(paths.contains(&PathBuf::from("/etc/keylime/tenant.conf")));
         assert!(
-            paths.contains(&PathBuf::from("/usr/etc/keylime/tenant.conf"))
+            paths.contains(&PathBuf::from("/etc/keylime/keylimectl.conf"))
         );
+        assert!(paths
+            .contains(&PathBuf::from("/usr/etc/keylime/keylimectl.conf")));
     }
 
     #[test]
