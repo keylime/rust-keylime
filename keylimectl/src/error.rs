@@ -60,6 +60,7 @@ pub enum KeylimectlError {
 
     /// Agent not found errors
     #[error("Agent {uuid} not found on {service}")]
+    #[allow(dead_code)]
     AgentNotFound {
         /// Agent UUID
         uuid: String,
@@ -69,6 +70,7 @@ pub enum KeylimectlError {
 
     /// Policy not found errors
     #[error("Policy '{name}' not found")]
+    #[allow(dead_code)]
     PolicyNotFound {
         /// Policy name
         name: String,
@@ -109,6 +111,14 @@ pub enum KeylimectlError {
     #[error("Operation timed out: {0}")]
     #[allow(dead_code)]
     Timeout(String),
+
+    /// Client-specific errors
+    #[error("Client error: {0}")]
+    Client(#[from] crate::client::error::ClientError),
+
+    /// Command-specific errors
+    #[error("Command error: {0}")]
+    Command(#[from] crate::commands::error::CommandError),
 
     /// Generic errors with context
     #[error("Error: {0}")]
@@ -178,6 +188,7 @@ impl KeylimectlError {
     ///
     /// let error = KeylimectlError::agent_not_found("12345", "verifier");
     /// ```
+    #[allow(dead_code)]
     pub fn agent_not_found<T: Into<String>, U: Into<String>>(
         uuid: T,
         service: U,
@@ -201,6 +212,7 @@ impl KeylimectlError {
     ///
     /// let error = KeylimectlError::policy_not_found("my_policy");
     /// ```
+    #[allow(dead_code)]
     pub fn policy_not_found<T: Into<String>>(name: T) -> Self {
         Self::PolicyNotFound { name: name.into() }
     }
@@ -256,6 +268,8 @@ impl KeylimectlError {
             Self::Attestation(_) => "ATTESTATION_ERROR",
             Self::Auth(_) => "AUTH_ERROR",
             Self::Timeout(_) => "TIMEOUT_ERROR",
+            Self::Client(_) => "CLIENT_ERROR",
+            Self::Command(_) => "COMMAND_ERROR",
             Self::Generic(_) => "GENERIC_ERROR",
             Self::RequestMiddleware(_) => "REQUEST_MIDDLEWARE_ERROR",
         }
@@ -285,6 +299,8 @@ impl KeylimectlError {
             Self::Network(_) => true,
             Self::Api { status, .. } => *status >= 500,
             Self::Timeout(_) => true,
+            Self::Client(client_err) => client_err.is_retryable(),
+            Self::Command(command_err) => command_err.is_retryable(),
             _ => false,
         }
     }
@@ -338,7 +354,8 @@ impl KeylimectlError {
 /// Helper trait for adding context to results
 ///
 /// This trait provides convenient methods for adding contextual information to errors,
-/// making debugging easier by providing a chain of what went wrong.
+/// making debugging easier by providing a chain of what went wrong. It leverages
+/// `anyhow` for rich error context while preserving backtrace information.
 ///
 /// # Examples
 ///
@@ -353,7 +370,10 @@ impl KeylimectlError {
 ///     .with_context(|| "Failed to read configuration file".to_string());
 /// ```
 pub trait ErrorContext<T> {
-    /// Add context to an error
+    /// Add context to an error with full backtrace preservation
+    ///
+    /// Uses `anyhow` to provide rich context while maintaining error chains.
+    /// This is the recommended way to add context for user-facing errors.
     ///
     /// # Arguments
     ///
@@ -362,14 +382,37 @@ pub trait ErrorContext<T> {
     where
         F: FnOnce() -> String;
 
-    /// Add validation context
+    /// Add specific validation context
+    ///
+    /// Creates a validation error with the provided message, losing the
+    /// original error type but providing a clear validation message.
     ///
     /// # Arguments
     ///
     /// * `f` - Closure that returns the validation error message
+    #[allow(dead_code)]
     fn validate<F>(self, f: F) -> Result<T, KeylimectlError>
     where
         F: FnOnce() -> String;
+
+    /// Add user-friendly context for command-line operations
+    ///
+    /// Provides context specifically designed for CLI users, with clear
+    /// explanations and suggested actions when appropriate.
+    ///
+    /// # Arguments
+    ///
+    /// * `operation` - The operation being performed (e.g., "adding agent")
+    /// * `suggestion` - Optional suggestion for the user
+    #[allow(dead_code)]
+    fn with_user_context<F, G>(
+        self,
+        operation: F,
+        suggestion: Option<G>,
+    ) -> Result<T, KeylimectlError>
+    where
+        F: FnOnce() -> String,
+        G: FnOnce() -> String;
 }
 
 impl<T, E> ErrorContext<T> for Result<T, E>
@@ -382,11 +425,10 @@ where
     {
         self.map_err(|e| {
             let base_error = e.into();
-            KeylimectlError::Generic(anyhow::anyhow!(
-                "{}: {}",
-                f(),
-                base_error
-            ))
+            // Use anyhow to maintain full error chain with backtrace
+            KeylimectlError::Generic(
+                anyhow::Error::new(base_error).context(f()),
+            )
         })
     }
 
@@ -395,6 +437,32 @@ where
         F: FnOnce() -> String,
     {
         self.map_err(|_| KeylimectlError::validation(f()))
+    }
+
+    fn with_user_context<F, G>(
+        self,
+        operation: F,
+        suggestion: Option<G>,
+    ) -> Result<T, KeylimectlError>
+    where
+        F: FnOnce() -> String,
+        G: FnOnce() -> String,
+    {
+        self.map_err(|e| {
+            let base_error = e.into();
+            let context = match suggestion {
+                Some(suggestion_fn) => format!(
+                    "Failed to {}\n\nSuggestion: {}",
+                    operation(),
+                    suggestion_fn()
+                ),
+                None => format!("Failed to {}", operation()),
+            };
+
+            KeylimectlError::Generic(
+                anyhow::Error::new(base_error).context(context),
+            )
+        })
     }
 }
 

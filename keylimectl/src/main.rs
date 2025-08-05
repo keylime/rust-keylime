@@ -41,7 +41,7 @@ mod output;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use log::error;
+use log::{debug, error};
 use serde_json::Value;
 use std::process;
 
@@ -337,7 +337,11 @@ async fn main() {
 
     // Load configuration
     let config = match Config::load(cli.config.as_deref()) {
-        Ok(config) => config,
+        Ok(config) => {
+            debug!("Loaded configuration with TLS settings: client_cert={:?}, client_key={:?}, trusted_ca={:?}",
+                   config.tls.client_cert, config.tls.client_key, config.tls.trusted_ca);
+            config
+        }
         Err(e) => {
             error!("Failed to load configuration: {e}");
             process::exit(1);
@@ -346,6 +350,8 @@ async fn main() {
 
     // Override config with CLI arguments
     let config = config.with_cli_overrides(&cli);
+    debug!("Final configuration after CLI overrides: client_cert={:?}, client_key={:?}, trusted_ca={:?}",
+           config.tls.client_cert, config.tls.client_key, config.tls.trusted_ca);
 
     // Initialize output handler
     let output = OutputHandler::new(cli.format, cli.quiet);

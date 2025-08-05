@@ -54,14 +54,13 @@
 //! # }
 //! ```
 
+use crate::client::base::BaseClient;
 use crate::config::Config;
 use crate::error::{ErrorContext, KeylimectlError};
-use keylime::resilient_client::ResilientClient;
 use keylime::version::KeylimeRegistrarVersion;
 use log::{debug, info, warn};
 use reqwest::{Method, StatusCode};
-use serde_json::{json, Value};
-use std::time::Duration;
+use serde_json::Value;
 
 /// Unknown API version constant for when version detection fails
 #[allow(dead_code)]
@@ -69,7 +68,8 @@ pub const UNKNOWN_API_VERSION: &str = "unknown";
 
 /// Supported API versions in order from oldest to newest (fallback tries newest first)
 #[allow(dead_code)]
-pub const SUPPORTED_API_VERSIONS: &[&str] = &["2.0", "2.1", "2.2", "3.0"];
+pub const SUPPORTED_API_VERSIONS: &[&str] =
+    &["2.0", "2.1", "2.2", "2.3", "3.0"];
 
 /// Response structure for version endpoint
 #[derive(serde::Deserialize, Debug)]
@@ -132,14 +132,165 @@ struct Response<T> {
 /// ```
 #[derive(Debug)]
 pub struct RegistrarClient {
-    client: ResilientClient,
-    base_url: String,
+    base: BaseClient,
     api_version: String,
     #[allow(dead_code)]
     supported_api_versions: Option<Vec<String>>,
 }
 
+/// Builder for creating RegistrarClient instances with flexible configuration
+///
+/// The `RegistrarClientBuilder` provides a fluent interface for configuring
+/// and creating `RegistrarClient` instances. It allows for optional API version
+/// detection and custom API version specification.
+///
+/// # Examples
+///
+/// ```rust
+/// use keylimectl::client::registrar::RegistrarClient;
+/// use keylimectl::config::Config;
+///
+/// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+/// let config = Config::default();
+///
+/// // Create client with automatic version detection
+/// let client = RegistrarClient::builder()
+///     .config(&config)
+///     .build()
+///     .await?;
+///
+/// // Create client without version detection (for testing)
+/// let client = RegistrarClient::builder()
+///     .config(&config)
+///     .skip_version_detection()
+///     .build_sync()?;
+///
+/// // Create client with specific API version
+/// let client = RegistrarClient::builder()
+///     .config(&config)
+///     .api_version("2.0")
+///     .skip_version_detection()
+///     .build_sync()?;
+/// # Ok(())
+/// # }
+/// ```
+#[derive(Debug)]
+#[allow(dead_code)] // Builder pattern may not be used initially
+pub struct RegistrarClientBuilder<'a> {
+    config: Option<&'a Config>,
+    skip_version_detection: bool,
+    api_version: Option<String>,
+}
+
+#[allow(dead_code)] // Builder pattern may not be used initially
+impl<'a> RegistrarClientBuilder<'a> {
+    /// Create a new builder instance
+    pub fn new() -> Self {
+        Self {
+            config: None,
+            skip_version_detection: false,
+            api_version: None,
+        }
+    }
+
+    /// Set the configuration for the client
+    pub fn config(mut self, config: &'a Config) -> Self {
+        self.config = Some(config);
+        self
+    }
+
+    /// Skip automatic API version detection
+    ///
+    /// When this is set, the client will use either the specified API version
+    /// or the default version ("2.1") without attempting to detect the server's
+    /// supported version.
+    pub fn skip_version_detection(mut self) -> Self {
+        self.skip_version_detection = true;
+        self
+    }
+
+    /// Set a specific API version to use
+    ///
+    /// If specified, this version will be used instead of the default.
+    /// If `skip_version_detection` is not set, version detection may still
+    /// override this value.
+    pub fn api_version<S: Into<String>>(mut self, version: S) -> Self {
+        self.api_version = Some(version.into());
+        self
+    }
+
+    /// Build the RegistrarClient with automatic API version detection
+    ///
+    /// This is the recommended way to create a client for production use,
+    /// as it will automatically detect the optimal API version supported
+    /// by the registrar service.
+    pub async fn build(self) -> Result<RegistrarClient, KeylimectlError> {
+        let config = self.config.ok_or_else(|| {
+            KeylimectlError::validation(
+                "Configuration is required for RegistrarClient",
+            )
+        })?;
+
+        if self.skip_version_detection {
+            self.build_sync()
+        } else {
+            RegistrarClient::new(config).await
+        }
+    }
+
+    /// Build the RegistrarClient without API version detection
+    ///
+    /// This creates the client immediately without any network calls.
+    /// Useful for testing or when you want to control the API version manually.
+    pub fn build_sync(self) -> Result<RegistrarClient, KeylimectlError> {
+        let config = self.config.ok_or_else(|| {
+            KeylimectlError::validation(
+                "Configuration is required for RegistrarClient",
+            )
+        })?;
+
+        let mut client =
+            RegistrarClient::new_without_version_detection(config)?;
+
+        if let Some(version) = self.api_version {
+            client.api_version = version;
+        }
+
+        Ok(client)
+    }
+}
+
+impl<'a> Default for RegistrarClientBuilder<'a> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl RegistrarClient {
+    /// Create a new builder for configuring a RegistrarClient
+    ///
+    /// This is the recommended way to create RegistrarClient instances,
+    /// as it provides a flexible interface for configuration.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use keylimectl::client::registrar::RegistrarClient;
+    /// use keylimectl::config::Config;
+    ///
+    /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+    /// let config = Config::default();
+    /// let client = RegistrarClient::builder()
+    ///     .config(&config)
+    ///     .build()
+    ///     .await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[allow(dead_code)] // Builder pattern may not be used initially
+    pub fn builder() -> RegistrarClientBuilder<'static> {
+        RegistrarClientBuilder::new()
+    }
     /// Create a new registrar client with automatic API version detection
     ///
     /// Initializes a new `RegistrarClient` with the provided configuration and
@@ -209,31 +360,15 @@ impl RegistrarClient {
     /// - TLS certificate files cannot be read
     /// - Certificate/key files are invalid
     /// - HTTP client initialization fails
-    pub fn new_without_version_detection(
+    pub(crate) fn new_without_version_detection(
         config: &Config,
     ) -> Result<Self, KeylimectlError> {
         let base_url = config.registrar_base_url();
-
-        // Create HTTP client with TLS configuration
-        let http_client = Self::create_http_client(config)?;
-
-        // Create resilient client with retry logic
-        let client = ResilientClient::new(
-            Some(http_client),
-            Duration::from_secs(1), // Initial delay
-            config.client.max_retries,
-            &[
-                StatusCode::OK,
-                StatusCode::CREATED,
-                StatusCode::ACCEPTED,
-                StatusCode::NO_CONTENT,
-            ],
-            Some(Duration::from_secs(60)), // Max delay
-        );
+        let base = BaseClient::new(base_url, config)
+            .map_err(KeylimectlError::from)?;
 
         Ok(Self {
-            client,
-            base_url,
+            base,
             api_version: "2.1".to_string(), // Default API version
             supported_api_versions: None,
         })
@@ -313,11 +448,12 @@ impl RegistrarClient {
     async fn get_registrar_api_version(
         &mut self,
     ) -> Result<String, KeylimectlError> {
-        let url = format!("{}/version", self.base_url);
+        let url = format!("{}/version", self.base.base_url);
 
         info!("Requesting registrar API version from {url}");
 
         let response = self
+            .base
             .client
             .get_request(Method::GET, &url)
             .send()
@@ -351,11 +487,12 @@ impl RegistrarClient {
         &self,
         api_version: &str,
     ) -> Result<(), KeylimectlError> {
-        let url = format!("{}/v{}/agents/", self.base_url, api_version);
+        let url = format!("{}/v{}/agents/", self.base.base_url, api_version);
 
         debug!("Testing registrar API version {api_version} with URL: {url}");
 
         let response = self
+            .base
             .client
             .get_request(Method::GET, &url)
             .send()
@@ -445,10 +582,11 @@ impl RegistrarClient {
 
         let url = format!(
             "{}/v{}/agents/{}",
-            self.base_url, self.api_version, agent_uuid
+            self.base.base_url, self.api_version, agent_uuid
         );
 
         let response = self
+            .base
             .client
             .get_request(Method::GET, &url)
             .send()
@@ -459,7 +597,11 @@ impl RegistrarClient {
 
         match response.status() {
             StatusCode::OK => {
-                let json_response = self.handle_response(response).await?;
+                let json_response: Value = self
+                    .base
+                    .handle_response(response)
+                    .await
+                    .map_err(KeylimectlError::from)?;
 
                 // Extract agent data from registrar response format
                 if let Some(results) = json_response.get("results") {
@@ -474,7 +616,11 @@ impl RegistrarClient {
             }
             StatusCode::NOT_FOUND => Ok(None),
             _ => {
-                let error_response = self.handle_response(response).await;
+                let error_response: Result<Value, KeylimectlError> = self
+                    .base
+                    .handle_response(response)
+                    .await
+                    .map_err(KeylimectlError::from);
                 match error_response {
                     Ok(_) => Ok(None),
                     Err(e) => Err(e),
@@ -538,10 +684,11 @@ impl RegistrarClient {
 
         let url = format!(
             "{}/v{}/agents/{}",
-            self.base_url, self.api_version, agent_uuid
+            self.base.base_url, self.api_version, agent_uuid
         );
 
         let response = self
+            .base
             .client
             .get_request(Method::DELETE, &url)
             .send()
@@ -550,7 +697,10 @@ impl RegistrarClient {
                 "Failed to send delete agent request to registrar".to_string()
             })?;
 
-        self.handle_response(response).await
+        self.base
+            .handle_response(response)
+            .await
+            .map_err(KeylimectlError::from)
     }
 
     /// List all agents registered with the registrar
@@ -622,9 +772,11 @@ impl RegistrarClient {
     pub async fn list_agents(&self) -> Result<Value, KeylimectlError> {
         debug!("Listing agents on registrar");
 
-        let url = format!("{}/v{}/agents/", self.base_url, self.api_version);
+        let url =
+            format!("{}/v{}/agents/", self.base.base_url, self.api_version);
 
         let response = self
+            .base
             .client
             .get_request(Method::GET, &url)
             .send()
@@ -633,7 +785,10 @@ impl RegistrarClient {
                 "Failed to send list agents request to registrar".to_string()
             })?;
 
-        self.handle_response(response).await
+        self.base
+            .handle_response(response)
+            .await
+            .map_err(KeylimectlError::from)
     }
 
     /// Add an agent to the registrar
@@ -647,10 +802,11 @@ impl RegistrarClient {
 
         let url = format!(
             "{}/v{}/agents/{}",
-            self.base_url, self.api_version, agent_uuid
+            self.base.base_url, self.api_version, agent_uuid
         );
 
         let response = self
+            .base
             .client
             .get_json_request_from_struct(Method::POST, &url, &data, None)
             .map_err(KeylimectlError::Json)?
@@ -660,7 +816,10 @@ impl RegistrarClient {
                 "Failed to send add agent request to registrar".to_string()
             })?;
 
-        self.handle_response(response).await
+        self.base
+            .handle_response(response)
+            .await
+            .map_err(KeylimectlError::from)
     }
 
     /// Update an agent on the registrar
@@ -674,10 +833,11 @@ impl RegistrarClient {
 
         let url = format!(
             "{}/v{}/agents/{}",
-            self.base_url, self.api_version, agent_uuid
+            self.base.base_url, self.api_version, agent_uuid
         );
 
         let response = self
+            .base
             .client
             .get_json_request_from_struct(Method::PUT, &url, &data, None)
             .map_err(KeylimectlError::Json)?
@@ -687,7 +847,10 @@ impl RegistrarClient {
                 "Failed to send update agent request to registrar".to_string()
             })?;
 
-        self.handle_response(response).await
+        self.base
+            .handle_response(response)
+            .await
+            .map_err(KeylimectlError::from)
     }
 
     /// Get agent by EK hash
@@ -700,10 +863,11 @@ impl RegistrarClient {
 
         let url = format!(
             "{}/v{}/agents/?ekhash={}",
-            self.base_url, self.api_version, ek_hash
+            self.base.base_url, self.api_version, ek_hash
         );
 
         let response = self
+            .base
             .client
             .get_request(Method::GET, &url)
             .send()
@@ -715,188 +879,24 @@ impl RegistrarClient {
 
         match response.status() {
             StatusCode::OK => {
-                let json_response = self.handle_response(response).await?;
+                let json_response: Value = self
+                    .base
+                    .handle_response(response)
+                    .await
+                    .map_err(KeylimectlError::from)?;
                 Ok(Some(json_response))
             }
             StatusCode::NOT_FOUND => Ok(None),
             _ => {
-                let error_response = self.handle_response(response).await;
+                let error_response: Result<Value, KeylimectlError> = self
+                    .base
+                    .handle_response(response)
+                    .await
+                    .map_err(KeylimectlError::from);
                 match error_response {
                     Ok(_) => Ok(None),
                     Err(e) => Err(e),
                 }
-            }
-        }
-    }
-
-    /// Create HTTP client with TLS configuration
-    ///
-    /// Initializes a reqwest HTTP client with the TLS settings specified
-    /// in the configuration. This includes client certificates, server
-    /// certificate verification, and connection timeouts.
-    ///
-    /// # Arguments
-    ///
-    /// * `config` - Configuration containing TLS and client settings
-    ///
-    /// # Returns
-    ///
-    /// Returns a configured `reqwest::Client` ready for HTTPS communication.
-    ///
-    /// # TLS Configuration
-    ///
-    /// The client is configured with:
-    /// - Client certificate and key (if specified)
-    /// - Server certificate verification (can be disabled for testing)
-    /// - Connection timeout from config
-    /// - HTTP/2 and connection pooling
-    ///
-    /// # Security Notes
-    ///
-    /// - Client certificates enable mutual TLS authentication
-    /// - Server certificate verification should only be disabled for testing
-    /// - Invalid certificates will cause connection failures
-    ///
-    /// # Errors
-    ///
-    /// This method can fail if:
-    /// - Certificate files cannot be read
-    /// - Certificate/key files are invalid or malformed
-    /// - Certificate and key don't match
-    /// - HTTP client builder configuration fails
-    fn create_http_client(
-        config: &Config,
-    ) -> Result<reqwest::Client, KeylimectlError> {
-        let mut builder = reqwest::Client::builder()
-            .timeout(Duration::from_secs(config.client.timeout));
-
-        // Configure TLS
-        if !config.tls.verify_server_cert {
-            builder = builder.danger_accept_invalid_certs(true);
-            warn!("Server certificate verification is disabled");
-        }
-
-        // Add trusted CA certificates for server verification
-        for ca_path in &config.tls.trusted_ca {
-            if std::path::Path::new(ca_path).exists() {
-                let ca_cert = std::fs::read(ca_path).with_context(|| {
-                    format!(
-                        "Failed to read trusted CA certificate: {ca_path}"
-                    )
-                })?;
-
-                let ca_cert = reqwest::Certificate::from_pem(&ca_cert)
-                    .with_context(|| {
-                        format!("Failed to parse CA certificate: {ca_path}")
-                    })?;
-
-                builder = builder.add_root_certificate(ca_cert);
-            } else {
-                warn!("Trusted CA certificate file not found: {ca_path}");
-            }
-        }
-
-        // Add client certificate if configured
-        if let (Some(cert_path), Some(key_path)) =
-            (&config.tls.client_cert, &config.tls.client_key)
-        {
-            let cert = std::fs::read(cert_path).with_context(|| {
-                format!("Failed to read client certificate: {cert_path}")
-            })?;
-
-            let key = std::fs::read(key_path).with_context(|| {
-                format!("Failed to read client key: {key_path}")
-            })?;
-
-            let identity = reqwest::Identity::from_pkcs8_pem(&cert, &key)
-                .with_context(|| "Failed to create client identity from certificate and key".to_string())?;
-
-            builder = builder.identity(identity);
-        }
-
-        builder
-            .build()
-            .with_context(|| "Failed to create HTTP client".to_string())
-    }
-
-    /// Handle HTTP response and convert to JSON
-    ///
-    /// Processes HTTP responses from the registrar service, handling both
-    /// success and error cases. Converts successful responses to JSON
-    /// and transforms HTTP errors into appropriate `KeylimectlError` types.
-    ///
-    /// # Arguments
-    ///
-    /// * `response` - HTTP response from the registrar service
-    ///
-    /// # Returns
-    ///
-    /// Returns parsed JSON data for successful responses.
-    ///
-    /// # Response Handling
-    ///
-    /// - **2xx responses**: Parsed as JSON or default success object
-    /// - **4xx/5xx responses**: Converted to `KeylimectlError::Api` with details
-    /// - **Empty responses**: Returns `{"status": "success"}`
-    /// - **Invalid JSON**: Returns parsing error with response text
-    ///
-    /// # Error Details
-    ///
-    /// For error responses, attempts to extract meaningful error messages
-    /// from the JSON response body, falling back to HTTP status descriptions.
-    ///
-    /// # Errors
-    ///
-    /// This method can fail if:
-    /// - Response body cannot be read
-    /// - Response contains invalid JSON
-    /// - Registrar returns an error status code
-    async fn handle_response(
-        &self,
-        response: reqwest::Response,
-    ) -> Result<Value, KeylimectlError> {
-        let status = response.status();
-        let response_text = response
-            .text()
-            .await
-            .with_context(|| "Failed to read response body".to_string())?;
-
-        match status {
-            StatusCode::OK
-            | StatusCode::CREATED
-            | StatusCode::ACCEPTED
-            | StatusCode::NO_CONTENT => {
-                if response_text.is_empty() {
-                    Ok(json!({"status": "success"}))
-                } else {
-                    serde_json::from_str(&response_text).with_context(|| {
-                        format!(
-                            "Failed to parse JSON response: {response_text}"
-                        )
-                    })
-                }
-            }
-            _ => {
-                let error_message = if response_text.is_empty() {
-                    format!("HTTP {} error", status.as_u16())
-                } else {
-                    // Try to parse as JSON for better error message
-                    match serde_json::from_str::<Value>(&response_text) {
-                        Ok(json_error) => json_error
-                            .get("status")
-                            .or_else(|| json_error.get("message"))
-                            .and_then(|v| v.as_str())
-                            .unwrap_or(&response_text)
-                            .to_string(),
-                        Err(_) => response_text.clone(),
-                    }
-                };
-
-                Err(KeylimectlError::api_error(
-                    status.as_u16(),
-                    error_message,
-                    serde_json::from_str(&response_text).ok(),
-                ))
             }
         }
     }
@@ -905,6 +905,7 @@ impl RegistrarClient {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::client::base::BaseClient;
     use crate::config::{ClientConfig, RegistrarConfig, TlsConfig};
     use serde_json::json;
 
@@ -940,7 +941,7 @@ mod tests {
 
         assert!(result.is_ok());
         let client = result.unwrap();
-        assert_eq!(client.base_url, "https://127.0.0.1:8891");
+        assert_eq!(client.base.base_url, "https://127.0.0.1:8891");
         assert_eq!(client.api_version, "2.1");
     }
 
@@ -953,7 +954,7 @@ mod tests {
         assert!(result.is_ok());
 
         let client = result.unwrap();
-        assert_eq!(client.base_url, "https://127.0.0.1:9000");
+        assert_eq!(client.base.base_url, "https://127.0.0.1:9000");
     }
 
     #[test]
@@ -965,7 +966,7 @@ mod tests {
         assert!(result.is_ok());
 
         let client = result.unwrap();
-        assert_eq!(client.base_url, "https://[::1]:8891");
+        assert_eq!(client.base.base_url, "https://[::1]:8891");
     }
 
     #[test]
@@ -977,13 +978,13 @@ mod tests {
         assert!(result.is_ok());
 
         let client = result.unwrap();
-        assert_eq!(client.base_url, "https://[2001:db8::1]:8891");
+        assert_eq!(client.base.base_url, "https://[2001:db8::1]:8891");
     }
 
     #[test]
     fn test_create_http_client_basic() {
         let config = create_test_config();
-        let result = RegistrarClient::create_http_client(&config);
+        let result = BaseClient::create_http_client(&config);
 
         assert!(result.is_ok());
         // Basic validation that client was created
@@ -995,7 +996,7 @@ mod tests {
         let mut config = create_test_config();
         config.client.timeout = 45;
 
-        let result = RegistrarClient::create_http_client(&config);
+        let result = BaseClient::create_http_client(&config);
         assert!(result.is_ok());
     }
 
@@ -1005,14 +1006,12 @@ mod tests {
         config.tls.client_cert = Some("/nonexistent/cert.pem".to_string());
         config.tls.client_key = Some("/nonexistent/key.pem".to_string());
 
-        let result = RegistrarClient::create_http_client(&config);
+        let result = BaseClient::create_http_client(&config);
         // Should fail because cert files don't exist
         assert!(result.is_err());
 
         let error = result.unwrap_err();
-        assert!(error
-            .to_string()
-            .contains("Failed to read client certificate"));
+        assert!(error.to_string().contains("Certificate file error"));
     }
 
     #[test]
@@ -1045,7 +1044,7 @@ mod tests {
 
         let client =
             RegistrarClient::new_without_version_detection(&config).unwrap();
-        assert_eq!(client.base_url, "https://10.0.0.5:9500");
+        assert_eq!(client.base.base_url, "https://10.0.0.5:9500");
 
         // Test IPv6
         config.registrar.ip = "2001:db8:85a3::8a2e:370:7334".to_string();
@@ -1054,7 +1053,7 @@ mod tests {
         let client =
             RegistrarClient::new_without_version_detection(&config).unwrap();
         assert_eq!(
-            client.base_url,
+            client.base.base_url,
             "https://[2001:db8:85a3::8a2e:370:7334]:8891"
         );
     }
@@ -1075,7 +1074,7 @@ mod tests {
         let mut config = create_test_config();
         config.tls.verify_server_cert = false;
 
-        let result = RegistrarClient::create_http_client(&config);
+        let result = BaseClient::create_http_client(&config);
         assert!(result.is_ok());
         // Client should be created successfully with verification disabled
     }
@@ -1085,7 +1084,7 @@ mod tests {
         let mut config = create_test_config();
         config.tls.verify_server_cert = true;
 
-        let result = RegistrarClient::create_http_client(&config);
+        let result = BaseClient::create_http_client(&config);
         assert!(result.is_ok());
         // Client should be created successfully with verification enabled
     }
@@ -1098,8 +1097,8 @@ mod tests {
 
         // Verify that config values are properly used
         assert_eq!(client.api_version, "2.1");
-        assert!(client.base_url.starts_with("https://"));
-        assert!(client.base_url.contains("8891"));
+        assert!(client.base.base_url.starts_with("https://"));
+        assert!(client.base.base_url.contains("8891"));
     }
 
     // Error handling tests
@@ -1235,7 +1234,10 @@ mod tests {
         #[test]
         fn test_supported_api_versions_constant() {
             // Test that the constant contains expected versions in correct order
-            assert_eq!(SUPPORTED_API_VERSIONS, &["2.0", "2.1", "2.2", "3.0"]);
+            assert_eq!(
+                SUPPORTED_API_VERSIONS,
+                &["2.0", "2.1", "2.2", "2.3", "3.0"]
+            );
             assert!(SUPPORTED_API_VERSIONS.len() >= 2);
 
             // Verify versions are in ascending order (oldest to newest)
@@ -1298,9 +1300,10 @@ mod tests {
 
             // Should be newest first
             assert_eq!(versions[0], "3.0");
-            assert_eq!(versions[1], "2.2");
-            assert_eq!(versions[2], "2.1");
-            assert_eq!(versions[3], "2.0");
+            assert_eq!(versions[1], "2.3");
+            assert_eq!(versions[2], "2.2");
+            assert_eq!(versions[3], "2.1");
+            assert_eq!(versions[4], "2.0");
 
             // Verify it's actually newest to oldest
             for i in 1..versions.len() {
@@ -1361,11 +1364,11 @@ mod tests {
                 let expected_pattern = format!("/v{version}/agents/");
                 let test_url = format!(
                     "{}/v{}/agents/test-uuid",
-                    client.base_url, client.api_version
+                    client.base.base_url, client.api_version
                 );
 
                 assert!(test_url.contains(&expected_pattern));
-                assert!(test_url.contains(&client.base_url));
+                assert!(test_url.contains(&client.base.base_url));
                 assert!(test_url.contains("test-uuid"));
             }
         }
@@ -1454,11 +1457,12 @@ mod tests {
                 attempted_versions.push(version);
             }
 
-            // Should try 3.0 first, then 2.2, then 2.1, then 2.0
+            // Should try 3.0 first, then 2.3, then 2.2, then 2.1, then 2.0
             assert_eq!(attempted_versions[0], "3.0");
-            assert_eq!(attempted_versions[1], "2.2");
-            assert_eq!(attempted_versions[2], "2.1");
-            assert_eq!(attempted_versions[3], "2.0");
+            assert_eq!(attempted_versions[1], "2.3");
+            assert_eq!(attempted_versions[2], "2.2");
+            assert_eq!(attempted_versions[3], "2.1");
+            assert_eq!(attempted_versions[4], "2.0");
 
             // Should try all supported versions
             assert_eq!(
@@ -1475,8 +1479,8 @@ mod tests {
                     .unwrap();
 
             // Test registrar-specific base URL
-            assert!(client.base_url.contains("8891")); // Default registrar port
-            assert!(client.base_url.starts_with("https://"));
+            assert!(client.base.base_url.contains("8891")); // Default registrar port
+            assert!(client.base.base_url.starts_with("https://"));
 
             // Test that client can be created with different IPs
             let mut custom_config = create_test_config();
@@ -1488,8 +1492,8 @@ mod tests {
                     &custom_config,
                 )
                 .unwrap();
-            assert!(custom_client.base_url.contains("10.0.0.5"));
-            assert!(custom_client.base_url.contains("9000"));
+            assert!(custom_client.base.base_url.contains("10.0.0.5"));
+            assert!(custom_client.base.base_url.contains("9000"));
         }
 
         #[test]
@@ -1512,7 +1516,7 @@ mod tests {
                     .unwrap();
 
             // Test version endpoint URL construction
-            let version_url = format!("{}/version", client.base_url);
+            let version_url = format!("{}/version", client.base.base_url);
 
             assert!(version_url.contains("/version"));
             assert!(version_url.starts_with("https://"));
@@ -1534,7 +1538,7 @@ mod tests {
                 client.api_version = version.to_string();
                 let agents_url = format!(
                     "{}/v{}/agents/",
-                    client.base_url, client.api_version
+                    client.base.base_url, client.api_version
                 );
 
                 assert!(agents_url.contains(&format!("/v{version}/agents/")));

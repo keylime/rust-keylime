@@ -58,14 +58,13 @@
 //! # }
 //! ```
 
+use crate::client::base::BaseClient;
 use crate::config::Config;
 use crate::error::{ErrorContext, KeylimectlError};
 use base64::{engine::general_purpose::STANDARD, Engine};
-use keylime::resilient_client::ResilientClient;
 use log::{debug, warn};
 use reqwest::{Method, StatusCode};
 use serde_json::{json, Value};
-use std::time::Duration;
 
 /// Unknown API version constant for when version detection fails
 const UNKNOWN_API_VERSION: &str = "unknown";
@@ -96,14 +95,220 @@ const SUPPORTED_AGENT_API_VERSIONS: &[&str] = &["2.0", "2.1", "2.2"];
 /// or threads using `Arc<AgentClient>`.
 #[derive(Debug)]
 pub struct AgentClient {
-    client: ResilientClient,
-    base_url: String,
+    base: BaseClient,
     api_version: String,
     agent_ip: String,
     agent_port: u16,
 }
 
+/// Builder for creating AgentClient instances with flexible configuration
+///
+/// The `AgentClientBuilder` provides a fluent interface for configuring
+/// and creating `AgentClient` instances. It allows for optional API version
+/// detection and custom API version specification.
+///
+/// # Examples
+///
+/// ```rust
+/// use keylimectl::client::agent::AgentClient;
+/// use keylimectl::config::Config;
+///
+/// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+/// let config = Config::default();
+///
+/// // Create client with automatic version detection
+/// let client = AgentClient::builder()
+///     .agent_ip("192.168.1.100")
+///     .agent_port(9002)
+///     .config(&config)
+///     .build()
+///     .await?;
+///
+/// // Create client without version detection (for testing)
+/// let client = AgentClient::builder()
+///     .agent_ip("192.168.1.100")
+///     .agent_port(9002)
+///     .config(&config)
+///     .skip_version_detection()
+///     .build_sync()?;
+///
+/// // Create client with specific API version
+/// let client = AgentClient::builder()
+///     .agent_ip("192.168.1.100")
+///     .agent_port(9002)
+///     .config(&config)
+///     .api_version("2.0")
+///     .skip_version_detection()
+///     .build_sync()?;
+/// # Ok(())
+/// # }
+/// ```
+#[derive(Debug)]
+#[allow(dead_code)] // Builder pattern may not be used initially
+pub struct AgentClientBuilder<'a> {
+    agent_ip: Option<String>,
+    agent_port: Option<u16>,
+    config: Option<&'a Config>,
+    skip_version_detection: bool,
+    api_version: Option<String>,
+}
+
+#[allow(dead_code)] // Builder pattern may not be used initially
+impl<'a> AgentClientBuilder<'a> {
+    /// Create a new builder instance
+    pub fn new() -> Self {
+        Self {
+            agent_ip: None,
+            agent_port: None,
+            config: None,
+            skip_version_detection: false,
+            api_version: None,
+        }
+    }
+
+    /// Set the agent IP address
+    pub fn agent_ip<S: Into<String>>(mut self, ip: S) -> Self {
+        self.agent_ip = Some(ip.into());
+        self
+    }
+
+    /// Set the agent port
+    pub fn agent_port(mut self, port: u16) -> Self {
+        self.agent_port = Some(port);
+        self
+    }
+
+    /// Set the configuration for the client
+    pub fn config(mut self, config: &'a Config) -> Self {
+        self.config = Some(config);
+        self
+    }
+
+    /// Skip automatic API version detection
+    ///
+    /// When this is set, the client will use either the specified API version
+    /// or the default version ("2.1") without attempting to detect the server's
+    /// supported version.
+    pub fn skip_version_detection(mut self) -> Self {
+        self.skip_version_detection = true;
+        self
+    }
+
+    /// Set a specific API version to use
+    ///
+    /// If specified, this version will be used instead of the default.
+    /// If `skip_version_detection` is not set, version detection may still
+    /// override this value.
+    pub fn api_version<S: Into<String>>(mut self, version: S) -> Self {
+        self.api_version = Some(version.into());
+        self
+    }
+
+    /// Build the AgentClient with automatic API version detection
+    ///
+    /// This is the recommended way to create a client for production use,
+    /// as it will automatically detect the optimal API version supported
+    /// by the agent.
+    pub async fn build(self) -> Result<AgentClient, KeylimectlError> {
+        // Extract values before pattern matching to avoid partial move issues
+        let agent_ip = self.agent_ip.ok_or_else(|| {
+            KeylimectlError::validation(
+                "Agent IP is required for AgentClient",
+            )
+        })?;
+        let agent_port = self.agent_port.ok_or_else(|| {
+            KeylimectlError::validation(
+                "Agent port is required for AgentClient",
+            )
+        })?;
+        let config = self.config.ok_or_else(|| {
+            KeylimectlError::validation(
+                "Configuration is required for AgentClient",
+            )
+        })?;
+
+        if self.skip_version_detection {
+            // Use build_sync logic inline since we already extracted values
+            let mut client = AgentClient::new_without_version_detection(
+                &agent_ip, agent_port, config,
+            )?;
+
+            if let Some(version) = self.api_version {
+                client.api_version = version;
+            }
+
+            Ok(client)
+        } else {
+            AgentClient::new(&agent_ip, agent_port, config).await
+        }
+    }
+
+    /// Build the AgentClient without API version detection
+    ///
+    /// This creates the client immediately without any network calls.
+    /// Useful for testing or when you want to control the API version manually.
+    pub fn build_sync(self) -> Result<AgentClient, KeylimectlError> {
+        let agent_ip = self.agent_ip.ok_or_else(|| {
+            KeylimectlError::validation(
+                "Agent IP is required for AgentClient",
+            )
+        })?;
+        let agent_port = self.agent_port.ok_or_else(|| {
+            KeylimectlError::validation(
+                "Agent port is required for AgentClient",
+            )
+        })?;
+        let config = self.config.ok_or_else(|| {
+            KeylimectlError::validation(
+                "Configuration is required for AgentClient",
+            )
+        })?;
+
+        let mut client = AgentClient::new_without_version_detection(
+            &agent_ip, agent_port, config,
+        )?;
+
+        if let Some(version) = self.api_version {
+            client.api_version = version;
+        }
+
+        Ok(client)
+    }
+}
+
+impl<'a> Default for AgentClientBuilder<'a> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AgentClient {
+    /// Create a new builder for configuring an AgentClient
+    ///
+    /// This is the recommended way to create AgentClient instances,
+    /// as it provides a flexible interface for configuration.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use keylimectl::client::agent::AgentClient;
+    /// use keylimectl::config::Config;
+    ///
+    /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+    /// let config = Config::default();
+    /// let client = AgentClient::builder()
+    ///     .agent_ip("192.168.1.100")
+    ///     .agent_port(9002)
+    ///     .config(&config)
+    ///     .build()
+    ///     .await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[allow(dead_code)] // Builder pattern may not be used initially
+    pub fn builder() -> AgentClientBuilder<'static> {
+        AgentClientBuilder::new()
+    }
     /// Create a new agent client with automatic API version detection
     ///
     /// Initializes a new `AgentClient` for communicating with the specified agent
@@ -172,7 +377,7 @@ impl AgentClient {
     /// # Returns
     ///
     /// Returns a configured `AgentClient` with default API version.
-    pub fn new_without_version_detection(
+    pub(crate) fn new_without_version_detection(
         agent_ip: &str,
         agent_port: u16,
         config: &Config,
@@ -189,26 +394,11 @@ impl AgentClient {
             format!("https://{agent_ip}:{agent_port}")
         };
 
-        // Create HTTP client with TLS configuration
-        let http_client = Self::create_http_client(config)?;
-
-        // Create resilient client with retry logic
-        let client = ResilientClient::new(
-            Some(http_client),
-            Duration::from_secs(1), // Initial delay
-            config.client.max_retries,
-            &[
-                StatusCode::OK,
-                StatusCode::CREATED,
-                StatusCode::ACCEPTED,
-                StatusCode::NO_CONTENT,
-            ],
-            Some(Duration::from_secs(60)), // Max delay
-        );
+        let base = BaseClient::new(base_url, config)
+            .map_err(KeylimectlError::from)?;
 
         Ok(Self {
-            client,
-            base_url,
+            base,
             api_version: "2.1".to_string(), // Default API version
             agent_ip: agent_ip.to_string(),
             agent_port,
@@ -262,12 +452,13 @@ impl AgentClient {
     ) -> Result<(), KeylimectlError> {
         let url = format!(
             "{}/v{}/quotes/identity?nonce=test",
-            self.base_url, api_version
+            self.base.base_url, api_version
         );
 
         debug!("Testing agent API version {api_version} with URL: {url}");
 
         let response = self
+            .base
             .client
             .get_request(Method::GET, &url)
             .send()
@@ -340,10 +531,11 @@ impl AgentClient {
 
         let url = format!(
             "{}/v{}/quotes/identity?nonce={}",
-            self.base_url, self.api_version, nonce
+            self.base.base_url, self.api_version, nonce
         );
 
         let response = self
+            .base
             .client
             .get_request(Method::GET, &url)
             .send()
@@ -352,7 +544,10 @@ impl AgentClient {
                 "Failed to send quote request to agent".to_string()
             })?;
 
-        self.handle_response(response).await
+        self.base
+            .handle_response(response)
+            .await
+            .map_err(KeylimectlError::from)
     }
 
     /// Deliver encrypted U key and optional payload to the agent
@@ -405,7 +600,7 @@ impl AgentClient {
         );
 
         let url =
-            format!("{}/v{}/keys/ukey", self.base_url, self.api_version);
+            format!("{}/v{}/keys/ukey", self.base.base_url, self.api_version);
 
         let mut data = json!({
             "encrypted_key": STANDARD.encode(encrypted_key),
@@ -418,6 +613,7 @@ impl AgentClient {
         }
 
         let response = self
+            .base
             .client
             .get_json_request_from_struct(Method::POST, &url, &data, None)
             .map_err(KeylimectlError::Json)?
@@ -427,7 +623,10 @@ impl AgentClient {
                 "Failed to send key delivery request to agent".to_string()
             })?;
 
-        self.handle_response(response).await
+        self.base
+            .handle_response(response)
+            .await
+            .map_err(KeylimectlError::from)
     }
 
     /// Verify key derivation using HMAC challenge
@@ -483,10 +682,11 @@ impl AgentClient {
 
         let url = format!(
             "{}/v{}/keys/verify?challenge={}",
-            self.base_url, self.api_version, challenge
+            self.base.base_url, self.api_version, challenge
         );
 
         let response = self
+            .base
             .client
             .get_request(Method::GET, &url)
             .send()
@@ -495,7 +695,7 @@ impl AgentClient {
                 "Failed to send verification request to agent".to_string()
             })?;
 
-        let response_json = self.handle_response(response).await?;
+        let response_json = self.base.handle_response(response).await?;
 
         // Extract HMAC from response and compare
         if let Some(results) = response_json.get("results") {
@@ -544,7 +744,7 @@ impl AgentClient {
     /// Get the agent's base URL
     #[allow(dead_code)]
     pub fn base_url(&self) -> &str {
-        &self.base_url
+        &self.base.base_url
     }
 
     /// Get the detected/configured API version
@@ -552,133 +752,12 @@ impl AgentClient {
     pub fn api_version(&self) -> &str {
         &self.api_version
     }
-
-    /// Create HTTP client with TLS configuration
-    ///
-    /// Initializes a reqwest HTTP client with the TLS settings specified
-    /// in the configuration. This includes client certificates for mutual TLS
-    /// and server certificate verification settings.
-    fn create_http_client(
-        config: &Config,
-    ) -> Result<reqwest::Client, KeylimectlError> {
-        let mut builder = reqwest::Client::builder()
-            .timeout(Duration::from_secs(config.client.timeout));
-
-        // Configure TLS
-        if !config.tls.verify_server_cert {
-            builder = builder.danger_accept_invalid_certs(true);
-            warn!("Server certificate verification is disabled for agent communication");
-        }
-
-        // Add trusted CA certificates
-        for ca_path in &config.tls.trusted_ca {
-            if std::path::Path::new(ca_path).exists() {
-                let ca_cert = std::fs::read(ca_path).with_context(|| {
-                    format!(
-                        "Failed to read trusted CA certificate: {ca_path}"
-                    )
-                })?;
-
-                let ca_cert = reqwest::Certificate::from_pem(&ca_cert)
-                    .with_context(|| {
-                        format!("Failed to parse CA certificate: {ca_path}")
-                    })?;
-
-                builder = builder.add_root_certificate(ca_cert);
-            } else {
-                warn!("Trusted CA certificate file not found: {ca_path}");
-            }
-        }
-
-        // Add client certificate if configured and enabled for agent mTLS
-        if config.tls.enable_agent_mtls {
-            if let (Some(cert_path), Some(key_path)) =
-                (&config.tls.client_cert, &config.tls.client_key)
-            {
-                let cert = std::fs::read(cert_path).with_context(|| {
-                    format!("Failed to read client certificate: {cert_path}")
-                })?;
-
-                let key = std::fs::read(key_path).with_context(|| {
-                    format!("Failed to read client key: {key_path}")
-                })?;
-
-                let identity = reqwest::Identity::from_pkcs8_pem(&cert, &key)
-                    .with_context(|| "Failed to create client identity from certificate and key".to_string())?;
-
-                builder = builder.identity(identity);
-                debug!("Configured client certificate for agent mTLS");
-            } else {
-                warn!(
-                    "Agent mTLS enabled but no client certificate configured"
-                );
-            }
-        }
-
-        builder
-            .build()
-            .with_context(|| "Failed to create HTTP client".to_string())
-    }
-
-    /// Handle HTTP response and convert to JSON
-    ///
-    /// Processes HTTP responses from the agent, handling both
-    /// success and error cases. Converts successful responses to JSON
-    /// and transforms HTTP errors into appropriate `KeylimectlError` types.
-    async fn handle_response(
-        &self,
-        response: reqwest::Response,
-    ) -> Result<Value, KeylimectlError> {
-        let status = response.status();
-        let response_text = response
-            .text()
-            .await
-            .with_context(|| "Failed to read response body".to_string())?;
-
-        match status {
-            StatusCode::OK
-            | StatusCode::CREATED
-            | StatusCode::ACCEPTED
-            | StatusCode::NO_CONTENT => {
-                if response_text.is_empty() {
-                    Ok(json!({"status": "success"}))
-                } else {
-                    serde_json::from_str(&response_text).with_context(|| {
-                        format!(
-                            "Failed to parse JSON response: {response_text}"
-                        )
-                    })
-                }
-            }
-            _ => {
-                let error_message = if response_text.is_empty() {
-                    format!("HTTP {} error", status.as_u16())
-                } else {
-                    // Try to parse as JSON for better error message
-                    match serde_json::from_str::<Value>(&response_text) {
-                        Ok(json_error) => json_error
-                            .get("status")
-                            .or_else(|| json_error.get("message"))
-                            .and_then(|v| v.as_str())
-                            .unwrap_or(&response_text)
-                            .to_string(),
-                        Err(_) => response_text.clone(),
-                    }
-                };
-
-                Err(KeylimectlError::api_error(
-                    status.as_u16(),
-                    error_message,
-                    serde_json::from_str(&response_text).ok(),
-                ))
-            }
-        }
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::client::base::BaseClient;
     use crate::config::{ClientConfig, TlsConfig};
 
     /// Create a test configuration
@@ -714,7 +793,7 @@ mod tests {
 
         assert!(result.is_ok());
         let client = result.unwrap();
-        assert_eq!(client.base_url, "https://127.0.0.1:9002");
+        assert_eq!(client.base.base_url, "https://127.0.0.1:9002");
         assert_eq!(client.api_version, "2.1");
         assert_eq!(client.agent_ip, "127.0.0.1");
         assert_eq!(client.agent_port, 9002);
@@ -729,7 +808,7 @@ mod tests {
             AgentClient::new_without_version_detection("::1", 9002, &config);
         assert!(result.is_ok());
         let client = result.unwrap();
-        assert_eq!(client.base_url, "https://[::1]:9002");
+        assert_eq!(client.base.base_url, "https://[::1]:9002");
 
         // Test IPv6 with brackets
         let result = AgentClient::new_without_version_detection(
@@ -739,7 +818,7 @@ mod tests {
         );
         assert!(result.is_ok());
         let client = result.unwrap();
-        assert_eq!(client.base_url, "https://[2001:db8::1]:9002");
+        assert_eq!(client.base.base_url, "https://[2001:db8::1]:9002");
     }
 
     #[test]
@@ -866,17 +945,17 @@ mod tests {
 
         // Test with mTLS disabled
         config.tls.enable_agent_mtls = false;
-        let result = AgentClient::create_http_client(&config);
+        let result = BaseClient::create_http_client(&config);
         assert!(result.is_ok());
 
         // Test with mTLS enabled but no certificates
         config.tls.enable_agent_mtls = true;
-        let result = AgentClient::create_http_client(&config);
+        let result = BaseClient::create_http_client(&config);
         assert!(result.is_ok()); // Should still work, just warn about missing certs
 
         // Test with server verification disabled
         config.tls.verify_server_cert = false;
-        let result = AgentClient::create_http_client(&config);
+        let result = BaseClient::create_http_client(&config);
         assert!(result.is_ok());
     }
 

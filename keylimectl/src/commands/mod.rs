@@ -4,6 +4,7 @@
 //! Command implementations for keylimectl
 
 pub mod agent;
+pub mod error;
 pub mod list;
 pub mod measured_boot;
 pub mod policy;

@@ -83,7 +83,7 @@
 use crate::Cli;
 use config::{ConfigError, Environment, File, FileFormat};
 use serde::{Deserialize, Serialize};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 /// Main configuration structure for keylimectl
 ///
@@ -530,63 +530,13 @@ impl Config {
     /// - Retry interval is not positive
     #[allow(dead_code)]
     pub fn validate(&self) -> Result<(), ConfigError> {
-        // Validate IP addresses
-        if self.verifier.ip.is_empty() {
-            return Err(ConfigError::Message(
-                "Verifier IP cannot be empty".to_string(),
-            ));
-        }
-
-        if self.registrar.ip.is_empty() {
-            return Err(ConfigError::Message(
-                "Registrar IP cannot be empty".to_string(),
-            ));
-        }
-
-        // Validate ports
-        if self.verifier.port == 0 {
-            return Err(ConfigError::Message(
-                "Verifier port cannot be 0".to_string(),
-            ));
-        }
-
-        if self.registrar.port == 0 {
-            return Err(ConfigError::Message(
-                "Registrar port cannot be 0".to_string(),
-            ));
-        }
-
-        // Validate TLS configuration
-        if let Some(ref cert_path) = self.tls.client_cert {
-            if !Path::new(cert_path).exists() {
-                return Err(ConfigError::Message(format!(
-                    "Client certificate file not found: {cert_path}"
-                )));
-            }
-        }
-
-        if let Some(ref key_path) = self.tls.client_key {
-            if !Path::new(key_path).exists() {
-                return Err(ConfigError::Message(format!(
-                    "Client key file not found: {key_path}"
-                )));
-            }
-        }
-
-        // Validate client configuration
-        if self.client.timeout == 0 {
-            return Err(ConfigError::Message(
-                "Client timeout cannot be 0".to_string(),
-            ));
-        }
-
-        if self.client.retry_interval <= 0.0 {
-            return Err(ConfigError::Message(
-                "Retry interval must be positive".to_string(),
-            ));
-        }
-
-        Ok(())
+        // Use the extracted validation logic from the validation module
+        crate::config::validation::validate_complete_config(
+            &self.verifier,
+            &self.registrar,
+            &self.tls,
+            &self.client,
+        )
     }
 }
 
@@ -962,7 +912,10 @@ mod tests {
                 client_key: Some(
                     key_file.path().to_string_lossy().to_string(),
                 ),
-                ..TlsConfig::default()
+                client_key_password: None,
+                trusted_ca: vec![], // Empty trusted CA to avoid non-existent file validation
+                verify_server_cert: true,
+                enable_agent_mtls: true,
             },
             ..Config::default()
         };
