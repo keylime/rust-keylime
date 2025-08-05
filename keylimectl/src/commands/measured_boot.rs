@@ -69,10 +69,12 @@
 //! ```
 
 use crate::client::verifier::VerifierClient;
+use crate::commands::error::CommandError;
 use crate::config::Config;
-use crate::error::{ErrorContext, KeylimectlError};
+use crate::error::KeylimectlError;
 use crate::output::OutputHandler;
 use crate::MeasuredBootAction;
+use chrono;
 use log::debug;
 use serde_json::{json, Value};
 use std::fs;
@@ -163,16 +165,24 @@ pub async fn execute(
 ) -> Result<Value, KeylimectlError> {
     match action {
         MeasuredBootAction::Create { name, file } => {
-            create_mb_policy(name, file, config, output).await
+            create_mb_policy(name, file, config, output)
+                .await
+                .map_err(KeylimectlError::from)
         }
         MeasuredBootAction::Show { name } => {
-            show_mb_policy(name, config, output).await
+            show_mb_policy(name, config, output)
+                .await
+                .map_err(KeylimectlError::from)
         }
         MeasuredBootAction::Update { name, file } => {
-            update_mb_policy(name, file, config, output).await
+            update_mb_policy(name, file, config, output)
+                .await
+                .map_err(KeylimectlError::from)
         }
         MeasuredBootAction::Delete { name } => {
-            delete_mb_policy(name, config, output).await
+            delete_mb_policy(name, config, output)
+                .await
+                .map_err(KeylimectlError::from)
         }
     }
 }
@@ -183,20 +193,25 @@ async fn create_mb_policy(
     file_path: &str,
     config: &Config,
     output: &OutputHandler,
-) -> Result<Value, KeylimectlError> {
+) -> Result<Value, CommandError> {
     output.info(format!("Creating measured boot policy '{name}'"));
 
     // Load policy from file
-    let policy_content =
-        fs::read_to_string(file_path).with_context(|| {
-            format!("Failed to read measured boot policy file: {file_path}")
-        })?;
+    let policy_content = fs::read_to_string(file_path).map_err(|e| {
+        CommandError::policy_file_error(
+            file_path,
+            format!("Failed to read measured boot policy file: {e}"),
+        )
+    })?;
 
     // Parse policy content (basic validation)
-    let _policy_json: Value = serde_json::from_str(&policy_content)
-        .with_context(|| {
-            format!(
-                "Failed to parse measured boot policy as JSON: {file_path}"
+    let _policy_json: Value =
+        serde_json::from_str(&policy_content).map_err(|e| {
+            CommandError::policy_file_error(
+                file_path,
+                format!(
+                    "Failed to parse measured boot policy as JSON: {e}"
+                ),
             )
         })?;
 
@@ -207,17 +222,67 @@ async fn create_mb_policy(
     );
 
     // Create policy data structure for the API
-    let policy_data = json!({
+    // Parse the policy to extract metadata and validate structure
+    let policy_json: Value =
+        serde_json::from_str(&policy_content).map_err(|e| {
+            CommandError::policy_file_error(
+                file_path,
+                format!(
+                    "Failed to parse measured boot policy as JSON: {e}"
+                ),
+            )
+        })?;
+
+    // Extract policy metadata for enhanced API payload
+    let mut policy_data = json!({
         "mb_policy": policy_content,
-        // TODO: Add other measured boot policy-related fields as needed
+        "policy_type": "measured_boot",
+        "format_version": "1.0",
+        "upload_timestamp": chrono::Utc::now().to_rfc3339()
     });
 
-    let verifier_client = VerifierClient::new(config).await?;
+    // Add metadata based on policy content structure
+    if let Some(pcrs) = policy_json.get("pcrs").and_then(|v| v.as_object()) {
+        policy_data["pcr_count"] = json!(pcrs.len());
+        policy_data["pcr_list"] = json!(pcrs.keys().collect::<Vec<_>>());
+    }
+
+    if let Some(components) =
+        policy_json.get("components").and_then(|v| v.as_array())
+    {
+        policy_data["components_count"] = json!(components.len());
+    }
+
+    if let Some(settings) = policy_json.get("settings") {
+        policy_data["mb_settings"] = settings.clone();
+        if let Some(secure_boot) = settings.get("secure_boot") {
+            policy_data["secure_boot_enabled"] = secure_boot.clone();
+        }
+        if let Some(tpm_version) = settings.get("tpm_version") {
+            policy_data["tpm_version"] = tpm_version.clone();
+        }
+    }
+
+    if let Some(meta) = policy_json.get("meta") {
+        policy_data["policy_metadata"] = meta.clone();
+    }
+
+    let verifier_client = VerifierClient::new(config).await.map_err(|e| {
+        CommandError::resource_error(
+            "verifier",
+            format!("Failed to connect to verifier: {e}"),
+        )
+    })?;
     let response = verifier_client
         .add_mb_policy(name, policy_data)
         .await
-        .with_context(|| {
-            format!("Failed to create measured boot policy '{name}'")
+        .map_err(|e| {
+            CommandError::resource_error(
+                "verifier",
+                format!(
+                    "Failed to create measured boot policy '{name}': {e}"
+                ),
+            )
         })?;
 
     output.info(format!(
@@ -237,21 +302,30 @@ async fn show_mb_policy(
     name: &str,
     config: &Config,
     output: &OutputHandler,
-) -> Result<Value, KeylimectlError> {
+) -> Result<Value, CommandError> {
     output.info(format!("Retrieving measured boot policy '{name}'"));
 
-    let verifier_client = VerifierClient::new(config).await?;
-    let policy =
-        verifier_client.get_mb_policy(name).await.with_context(|| {
-            format!("Failed to retrieve measured boot policy '{name}'")
-        })?;
+    let verifier_client = VerifierClient::new(config).await.map_err(|e| {
+        CommandError::resource_error(
+            "verifier",
+            format!("Failed to connect to verifier: {e}"),
+        )
+    })?;
+    let policy = verifier_client.get_mb_policy(name).await.map_err(|e| {
+        CommandError::resource_error(
+            "verifier",
+            format!(
+                "Failed to retrieve measured boot policy '{name}': {e}"
+            ),
+        )
+    })?;
 
     match policy {
         Some(policy_data) => Ok(json!({
             "policy_name": name,
             "results": policy_data
         })),
-        None => Err(KeylimectlError::policy_not_found(name)),
+        None => Err(CommandError::policy_not_found(name)),
     }
 }
 
@@ -261,20 +335,25 @@ async fn update_mb_policy(
     file_path: &str,
     config: &Config,
     output: &OutputHandler,
-) -> Result<Value, KeylimectlError> {
+) -> Result<Value, CommandError> {
     output.info(format!("Updating measured boot policy '{name}'"));
 
     // Load policy from file
-    let policy_content =
-        fs::read_to_string(file_path).with_context(|| {
-            format!("Failed to read measured boot policy file: {file_path}")
-        })?;
+    let policy_content = fs::read_to_string(file_path).map_err(|e| {
+        CommandError::policy_file_error(
+            file_path,
+            format!("Failed to read measured boot policy file: {e}"),
+        )
+    })?;
 
     // Parse policy content (basic validation)
-    let _policy_json: Value = serde_json::from_str(&policy_content)
-        .with_context(|| {
-            format!(
-                "Failed to parse measured boot policy as JSON: {file_path}"
+    let _policy_json: Value =
+        serde_json::from_str(&policy_content).map_err(|e| {
+            CommandError::policy_file_error(
+                file_path,
+                format!(
+                    "Failed to parse measured boot policy as JSON: {e}"
+                ),
             )
         })?;
 
@@ -285,17 +364,67 @@ async fn update_mb_policy(
     );
 
     // Create policy data structure for the API
-    let policy_data = json!({
+    // Parse the policy to extract metadata and validate structure
+    let policy_json: Value =
+        serde_json::from_str(&policy_content).map_err(|e| {
+            CommandError::policy_file_error(
+                file_path,
+                format!(
+                    "Failed to parse measured boot policy as JSON: {e}"
+                ),
+            )
+        })?;
+
+    // Extract policy metadata for enhanced API payload
+    let mut policy_data = json!({
         "mb_policy": policy_content,
-        // TODO: Add other measured boot policy-related fields as needed
+        "policy_type": "measured_boot",
+        "format_version": "1.0",
+        "update_timestamp": chrono::Utc::now().to_rfc3339()
     });
 
-    let verifier_client = VerifierClient::new(config).await?;
+    // Add metadata based on policy content structure
+    if let Some(pcrs) = policy_json.get("pcrs").and_then(|v| v.as_object()) {
+        policy_data["pcr_count"] = json!(pcrs.len());
+        policy_data["pcr_list"] = json!(pcrs.keys().collect::<Vec<_>>());
+    }
+
+    if let Some(components) =
+        policy_json.get("components").and_then(|v| v.as_array())
+    {
+        policy_data["components_count"] = json!(components.len());
+    }
+
+    if let Some(settings) = policy_json.get("settings") {
+        policy_data["mb_settings"] = settings.clone();
+        if let Some(secure_boot) = settings.get("secure_boot") {
+            policy_data["secure_boot_enabled"] = secure_boot.clone();
+        }
+        if let Some(tpm_version) = settings.get("tpm_version") {
+            policy_data["tpm_version"] = tpm_version.clone();
+        }
+    }
+
+    if let Some(meta) = policy_json.get("meta") {
+        policy_data["policy_metadata"] = meta.clone();
+    }
+
+    let verifier_client = VerifierClient::new(config).await.map_err(|e| {
+        CommandError::resource_error(
+            "verifier",
+            format!("Failed to connect to verifier: {e}"),
+        )
+    })?;
     let response = verifier_client
         .update_mb_policy(name, policy_data)
         .await
-        .with_context(|| {
-            format!("Failed to update measured boot policy '{name}'")
+        .map_err(|e| {
+            CommandError::resource_error(
+                "verifier",
+                format!(
+                    "Failed to update measured boot policy '{name}': {e}"
+                ),
+            )
         })?;
 
     output.info(format!(
@@ -315,15 +444,23 @@ async fn delete_mb_policy(
     name: &str,
     config: &Config,
     output: &OutputHandler,
-) -> Result<Value, KeylimectlError> {
+) -> Result<Value, CommandError> {
     output.info(format!("Deleting measured boot policy '{name}'"));
 
-    let verifier_client = VerifierClient::new(config).await?;
-    let response = verifier_client
-        .delete_mb_policy(name)
-        .await
-        .with_context(|| {
-            format!("Failed to delete measured boot policy '{name}'")
+    let verifier_client = VerifierClient::new(config).await.map_err(|e| {
+        CommandError::resource_error(
+            "verifier",
+            format!("Failed to connect to verifier: {e}"),
+        )
+    })?;
+    let response =
+        verifier_client.delete_mb_policy(name).await.map_err(|e| {
+            CommandError::resource_error(
+                "verifier",
+                format!(
+                    "Failed to delete measured boot policy '{name}': {e}"
+                ),
+            )
         })?;
 
     output.info(format!(

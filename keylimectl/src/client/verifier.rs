@@ -53,14 +53,13 @@
 //! # }
 //! ```
 
+use crate::client::base::BaseClient;
 use crate::config::Config;
 use crate::error::{ErrorContext, KeylimectlError};
-use keylime::resilient_client::ResilientClient;
 use keylime::version::KeylimeRegistrarVersion;
 use log::{debug, info, warn};
 use reqwest::{Method, StatusCode};
-use serde_json::{json, Value};
-use std::time::Duration;
+use serde_json::Value;
 
 /// Unknown API version constant for when version detection fails
 #[allow(dead_code)]
@@ -68,7 +67,8 @@ pub const UNKNOWN_API_VERSION: &str = "unknown";
 
 /// Supported API versions in order from oldest to newest (fallback tries newest first)
 #[allow(dead_code)]
-pub const SUPPORTED_API_VERSIONS: &[&str] = &["2.0", "2.1", "2.2", "3.0"];
+pub const SUPPORTED_API_VERSIONS: &[&str] =
+    &["2.0", "2.1", "2.2", "2.3", "3.0"];
 
 /// Response structure for version endpoint
 #[derive(serde::Deserialize, Debug)]
@@ -121,14 +121,165 @@ struct Response<T> {
 /// ```
 #[derive(Debug)]
 pub struct VerifierClient {
-    client: ResilientClient,
-    base_url: String,
+    base: BaseClient,
     api_version: String,
     #[allow(dead_code)]
     supported_api_versions: Option<Vec<String>>,
 }
 
+/// Builder for creating VerifierClient instances with flexible configuration
+///
+/// The `VerifierClientBuilder` provides a fluent interface for configuring
+/// and creating `VerifierClient` instances. It allows for optional API version
+/// detection and custom API version specification.
+///
+/// # Examples
+///
+/// ```rust
+/// use keylimectl::client::verifier::VerifierClient;
+/// use keylimectl::config::Config;
+///
+/// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+/// let config = Config::default();
+///
+/// // Create client with automatic version detection
+/// let client = VerifierClient::builder()
+///     .config(&config)
+///     .build()
+///     .await?;
+///
+/// // Create client without version detection (for testing)
+/// let client = VerifierClient::builder()
+///     .config(&config)
+///     .skip_version_detection()
+///     .build_sync()?;
+///
+/// // Create client with specific API version
+/// let client = VerifierClient::builder()
+///     .config(&config)
+///     .api_version("2.0")
+///     .skip_version_detection()
+///     .build_sync()?;
+/// # Ok(())
+/// # }
+/// ```
+#[derive(Debug)]
+#[allow(dead_code)] // Builder pattern may not be used initially
+pub struct VerifierClientBuilder<'a> {
+    config: Option<&'a Config>,
+    skip_version_detection: bool,
+    api_version: Option<String>,
+}
+
+#[allow(dead_code)] // Builder pattern may not be used initially
+impl<'a> VerifierClientBuilder<'a> {
+    /// Create a new builder instance
+    pub fn new() -> Self {
+        Self {
+            config: None,
+            skip_version_detection: false,
+            api_version: None,
+        }
+    }
+
+    /// Set the configuration for the client
+    pub fn config(mut self, config: &'a Config) -> Self {
+        self.config = Some(config);
+        self
+    }
+
+    /// Skip automatic API version detection
+    ///
+    /// When this is set, the client will use either the specified API version
+    /// or the default version ("2.1") without attempting to detect the server's
+    /// supported version.
+    pub fn skip_version_detection(mut self) -> Self {
+        self.skip_version_detection = true;
+        self
+    }
+
+    /// Set a specific API version to use
+    ///
+    /// If specified, this version will be used instead of the default.
+    /// If `skip_version_detection` is not set, version detection may still
+    /// override this value.
+    pub fn api_version<S: Into<String>>(mut self, version: S) -> Self {
+        self.api_version = Some(version.into());
+        self
+    }
+
+    /// Build the VerifierClient with automatic API version detection
+    ///
+    /// This is the recommended way to create a client for production use,
+    /// as it will automatically detect the optimal API version supported
+    /// by the verifier service.
+    pub async fn build(self) -> Result<VerifierClient, KeylimectlError> {
+        let config = self.config.ok_or_else(|| {
+            KeylimectlError::validation(
+                "Configuration is required for VerifierClient",
+            )
+        })?;
+
+        if self.skip_version_detection {
+            self.build_sync()
+        } else {
+            VerifierClient::new(config).await
+        }
+    }
+
+    /// Build the VerifierClient without API version detection
+    ///
+    /// This creates the client immediately without any network calls.
+    /// Useful for testing or when you want to control the API version manually.
+    pub fn build_sync(self) -> Result<VerifierClient, KeylimectlError> {
+        let config = self.config.ok_or_else(|| {
+            KeylimectlError::validation(
+                "Configuration is required for VerifierClient",
+            )
+        })?;
+
+        let mut client =
+            VerifierClient::new_without_version_detection(config)?;
+
+        if let Some(version) = self.api_version {
+            client.api_version = version;
+        }
+
+        Ok(client)
+    }
+}
+
+impl<'a> Default for VerifierClientBuilder<'a> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl VerifierClient {
+    /// Create a new builder for configuring a VerifierClient
+    ///
+    /// This is the recommended way to create VerifierClient instances,
+    /// as it provides a flexible interface for configuration.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use keylimectl::client::verifier::VerifierClient;
+    /// use keylimectl::config::Config;
+    ///
+    /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+    /// let config = Config::default();
+    /// let client = VerifierClient::builder()
+    ///     .config(&config)
+    ///     .build()
+    ///     .await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[allow(dead_code)] // Builder pattern may not be used initially
+    pub fn builder() -> VerifierClientBuilder<'static> {
+        VerifierClientBuilder::new()
+    }
     /// Create a new verifier client with automatic API version detection
     ///
     /// Initializes a new `VerifierClient` with the provided configuration and
@@ -166,6 +317,8 @@ impl VerifierClient {
     /// # }
     /// ```
     pub async fn new(config: &Config) -> Result<Self, KeylimectlError> {
+        debug!("Creating VerifierClient with config: client_cert={:?}, client_key={:?}, trusted_ca={:?}",
+               config.tls.client_cert, config.tls.client_key, config.tls.trusted_ca);
         let mut client = Self::new_without_version_detection(config)?;
 
         // Attempt to detect API version
@@ -198,31 +351,15 @@ impl VerifierClient {
     /// - TLS certificate files cannot be read
     /// - Certificate/key files are invalid
     /// - HTTP client initialization fails
-    pub fn new_without_version_detection(
+    pub(crate) fn new_without_version_detection(
         config: &Config,
     ) -> Result<Self, KeylimectlError> {
         let base_url = config.verifier_base_url();
-
-        // Create HTTP client with TLS configuration
-        let http_client = Self::create_http_client(config)?;
-
-        // Create resilient client with retry logic
-        let client = ResilientClient::new(
-            Some(http_client),
-            Duration::from_secs(1), // Initial delay
-            config.client.max_retries,
-            &[
-                StatusCode::OK,
-                StatusCode::CREATED,
-                StatusCode::ACCEPTED,
-                StatusCode::NO_CONTENT,
-            ],
-            Some(Duration::from_secs(60)), // Max delay
-        );
+        let base = BaseClient::new(base_url, config)
+            .map_err(KeylimectlError::from)?;
 
         Ok(Self {
-            client,
-            base_url,
+            base,
             api_version: "2.1".to_string(), // Default API version
             supported_api_versions: None,
         })
@@ -303,17 +440,20 @@ impl VerifierClient {
     async fn get_verifier_api_version(
         &mut self,
     ) -> Result<String, KeylimectlError> {
-        let url = format!("{}/version", self.base_url);
+        let url = format!("{}/version", self.base.base_url);
 
         info!("Requesting verifier API version from {url}");
 
+        debug!("Sending version request to: {url}");
+
         let response = self
+            .base
             .client
             .get_request(Method::GET, &url)
             .send()
             .await
             .with_context(|| {
-                "Failed to send version request to verifier".to_string()
+                format!("Failed to send version request to verifier at {url}")
             })?;
 
         if !response.status().is_success() {
@@ -340,11 +480,12 @@ impl VerifierClient {
         &self,
         api_version: &str,
     ) -> Result<(), KeylimectlError> {
-        let url = format!("{}/v{}/agents/", self.base_url, api_version);
+        let url = format!("{}/v{}/agents/", self.base.base_url, api_version);
 
         debug!("Testing verifier API version {api_version} with URL: {url}");
 
         let response = self
+            .base
             .client
             .get_request(Method::GET, &url)
             .send()
@@ -433,10 +574,11 @@ impl VerifierClient {
 
         let url = format!(
             "{}/v{}/agents/{}",
-            self.base_url, self.api_version, agent_uuid
+            self.base.base_url, self.api_version, agent_uuid
         );
 
         let response = self
+            .base
             .client
             .get_json_request_from_struct(Method::POST, &url, &data, None)
             .map_err(KeylimectlError::Json)?
@@ -446,7 +588,10 @@ impl VerifierClient {
                 "Failed to send add agent request to verifier".to_string()
             })?;
 
-        self.handle_response(response).await
+        self.base
+            .handle_response(response)
+            .await
+            .map_err(KeylimectlError::from)
     }
 
     /// Get agent information from the verifier
@@ -506,10 +651,11 @@ impl VerifierClient {
 
         let url = format!(
             "{}/v{}/agents/{}",
-            self.base_url, self.api_version, agent_uuid
+            self.base.base_url, self.api_version, agent_uuid
         );
 
         let response = self
+            .base
             .client
             .get_request(Method::GET, &url)
             .send()
@@ -520,12 +666,20 @@ impl VerifierClient {
 
         match response.status() {
             StatusCode::OK => {
-                let json_response = self.handle_response(response).await?;
+                let json_response: Value = self
+                    .base
+                    .handle_response(response)
+                    .await
+                    .map_err(KeylimectlError::from)?;
                 Ok(Some(json_response))
             }
             StatusCode::NOT_FOUND => Ok(None),
             _ => {
-                let error_response = self.handle_response(response).await;
+                let error_response: Result<Value, KeylimectlError> = self
+                    .base
+                    .handle_response(response)
+                    .await
+                    .map_err(KeylimectlError::from);
                 match error_response {
                     Ok(_) => Ok(None),
                     Err(e) => Err(e),
@@ -581,10 +735,11 @@ impl VerifierClient {
 
         let url = format!(
             "{}/v{}/agents/{}",
-            self.base_url, self.api_version, agent_uuid
+            self.base.base_url, self.api_version, agent_uuid
         );
 
         let response = self
+            .base
             .client
             .get_request(Method::DELETE, &url)
             .send()
@@ -593,7 +748,10 @@ impl VerifierClient {
                 "Failed to send delete agent request to verifier".to_string()
             })?;
 
-        self.handle_response(response).await
+        self.base
+            .handle_response(response)
+            .await
+            .map_err(KeylimectlError::from)
     }
 
     /// Reactivate an agent on the verifier
@@ -605,10 +763,11 @@ impl VerifierClient {
 
         let url = format!(
             "{}/v{}/agents/{}/reactivate",
-            self.base_url, self.api_version, agent_uuid
+            self.base.base_url, self.api_version, agent_uuid
         );
 
         let response = self
+            .base
             .client
             .get_request(Method::PUT, &url)
             .body("")
@@ -619,7 +778,10 @@ impl VerifierClient {
                     .to_string()
             })?;
 
-        self.handle_response(response).await
+        self.base
+            .handle_response(response)
+            .await
+            .map_err(KeylimectlError::from)
     }
 
     /// Stop an agent on the verifier
@@ -632,10 +794,11 @@ impl VerifierClient {
 
         let url = format!(
             "{}/v{}/agents/{}/stop",
-            self.base_url, self.api_version, agent_uuid
+            self.base.base_url, self.api_version, agent_uuid
         );
 
         let response = self
+            .base
             .client
             .get_request(Method::PUT, &url)
             .body("")
@@ -645,7 +808,10 @@ impl VerifierClient {
                 "Failed to send stop agent request to verifier".to_string()
             })?;
 
-        self.handle_response(response).await
+        self.base
+            .handle_response(response)
+            .await
+            .map_err(KeylimectlError::from)
     }
 
     /// List all agents on the verifier
@@ -711,13 +877,14 @@ impl VerifierClient {
         debug!("Listing agents on verifier");
 
         let mut url =
-            format!("{}/v{}/agents/", self.base_url, self.api_version);
+            format!("{}/v{}/agents/", self.base.base_url, self.api_version);
 
         if let Some(vid) = verifier_id {
             url.push_str(&format!("?verifier={vid}"));
         }
 
         let response = self
+            .base
             .client
             .get_request(Method::GET, &url)
             .send()
@@ -726,7 +893,10 @@ impl VerifierClient {
                 "Failed to send list agents request to verifier".to_string()
             })?;
 
-        self.handle_response(response).await
+        self.base
+            .handle_response(response)
+            .await
+            .map_err(KeylimectlError::from)
     }
 
     /// Get bulk information for all agents
@@ -797,7 +967,7 @@ impl VerifierClient {
 
         let mut url = format!(
             "{}/v{}/agents/?bulk=true",
-            self.base_url, self.api_version
+            self.base.base_url, self.api_version
         );
 
         if let Some(vid) = verifier_id {
@@ -805,6 +975,7 @@ impl VerifierClient {
         }
 
         let response = self
+            .base
             .client
             .get_request(Method::GET, &url)
             .send()
@@ -813,7 +984,10 @@ impl VerifierClient {
                 "Failed to send bulk info request to verifier".to_string()
             })?;
 
-        self.handle_response(response).await
+        self.base
+            .handle_response(response)
+            .await
+            .map_err(KeylimectlError::from)
     }
 
     /// Add a runtime policy
@@ -826,10 +1000,11 @@ impl VerifierClient {
 
         let url = format!(
             "{}/v{}/allowlists/{}",
-            self.base_url, self.api_version, policy_name
+            self.base.base_url, self.api_version, policy_name
         );
 
         let response = self
+            .base
             .client
             .get_json_request_from_struct(
                 Method::POST,
@@ -845,7 +1020,10 @@ impl VerifierClient {
                     .to_string()
             })?;
 
-        self.handle_response(response).await
+        self.base
+            .handle_response(response)
+            .await
+            .map_err(KeylimectlError::from)
     }
 
     /// Get a runtime policy
@@ -857,10 +1035,11 @@ impl VerifierClient {
 
         let url = format!(
             "{}/v{}/allowlists/{}",
-            self.base_url, self.api_version, policy_name
+            self.base.base_url, self.api_version, policy_name
         );
 
         let response = self
+            .base
             .client
             .get_request(Method::GET, &url)
             .send()
@@ -872,12 +1051,20 @@ impl VerifierClient {
 
         match response.status() {
             StatusCode::OK => {
-                let json_response = self.handle_response(response).await?;
+                let json_response: Value = self
+                    .base
+                    .handle_response(response)
+                    .await
+                    .map_err(KeylimectlError::from)?;
                 Ok(Some(json_response))
             }
             StatusCode::NOT_FOUND => Ok(None),
             _ => {
-                let error_response = self.handle_response(response).await;
+                let error_response: Result<Value, KeylimectlError> = self
+                    .base
+                    .handle_response(response)
+                    .await
+                    .map_err(KeylimectlError::from);
                 match error_response {
                     Ok(_) => Ok(None),
                     Err(e) => Err(e),
@@ -896,10 +1083,11 @@ impl VerifierClient {
 
         let url = format!(
             "{}/v{}/allowlists/{}",
-            self.base_url, self.api_version, policy_name
+            self.base.base_url, self.api_version, policy_name
         );
 
         let response = self
+            .base
             .client
             .get_json_request_from_struct(
                 Method::PUT,
@@ -915,7 +1103,10 @@ impl VerifierClient {
                     .to_string()
             })?;
 
-        self.handle_response(response).await
+        self.base
+            .handle_response(response)
+            .await
+            .map_err(KeylimectlError::from)
     }
 
     /// Delete a runtime policy
@@ -927,10 +1118,11 @@ impl VerifierClient {
 
         let url = format!(
             "{}/v{}/allowlists/{}",
-            self.base_url, self.api_version, policy_name
+            self.base.base_url, self.api_version, policy_name
         );
 
         let response = self
+            .base
             .client
             .get_request(Method::DELETE, &url)
             .send()
@@ -940,7 +1132,10 @@ impl VerifierClient {
                     .to_string()
             })?;
 
-        self.handle_response(response).await
+        self.base
+            .handle_response(response)
+            .await
+            .map_err(KeylimectlError::from)
     }
 
     /// List runtime policies
@@ -949,10 +1144,13 @@ impl VerifierClient {
     ) -> Result<Value, KeylimectlError> {
         debug!("Listing runtime policies on verifier");
 
-        let url =
-            format!("{}/v{}/allowlists/", self.base_url, self.api_version);
+        let url = format!(
+            "{}/v{}/allowlists/",
+            self.base.base_url, self.api_version
+        );
 
         let response = self
+            .base
             .client
             .get_request(Method::GET, &url)
             .send()
@@ -962,7 +1160,10 @@ impl VerifierClient {
                     .to_string()
             })?;
 
-        self.handle_response(response).await
+        self.base
+            .handle_response(response)
+            .await
+            .map_err(KeylimectlError::from)
     }
 
     /// Add a measured boot policy
@@ -975,10 +1176,11 @@ impl VerifierClient {
 
         let url = format!(
             "{}/v{}/mbpolicies/{}",
-            self.base_url, self.api_version, policy_name
+            self.base.base_url, self.api_version, policy_name
         );
 
         let response = self
+            .base
             .client
             .get_json_request_from_struct(
                 Method::POST,
@@ -994,7 +1196,10 @@ impl VerifierClient {
                     .to_string()
             })?;
 
-        self.handle_response(response).await
+        self.base
+            .handle_response(response)
+            .await
+            .map_err(KeylimectlError::from)
     }
 
     /// Get a measured boot policy
@@ -1006,10 +1211,11 @@ impl VerifierClient {
 
         let url = format!(
             "{}/v{}/mbpolicies/{}",
-            self.base_url, self.api_version, policy_name
+            self.base.base_url, self.api_version, policy_name
         );
 
         let response = self
+            .base
             .client
             .get_request(Method::GET, &url)
             .send()
@@ -1021,12 +1227,20 @@ impl VerifierClient {
 
         match response.status() {
             StatusCode::OK => {
-                let json_response = self.handle_response(response).await?;
+                let json_response: Value = self
+                    .base
+                    .handle_response(response)
+                    .await
+                    .map_err(KeylimectlError::from)?;
                 Ok(Some(json_response))
             }
             StatusCode::NOT_FOUND => Ok(None),
             _ => {
-                let error_response = self.handle_response(response).await;
+                let error_response: Result<Value, KeylimectlError> = self
+                    .base
+                    .handle_response(response)
+                    .await
+                    .map_err(KeylimectlError::from);
                 match error_response {
                     Ok(_) => Ok(None),
                     Err(e) => Err(e),
@@ -1045,18 +1259,21 @@ impl VerifierClient {
 
         let url = format!(
             "{}/v{}/mbpolicies/{}",
-            self.base_url, self.api_version, policy_name
+            self.base.base_url, self.api_version, policy_name
         );
 
         let response = self
-            .client
+            .base.client
             .get_json_request_from_struct(Method::PUT, &url, &policy_data, None)
             .map_err(KeylimectlError::Json)?
             .send()
             .await
             .with_context(|| "Failed to send update measured boot policy request to verifier".to_string())?;
 
-        self.handle_response(response).await
+        self.base
+            .handle_response(response)
+            .await
+            .map_err(KeylimectlError::from)
     }
 
     /// Delete a measured boot policy
@@ -1068,217 +1285,54 @@ impl VerifierClient {
 
         let url = format!(
             "{}/v{}/mbpolicies/{}",
-            self.base_url, self.api_version, policy_name
+            self.base.base_url, self.api_version, policy_name
         );
 
         let response = self
-            .client
+            .base.client
             .get_request(Method::DELETE, &url)
             .send()
             .await
             .with_context(|| "Failed to send delete measured boot policy request to verifier".to_string())?;
 
-        self.handle_response(response).await
+        self.base
+            .handle_response(response)
+            .await
+            .map_err(KeylimectlError::from)
     }
 
     /// List measured boot policies
     pub async fn list_mb_policies(&self) -> Result<Value, KeylimectlError> {
         debug!("Listing measured boot policies on verifier");
 
-        let url =
-            format!("{}/v{}/mbpolicies/", self.base_url, self.api_version);
+        let url = format!(
+            "{}/v{}/mbpolicies/",
+            self.base.base_url, self.api_version
+        );
 
         let response = self
-            .client
+            .base.client
             .get_request(Method::GET, &url)
             .send()
             .await
             .with_context(|| "Failed to send list measured boot policies request to verifier".to_string())?;
 
-        self.handle_response(response).await
+        self.base
+            .handle_response(response)
+            .await
+            .map_err(KeylimectlError::from)
     }
 
     /// Get the detected API version
     pub fn api_version(&self) -> &str {
         &self.api_version
     }
-
-    /// Create HTTP client with TLS configuration
-    ///
-    /// Initializes a reqwest HTTP client with the TLS settings specified
-    /// in the configuration. This includes client certificates, server
-    /// certificate verification, and connection timeouts.
-    ///
-    /// # Arguments
-    ///
-    /// * `config` - Configuration containing TLS and client settings
-    ///
-    /// # Returns
-    ///
-    /// Returns a configured `reqwest::Client` ready for HTTPS communication.
-    ///
-    /// # TLS Configuration
-    ///
-    /// The client is configured with:
-    /// - Client certificate and key (if specified)
-    /// - Server certificate verification (can be disabled for testing)
-    /// - Connection timeout from config
-    /// - HTTP/2 and connection pooling
-    ///
-    /// # Security Notes
-    ///
-    /// - Client certificates enable mutual TLS authentication
-    /// - Server certificate verification should only be disabled for testing
-    /// - Invalid certificates will cause connection failures
-    ///
-    /// # Errors
-    ///
-    /// This method can fail if:
-    /// - Certificate files cannot be read
-    /// - Certificate/key files are invalid or malformed
-    /// - Certificate and key don't match
-    /// - HTTP client builder configuration fails
-    fn create_http_client(
-        config: &Config,
-    ) -> Result<reqwest::Client, KeylimectlError> {
-        let mut builder = reqwest::Client::builder()
-            .timeout(Duration::from_secs(config.client.timeout));
-
-        // Configure TLS
-        if !config.tls.verify_server_cert {
-            builder = builder.danger_accept_invalid_certs(true);
-            warn!("Server certificate verification is disabled");
-        }
-
-        // Add trusted CA certificates for server verification
-        for ca_path in &config.tls.trusted_ca {
-            if std::path::Path::new(ca_path).exists() {
-                let ca_cert = std::fs::read(ca_path).with_context(|| {
-                    format!(
-                        "Failed to read trusted CA certificate: {ca_path}"
-                    )
-                })?;
-
-                let ca_cert = reqwest::Certificate::from_pem(&ca_cert)
-                    .with_context(|| {
-                        format!("Failed to parse CA certificate: {ca_path}")
-                    })?;
-
-                builder = builder.add_root_certificate(ca_cert);
-            } else {
-                warn!("Trusted CA certificate file not found: {ca_path}");
-            }
-        }
-
-        // Add client certificate if configured
-        if let (Some(cert_path), Some(key_path)) =
-            (&config.tls.client_cert, &config.tls.client_key)
-        {
-            let cert = std::fs::read(cert_path).with_context(|| {
-                format!("Failed to read client certificate: {cert_path}")
-            })?;
-
-            let key = std::fs::read(key_path).with_context(|| {
-                format!("Failed to read client key: {key_path}")
-            })?;
-
-            let identity = reqwest::Identity::from_pkcs8_pem(&cert, &key)
-                .with_context(|| "Failed to create client identity from certificate and key".to_string())?;
-
-            builder = builder.identity(identity);
-        }
-
-        builder
-            .build()
-            .with_context(|| "Failed to create HTTP client".to_string())
-    }
-
-    /// Handle HTTP response and convert to JSON
-    ///
-    /// Processes HTTP responses from the verifier service, handling both
-    /// success and error cases. Converts successful responses to JSON
-    /// and transforms HTTP errors into appropriate `KeylimectlError` types.
-    ///
-    /// # Arguments
-    ///
-    /// * `response` - HTTP response from the verifier service
-    ///
-    /// # Returns
-    ///
-    /// Returns parsed JSON data for successful responses.
-    ///
-    /// # Response Handling
-    ///
-    /// - **2xx responses**: Parsed as JSON or default success object
-    /// - **4xx/5xx responses**: Converted to `KeylimectlError::Api` with details
-    /// - **Empty responses**: Returns `{"status": "success"}`
-    /// - **Invalid JSON**: Returns parsing error with response text
-    ///
-    /// # Error Details
-    ///
-    /// For error responses, attempts to extract meaningful error messages
-    /// from the JSON response body, falling back to HTTP status descriptions.
-    ///
-    /// # Errors
-    ///
-    /// This method can fail if:
-    /// - Response body cannot be read
-    /// - Response contains invalid JSON
-    /// - Verifier returns an error status code
-    async fn handle_response(
-        &self,
-        response: reqwest::Response,
-    ) -> Result<Value, KeylimectlError> {
-        let status = response.status();
-        let response_text = response
-            .text()
-            .await
-            .with_context(|| "Failed to read response body".to_string())?;
-
-        match status {
-            StatusCode::OK
-            | StatusCode::CREATED
-            | StatusCode::ACCEPTED
-            | StatusCode::NO_CONTENT => {
-                if response_text.is_empty() {
-                    Ok(json!({"status": "success"}))
-                } else {
-                    serde_json::from_str(&response_text).with_context(|| {
-                        format!(
-                            "Failed to parse JSON response: {response_text}"
-                        )
-                    })
-                }
-            }
-            _ => {
-                let error_message = if response_text.is_empty() {
-                    format!("HTTP {} error", status.as_u16())
-                } else {
-                    // Try to parse as JSON for better error message
-                    match serde_json::from_str::<Value>(&response_text) {
-                        Ok(json_error) => json_error
-                            .get("status")
-                            .or_else(|| json_error.get("message"))
-                            .and_then(|v| v.as_str())
-                            .unwrap_or(&response_text)
-                            .to_string(),
-                        Err(_) => response_text.clone(),
-                    }
-                };
-
-                Err(KeylimectlError::api_error(
-                    status.as_u16(),
-                    error_message,
-                    serde_json::from_str(&response_text).ok(),
-                ))
-            }
-        }
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::client::base::BaseClient;
     use crate::config::{ClientConfig, TlsConfig, VerifierConfig};
 
     /// Create a test configuration
@@ -1314,7 +1368,7 @@ mod tests {
 
         assert!(result.is_ok());
         let client = result.unwrap();
-        assert_eq!(client.base_url, "https://127.0.0.1:8881");
+        assert_eq!(client.base.base_url, "https://127.0.0.1:8881");
         assert_eq!(client.api_version, "2.1");
     }
 
@@ -1327,7 +1381,7 @@ mod tests {
         assert!(result.is_ok());
 
         let client = result.unwrap();
-        assert_eq!(client.base_url, "https://[::1]:8881");
+        assert_eq!(client.base.base_url, "https://[::1]:8881");
     }
 
     #[test]
@@ -1339,13 +1393,13 @@ mod tests {
         assert!(result.is_ok());
 
         let client = result.unwrap();
-        assert_eq!(client.base_url, "https://[2001:db8::1]:8881");
+        assert_eq!(client.base.base_url, "https://[2001:db8::1]:8881");
     }
 
     #[test]
     fn test_create_http_client_basic() {
         let config = create_test_config();
-        let result = VerifierClient::create_http_client(&config);
+        let result = BaseClient::create_http_client(&config);
 
         assert!(result.is_ok());
         // Basic validation that client was created
@@ -1357,7 +1411,7 @@ mod tests {
         let mut config = create_test_config();
         config.client.timeout = 60;
 
-        let result = VerifierClient::create_http_client(&config);
+        let result = BaseClient::create_http_client(&config);
         assert!(result.is_ok());
     }
 
@@ -1367,14 +1421,12 @@ mod tests {
         config.tls.client_cert = Some("/nonexistent/cert.pem".to_string());
         config.tls.client_key = Some("/nonexistent/key.pem".to_string());
 
-        let result = VerifierClient::create_http_client(&config);
+        let result = BaseClient::create_http_client(&config);
         // Should fail because cert files don't exist
         assert!(result.is_err());
 
         let error = result.unwrap_err();
-        assert!(error
-            .to_string()
-            .contains("Failed to read client certificate"));
+        assert!(error.to_string().contains("Certificate file error"));
     }
 
     #[test]
@@ -1407,7 +1459,7 @@ mod tests {
 
         let client =
             VerifierClient::new_without_version_detection(&config).unwrap();
-        assert_eq!(client.base_url, "https://192.168.1.100:9001");
+        assert_eq!(client.base.base_url, "https://192.168.1.100:9001");
 
         // Test IPv6
         config.verifier.ip = "2001:db8::1".to_string();
@@ -1415,7 +1467,7 @@ mod tests {
 
         let client =
             VerifierClient::new_without_version_detection(&config).unwrap();
-        assert_eq!(client.base_url, "https://[2001:db8::1]:8881");
+        assert_eq!(client.base.base_url, "https://[2001:db8::1]:8881");
     }
 
     #[test]
@@ -1428,7 +1480,7 @@ mod tests {
         // Note: We can't directly access the internal reqwest client config,
         // but we can verify our config was accepted
         assert_eq!(client.api_version, "2.1");
-        assert!(client.base_url.starts_with("https://"));
+        assert!(client.base.base_url.starts_with("https://"));
     }
 
     #[test]
@@ -1436,7 +1488,7 @@ mod tests {
         let mut config = create_test_config();
         config.tls.verify_server_cert = false;
 
-        let result = VerifierClient::create_http_client(&config);
+        let result = BaseClient::create_http_client(&config);
         assert!(result.is_ok());
         // Client should be created successfully with verification disabled
     }
@@ -1446,7 +1498,7 @@ mod tests {
         let mut config = create_test_config();
         config.tls.verify_server_cert = true;
 
-        let result = VerifierClient::create_http_client(&config);
+        let result = BaseClient::create_http_client(&config);
         assert!(result.is_ok());
         // Client should be created successfully with verification enabled
     }
@@ -1549,7 +1601,10 @@ mod tests {
         #[test]
         fn test_supported_api_versions_constant() {
             // Test that the constant contains expected versions in correct order
-            assert_eq!(SUPPORTED_API_VERSIONS, &["2.0", "2.1", "2.2", "3.0"]);
+            assert_eq!(
+                SUPPORTED_API_VERSIONS,
+                &["2.0", "2.1", "2.2", "2.3", "3.0"]
+            );
             assert!(SUPPORTED_API_VERSIONS.len() >= 2);
 
             // Verify versions are in ascending order (oldest to newest)
@@ -1612,9 +1667,10 @@ mod tests {
 
             // Should be newest first
             assert_eq!(versions[0], "3.0");
-            assert_eq!(versions[1], "2.2");
-            assert_eq!(versions[2], "2.1");
-            assert_eq!(versions[3], "2.0");
+            assert_eq!(versions[1], "2.3");
+            assert_eq!(versions[2], "2.2");
+            assert_eq!(versions[3], "2.1");
+            assert_eq!(versions[4], "2.0");
 
             // Verify it's actually newest to oldest
             for i in 1..versions.len() {
@@ -1675,11 +1731,11 @@ mod tests {
                 let expected_pattern = format!("/v{version}/agents/");
                 let test_url = format!(
                     "{}/v{}/agents/test-uuid",
-                    client.base_url, client.api_version
+                    client.base.base_url, client.api_version
                 );
 
                 assert!(test_url.contains(&expected_pattern));
-                assert!(test_url.contains(&client.base_url));
+                assert!(test_url.contains(&client.base.base_url));
                 assert!(test_url.contains("test-uuid"));
             }
         }
@@ -1767,11 +1823,12 @@ mod tests {
                 attempted_versions.push(version);
             }
 
-            // Should try 3.0 first, then 2.2, then 2.1, then 2.0
+            // Should try 3.0 first, then 2.3, then 2.2, then 2.1, then 2.0
             assert_eq!(attempted_versions[0], "3.0");
-            assert_eq!(attempted_versions[1], "2.2");
-            assert_eq!(attempted_versions[2], "2.1");
-            assert_eq!(attempted_versions[3], "2.0");
+            assert_eq!(attempted_versions[1], "2.3");
+            assert_eq!(attempted_versions[2], "2.2");
+            assert_eq!(attempted_versions[3], "2.1");
+            assert_eq!(attempted_versions[4], "2.0");
 
             // Should try all supported versions
             assert_eq!(

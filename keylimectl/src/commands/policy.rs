@@ -72,10 +72,12 @@
 //! ```
 
 use crate::client::verifier::VerifierClient;
+use crate::commands::error::CommandError;
 use crate::config::Config;
-use crate::error::{ErrorContext, KeylimectlError};
+use crate::error::KeylimectlError;
 use crate::output::OutputHandler;
 use crate::PolicyAction;
+use chrono;
 use log::debug;
 use serde_json::{json, Value};
 use std::fs;
@@ -177,17 +179,21 @@ pub async fn execute(
 ) -> Result<Value, KeylimectlError> {
     match action {
         PolicyAction::Create { name, file } => {
-            create_policy(name, file, config, output).await
+            create_policy(name, file, config, output)
+                .await
+                .map_err(KeylimectlError::from)
         }
-        PolicyAction::Show { name } => {
-            show_policy(name, config, output).await
-        }
+        PolicyAction::Show { name } => show_policy(name, config, output)
+            .await
+            .map_err(KeylimectlError::from),
         PolicyAction::Update { name, file } => {
-            update_policy(name, file, config, output).await
+            update_policy(name, file, config, output)
+                .await
+                .map_err(KeylimectlError::from)
         }
-        PolicyAction::Delete { name } => {
-            delete_policy(name, config, output).await
-        }
+        PolicyAction::Delete { name } => delete_policy(name, config, output)
+            .await
+            .map_err(KeylimectlError::from),
     }
 }
 
@@ -197,19 +203,24 @@ async fn create_policy(
     file_path: &str,
     config: &Config,
     output: &OutputHandler,
-) -> Result<Value, KeylimectlError> {
+) -> Result<Value, CommandError> {
     output.info(format!("Creating runtime policy '{name}'"));
 
     // Load policy from file
-    let policy_content =
-        fs::read_to_string(file_path).with_context(|| {
-            format!("Failed to read policy file: {file_path}")
-        })?;
+    let policy_content = fs::read_to_string(file_path).map_err(|e| {
+        CommandError::policy_file_error(
+            file_path,
+            format!("Failed to read policy file: {e}"),
+        )
+    })?;
 
     // Parse policy content (basic validation)
-    let _policy_json: Value = serde_json::from_str(&policy_content)
-        .with_context(|| {
-            format!("Failed to parse policy as JSON: {file_path}")
+    let _policy_json: Value =
+        serde_json::from_str(&policy_content).map_err(|e| {
+            CommandError::policy_file_error(
+                file_path,
+                format!("Failed to parse policy as JSON: {e}"),
+            )
         })?;
 
     debug!(
@@ -219,17 +230,63 @@ async fn create_policy(
     );
 
     // Create policy data structure for the API
-    let policy_data = json!({
+    // Parse the policy to extract metadata and validate structure
+    let policy_json: Value =
+        serde_json::from_str(&policy_content).map_err(|e| {
+            CommandError::policy_file_error(
+                file_path,
+                format!("Failed to parse policy as JSON: {e}"),
+            )
+        })?;
+
+    // Extract policy metadata for enhanced API payload
+    let mut policy_data = json!({
         "runtime_policy": policy_content,
-        // TODO: Add other policy-related fields as needed
+        "policy_type": "runtime",
+        "format_version": "1.0",
+        "upload_timestamp": chrono::Utc::now().to_rfc3339()
     });
 
-    let verifier_client = VerifierClient::new(config).await?;
+    // Add metadata based on policy content structure
+    if let Some(allowlist) =
+        policy_json.get("allowlist").and_then(|v| v.as_array())
+    {
+        policy_data["allowlist_count"] = json!(allowlist.len());
+    }
+
+    if let Some(exclude) =
+        policy_json.get("exclude").and_then(|v| v.as_array())
+    {
+        policy_data["exclude_count"] = json!(exclude.len());
+    }
+
+    if let Some(ima) = policy_json.get("ima") {
+        policy_data["ima_enabled"] = json!(true);
+        if let Some(require_sigs) = ima.get("require_signatures") {
+            policy_data["ima_require_signatures"] = require_sigs.clone();
+        }
+    } else {
+        policy_data["ima_enabled"] = json!(false);
+    }
+
+    if let Some(meta) = policy_json.get("meta") {
+        policy_data["policy_metadata"] = meta.clone();
+    }
+
+    let verifier_client = VerifierClient::new(config).await.map_err(|e| {
+        CommandError::resource_error(
+            "verifier",
+            format!("Failed to connect to verifier: {e}"),
+        )
+    })?;
     let response = verifier_client
         .add_runtime_policy(name, policy_data)
         .await
-        .with_context(|| {
-            format!("Failed to create runtime policy '{name}'")
+        .map_err(|e| {
+            CommandError::resource_error(
+                "verifier",
+                format!("Failed to create runtime policy '{name}': {e}"),
+            )
         })?;
 
     output.info(format!("Runtime policy '{name}' created successfully"));
@@ -247,23 +304,34 @@ async fn show_policy(
     name: &str,
     config: &Config,
     output: &OutputHandler,
-) -> Result<Value, KeylimectlError> {
+) -> Result<Value, CommandError> {
     output.info(format!("Retrieving runtime policy '{name}'"));
 
-    let verifier_client = VerifierClient::new(config).await?;
-    let policy = verifier_client
-        .get_runtime_policy(name)
-        .await
-        .with_context(|| {
-            format!("Failed to retrieve runtime policy '{name}'")
-        })?;
+    let verifier_client = VerifierClient::new(config).await.map_err(|e| {
+        CommandError::resource_error(
+            "verifier",
+            format!("Failed to connect to verifier: {e}"),
+        )
+    })?;
+    let policy =
+        verifier_client
+            .get_runtime_policy(name)
+            .await
+            .map_err(|e| {
+                CommandError::resource_error(
+                    "verifier",
+                    format!(
+                        "Failed to retrieve runtime policy '{name}': {e}"
+                    ),
+                )
+            })?;
 
     match policy {
         Some(policy_data) => Ok(json!({
             "policy_name": name,
             "results": policy_data
         })),
-        None => Err(KeylimectlError::policy_not_found(name)),
+        None => Err(CommandError::policy_not_found(name)),
     }
 }
 
@@ -273,19 +341,24 @@ async fn update_policy(
     file_path: &str,
     config: &Config,
     output: &OutputHandler,
-) -> Result<Value, KeylimectlError> {
+) -> Result<Value, CommandError> {
     output.info(format!("Updating runtime policy '{name}'"));
 
     // Load policy from file
-    let policy_content =
-        fs::read_to_string(file_path).with_context(|| {
-            format!("Failed to read policy file: {file_path}")
-        })?;
+    let policy_content = fs::read_to_string(file_path).map_err(|e| {
+        CommandError::policy_file_error(
+            file_path,
+            format!("Failed to read policy file: {e}"),
+        )
+    })?;
 
     // Parse policy content (basic validation)
-    let _policy_json: Value = serde_json::from_str(&policy_content)
-        .with_context(|| {
-            format!("Failed to parse policy as JSON: {file_path}")
+    let _policy_json: Value =
+        serde_json::from_str(&policy_content).map_err(|e| {
+            CommandError::policy_file_error(
+                file_path,
+                format!("Failed to parse policy as JSON: {e}"),
+            )
         })?;
 
     debug!(
@@ -295,17 +368,63 @@ async fn update_policy(
     );
 
     // Create policy data structure for the API
-    let policy_data = json!({
+    // Parse the policy to extract metadata and validate structure
+    let policy_json: Value =
+        serde_json::from_str(&policy_content).map_err(|e| {
+            CommandError::policy_file_error(
+                file_path,
+                format!("Failed to parse policy as JSON: {e}"),
+            )
+        })?;
+
+    // Extract policy metadata for enhanced API payload
+    let mut policy_data = json!({
         "runtime_policy": policy_content,
-        // TODO: Add other policy-related fields as needed
+        "policy_type": "runtime",
+        "format_version": "1.0",
+        "update_timestamp": chrono::Utc::now().to_rfc3339()
     });
 
-    let verifier_client = VerifierClient::new(config).await?;
+    // Add metadata based on policy content structure
+    if let Some(allowlist) =
+        policy_json.get("allowlist").and_then(|v| v.as_array())
+    {
+        policy_data["allowlist_count"] = json!(allowlist.len());
+    }
+
+    if let Some(exclude) =
+        policy_json.get("exclude").and_then(|v| v.as_array())
+    {
+        policy_data["exclude_count"] = json!(exclude.len());
+    }
+
+    if let Some(ima) = policy_json.get("ima") {
+        policy_data["ima_enabled"] = json!(true);
+        if let Some(require_sigs) = ima.get("require_signatures") {
+            policy_data["ima_require_signatures"] = require_sigs.clone();
+        }
+    } else {
+        policy_data["ima_enabled"] = json!(false);
+    }
+
+    if let Some(meta) = policy_json.get("meta") {
+        policy_data["policy_metadata"] = meta.clone();
+    }
+
+    let verifier_client = VerifierClient::new(config).await.map_err(|e| {
+        CommandError::resource_error(
+            "verifier",
+            format!("Failed to connect to verifier: {e}"),
+        )
+    })?;
     let response = verifier_client
         .update_runtime_policy(name, policy_data)
         .await
-        .with_context(|| {
-            format!("Failed to update runtime policy '{name}'")
+        .map_err(|e| {
+            CommandError::resource_error(
+                "verifier",
+                format!("Failed to update runtime policy '{name}': {e}"),
+            )
         })?;
 
     output.info(format!("Runtime policy '{name}' updated successfully"));
@@ -323,15 +442,23 @@ async fn delete_policy(
     name: &str,
     config: &Config,
     output: &OutputHandler,
-) -> Result<Value, KeylimectlError> {
+) -> Result<Value, CommandError> {
     output.info(format!("Deleting runtime policy '{name}'"));
 
-    let verifier_client = VerifierClient::new(config).await?;
+    let verifier_client = VerifierClient::new(config).await.map_err(|e| {
+        CommandError::resource_error(
+            "verifier",
+            format!("Failed to connect to verifier: {e}"),
+        )
+    })?;
     let response = verifier_client
         .delete_runtime_policy(name)
         .await
-        .with_context(|| {
-            format!("Failed to delete runtime policy '{name}'")
+        .map_err(|e| {
+            CommandError::resource_error(
+                "verifier",
+                format!("Failed to delete runtime policy '{name}': {e}"),
+            )
         })?;
 
     output.info(format!("Runtime policy '{name}' deleted successfully"));
