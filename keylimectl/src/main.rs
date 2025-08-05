@@ -353,6 +353,13 @@ async fn main() {
     debug!("Final configuration after CLI overrides: client_cert={:?}, client_key={:?}, trusted_ca={:?}",
            config.tls.client_cert, config.tls.client_key, config.tls.trusted_ca);
 
+    // Validate the final configuration
+    if let Err(e) = config.validate() {
+        error!("Configuration validation failed: {e}");
+        process::exit(1);
+    }
+    debug!("Configuration validation passed");
+
     // Initialize output handler
     let output = OutputHandler::new(cli.format, cli.quiet);
 

@@ -63,11 +63,9 @@ use reqwest::{Method, StatusCode};
 use serde_json::Value;
 
 /// Unknown API version constant for when version detection fails
-#[allow(dead_code)]
 pub const UNKNOWN_API_VERSION: &str = "unknown";
 
 /// Supported API versions in order from oldest to newest (fallback tries newest first)
-#[allow(dead_code)]
 pub const SUPPORTED_API_VERSIONS: &[&str] =
     &["2.0", "2.1", "2.2", "2.3", "3.0"];
 
@@ -78,7 +76,6 @@ struct Response<T> {
     code: serde_json::Number,
     #[allow(dead_code)]
     status: String,
-    #[allow(dead_code)]
     results: T,
 }
 
@@ -134,7 +131,6 @@ struct Response<T> {
 pub struct RegistrarClient {
     base: BaseClient,
     api_version: String,
-    #[allow(dead_code)]
     supported_api_versions: Option<Vec<String>>,
 }
 
@@ -175,21 +171,15 @@ pub struct RegistrarClient {
 /// # }
 /// ```
 #[derive(Debug)]
-#[allow(dead_code)] // Builder pattern may not be used initially
 pub struct RegistrarClientBuilder<'a> {
     config: Option<&'a Config>,
-    skip_version_detection: bool,
-    api_version: Option<String>,
 }
 
-#[allow(dead_code)] // Builder pattern may not be used initially
 impl<'a> RegistrarClientBuilder<'a> {
     /// Create a new builder instance
     pub fn new() -> Self {
         Self {
             config: None,
-            skip_version_detection: false,
-            api_version: None,
         }
     }
 
@@ -199,25 +189,6 @@ impl<'a> RegistrarClientBuilder<'a> {
         self
     }
 
-    /// Skip automatic API version detection
-    ///
-    /// When this is set, the client will use either the specified API version
-    /// or the default version ("2.1") without attempting to detect the server's
-    /// supported version.
-    pub fn skip_version_detection(mut self) -> Self {
-        self.skip_version_detection = true;
-        self
-    }
-
-    /// Set a specific API version to use
-    ///
-    /// If specified, this version will be used instead of the default.
-    /// If `skip_version_detection` is not set, version detection may still
-    /// override this value.
-    pub fn api_version<S: Into<String>>(mut self, version: S) -> Self {
-        self.api_version = Some(version.into());
-        self
-    }
 
     /// Build the RegistrarClient with automatic API version detection
     ///
@@ -231,33 +202,9 @@ impl<'a> RegistrarClientBuilder<'a> {
             )
         })?;
 
-        if self.skip_version_detection {
-            self.build_sync()
-        } else {
-            RegistrarClient::new(config).await
-        }
+        RegistrarClient::new(config).await
     }
 
-    /// Build the RegistrarClient without API version detection
-    ///
-    /// This creates the client immediately without any network calls.
-    /// Useful for testing or when you want to control the API version manually.
-    pub fn build_sync(self) -> Result<RegistrarClient, KeylimectlError> {
-        let config = self.config.ok_or_else(|| {
-            KeylimectlError::validation(
-                "Configuration is required for RegistrarClient",
-            )
-        })?;
-
-        let mut client =
-            RegistrarClient::new_without_version_detection(config)?;
-
-        if let Some(version) = self.api_version {
-            client.api_version = version;
-        }
-
-        Ok(client)
-    }
 }
 
 impl<'a> Default for RegistrarClientBuilder<'a> {
@@ -287,7 +234,6 @@ impl RegistrarClient {
     /// # Ok(())
     /// # }
     /// ```
-    #[allow(dead_code)] // Builder pattern may not be used initially
     pub fn builder() -> RegistrarClientBuilder<'static> {
         RegistrarClientBuilder::new()
     }
@@ -405,7 +351,6 @@ impl RegistrarClient {
     /// # Ok(())
     /// # }
     /// ```
-    #[allow(dead_code)]
     pub async fn detect_api_version(
         &mut self,
     ) -> Result<(), KeylimectlError> {
@@ -444,7 +389,6 @@ impl RegistrarClient {
     }
 
     /// Get the registrar API version from the '/version' endpoint
-    #[allow(dead_code)]
     async fn get_registrar_api_version(
         &mut self,
     ) -> Result<String, KeylimectlError> {
@@ -482,7 +426,6 @@ impl RegistrarClient {
     }
 
     /// Test if a specific API version works by making a simple request
-    #[allow(dead_code)]
     async fn test_api_version(
         &self,
         api_version: &str,
@@ -791,115 +734,8 @@ impl RegistrarClient {
             .map_err(KeylimectlError::from)
     }
 
-    /// Add an agent to the registrar
-    #[allow(dead_code)]
-    pub async fn add_agent(
-        &self,
-        agent_uuid: &str,
-        data: Value,
-    ) -> Result<Value, KeylimectlError> {
-        debug!("Adding agent {agent_uuid} to registrar");
 
-        let url = format!(
-            "{}/v{}/agents/{}",
-            self.base.base_url, self.api_version, agent_uuid
-        );
 
-        let response = self
-            .base
-            .client
-            .get_json_request_from_struct(Method::POST, &url, &data, None)
-            .map_err(KeylimectlError::Json)?
-            .send()
-            .await
-            .with_context(|| {
-                "Failed to send add agent request to registrar".to_string()
-            })?;
-
-        self.base
-            .handle_response(response)
-            .await
-            .map_err(KeylimectlError::from)
-    }
-
-    /// Update an agent on the registrar
-    #[allow(dead_code)]
-    pub async fn update_agent(
-        &self,
-        agent_uuid: &str,
-        data: Value,
-    ) -> Result<Value, KeylimectlError> {
-        debug!("Updating agent {agent_uuid} on registrar");
-
-        let url = format!(
-            "{}/v{}/agents/{}",
-            self.base.base_url, self.api_version, agent_uuid
-        );
-
-        let response = self
-            .base
-            .client
-            .get_json_request_from_struct(Method::PUT, &url, &data, None)
-            .map_err(KeylimectlError::Json)?
-            .send()
-            .await
-            .with_context(|| {
-                "Failed to send update agent request to registrar".to_string()
-            })?;
-
-        self.base
-            .handle_response(response)
-            .await
-            .map_err(KeylimectlError::from)
-    }
-
-    /// Get agent by EK hash
-    #[allow(dead_code)]
-    pub async fn get_agent_by_ek_hash(
-        &self,
-        ek_hash: &str,
-    ) -> Result<Option<Value>, KeylimectlError> {
-        debug!("Getting agent by EK hash {ek_hash} from registrar");
-
-        let url = format!(
-            "{}/v{}/agents/?ekhash={}",
-            self.base.base_url, self.api_version, ek_hash
-        );
-
-        let response = self
-            .base
-            .client
-            .get_request(Method::GET, &url)
-            .send()
-            .await
-            .with_context(|| {
-                "Failed to send get agent by EK hash request to registrar"
-                    .to_string()
-            })?;
-
-        match response.status() {
-            StatusCode::OK => {
-                let json_response: Value = self
-                    .base
-                    .handle_response(response)
-                    .await
-                    .map_err(KeylimectlError::from)?;
-                Ok(Some(json_response))
-            }
-            StatusCode::NOT_FOUND => Ok(None),
-            _ => {
-                let error_response: Result<Value, KeylimectlError> = self
-                    .base
-                    .handle_response(response)
-                    .await
-                    .map_err(KeylimectlError::from);
-                match error_response {
-                    Ok(_) => Ok(None),
-                    Err(e) => Err(e),
-                }
-            }
-        }
-    }
 }
 
 #[cfg(test)]

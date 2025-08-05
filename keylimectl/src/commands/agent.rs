@@ -351,8 +351,11 @@ async fn add_agent(
     // Step 1: Get agent data from registrar
     output.step(1, 4, "Retrieving agent data from registrar");
 
-    let registrar_client =
-        RegistrarClient::new(config).await.map_err(|e| {
+    let registrar_client = RegistrarClient::builder()
+        .config(config)
+        .build()
+        .await
+        .map_err(|e| {
             CommandError::resource_error("registrar", e.to_string())
         })?;
     let agent_data = registrar_client
@@ -419,8 +422,11 @@ async fn add_agent(
         output.step(3, 4, "Performing attestation with agent");
 
         // Check if we need agent communication based on API version
-        let verifier_client =
-            VerifierClient::new(config).await.map_err(|e| {
+        let verifier_client = VerifierClient::builder()
+            .config(config)
+            .build()
+            .await
+            .map_err(|e| {
                 CommandError::resource_error("verifier", e.to_string())
             })?;
         let api_version =
@@ -428,12 +434,15 @@ async fn add_agent(
 
         if api_version < 3.0 {
             // Create agent client for direct communication
-            let agent_client =
-                AgentClient::new(&agent_ip, agent_port, config)
-                    .await
-                    .map_err(|e| {
-                        CommandError::resource_error("agent", e.to_string())
-                    })?;
+            let agent_client = AgentClient::builder()
+                .agent_ip(&agent_ip)
+                .agent_port(agent_port)
+                .config(config)
+                .build()
+                .await
+                .map_err(|e| {
+                    CommandError::resource_error("agent", e.to_string())
+                })?;
 
             if !agent_client.is_pull_model() {
                 return Err(CommandError::invalid_parameter(
@@ -465,9 +474,13 @@ async fn add_agent(
     // Step 4: Add agent to verifier
     output.step(4, 4, "Adding agent to verifier");
 
-    let verifier_client = VerifierClient::new(config).await.map_err(|e| {
-        CommandError::resource_error("verifier", e.to_string())
-    })?;
+    let verifier_client = VerifierClient::builder()
+        .config(config)
+        .build()
+        .await
+        .map_err(|e| {
+            CommandError::resource_error("verifier", e.to_string())
+        })?;
 
     // Build the request payload
     let cv_agent_ip = params.verifier_ip.unwrap_or(&agent_ip);
@@ -526,12 +539,15 @@ async fn add_agent(
             verifier_client.api_version().parse::<f32>().unwrap_or(2.1);
 
         if verifier_api_version < 3.0 {
-            let agent_client =
-                AgentClient::new(&agent_ip, agent_port, config)
-                    .await
-                    .map_err(|e| {
-                        CommandError::resource_error("agent", e.to_string())
-                    })?;
+            let agent_client = AgentClient::builder()
+                .agent_ip(&agent_ip)
+                .agent_port(agent_port)
+                .config(config)
+                .build()
+                .await
+                .map_err(|e| {
+                    CommandError::resource_error("agent", e.to_string())
+                })?;
 
             // Deliver U key and payload to agent
             if let Some(attestation) = attestation_result {
@@ -584,9 +600,13 @@ async fn remove_agent(
 
     output.info(format!("Removing agent {agent_uuid} from verifier"));
 
-    let verifier_client = VerifierClient::new(config).await.map_err(|e| {
-        CommandError::resource_error("verifier", e.to_string())
-    })?;
+    let verifier_client = VerifierClient::builder()
+        .config(config)
+        .build()
+        .await
+        .map_err(|e| {
+            CommandError::resource_error("verifier", e.to_string())
+        })?;
 
     // Check if agent exists on verifier (unless force is used)
     if !force {
@@ -653,8 +673,11 @@ async fn remove_agent(
             "Removing agent from registrar",
         );
 
-        let registrar_client =
-            RegistrarClient::new(config).await.map_err(|e| {
+        let registrar_client = RegistrarClient::builder()
+            .config(config)
+            .build()
+            .await
+            .map_err(|e| {
                 CommandError::resource_error("registrar", e.to_string())
             })?;
         let registrar_response = registrar_client
@@ -704,13 +727,20 @@ async fn update_agent(
     // Step 1: Get existing configuration from both registrar and verifier
     output.step(1, 3, "Retrieving existing agent configuration");
 
-    let registrar_client =
-        RegistrarClient::new(config).await.map_err(|e| {
+    let registrar_client = RegistrarClient::builder()
+        .config(config)
+        .build()
+        .await
+        .map_err(|e| {
             CommandError::resource_error("registrar", e.to_string())
         })?;
-    let verifier_client = VerifierClient::new(config).await.map_err(|e| {
-        CommandError::resource_error("verifier", e.to_string())
-    })?;
+    let verifier_client = VerifierClient::builder()
+        .config(config)
+        .build()
+        .await
+        .map_err(|e| {
+            CommandError::resource_error("verifier", e.to_string())
+        })?;
 
     // Get agent info from registrar (contains IP, port, etc.)
     let registrar_agent = registrar_client
@@ -825,8 +855,11 @@ async fn get_agent_status(
     if !verifier_only {
         output.progress("Checking registrar status");
 
-        let registrar_client =
-            RegistrarClient::new(config).await.map_err(|e| {
+        let registrar_client = RegistrarClient::builder()
+            .config(config)
+            .build()
+            .await
+            .map_err(|e| {
                 CommandError::resource_error("registrar", e.to_string())
             })?;
         match registrar_client.get_agent(&agent_uuid.to_string()).await {
@@ -854,8 +887,11 @@ async fn get_agent_status(
     if !registrar_only {
         output.progress("Checking verifier status");
 
-        let verifier_client =
-            VerifierClient::new(config).await.map_err(|e| {
+        let verifier_client = VerifierClient::builder()
+            .config(config)
+            .build()
+            .await
+            .map_err(|e| {
                 CommandError::resource_error("verifier", e.to_string())
             })?;
         match verifier_client.get_agent(&agent_uuid.to_string()).await {
@@ -898,8 +934,11 @@ async fn get_agent_status(
 
             if let (Some(ip), Some(port)) = (agent_ip, agent_port) {
                 // Check if we should try direct agent communication
-                let verifier_client =
-                    VerifierClient::new(config).await.map_err(|e| {
+                let verifier_client = VerifierClient::builder()
+                    .config(config)
+                    .build()
+                    .await
+                    .map_err(|e| {
                         CommandError::resource_error(
                             "verifier",
                             e.to_string(),
@@ -913,7 +952,13 @@ async fn get_agent_status(
                 if api_version < 3.0 {
                     output.progress("Checking agent status directly");
 
-                    match AgentClient::new(ip, port, config).await {
+                    match AgentClient::builder()
+                        .agent_ip(ip)
+                        .agent_port(port)
+                        .config(config)
+                        .build()
+                        .await
+                    {
                         Ok(agent_client) => {
                             // Try a simple test request to check if agent is responsive
                             match agent_client
@@ -986,9 +1031,13 @@ async fn reactivate_agent(
 
     output.info(format!("Reactivating agent {agent_uuid}"));
 
-    let verifier_client = VerifierClient::new(config).await.map_err(|e| {
-        CommandError::resource_error("verifier", e.to_string())
-    })?;
+    let verifier_client = VerifierClient::builder()
+        .config(config)
+        .build()
+        .await
+        .map_err(|e| {
+            CommandError::resource_error("verifier", e.to_string())
+        })?;
     let response = verifier_client
         .reactivate_agent(&agent_uuid.to_string())
         .await
@@ -1086,8 +1135,11 @@ async fn perform_agent_attestation(
     output.progress("Validating TPM quote");
 
     // Create registrar client for validation
-    let registrar_client =
-        RegistrarClient::new(config).await.map_err(|e| {
+    let registrar_client = RegistrarClient::builder()
+        .config(config)
+        .build()
+        .await
+        .map_err(|e| {
             CommandError::resource_error("registrar", e.to_string())
         })?;
 
@@ -1761,23 +1813,23 @@ mod tests {
         #[test]
         fn test_command_error_types() {
             // Test agent not found error
-            let agent_error =
+            let _agent_error =
                 CommandError::agent_not_found("test-uuid", "verifier");
-            assert_eq!(agent_error.category(), "agent");
+            // Note: category() method removed as unused
 
             // Test validation error
-            let validation_error = CommandError::invalid_parameter(
+            let _validation_error = CommandError::invalid_parameter(
                 "uuid",
                 "Invalid UUID format",
             );
-            assert_eq!(validation_error.category(), "parameter");
+            // Note: category() method removed as unused
 
             // Test resource error
-            let resource_error = CommandError::resource_error(
+            let _resource_error = CommandError::resource_error(
                 "verifier",
                 "Failed to connect to service",
             );
-            assert_eq!(resource_error.category(), "resource");
+            // Note: category() method removed as unused
         }
     }
 

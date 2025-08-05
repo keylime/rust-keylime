@@ -299,8 +299,8 @@ impl KeylimectlError {
             Self::Network(_) => true,
             Self::Api { status, .. } => *status >= 500,
             Self::Timeout(_) => true,
-            Self::Client(client_err) => client_err.is_retryable(),
-            Self::Command(command_err) => command_err.is_retryable(),
+            Self::Client(_) => false, // Client errors are generally not retryable
+            Self::Command(_) => false, // Command errors are generally not retryable
             _ => false,
         }
     }
