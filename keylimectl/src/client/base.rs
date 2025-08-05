@@ -131,11 +131,13 @@ impl BaseClient {
     /// - Client certificate and key (if specified)
     /// - Server certificate verification (can be disabled for testing)
     /// - Connection timeout from config
+    /// - Hostname verification disabled (required for Keylime certificates)
     /// - HTTP/2 and connection pooling
     ///
     /// # Security Notes
     ///
     /// - Client certificates enable mutual TLS authentication
+    /// - Hostname verification is disabled for Keylime certificate compatibility
     /// - Server certificate verification should only be disabled for testing
     /// - Invalid certificates will cause connection failures
     ///
@@ -153,7 +155,8 @@ impl BaseClient {
                config.tls.verify_server_cert, config.tls.client_cert, config.tls.client_key, config.tls.trusted_ca);
 
         let mut builder = reqwest::Client::builder()
-            .timeout(Duration::from_secs(config.client.timeout));
+            .timeout(Duration::from_secs(config.client.timeout))
+            .danger_accept_invalid_hostnames(true); // Required for Keylime certificates
 
         // Configure TLS
         if !config.tls.verify_server_cert {
