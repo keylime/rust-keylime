@@ -528,7 +528,6 @@ impl Config {
     /// - Certificate/key files don't exist
     /// - Timeout is zero
     /// - Retry interval is not positive
-    #[allow(dead_code)]
     pub fn validate(&self) -> Result<(), ConfigError> {
         // Use the extracted validation logic from the validation module
         crate::config::validation::validate_complete_config(

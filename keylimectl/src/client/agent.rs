@@ -178,7 +178,6 @@ impl<'a> AgentClientBuilder<'a> {
         self
     }
 
-
     /// Build the AgentClient with automatic API version detection
     ///
     /// This is the recommended way to create a client for production use,
@@ -203,7 +202,6 @@ impl<'a> AgentClientBuilder<'a> {
 
         AgentClient::new(&agent_ip, agent_port, config).await
     }
-
 }
 
 impl<'a> Default for AgentClientBuilder<'a> {
@@ -669,8 +667,6 @@ impl AgentClient {
             true
         }
     }
-
-
 }
 
 #[cfg(test)]

@@ -209,9 +209,7 @@ async fn create_mb_policy(
         serde_json::from_str(&policy_content).map_err(|e| {
             CommandError::policy_file_error(
                 file_path,
-                format!(
-                    "Failed to parse measured boot policy as JSON: {e}"
-                ),
+                format!("Failed to parse measured boot policy as JSON: {e}"),
             )
         })?;
 
@@ -227,9 +225,7 @@ async fn create_mb_policy(
         serde_json::from_str(&policy_content).map_err(|e| {
             CommandError::policy_file_error(
                 file_path,
-                format!(
-                    "Failed to parse measured boot policy as JSON: {e}"
-                ),
+                format!("Failed to parse measured boot policy as JSON: {e}"),
             )
         })?;
 
@@ -322,9 +318,7 @@ async fn show_mb_policy(
     let policy = verifier_client.get_mb_policy(name).await.map_err(|e| {
         CommandError::resource_error(
             "verifier",
-            format!(
-                "Failed to retrieve measured boot policy '{name}': {e}"
-            ),
+            format!("Failed to retrieve measured boot policy '{name}': {e}"),
         )
     })?;
 
@@ -359,9 +353,7 @@ async fn update_mb_policy(
         serde_json::from_str(&policy_content).map_err(|e| {
             CommandError::policy_file_error(
                 file_path,
-                format!(
-                    "Failed to parse measured boot policy as JSON: {e}"
-                ),
+                format!("Failed to parse measured boot policy as JSON: {e}"),
             )
         })?;
 
@@ -377,9 +369,7 @@ async fn update_mb_policy(
         serde_json::from_str(&policy_content).map_err(|e| {
             CommandError::policy_file_error(
                 file_path,
-                format!(
-                    "Failed to parse measured boot policy as JSON: {e}"
-                ),
+                format!("Failed to parse measured boot policy as JSON: {e}"),
             )
         })?;
 

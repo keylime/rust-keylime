@@ -178,9 +178,7 @@ pub struct RegistrarClientBuilder<'a> {
 impl<'a> RegistrarClientBuilder<'a> {
     /// Create a new builder instance
     pub fn new() -> Self {
-        Self {
-            config: None,
-        }
+        Self { config: None }
     }
 
     /// Set the configuration for the client
@@ -188,7 +186,6 @@ impl<'a> RegistrarClientBuilder<'a> {
         self.config = Some(config);
         self
     }
-
 
     /// Build the RegistrarClient with automatic API version detection
     ///
@@ -204,7 +201,6 @@ impl<'a> RegistrarClientBuilder<'a> {
 
         RegistrarClient::new(config).await
     }
-
 }
 
 impl<'a> Default for RegistrarClientBuilder<'a> {
@@ -733,9 +729,6 @@ impl RegistrarClient {
             .await
             .map_err(KeylimectlError::from)
     }
-
-
-
 }
 
 #[cfg(test)]

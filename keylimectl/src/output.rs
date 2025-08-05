@@ -25,7 +25,7 @@
 //! ```
 
 use crate::error::KeylimectlError;
-use log::{info, warn};
+use log::info;
 use serde_json::Value;
 
 /// Output format options
@@ -209,30 +209,6 @@ impl OutputHandler {
     pub fn info<T: AsRef<str>>(&self, message: T) {
         if !self.quiet {
             info!("{}", message.as_ref());
-        }
-    }
-
-    /// Display warning message (only if not quiet)
-    ///
-    /// Warning messages indicate potential issues that don't prevent operation
-    /// but should be brought to the user's attention.
-    ///
-    /// # Arguments
-    ///
-    /// * `message` - The warning message to display
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// use keylimectl::output::OutputHandler;
-    ///
-    /// let handler = OutputHandler::new(crate::OutputFormat::Json, false);
-    /// handler.warn("Using default configuration due to missing config file");
-    /// ```
-    #[allow(dead_code)]
-    pub fn warn<T: AsRef<str>>(&self, message: T) {
-        if !self.quiet {
-            warn!("{}", message.as_ref());
         }
     }
 

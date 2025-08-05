@@ -62,7 +62,6 @@ pub enum CommandError {
     /// Command parameter validation errors
     #[error("Invalid parameter: {parameter} - {reason}")]
     InvalidParameter { parameter: String, reason: String },
-
 }
 
 /// Agent management specific errors
@@ -75,7 +74,6 @@ pub enum AgentError {
     #[error("Agent {uuid} not found on {service}")]
     NotFound { uuid: String, service: String },
 
-
     /// Agent operation failed
     #[error("Agent operation failed: {operation} for {uuid} - {reason}")]
     OperationFailed {
@@ -83,7 +81,6 @@ pub enum AgentError {
         uuid: String,
         reason: String,
     },
-
 }
 
 /// Policy operation specific errors
@@ -96,11 +93,9 @@ pub enum PolicyError {
     #[error("Policy '{name}' not found")]
     NotFound { name: String },
 
-
     /// Policy file errors
     #[error("Policy file error: {path} - {reason}")]
     FileError { path: PathBuf, reason: String },
-
 }
 
 /// Resource listing and management errors
@@ -109,14 +104,12 @@ pub enum PolicyError {
 /// including listing, filtering, and display formatting.
 #[derive(Error, Debug)]
 pub enum ResourceError {
-
     /// Resource listing failed
     #[error("Failed to list {resource_type}: {reason}")]
     ListingFailed {
         resource_type: String,
         reason: String,
     },
-
 }
 
 impl CommandError {
@@ -130,7 +123,6 @@ impl CommandError {
             reason: reason.into(),
         }
     }
-
 
     /// Create an agent not found error
     pub fn agent_not_found<U: Into<String>, S: Into<String>>(
@@ -147,7 +139,6 @@ impl CommandError {
     pub fn policy_not_found<N: Into<String>>(name: N) -> Self {
         Self::Policy(PolicyError::NotFound { name: name.into() })
     }
-
 
     /// Create a resource error
     pub fn resource_error<T: Into<String>, R: Into<String>>(
@@ -187,38 +178,13 @@ impl CommandError {
             reason: reason.into(),
         })
     }
-
-
-
 }
 
-impl AgentError {
+impl AgentError {}
 
+impl PolicyError {}
 
-
-
-
-
-
-}
-
-impl PolicyError {
-
-
-
-
-
-
-
-}
-
-impl ResourceError {
-
-
-
-
-
-}
+impl ResourceError {}
 
 #[cfg(test)]
 mod tests {
@@ -262,12 +228,13 @@ mod tests {
             }
             _ => panic!("Expected OperationFailed error"),
         }
-
     }
 
     #[test]
     fn test_policy_error_creation() {
-        let not_found = PolicyError::NotFound { name: "my_policy".to_string() };
+        let not_found = PolicyError::NotFound {
+            name: "my_policy".to_string(),
+        };
         match not_found {
             PolicyError::NotFound { name } => {
                 assert_eq!(name, "my_policy");
@@ -337,10 +304,11 @@ mod tests {
             reason: "Temporary failure".to_string(),
         });
 
-        let _listing_failed = CommandError::Resource(ResourceError::ListingFailed {
-            resource_type: "agents".to_string(),
-            reason: "Service unavailable".to_string(),
-        });
+        let _listing_failed =
+            CommandError::Resource(ResourceError::ListingFailed {
+                resource_type: "agents".to_string(),
+                reason: "Service unavailable".to_string(),
+            });
 
         // Parameter errors
         let _invalid_param =
