@@ -61,9 +61,6 @@ use log::{debug, info, warn};
 use reqwest::{Method, StatusCode};
 use serde_json::Value;
 
-/// Unknown API version constant for when version detection fails
-pub const UNKNOWN_API_VERSION: &str = "unknown";
-
 /// Supported API versions in order from oldest to newest (fallback tries newest first)
 pub const SUPPORTED_API_VERSIONS: &[&str] =
     &["2.0", "2.1", "2.2", "2.3", "3.0"];
@@ -367,12 +364,11 @@ impl VerifierClient {
             }
         }
 
-        // If all versions failed, set to unknown and continue with default
+        // If all versions failed, continue with default version
         warn!(
             "Could not detect verifier API version, using default: {}",
             self.api_version
         );
-        self.api_version = UNKNOWN_API_VERSION.to_string();
         Ok(())
     }
 
@@ -1528,10 +1524,6 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_unknown_api_version_constant() {
-            assert_eq!(UNKNOWN_API_VERSION, "unknown");
-        }
 
         #[test]
         fn test_response_structure_deserialization() {
@@ -1621,8 +1613,8 @@ mod tests {
             client.api_version = "2.0".to_string();
             assert_eq!(client.api_version, "2.0");
 
-            client.api_version = UNKNOWN_API_VERSION.to_string();
-            assert_eq!(client.api_version, "unknown");
+            client.api_version = "3.0".to_string();
+            assert_eq!(client.api_version, "3.0");
         }
 
         #[test]
@@ -1672,11 +1664,7 @@ mod tests {
         #[allow(clippy::const_is_empty)]
         fn test_version_constants_consistency() {
             // Ensure our constants are consistent with expected patterns
-            assert!(!UNKNOWN_API_VERSION.is_empty()); // Known constant value
             assert!(!SUPPORTED_API_VERSIONS.is_empty()); // Known constant value
-
-            // UNKNOWN_API_VERSION should not be in SUPPORTED_API_VERSIONS
-            assert!(!SUPPORTED_API_VERSIONS.contains(&UNKNOWN_API_VERSION));
 
             // All supported versions should be valid version strings
             for version in SUPPORTED_API_VERSIONS {
