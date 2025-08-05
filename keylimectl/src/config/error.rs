@@ -42,8 +42,6 @@ pub enum ConfigError {
     #[error("Configuration validation error: {0}")]
     Validation(#[from] ValidationError),
 
-
-
     /// Configuration parsing errors from config crate
     #[error("Configuration parsing error: {0}")]
     ConfigParsing(#[from] config::ConfigError),
@@ -51,8 +49,6 @@ pub enum ConfigError {
     /// I/O errors when reading configuration files
     #[error("I/O error reading configuration: {0}")]
     Io(#[from] std::io::Error),
-
-
 }
 
 /// Configuration file loading errors
@@ -60,44 +56,20 @@ pub enum ConfigError {
 /// These errors represent issues when loading configuration files,
 /// including file system errors and format issues.
 #[derive(Error, Debug)]
-pub enum LoadError {
-
-
-
-
-}
+pub enum LoadError {}
 
 /// Configuration validation errors
 ///
 /// These errors represent validation failures for specific configuration
 /// values, providing detailed context about what is wrong and how to fix it.
 #[derive(Error, Debug)]
-pub enum ValidationError {
+pub enum ValidationError {}
 
+impl ConfigError {}
 
+impl ValidationError {}
 
-}
-
-impl ConfigError {
-
-
-
-
-
-
-
-}
-
-impl ValidationError {
-
-
-
-}
-
-impl LoadError {
-
-
-}
+impl LoadError {}
 
 #[cfg(test)]
 mod tests {
@@ -112,8 +84,4 @@ mod tests {
         ));
         assert!(io_err.to_string().contains("I/O error"));
     }
-
-
-
-
 }

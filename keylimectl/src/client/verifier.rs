@@ -167,9 +167,7 @@ pub struct VerifierClientBuilder<'a> {
 impl<'a> VerifierClientBuilder<'a> {
     /// Create a new builder instance
     pub fn new() -> Self {
-        Self {
-            config: None,
-        }
+        Self { config: None }
     }
 
     /// Set the configuration for the client
@@ -177,7 +175,6 @@ impl<'a> VerifierClientBuilder<'a> {
         self.config = Some(config);
         self
     }
-
 
     /// Build the VerifierClient with automatic API version detection
     ///
@@ -193,7 +190,6 @@ impl<'a> VerifierClientBuilder<'a> {
 
         VerifierClient::new(config).await
     }
-
 }
 
 impl<'a> Default for VerifierClientBuilder<'a> {
@@ -726,7 +722,6 @@ impl VerifierClient {
             .await
             .map_err(KeylimectlError::from)
     }
-
 
     /// List all agents on the verifier
     ///

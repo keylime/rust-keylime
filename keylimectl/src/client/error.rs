@@ -58,7 +58,6 @@ pub enum ClientError {
     /// Client configuration errors
     #[error("Client configuration error: {message}")]
     Configuration { message: String },
-
 }
 
 /// API response specific errors
@@ -67,7 +66,6 @@ pub enum ClientError {
 /// including HTTP status codes and response parsing issues.
 #[derive(Error, Debug)]
 pub enum ApiResponseError {
-
     /// Server returned an error response
     #[error("Server error: {message} (status: {status})")]
     ServerError {
@@ -95,7 +93,6 @@ pub enum TlsError {
     #[error("CA certificate file error: {path} - {reason}")]
     CaCertificateFile { path: String, reason: String },
 
-
     /// TLS configuration error
     #[error("TLS configuration error: {message}")]
     Configuration { message: String },
@@ -108,12 +105,9 @@ impl ClientError {
             message: message.into(),
         }
     }
-
-
 }
 
-impl ApiResponseError {
-}
+impl ApiResponseError {}
 
 impl TlsError {
     /// Create a certificate file error
@@ -148,7 +142,6 @@ impl TlsError {
             reason: reason.into(),
         }
     }
-
 
     /// Create a configuration error
     pub fn configuration<M: Into<String>>(message: M) -> Self {
@@ -200,7 +193,6 @@ mod tests {
             }
             _ => panic!("Expected PrivateKeyFile error"),
         }
-
     }
 
     #[test]

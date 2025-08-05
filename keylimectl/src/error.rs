@@ -60,7 +60,7 @@ pub enum KeylimectlError {
 
     /// Agent not found errors
     #[error("Agent {uuid} not found on {service}")]
-    #[allow(dead_code)]
+    #[cfg(test)]
     AgentNotFound {
         /// Agent UUID
         uuid: String,
@@ -70,7 +70,7 @@ pub enum KeylimectlError {
 
     /// Policy not found errors
     #[error("Policy '{name}' not found")]
-    #[allow(dead_code)]
+    #[cfg(test)]
     PolicyNotFound {
         /// Policy name
         name: String,
@@ -91,26 +91,6 @@ pub enum KeylimectlError {
     /// UUID parsing errors
     #[error("Invalid UUID: {0}")]
     Uuid(#[from] uuid::Error),
-
-    /// Cryptographic errors
-    #[error("Cryptographic error: {0}")]
-    #[allow(dead_code)]
-    Crypto(String),
-
-    /// TPM/attestation errors
-    #[error("Attestation error: {0}")]
-    #[allow(dead_code)]
-    Attestation(String),
-
-    /// Authentication/authorization errors
-    #[error("Authentication error: {0}")]
-    #[allow(dead_code)]
-    Auth(String),
-
-    /// Timeout errors
-    #[error("Operation timed out: {0}")]
-    #[allow(dead_code)]
-    Timeout(String),
 
     /// Client-specific errors
     #[error("Client error: {0}")]
@@ -188,7 +168,7 @@ impl KeylimectlError {
     ///
     /// let error = KeylimectlError::agent_not_found("12345", "verifier");
     /// ```
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub fn agent_not_found<T: Into<String>, U: Into<String>>(
         uuid: T,
         service: U,
@@ -212,33 +192,9 @@ impl KeylimectlError {
     ///
     /// let error = KeylimectlError::policy_not_found("my_policy");
     /// ```
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub fn policy_not_found<T: Into<String>>(name: T) -> Self {
         Self::PolicyNotFound { name: name.into() }
-    }
-
-    /// Create a new crypto error
-    #[allow(dead_code)]
-    pub fn crypto<T: Into<String>>(message: T) -> Self {
-        Self::Crypto(message.into())
-    }
-
-    /// Create a new attestation error
-    #[allow(dead_code)]
-    pub fn attestation<T: Into<String>>(message: T) -> Self {
-        Self::Attestation(message.into())
-    }
-
-    /// Create a new auth error
-    #[allow(dead_code)]
-    pub fn auth<T: Into<String>>(message: T) -> Self {
-        Self::Auth(message.into())
-    }
-
-    /// Create a new timeout error
-    #[allow(dead_code)]
-    pub fn timeout<T: Into<String>>(message: T) -> Self {
-        Self::Timeout(message.into())
     }
 
     /// Get the error code for JSON output
@@ -258,16 +214,14 @@ impl KeylimectlError {
             Self::Config(_) => "CONFIG_ERROR",
             Self::Network(_) => "NETWORK_ERROR",
             Self::Api { .. } => "API_ERROR",
+            #[cfg(test)]
             Self::AgentNotFound { .. } => "AGENT_NOT_FOUND",
+            #[cfg(test)]
             Self::PolicyNotFound { .. } => "POLICY_NOT_FOUND",
             Self::Validation(_) => "VALIDATION_ERROR",
             Self::Io(_) => "IO_ERROR",
             Self::Json(_) => "JSON_ERROR",
             Self::Uuid(_) => "UUID_ERROR",
-            Self::Crypto(_) => "CRYPTO_ERROR",
-            Self::Attestation(_) => "ATTESTATION_ERROR",
-            Self::Auth(_) => "AUTH_ERROR",
-            Self::Timeout(_) => "TIMEOUT_ERROR",
             Self::Client(_) => "CLIENT_ERROR",
             Self::Command(_) => "COMMAND_ERROR",
             Self::Generic(_) => "GENERIC_ERROR",
@@ -293,12 +247,11 @@ impl KeylimectlError {
     /// let validation_error = KeylimectlError::validation("bad input");
     /// assert!(!validation_error.is_retryable());
     /// ```
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub fn is_retryable(&self) -> bool {
         match self {
             Self::Network(_) => true,
             Self::Api { status, .. } => *status >= 500,
-            Self::Timeout(_) => true,
             Self::Client(_) => false, // Client errors are generally not retryable
             Self::Command(_) => false, // Command errors are generally not retryable
             _ => false,
@@ -339,10 +292,12 @@ impl KeylimectlError {
                 "http_status": status,
                 "response": response
             }),
+            #[cfg(test)]
             Self::AgentNotFound { uuid, service } => serde_json::json!({
                 "agent_uuid": uuid,
                 "service": service
             }),
+            #[cfg(test)]
             Self::PolicyNotFound { name } => serde_json::json!({
                 "policy_name": name
             }),
@@ -381,38 +336,6 @@ pub trait ErrorContext<T> {
     fn with_context<F>(self, f: F) -> Result<T, KeylimectlError>
     where
         F: FnOnce() -> String;
-
-    /// Add specific validation context
-    ///
-    /// Creates a validation error with the provided message, losing the
-    /// original error type but providing a clear validation message.
-    ///
-    /// # Arguments
-    ///
-    /// * `f` - Closure that returns the validation error message
-    #[allow(dead_code)]
-    fn validate<F>(self, f: F) -> Result<T, KeylimectlError>
-    where
-        F: FnOnce() -> String;
-
-    /// Add user-friendly context for command-line operations
-    ///
-    /// Provides context specifically designed for CLI users, with clear
-    /// explanations and suggested actions when appropriate.
-    ///
-    /// # Arguments
-    ///
-    /// * `operation` - The operation being performed (e.g., "adding agent")
-    /// * `suggestion` - Optional suggestion for the user
-    #[allow(dead_code)]
-    fn with_user_context<F, G>(
-        self,
-        operation: F,
-        suggestion: Option<G>,
-    ) -> Result<T, KeylimectlError>
-    where
-        F: FnOnce() -> String,
-        G: FnOnce() -> String;
 }
 
 impl<T, E> ErrorContext<T> for Result<T, E>
@@ -428,39 +351,6 @@ where
             // Use anyhow to maintain full error chain with backtrace
             KeylimectlError::Generic(
                 anyhow::Error::new(base_error).context(f()),
-            )
-        })
-    }
-
-    fn validate<F>(self, f: F) -> Result<T, KeylimectlError>
-    where
-        F: FnOnce() -> String,
-    {
-        self.map_err(|_| KeylimectlError::validation(f()))
-    }
-
-    fn with_user_context<F, G>(
-        self,
-        operation: F,
-        suggestion: Option<G>,
-    ) -> Result<T, KeylimectlError>
-    where
-        F: FnOnce() -> String,
-        G: FnOnce() -> String,
-    {
-        self.map_err(|e| {
-            let base_error = e.into();
-            let context = match suggestion {
-                Some(suggestion_fn) => format!(
-                    "Failed to {}\n\nSuggestion: {}",
-                    operation(),
-                    suggestion_fn()
-                ),
-                None => format!("Failed to {}", operation()),
-            };
-
-            KeylimectlError::Generic(
-                anyhow::Error::new(base_error).context(context),
             )
         })
     }
@@ -631,23 +521,5 @@ mod tests {
         let error = result.unwrap_err();
         assert_eq!(error.error_code(), "GENERIC_ERROR");
         assert!(error.to_string().contains("Failed to read config file"));
-    }
-
-    #[test]
-    fn test_validate() {
-        let result: Result<(), std::io::Error> = Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidInput,
-            "invalid",
-        ));
-
-        let validated = result.validate(|| "Invalid UUID format".to_string());
-
-        assert!(validated.is_err());
-        let error = validated.unwrap_err();
-        assert_eq!(error.error_code(), "VALIDATION_ERROR");
-        assert_eq!(
-            error.to_string(),
-            "Validation error: Invalid UUID format"
-        );
     }
 }
