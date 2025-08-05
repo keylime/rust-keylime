@@ -267,12 +267,16 @@ async fn create_mb_policy(
         policy_data["policy_metadata"] = meta.clone();
     }
 
-    let verifier_client = VerifierClient::new(config).await.map_err(|e| {
-        CommandError::resource_error(
-            "verifier",
-            format!("Failed to connect to verifier: {e}"),
-        )
-    })?;
+    let verifier_client = VerifierClient::builder()
+        .config(config)
+        .build()
+        .await
+        .map_err(|e| {
+            CommandError::resource_error(
+                "verifier",
+                format!("Failed to connect to verifier: {e}"),
+            )
+        })?;
     let response = verifier_client
         .add_mb_policy(name, policy_data)
         .await
@@ -305,12 +309,16 @@ async fn show_mb_policy(
 ) -> Result<Value, CommandError> {
     output.info(format!("Retrieving measured boot policy '{name}'"));
 
-    let verifier_client = VerifierClient::new(config).await.map_err(|e| {
-        CommandError::resource_error(
-            "verifier",
-            format!("Failed to connect to verifier: {e}"),
-        )
-    })?;
+    let verifier_client = VerifierClient::builder()
+        .config(config)
+        .build()
+        .await
+        .map_err(|e| {
+            CommandError::resource_error(
+                "verifier",
+                format!("Failed to connect to verifier: {e}"),
+            )
+        })?;
     let policy = verifier_client.get_mb_policy(name).await.map_err(|e| {
         CommandError::resource_error(
             "verifier",
@@ -409,12 +417,16 @@ async fn update_mb_policy(
         policy_data["policy_metadata"] = meta.clone();
     }
 
-    let verifier_client = VerifierClient::new(config).await.map_err(|e| {
-        CommandError::resource_error(
-            "verifier",
-            format!("Failed to connect to verifier: {e}"),
-        )
-    })?;
+    let verifier_client = VerifierClient::builder()
+        .config(config)
+        .build()
+        .await
+        .map_err(|e| {
+            CommandError::resource_error(
+                "verifier",
+                format!("Failed to connect to verifier: {e}"),
+            )
+        })?;
     let response = verifier_client
         .update_mb_policy(name, policy_data)
         .await
@@ -447,12 +459,16 @@ async fn delete_mb_policy(
 ) -> Result<Value, CommandError> {
     output.info(format!("Deleting measured boot policy '{name}'"));
 
-    let verifier_client = VerifierClient::new(config).await.map_err(|e| {
-        CommandError::resource_error(
-            "verifier",
-            format!("Failed to connect to verifier: {e}"),
-        )
-    })?;
+    let verifier_client = VerifierClient::builder()
+        .config(config)
+        .build()
+        .await
+        .map_err(|e| {
+            CommandError::resource_error(
+                "verifier",
+                format!("Failed to connect to verifier: {e}"),
+            )
+        })?;
     let response =
         verifier_client.delete_mb_policy(name).await.map_err(|e| {
             CommandError::resource_error(

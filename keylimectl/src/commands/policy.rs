@@ -273,12 +273,16 @@ async fn create_policy(
         policy_data["policy_metadata"] = meta.clone();
     }
 
-    let verifier_client = VerifierClient::new(config).await.map_err(|e| {
-        CommandError::resource_error(
-            "verifier",
-            format!("Failed to connect to verifier: {e}"),
-        )
-    })?;
+    let verifier_client = VerifierClient::builder()
+        .config(config)
+        .build()
+        .await
+        .map_err(|e| {
+            CommandError::resource_error(
+                "verifier",
+                format!("Failed to connect to verifier: {e}"),
+            )
+        })?;
     let response = verifier_client
         .add_runtime_policy(name, policy_data)
         .await
@@ -307,12 +311,16 @@ async fn show_policy(
 ) -> Result<Value, CommandError> {
     output.info(format!("Retrieving runtime policy '{name}'"));
 
-    let verifier_client = VerifierClient::new(config).await.map_err(|e| {
-        CommandError::resource_error(
-            "verifier",
-            format!("Failed to connect to verifier: {e}"),
-        )
-    })?;
+    let verifier_client = VerifierClient::builder()
+        .config(config)
+        .build()
+        .await
+        .map_err(|e| {
+            CommandError::resource_error(
+                "verifier",
+                format!("Failed to connect to verifier: {e}"),
+            )
+        })?;
     let policy =
         verifier_client
             .get_runtime_policy(name)
@@ -411,12 +419,16 @@ async fn update_policy(
         policy_data["policy_metadata"] = meta.clone();
     }
 
-    let verifier_client = VerifierClient::new(config).await.map_err(|e| {
-        CommandError::resource_error(
-            "verifier",
-            format!("Failed to connect to verifier: {e}"),
-        )
-    })?;
+    let verifier_client = VerifierClient::builder()
+        .config(config)
+        .build()
+        .await
+        .map_err(|e| {
+            CommandError::resource_error(
+                "verifier",
+                format!("Failed to connect to verifier: {e}"),
+            )
+        })?;
     let response = verifier_client
         .update_runtime_policy(name, policy_data)
         .await
@@ -445,12 +457,16 @@ async fn delete_policy(
 ) -> Result<Value, CommandError> {
     output.info(format!("Deleting runtime policy '{name}'"));
 
-    let verifier_client = VerifierClient::new(config).await.map_err(|e| {
-        CommandError::resource_error(
-            "verifier",
-            format!("Failed to connect to verifier: {e}"),
-        )
-    })?;
+    let verifier_client = VerifierClient::builder()
+        .config(config)
+        .build()
+        .await
+        .map_err(|e| {
+            CommandError::resource_error(
+                "verifier",
+                format!("Failed to connect to verifier: {e}"),
+            )
+        })?;
     let response = verifier_client
         .delete_runtime_policy(name)
         .await

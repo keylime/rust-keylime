@@ -214,7 +214,10 @@ async fn list_agents(
         output.info("Listing agents from verifier");
     }
 
-    let verifier_client = VerifierClient::new(config).await?;
+    let verifier_client = VerifierClient::builder()
+        .config(config)
+        .build()
+        .await?;
 
     if detailed {
         // Get detailed info from verifier
@@ -226,7 +229,10 @@ async fn list_agents(
             })?;
 
         // Also get registrar data for complete picture
-        let registrar_client = RegistrarClient::new(config).await?;
+        let registrar_client = RegistrarClient::builder()
+            .config(config)
+            .build()
+            .await?;
         let registrar_data =
             registrar_client.list_agents().await.with_context(|| {
                 "Failed to list agents from registrar".to_string()
@@ -257,7 +263,10 @@ async fn list_runtime_policies(
 ) -> Result<Value, KeylimectlError> {
     output.info("Listing runtime policies");
 
-    let verifier_client = VerifierClient::new(config).await?;
+    let verifier_client = VerifierClient::builder()
+        .config(config)
+        .build()
+        .await?;
     let policies = verifier_client
         .list_runtime_policies()
         .await
@@ -275,7 +284,10 @@ async fn list_mb_policies(
 ) -> Result<Value, KeylimectlError> {
     output.info("Listing measured boot policies");
 
-    let verifier_client = VerifierClient::new(config).await?;
+    let verifier_client = VerifierClient::builder()
+        .config(config)
+        .build()
+        .await?;
     let policies =
         verifier_client.list_mb_policies().await.with_context(|| {
             "Failed to list measured boot policies from verifier".to_string()

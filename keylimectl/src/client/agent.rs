@@ -144,16 +144,12 @@ pub struct AgentClient {
 /// # }
 /// ```
 #[derive(Debug)]
-#[allow(dead_code)] // Builder pattern may not be used initially
 pub struct AgentClientBuilder<'a> {
     agent_ip: Option<String>,
     agent_port: Option<u16>,
     config: Option<&'a Config>,
-    skip_version_detection: bool,
-    api_version: Option<String>,
 }
 
-#[allow(dead_code)] // Builder pattern may not be used initially
 impl<'a> AgentClientBuilder<'a> {
     /// Create a new builder instance
     pub fn new() -> Self {
@@ -161,8 +157,6 @@ impl<'a> AgentClientBuilder<'a> {
             agent_ip: None,
             agent_port: None,
             config: None,
-            skip_version_detection: false,
-            api_version: None,
         }
     }
 
@@ -184,25 +178,6 @@ impl<'a> AgentClientBuilder<'a> {
         self
     }
 
-    /// Skip automatic API version detection
-    ///
-    /// When this is set, the client will use either the specified API version
-    /// or the default version ("2.1") without attempting to detect the server's
-    /// supported version.
-    pub fn skip_version_detection(mut self) -> Self {
-        self.skip_version_detection = true;
-        self
-    }
-
-    /// Set a specific API version to use
-    ///
-    /// If specified, this version will be used instead of the default.
-    /// If `skip_version_detection` is not set, version detection may still
-    /// override this value.
-    pub fn api_version<S: Into<String>>(mut self, version: S) -> Self {
-        self.api_version = Some(version.into());
-        self
-    }
 
     /// Build the AgentClient with automatic API version detection
     ///
@@ -210,7 +185,6 @@ impl<'a> AgentClientBuilder<'a> {
     /// as it will automatically detect the optimal API version supported
     /// by the agent.
     pub async fn build(self) -> Result<AgentClient, KeylimectlError> {
-        // Extract values before pattern matching to avoid partial move issues
         let agent_ip = self.agent_ip.ok_or_else(|| {
             KeylimectlError::validation(
                 "Agent IP is required for AgentClient",
@@ -227,53 +201,9 @@ impl<'a> AgentClientBuilder<'a> {
             )
         })?;
 
-        if self.skip_version_detection {
-            // Use build_sync logic inline since we already extracted values
-            let mut client = AgentClient::new_without_version_detection(
-                &agent_ip, agent_port, config,
-            )?;
-
-            if let Some(version) = self.api_version {
-                client.api_version = version;
-            }
-
-            Ok(client)
-        } else {
-            AgentClient::new(&agent_ip, agent_port, config).await
-        }
+        AgentClient::new(&agent_ip, agent_port, config).await
     }
 
-    /// Build the AgentClient without API version detection
-    ///
-    /// This creates the client immediately without any network calls.
-    /// Useful for testing or when you want to control the API version manually.
-    pub fn build_sync(self) -> Result<AgentClient, KeylimectlError> {
-        let agent_ip = self.agent_ip.ok_or_else(|| {
-            KeylimectlError::validation(
-                "Agent IP is required for AgentClient",
-            )
-        })?;
-        let agent_port = self.agent_port.ok_or_else(|| {
-            KeylimectlError::validation(
-                "Agent port is required for AgentClient",
-            )
-        })?;
-        let config = self.config.ok_or_else(|| {
-            KeylimectlError::validation(
-                "Configuration is required for AgentClient",
-            )
-        })?;
-
-        let mut client = AgentClient::new_without_version_detection(
-            &agent_ip, agent_port, config,
-        )?;
-
-        if let Some(version) = self.api_version {
-            client.api_version = version;
-        }
-
-        Ok(client)
-    }
 }
 
 impl<'a> Default for AgentClientBuilder<'a> {
@@ -305,7 +235,6 @@ impl AgentClient {
     /// # Ok(())
     /// # }
     /// ```
-    #[allow(dead_code)] // Builder pattern may not be used initially
     pub fn builder() -> AgentClientBuilder<'static> {
         AgentClientBuilder::new()
     }
@@ -741,17 +670,7 @@ impl AgentClient {
         }
     }
 
-    /// Get the agent's base URL
-    #[allow(dead_code)]
-    pub fn base_url(&self) -> &str {
-        &self.base.base_url
-    }
 
-    /// Get the detected/configured API version
-    #[allow(dead_code)]
-    pub fn api_version(&self) -> &str {
-        &self.api_version
-    }
 }
 
 #[cfg(test)]
@@ -887,7 +806,7 @@ mod tests {
             &config,
         )
         .unwrap();
-        assert_eq!(client.base_url(), "https://192.168.1.100:9002");
+        assert_eq!(client.base.base_url, "https://192.168.1.100:9002");
 
         // IPv6 without brackets
         let client = AgentClient::new_without_version_detection(
@@ -896,7 +815,7 @@ mod tests {
             &config,
         )
         .unwrap();
-        assert_eq!(client.base_url(), "https://[2001:db8::1]:9002");
+        assert_eq!(client.base.base_url, "https://[2001:db8::1]:9002");
 
         // IPv6 with brackets
         let client = AgentClient::new_without_version_detection(
@@ -905,7 +824,7 @@ mod tests {
             &config,
         )
         .unwrap();
-        assert_eq!(client.base_url(), "https://[2001:db8::1]:9002");
+        assert_eq!(client.base.base_url, "https://[2001:db8::1]:9002");
 
         // Hostname
         let client = AgentClient::new_without_version_detection(
@@ -914,7 +833,7 @@ mod tests {
             &config,
         )
         .unwrap();
-        assert_eq!(client.base_url(), "https://agent.example.com:9002");
+        assert_eq!(client.base.base_url, "https://agent.example.com:9002");
     }
 
     #[test]
@@ -969,7 +888,7 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(client.base_url(), "https://127.0.0.1:9002");
-        assert_eq!(client.api_version(), "2.1");
+        assert_eq!(client.base.base_url, "https://127.0.0.1:9002");
+        assert_eq!(client.api_version, "2.1");
     }
 }

@@ -62,11 +62,9 @@ use reqwest::{Method, StatusCode};
 use serde_json::Value;
 
 /// Unknown API version constant for when version detection fails
-#[allow(dead_code)]
 pub const UNKNOWN_API_VERSION: &str = "unknown";
 
 /// Supported API versions in order from oldest to newest (fallback tries newest first)
-#[allow(dead_code)]
 pub const SUPPORTED_API_VERSIONS: &[&str] =
     &["2.0", "2.1", "2.2", "2.3", "3.0"];
 
@@ -77,7 +75,6 @@ struct Response<T> {
     code: serde_json::Number,
     #[allow(dead_code)]
     status: String,
-    #[allow(dead_code)]
     results: T,
 }
 
@@ -123,7 +120,6 @@ struct Response<T> {
 pub struct VerifierClient {
     base: BaseClient,
     api_version: String,
-    #[allow(dead_code)]
     supported_api_versions: Option<Vec<String>>,
 }
 
@@ -164,21 +160,15 @@ pub struct VerifierClient {
 /// # }
 /// ```
 #[derive(Debug)]
-#[allow(dead_code)] // Builder pattern may not be used initially
 pub struct VerifierClientBuilder<'a> {
     config: Option<&'a Config>,
-    skip_version_detection: bool,
-    api_version: Option<String>,
 }
 
-#[allow(dead_code)] // Builder pattern may not be used initially
 impl<'a> VerifierClientBuilder<'a> {
     /// Create a new builder instance
     pub fn new() -> Self {
         Self {
             config: None,
-            skip_version_detection: false,
-            api_version: None,
         }
     }
 
@@ -188,25 +178,6 @@ impl<'a> VerifierClientBuilder<'a> {
         self
     }
 
-    /// Skip automatic API version detection
-    ///
-    /// When this is set, the client will use either the specified API version
-    /// or the default version ("2.1") without attempting to detect the server's
-    /// supported version.
-    pub fn skip_version_detection(mut self) -> Self {
-        self.skip_version_detection = true;
-        self
-    }
-
-    /// Set a specific API version to use
-    ///
-    /// If specified, this version will be used instead of the default.
-    /// If `skip_version_detection` is not set, version detection may still
-    /// override this value.
-    pub fn api_version<S: Into<String>>(mut self, version: S) -> Self {
-        self.api_version = Some(version.into());
-        self
-    }
 
     /// Build the VerifierClient with automatic API version detection
     ///
@@ -220,33 +191,9 @@ impl<'a> VerifierClientBuilder<'a> {
             )
         })?;
 
-        if self.skip_version_detection {
-            self.build_sync()
-        } else {
-            VerifierClient::new(config).await
-        }
+        VerifierClient::new(config).await
     }
 
-    /// Build the VerifierClient without API version detection
-    ///
-    /// This creates the client immediately without any network calls.
-    /// Useful for testing or when you want to control the API version manually.
-    pub fn build_sync(self) -> Result<VerifierClient, KeylimectlError> {
-        let config = self.config.ok_or_else(|| {
-            KeylimectlError::validation(
-                "Configuration is required for VerifierClient",
-            )
-        })?;
-
-        let mut client =
-            VerifierClient::new_without_version_detection(config)?;
-
-        if let Some(version) = self.api_version {
-            client.api_version = version;
-        }
-
-        Ok(client)
-    }
 }
 
 impl<'a> Default for VerifierClientBuilder<'a> {
@@ -276,7 +223,6 @@ impl VerifierClient {
     /// # Ok(())
     /// # }
     /// ```
-    #[allow(dead_code)] // Builder pattern may not be used initially
     pub fn builder() -> VerifierClientBuilder<'static> {
         VerifierClientBuilder::new()
     }
@@ -397,7 +343,6 @@ impl VerifierClient {
     /// # Ok(())
     /// # }
     /// ```
-    #[allow(dead_code)]
     pub async fn detect_api_version(
         &mut self,
     ) -> Result<(), KeylimectlError> {
@@ -436,7 +381,6 @@ impl VerifierClient {
     }
 
     /// Get the verifier API version from the '/version' endpoint
-    #[allow(dead_code)]
     async fn get_verifier_api_version(
         &mut self,
     ) -> Result<String, KeylimectlError> {
@@ -475,7 +419,6 @@ impl VerifierClient {
     }
 
     /// Test if a specific API version works by making a simple request
-    #[allow(dead_code)]
     async fn test_api_version(
         &self,
         api_version: &str,
@@ -784,35 +727,6 @@ impl VerifierClient {
             .map_err(KeylimectlError::from)
     }
 
-    /// Stop an agent on the verifier
-    #[allow(dead_code)]
-    pub async fn stop_agent(
-        &self,
-        agent_uuid: &str,
-    ) -> Result<Value, KeylimectlError> {
-        debug!("Stopping agent {agent_uuid} on verifier");
-
-        let url = format!(
-            "{}/v{}/agents/{}/stop",
-            self.base.base_url, self.api_version, agent_uuid
-        );
-
-        let response = self
-            .base
-            .client
-            .get_request(Method::PUT, &url)
-            .body("")
-            .send()
-            .await
-            .with_context(|| {
-                "Failed to send stop agent request to verifier".to_string()
-            })?;
-
-        self.base
-            .handle_response(response)
-            .await
-            .map_err(KeylimectlError::from)
-    }
 
     /// List all agents on the verifier
     ///
