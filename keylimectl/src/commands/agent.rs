@@ -74,7 +74,6 @@ use keylime::crypto;
 use log::{debug, warn};
 use serde_json::{json, Value};
 use std::fs;
-use uuid::Uuid;
 
 /// Execute an agent management command
 ///
@@ -164,7 +163,7 @@ pub async fn execute(
             push_model,
         } => add_agent(
             AddAgentParams {
-                uuid,
+                agent_id: uuid,
                 ip: ip.as_deref(),
                 port: *port,
                 verifier_ip: verifier_ip.as_deref(),
@@ -228,7 +227,7 @@ pub async fn execute(
 ///
 /// # Fields
 ///
-/// * `uuid` - Agent UUID (must be registered with registrar first)
+/// * `agent_id` - Agent identifier (can be any string, not necessarily a UUID)
 /// * `ip` - Optional agent IP address (overrides registrar data)
 /// * `port` - Optional agent port (overrides registrar data)
 /// * `verifier_ip` - Optional verifier IP for agent communication
@@ -239,8 +238,8 @@ pub async fn execute(
 /// * `verify` - Whether to perform key derivation verification
 /// * `push_model` - Whether to use push model (agent connects to verifier)
 struct AddAgentParams<'a> {
-    /// Agent UUID - must be valid UUID format
-    uuid: &'a str,
+    /// Agent identifier - can be any string
+    agent_id: &'a str,
     /// Optional agent IP address (overrides registrar data)
     ip: Option<&'a str>,
     /// Optional agent port (overrides registrar data)
@@ -314,7 +313,7 @@ struct AddAgentParams<'a> {
 /// # use keylimectl::output::OutputHandler;
 /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
 /// let params = AddAgentParams {
-///     uuid: "550e8400-e29b-41d4-a716-446655440000",
+///     agent_id: "550e8400-e29b-41d4-a716-446655440000",
 ///     ip: Some("192.168.1.100"),
 ///     port: Some(9002),
 ///     verifier_ip: None,
@@ -338,15 +337,30 @@ async fn add_agent(
     config: &Config,
     output: &OutputHandler,
 ) -> Result<Value, CommandError> {
-    // Validate UUID
-    let agent_uuid = Uuid::parse_str(params.uuid).map_err(|_| {
-        CommandError::invalid_parameter(
-            "uuid",
-            format!("Invalid agent UUID: {}", params.uuid),
-        )
-    })?;
+    // Validate agent ID
+    if params.agent_id.is_empty() {
+        return Err(CommandError::invalid_parameter(
+            "agent_id",
+            "Agent ID cannot be empty".to_string(),
+        ));
+    }
 
-    output.info(format!("Adding agent {agent_uuid} to verifier"));
+    if params.agent_id.len() > 255 {
+        return Err(CommandError::invalid_parameter(
+            "agent_id",
+            "Agent ID cannot exceed 255 characters".to_string(),
+        ));
+    }
+
+    // Check for control characters that might cause issues
+    if params.agent_id.chars().any(|c| c.is_control()) {
+        return Err(CommandError::invalid_parameter(
+            "agent_id",
+            "Agent ID cannot contain control characters".to_string(),
+        ));
+    }
+
+    output.info(format!("Adding agent {} to verifier", params.agent_id));
 
     // Step 1: Get agent data from registrar
     output.step(1, 4, "Retrieving agent data from registrar");
@@ -359,7 +373,7 @@ async fn add_agent(
             CommandError::resource_error("registrar", e.to_string())
         })?;
     let agent_data = registrar_client
-        .get_agent(&agent_uuid.to_string())
+        .get_agent(params.agent_id)
         .await
         .map_err(|e| {
             CommandError::resource_error(
@@ -370,7 +384,7 @@ async fn add_agent(
 
     if agent_data.is_none() {
         return Err(CommandError::agent_not_found(
-            agent_uuid.to_string(),
+            params.agent_id.to_string(),
             "registrar",
         ));
     }
@@ -396,7 +410,8 @@ async fn add_agent(
             .ok_or_else(|| {
                 CommandError::invalid_parameter(
                     "ip",
-                    "Agent IP address is required when not using push model",
+                    "Agent IP address is required when not using push model"
+                        .to_string(),
                 )
             })?;
 
@@ -410,7 +425,8 @@ async fn add_agent(
             .ok_or_else(|| {
                 CommandError::invalid_parameter(
                     "port",
-                    "Agent port is required when not using push model",
+                    "Agent port is required when not using push model"
+                        .to_string(),
                 )
             })?;
 
@@ -447,7 +463,7 @@ async fn add_agent(
             if !agent_client.is_pull_model() {
                 return Err(CommandError::invalid_parameter(
                     "push_model",
-                    "Agent API version >= 3.0 detected but not using push model. Please use --push-model flag."
+                    "Agent API version >= 3.0 detected but not using push model. Please use --push-model flag.".to_string()
                 ));
             }
 
@@ -456,7 +472,7 @@ async fn add_agent(
                 &agent_client,
                 &agent_data,
                 config,
-                params.uuid,
+                params.agent_id,
                 output,
             )
             .await?
@@ -524,7 +540,7 @@ async fn add_agent(
     }
 
     let response = verifier_client
-        .add_agent(&agent_uuid.to_string(), request_data)
+        .add_agent(params.agent_id, request_data)
         .await
         .map_err(|e| {
             CommandError::resource_error(
@@ -573,32 +589,36 @@ async fn add_agent(
         }
     }
 
-    output.info(format!("Agent {agent_uuid} successfully added to verifier"));
+    output.info(format!(
+        "Agent {} successfully added to verifier",
+        params.agent_id
+    ));
 
     Ok(json!({
         "status": "success",
-        "message": format!("Agent {agent_uuid} added successfully"),
-        "agent_uuid": agent_uuid.to_string(),
+        "message": format!("Agent {} added successfully", params.agent_id),
+        "agent_id": params.agent_id,
         "results": response
     }))
 }
 
 /// Remove an agent from the verifier (and optionally registrar)
 async fn remove_agent(
-    uuid: &str,
+    agent_id: &str,
     from_registrar: bool,
     force: bool,
     config: &Config,
     output: &OutputHandler,
 ) -> Result<Value, CommandError> {
-    let agent_uuid = Uuid::parse_str(uuid).map_err(|_| {
-        CommandError::invalid_parameter(
-            "uuid",
-            format!("Invalid agent UUID: {uuid}"),
-        )
-    })?;
+    // Validate agent ID
+    if agent_id.is_empty() {
+        return Err(CommandError::invalid_parameter(
+            "agent_id",
+            "Agent ID cannot be empty".to_string(),
+        ));
+    }
 
-    output.info(format!("Removing agent {agent_uuid} from verifier"));
+    output.info(format!("Removing agent {agent_id} from verifier"));
 
     let verifier_client = VerifierClient::builder()
         .config(config)
@@ -616,7 +636,7 @@ async fn remove_agent(
             "Checking agent status on verifier",
         );
 
-        match verifier_client.get_agent(&agent_uuid.to_string()).await {
+        match verifier_client.get_agent(agent_id).await {
             Ok(Some(_)) => {
                 debug!("Agent found on verifier");
             }
@@ -651,10 +671,8 @@ async fn remove_agent(
 
     output.step(step_num, total_steps, "Removing agent from verifier");
 
-    let verifier_response = verifier_client
-        .delete_agent(&agent_uuid.to_string())
-        .await
-        .map_err(|e| {
+    let verifier_response =
+        verifier_client.delete_agent(agent_id).await.map_err(|e| {
             CommandError::resource_error(
                 "verifier",
                 format!("Failed to remove agent: {e}"),
@@ -680,10 +698,8 @@ async fn remove_agent(
             .map_err(|e| {
                 CommandError::resource_error("registrar", e.to_string())
             })?;
-        let registrar_response = registrar_client
-            .delete_agent(&agent_uuid.to_string())
-            .await
-            .map_err(|e| {
+        let registrar_response =
+            registrar_client.delete_agent(agent_id).await.map_err(|e| {
                 CommandError::resource_error(
                     "registrar",
                     format!("Failed to remove agent: {e}"),
@@ -693,12 +709,12 @@ async fn remove_agent(
         results["registrar"] = registrar_response;
     }
 
-    output.info(format!("Agent {agent_uuid} successfully removed"));
+    output.info(format!("Agent {agent_id} successfully removed"));
 
     Ok(json!({
         "status": "success",
-        "message": format!("Agent {agent_uuid} removed successfully"),
-        "agent_uuid": agent_uuid.to_string(),
+        "message": format!("Agent {agent_id} removed successfully"),
+        "agent_id": agent_id,
         "results": results
     }))
 }
@@ -709,20 +725,21 @@ async fn remove_agent(
 /// and only modifies the specified fields. Since Keylime doesn't provide a direct
 /// update API, we implement this as: get existing config -> remove -> add with merged config.
 async fn update_agent(
-    uuid: &str,
+    agent_id: &str,
     runtime_policy: Option<&str>,
     mb_policy: Option<&str>,
     config: &Config,
     output: &OutputHandler,
 ) -> Result<Value, CommandError> {
-    let agent_uuid = Uuid::parse_str(uuid).map_err(|_| {
-        CommandError::invalid_parameter(
-            "uuid",
-            format!("Invalid agent UUID: {uuid}"),
-        )
-    })?;
+    // Validate agent ID
+    if agent_id.is_empty() {
+        return Err(CommandError::invalid_parameter(
+            "agent_id",
+            "Agent ID cannot be empty".to_string(),
+        ));
+    }
 
-    output.info(format!("Updating agent {agent_uuid}"));
+    output.info(format!("Updating agent {agent_id}"));
 
     // Step 1: Get existing configuration from both registrar and verifier
     output.step(1, 3, "Retrieving existing agent configuration");
@@ -744,7 +761,7 @@ async fn update_agent(
 
     // Get agent info from registrar (contains IP, port, etc.)
     let registrar_agent = registrar_client
-        .get_agent(uuid)
+        .get_agent(agent_id)
         .await
         .map_err(|e| {
             CommandError::resource_error(
@@ -753,12 +770,12 @@ async fn update_agent(
             )
         })?
         .ok_or_else(|| {
-            CommandError::agent_not_found(uuid.to_string(), "registrar")
+            CommandError::agent_not_found(agent_id.to_string(), "registrar")
         })?;
 
     // Get agent info from verifier (contains policies, etc.)
     let _verifier_agent = verifier_client
-        .get_agent(uuid)
+        .get_agent(agent_id)
         .await
         .map_err(|e| {
             CommandError::resource_error(
@@ -767,21 +784,21 @@ async fn update_agent(
             )
         })?
         .ok_or_else(|| {
-            CommandError::agent_not_found(uuid.to_string(), "verifier")
+            CommandError::agent_not_found(agent_id.to_string(), "verifier")
         })?;
 
     // Extract existing configuration
     let existing_ip = registrar_agent["ip"].as_str().ok_or_else(|| {
         CommandError::invalid_parameter(
             "ip",
-            "Agent IP not found in registrar data",
+            "Agent IP not found in registrar data".to_string(),
         )
     })?;
     let existing_port =
         registrar_agent["port"].as_u64().ok_or_else(|| {
             CommandError::invalid_parameter(
                 "port",
-                "Agent port not found in registrar data",
+                "Agent port not found in registrar data".to_string(),
             )
         })?;
 
@@ -791,13 +808,13 @@ async fn update_agent(
     // Step 2: Remove existing agent configuration
     output.step(2, 3, "Removing existing agent configuration");
     let _remove_result =
-        remove_agent(uuid, false, false, config, output).await?;
+        remove_agent(agent_id, false, false, config, output).await?;
 
     // Step 3: Add agent with merged configuration (existing + updates)
     output.step(3, 3, "Adding agent with updated configuration");
     let add_result = add_agent(
         AddAgentParams {
-            uuid,
+            agent_id,
             ip: Some(existing_ip), // Preserve existing IP
             port: Some(existing_port as u16), // Preserve existing port
             verifier_ip: None,     // Use default from config
@@ -813,12 +830,12 @@ async fn update_agent(
     )
     .await?;
 
-    output.info(format!("Agent {agent_uuid} successfully updated"));
+    output.info(format!("Agent {agent_id} successfully updated"));
 
     Ok(json!({
         "status": "success",
-        "message": format!("Agent {agent_uuid} updated successfully"),
-        "agent_uuid": agent_uuid.to_string(),
+        "message": format!("Agent {agent_id} updated successfully"),
+        "agent_id": agent_id,
         "existing_config": {
             "ip": existing_ip,
             "port": existing_port,
@@ -834,20 +851,21 @@ async fn update_agent(
 
 /// Get agent status from verifier and/or registrar
 async fn get_agent_status(
-    uuid: &str,
+    agent_id: &str,
     verifier_only: bool,
     registrar_only: bool,
     config: &Config,
     output: &OutputHandler,
 ) -> Result<Value, CommandError> {
-    let agent_uuid = Uuid::parse_str(uuid).map_err(|_| {
-        CommandError::invalid_parameter(
-            "uuid",
-            format!("Invalid agent UUID: {uuid}"),
-        )
-    })?;
+    // Validate agent ID
+    if agent_id.is_empty() {
+        return Err(CommandError::invalid_parameter(
+            "agent_id",
+            "Agent ID cannot be empty".to_string(),
+        ));
+    }
 
-    output.info(format!("Getting status for agent {agent_uuid}"));
+    output.info(format!("Getting status for agent {agent_id}"));
 
     let mut results = json!({});
 
@@ -862,7 +880,7 @@ async fn get_agent_status(
             .map_err(|e| {
                 CommandError::resource_error("registrar", e.to_string())
             })?;
-        match registrar_client.get_agent(&agent_uuid.to_string()).await {
+        match registrar_client.get_agent(agent_id).await {
             Ok(Some(agent_data)) => {
                 results["registrar"] = json!({
                     "status": "found",
@@ -894,7 +912,7 @@ async fn get_agent_status(
             .map_err(|e| {
                 CommandError::resource_error("verifier", e.to_string())
             })?;
-        match verifier_client.get_agent(&agent_uuid.to_string()).await {
+        match verifier_client.get_agent(agent_id).await {
             Ok(Some(agent_data)) => {
                 results["verifier"] = json!({
                     "status": "found",
@@ -1011,25 +1029,26 @@ async fn get_agent_status(
     }
 
     Ok(json!({
-        "agent_uuid": agent_uuid.to_string(),
+        "agent_id": agent_id,
         "results": results
     }))
 }
 
 /// Reactivate a failed agent
 async fn reactivate_agent(
-    uuid: &str,
+    agent_id: &str,
     config: &Config,
     output: &OutputHandler,
 ) -> Result<Value, CommandError> {
-    let agent_uuid = Uuid::parse_str(uuid).map_err(|_| {
-        CommandError::invalid_parameter(
-            "uuid",
-            format!("Invalid agent UUID: {uuid}"),
-        )
-    })?;
+    // Validate agent ID
+    if agent_id.is_empty() {
+        return Err(CommandError::invalid_parameter(
+            "agent_id",
+            "Agent ID cannot be empty".to_string(),
+        ));
+    }
 
-    output.info(format!("Reactivating agent {agent_uuid}"));
+    output.info(format!("Reactivating agent {agent_id}"));
 
     let verifier_client = VerifierClient::builder()
         .config(config)
@@ -1038,22 +1057,23 @@ async fn reactivate_agent(
         .map_err(|e| {
             CommandError::resource_error("verifier", e.to_string())
         })?;
-    let response = verifier_client
-        .reactivate_agent(&agent_uuid.to_string())
-        .await
-        .map_err(|e| {
-            CommandError::resource_error(
-                "verifier",
-                format!("Failed to reactivate agent: {e}"),
-            )
-        })?;
+    let response =
+        verifier_client
+            .reactivate_agent(agent_id)
+            .await
+            .map_err(|e| {
+                CommandError::resource_error(
+                    "verifier",
+                    format!("Failed to reactivate agent: {e}"),
+                )
+            })?;
 
-    output.info(format!("Agent {agent_uuid} successfully reactivated"));
+    output.info(format!("Agent {agent_id} successfully reactivated"));
 
     Ok(json!({
         "status": "success",
-        "message": format!("Agent {agent_uuid} reactivated successfully"),
-        "agent_uuid": agent_uuid.to_string(),
+        "message": format!("Agent {agent_id} reactivated successfully"),
+        "agent_id": agent_id,
         "results": response
     }))
 }
@@ -1077,7 +1097,7 @@ async fn perform_agent_attestation(
     agent_client: &AgentClient,
     _agent_data: &Value,
     config: &Config,
-    agent_uuid: &str,
+    agent_id: &str,
     output: &OutputHandler,
 ) -> Result<Option<Value>, CommandError> {
     output.progress("Generating nonce for TPM quote");
@@ -1092,7 +1112,7 @@ async fn perform_agent_attestation(
     let quote_response =
         agent_client.get_quote(&nonce).await.map_err(|e| {
             CommandError::agent_operation_failed(
-                agent_uuid.to_string(),
+                agent_id.to_string(),
                 "get_tpm_quote",
                 format!("Failed to get TPM quote: {e}"),
             )
@@ -1103,7 +1123,7 @@ async fn perform_agent_attestation(
     // Extract quote data
     let results = quote_response.get("results").ok_or_else(|| {
         CommandError::agent_operation_failed(
-            agent_uuid.to_string(),
+            agent_id.to_string(),
             "quote_validation",
             "Missing results in quote response",
         )
@@ -1115,7 +1135,7 @@ async fn perform_agent_attestation(
             .and_then(|q| q.as_str())
             .ok_or_else(|| {
                 CommandError::agent_operation_failed(
-                    agent_uuid.to_string(),
+                    agent_id.to_string(),
                     "quote_validation",
                     "Missing quote in response",
                 )
@@ -1126,7 +1146,7 @@ async fn perform_agent_attestation(
         .and_then(|pk| pk.as_str())
         .ok_or_else(|| {
             CommandError::agent_operation_failed(
-                agent_uuid.to_string(),
+                agent_id.to_string(),
                 "quote_validation",
                 "Missing public key in response",
             )
@@ -1149,13 +1169,13 @@ async fn perform_agent_attestation(
         public_key,
         &nonce,
         &registrar_client,
-        agent_uuid,
+        agent_id,
     )
     .await?;
 
     if !validation_result.is_valid {
         return Err(CommandError::agent_operation_failed(
-            agent_uuid.to_string(),
+            agent_id.to_string(),
             "tpm_quote_validation",
             format!(
                 "TPM quote validation failed: {}",
@@ -1349,19 +1369,25 @@ fn load_payload_file(path: &str) -> Result<String, CommandError> {
 
 /// Generate a random string of the specified length
 ///
-/// Uses UUID v4 generation to create random strings. This is a simple
+/// Uses system time as seed for a simple random string generator. This is a simple
 /// replacement for the missing tpm_util::random_password function.
 fn generate_random_string(length: usize) -> String {
     let charset: &[u8] =
         b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-    let uuid = Uuid::new_v4();
-    let uuid_bytes = uuid.as_bytes();
 
-    // Repeat UUID bytes as needed to reach desired length
+    // Use system time as a simple random seed
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let seed = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos() as u64;
+
+    // Simple linear congruential generator for demo purposes
+    let mut state = seed;
     let mut result = String::new();
-    for i in 0..length {
-        let byte_idx = i % uuid_bytes.len();
-        let char_idx = (uuid_bytes[byte_idx] as usize) % charset.len();
+    for _ in 0..length {
+        state = state.wrapping_mul(1103515245).wrapping_add(12345);
+        let char_idx = (state as usize) % charset.len();
         result.push(charset[char_idx] as char);
     }
 
@@ -1399,13 +1425,13 @@ async fn validate_tpm_quote(
     public_key: &str,
     nonce: &str,
     registrar_client: &RegistrarClient,
-    agent_uuid: &str,
+    agent_id: &str,
 ) -> Result<TpmQuoteValidation, CommandError> {
-    debug!("Starting TPM quote validation for agent {agent_uuid}");
+    debug!("Starting TPM quote validation for agent {agent_id}");
 
     // Step 1: Retrieve agent's registered AIK from registrar
     let agent_data = registrar_client
-        .get_agent(agent_uuid)
+        .get_agent(agent_id)
         .await
         .map_err(|e| {
             CommandError::resource_error(
@@ -1414,12 +1440,12 @@ async fn validate_tpm_quote(
             )
         })?
         .ok_or_else(|| {
-            CommandError::agent_not_found(agent_uuid.to_string(), "registrar")
+            CommandError::agent_not_found(agent_id.to_string(), "registrar")
         })?;
 
     let registered_aik = agent_data["aik_tpm"].as_str().ok_or_else(|| {
         CommandError::agent_operation_failed(
-            agent_uuid.to_string(),
+            agent_id.to_string(),
             "aik_validation",
             "Agent AIK not found in registrar",
         )
@@ -1428,7 +1454,7 @@ async fn validate_tpm_quote(
     // Step 2: Basic format validation
     let quote_bytes = STANDARD.decode(quote).map_err(|e| {
         CommandError::agent_operation_failed(
-            agent_uuid.to_string(),
+            agent_id.to_string(),
             "quote_validation",
             format!("Invalid base64 quote: {e}"),
         )
@@ -1592,7 +1618,7 @@ mod tests {
     #[test]
     fn test_add_agent_params_creation() {
         let params = AddAgentParams {
-            uuid: "550e8400-e29b-41d4-a716-446655440000",
+            agent_id: "550e8400-e29b-41d4-a716-446655440000",
             ip: Some("192.168.1.100"),
             port: Some(9002),
             verifier_ip: None,
@@ -1604,7 +1630,7 @@ mod tests {
             push_model: false,
         };
 
-        assert_eq!(params.uuid, "550e8400-e29b-41d4-a716-446655440000");
+        assert_eq!(params.agent_id, "550e8400-e29b-41d4-a716-446655440000");
         assert_eq!(params.ip, Some("192.168.1.100"));
         assert_eq!(params.port, Some(9002));
         assert!(params.verify);
@@ -1614,7 +1640,7 @@ mod tests {
     #[test]
     fn test_add_agent_params_with_policies() {
         let params = AddAgentParams {
-            uuid: "550e8400-e29b-41d4-a716-446655440000",
+            agent_id: "550e8400-e29b-41d4-a716-446655440000",
             ip: None,
             port: None,
             verifier_ip: Some("10.0.0.1"),
@@ -1653,42 +1679,64 @@ mod tests {
         // by ensuring no panic occurred during creation
     }
 
-    // Test UUID validation behavior
-    mod uuid_validation {
-        use super::*;
+    // Test agent ID validation behavior
+    mod agent_id_validation {
 
         #[test]
-        fn test_valid_uuid_formats() {
-            let valid_uuids = [
-                "550e8400-e29b-41d4-a716-446655440000",
-                "6ba7b810-9dad-11d1-80b4-00c04fd430c8",
-                "6ba7b811-9dad-11d1-80b4-00c04fd430c8",
-                "00000000-0000-0000-0000-000000000000",
-                "ffffffff-ffff-ffff-ffff-ffffffffffff",
-                "550e8400e29b41d4a716446655440000", // No dashes is also valid
+        fn test_valid_agent_id_formats() {
+            let valid_ids = [
+                "550e8400-e29b-41d4-a716-446655440000", // UUID format
+                "agent-001",                            // Simple identifier
+                "AAA",                                  // Simple uppercase
+                "aaa",                                  // Simple lowercase
+                "my-agent",                             // Hyphenated
+                "agent_123",                            // Underscore
+                "Agent123",                             // Mixed case
+                "1234567890",                           // Numeric
+                "a",                                    // Single character
+                "test-agent-with-long-name-but-under-255-chars", // Long but valid
             ];
 
-            for uuid_str in &valid_uuids {
-                let result = Uuid::parse_str(uuid_str);
-                assert!(result.is_ok(), "UUID {uuid_str} should be valid");
+            for agent_id in &valid_ids {
+                // Test that ID is not empty
+                assert!(
+                    !agent_id.is_empty(),
+                    "Agent ID {agent_id} should not be empty"
+                );
+
+                // Test that ID is under 255 characters
+                assert!(
+                    agent_id.len() <= 255,
+                    "Agent ID {agent_id} should be <= 255 chars"
+                );
+
+                // Test that ID has no control characters
+                assert!(
+                    !agent_id.chars().any(|c| c.is_control()),
+                    "Agent ID {agent_id} should have no control characters"
+                );
             }
         }
 
         #[test]
-        fn test_invalid_uuid_formats() {
-            let invalid_uuids = [
-                "not-a-uuid",
-                "550e8400-e29b-41d4-a716", // Too short
-                "550e8400-e29b-41d4-a716-446655440000-extra", // Too long
-                "550e8400-e29b-41d4-a716-44665544000g", // Invalid character
-                "",
-                "550e8400-e29b-41d4-a716-446655440000 ", // Extra space
-                "g50e8400-e29b-41d4-a716-446655440000", // Invalid first character
+        fn test_invalid_agent_id_formats() {
+            let invalid_ids = [
+                "",               // Empty string
+                &"a".repeat(256), // Too long (>255 chars)
+                "agent\x00id", // Contains null character (control character)
+                "agent\nid",   // Contains newline (control character)
+                "agent\tid",   // Contains tab (control character)
             ];
 
-            for uuid_str in &invalid_uuids {
-                let result = Uuid::parse_str(uuid_str);
-                assert!(result.is_err(), "UUID {uuid_str} should be invalid");
+            for agent_id in &invalid_ids {
+                // Check various validation conditions
+                let is_empty = agent_id.is_empty();
+                let is_too_long = agent_id.len() > 255;
+                let has_control_chars =
+                    agent_id.chars().any(|c| c.is_control());
+
+                assert!(is_empty || is_too_long || has_control_chars,
+                       "Agent ID {agent_id:?} should fail at least one validation");
             }
         }
     }
@@ -1909,7 +1957,7 @@ mod tests {
         #[test]
         fn test_minimal_add_params() {
             let params = AddAgentParams {
-                uuid: "550e8400-e29b-41d4-a716-446655440000",
+                agent_id: "550e8400-e29b-41d4-a716-446655440000",
                 ip: None,
                 port: None,
                 verifier_ip: None,
@@ -1921,7 +1969,7 @@ mod tests {
                 push_model: false,
             };
 
-            assert_eq!(params.uuid, "550e8400-e29b-41d4-a716-446655440000");
+            assert_eq!(params.agent_id, "550e8400-e29b-41d4-a716-446655440000");
             assert!(params.ip.is_none());
             assert!(params.port.is_none());
             assert!(!params.verify);
@@ -1931,7 +1979,7 @@ mod tests {
         #[test]
         fn test_maximal_add_params() {
             let params = AddAgentParams {
-                uuid: "550e8400-e29b-41d4-a716-446655440000",
+                agent_id: "550e8400-e29b-41d4-a716-446655440000",
                 ip: Some("192.168.1.100"),
                 port: Some(9002),
                 verifier_ip: Some("10.0.0.1"),
@@ -1957,7 +2005,7 @@ mod tests {
         #[test]
         fn test_push_model_params() {
             let params = AddAgentParams {
-                uuid: "550e8400-e29b-41d4-a716-446655440000",
+                agent_id: "550e8400-e29b-41d4-a716-446655440000",
                 ip: None,   // IP not needed in push model
                 port: None, // Port not needed in push model
                 verifier_ip: None,

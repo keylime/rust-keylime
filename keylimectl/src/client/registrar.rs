@@ -1077,7 +1077,6 @@ mod tests {
             }
         }
 
-
         #[test]
         fn test_response_structure_deserialization() {
             let json_str = r#"{
