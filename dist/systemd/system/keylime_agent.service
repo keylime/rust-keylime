@@ -23,4 +23,4 @@ Environment="RUST_LOG=keylime_agent=info,keylime=info"
 #Environment="TCTI=tabrmd:"
 
 [Install]
-WantedBy=default.target
+WantedBy=multi-user.target
