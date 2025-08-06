@@ -72,6 +72,7 @@ use crate::AgentAction;
 use base64::{engine::general_purpose::STANDARD, Engine};
 use keylime::crypto;
 use log::{debug, warn};
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::fs;
 
@@ -262,6 +263,367 @@ struct AddAgentParams<'a> {
     push_model: bool,
     /// Optional TPM policy in JSON format
     tpm_policy: Option<&'a str>,
+}
+
+/// Request structure for adding an agent to the verifier
+///
+/// This struct represents the complete request payload sent to the verifier
+/// when adding an agent for attestation monitoring. It uses serde for
+/// automatic JSON serialization and ensures type safety.
+///
+/// # Core Required Fields
+///
+/// * `cloudagent_ip` - IP address where the agent can be reached
+/// * `cloudagent_port` - Port where the agent is listening
+/// * `verifier_ip` - IP address of the verifier
+/// * `verifier_port` - Port of the verifier
+/// * `ak_tpm` - Agent's attestation key from TPM
+/// * `mtls_cert` - Mutual TLS certificate for agent communication
+/// * `tpm_policy` - TPM policy in JSON format
+///
+/// # Legacy Compatibility Fields
+///
+/// * `v` - Optional V key from attestation (for API < 3.0)
+///
+/// # Policy Fields
+///
+/// * `runtime_policy` - Runtime policy content
+/// * `runtime_policy_name` - Name of the runtime policy
+/// * `runtime_policy_key` - Runtime policy signature key
+/// * `mb_policy` - Measured boot policy content
+/// * `mb_policy_name` - Name of the measured boot policy
+///
+/// # Security & Verification Fields
+///
+/// * `ima_sign_verification_keys` - IMA signature verification keys
+/// * `revocation_key` - Revocation key for certificates
+/// * `accept_tpm_hash_algs` - Accepted TPM hash algorithms
+/// * `accept_tpm_encryption_algs` - Accepted TPM encryption algorithms
+/// * `accept_tpm_signing_algs` - Accepted TPM signing algorithms
+///
+/// # Additional Fields
+///
+/// * `metadata` - Metadata in JSON format
+/// * `payload` - Optional payload content
+/// * `cert_dir` - Optional certificate directory path
+/// * `supported_version` - API version supported by the agent
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AddAgentRequest {
+    pub cloudagent_ip: String,
+    pub cloudagent_port: u16,
+    pub verifier_ip: String,
+    pub verifier_port: u16,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ak_tpm: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mtls_cert: Option<Value>,
+    pub tpm_policy: String,
+
+    // Legacy compatibility (API < 3.0)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub v: Option<Value>,
+
+    // Runtime policy fields
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub runtime_policy: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub runtime_policy_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub runtime_policy_key: Option<Value>,
+
+    // Measured boot policy fields
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mb_policy: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mb_policy_name: Option<String>,
+
+    // IMA and verification keys
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ima_sign_verification_keys: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub revocation_key: Option<String>,
+
+    // TPM algorithm support
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub accept_tpm_hash_algs: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub accept_tpm_encryption_algs: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub accept_tpm_signing_algs: Option<Vec<String>>,
+
+    // Metadata and additional fields
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub payload: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cert_dir: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub supported_version: Option<String>,
+}
+
+impl AddAgentRequest {
+    /// Create a new agent request with the required fields
+    pub fn new(
+        cloudagent_ip: String,
+        cloudagent_port: u16,
+        verifier_ip: String,
+        verifier_port: u16,
+        tpm_policy: String,
+    ) -> Self {
+        Self {
+            cloudagent_ip,
+            cloudagent_port,
+            verifier_ip,
+            verifier_port,
+            ak_tpm: None,
+            mtls_cert: None,
+            tpm_policy,
+            v: None,
+            runtime_policy: None,
+            runtime_policy_name: None,
+            runtime_policy_key: None,
+            mb_policy: None,
+            mb_policy_name: None,
+            ima_sign_verification_keys: None,
+            revocation_key: None,
+            accept_tpm_hash_algs: None,
+            accept_tpm_encryption_algs: None,
+            accept_tpm_signing_algs: None,
+            metadata: None,
+            payload: None,
+            cert_dir: None,
+            supported_version: None,
+        }
+    }
+
+    /// Set the TPM attestation key
+    pub fn with_ak_tpm(mut self, ak_tpm: Option<Value>) -> Self {
+        self.ak_tpm = ak_tpm;
+        self
+    }
+
+    /// Set the mutual TLS certificate
+    pub fn with_mtls_cert(mut self, mtls_cert: Option<Value>) -> Self {
+        self.mtls_cert = mtls_cert;
+        self
+    }
+
+    /// Set the V key from attestation
+    pub fn with_v_key(mut self, v_key: Option<Value>) -> Self {
+        self.v = v_key;
+        self
+    }
+
+    /// Set the runtime policy
+    pub fn with_runtime_policy(mut self, policy: Option<String>) -> Self {
+        self.runtime_policy = policy;
+        self
+    }
+
+    /// Set the measured boot policy
+    pub fn with_mb_policy(mut self, policy: Option<String>) -> Self {
+        self.mb_policy = policy;
+        self
+    }
+
+    /// Set the payload
+    pub fn with_payload(mut self, payload: Option<String>) -> Self {
+        self.payload = payload;
+        self
+    }
+
+    /// Set the certificate directory
+    pub fn with_cert_dir(mut self, cert_dir: Option<String>) -> Self {
+        self.cert_dir = cert_dir;
+        self
+    }
+
+    /// Set the runtime policy name
+    #[allow(dead_code)] // Will be used when CLI args are implemented
+    pub fn with_runtime_policy_name(
+        mut self,
+        policy_name: Option<String>,
+    ) -> Self {
+        self.runtime_policy_name = policy_name;
+        self
+    }
+
+    /// Set the runtime policy signature key
+    #[allow(dead_code)] // Will be used when CLI args are implemented
+    pub fn with_runtime_policy_key(
+        mut self,
+        policy_key: Option<Value>,
+    ) -> Self {
+        self.runtime_policy_key = policy_key;
+        self
+    }
+
+    /// Set the measured boot policy name
+    #[allow(dead_code)] // Will be used when CLI args are implemented
+    pub fn with_mb_policy_name(
+        mut self,
+        policy_name: Option<String>,
+    ) -> Self {
+        self.mb_policy_name = policy_name;
+        self
+    }
+
+    /// Set the IMA signature verification keys
+    #[allow(dead_code)] // Will be used when CLI args are implemented
+    pub fn with_ima_sign_verification_keys(
+        mut self,
+        keys: Option<String>,
+    ) -> Self {
+        self.ima_sign_verification_keys = keys;
+        self
+    }
+
+    /// Set the revocation key
+    #[allow(dead_code)] // Will be used when CLI args are implemented
+    pub fn with_revocation_key(mut self, key: Option<String>) -> Self {
+        self.revocation_key = key;
+        self
+    }
+
+    /// Set the accepted TPM hash algorithms
+    #[allow(dead_code)] // Will be used when CLI args are implemented
+    pub fn with_accept_tpm_hash_algs(
+        mut self,
+        algs: Option<Vec<String>>,
+    ) -> Self {
+        self.accept_tpm_hash_algs = algs;
+        self
+    }
+
+    /// Set the accepted TPM encryption algorithms
+    #[allow(dead_code)] // Will be used when CLI args are implemented
+    pub fn with_accept_tpm_encryption_algs(
+        mut self,
+        algs: Option<Vec<String>>,
+    ) -> Self {
+        self.accept_tpm_encryption_algs = algs;
+        self
+    }
+
+    /// Set the accepted TPM signing algorithms
+    #[allow(dead_code)] // Will be used when CLI args are implemented
+    pub fn with_accept_tpm_signing_algs(
+        mut self,
+        algs: Option<Vec<String>>,
+    ) -> Self {
+        self.accept_tpm_signing_algs = algs;
+        self
+    }
+
+    /// Set the metadata
+    #[allow(dead_code)] // Will be used when CLI args are implemented
+    pub fn with_metadata(mut self, metadata: Option<String>) -> Self {
+        self.metadata = metadata;
+        self
+    }
+
+    /// Set the supported API version
+    #[allow(dead_code)] // Will be used when CLI args are implemented
+    pub fn with_supported_version(mut self, version: Option<String>) -> Self {
+        self.supported_version = version;
+        self
+    }
+
+    /// Validate the request before sending
+    pub fn validate(&self) -> Result<(), CommandError> {
+        if self.cloudagent_ip.is_empty() {
+            return Err(CommandError::invalid_parameter(
+                "cloudagent_ip",
+                "Agent IP cannot be empty".to_string(),
+            ));
+        }
+
+        if self.cloudagent_port == 0 {
+            return Err(CommandError::invalid_parameter(
+                "cloudagent_port",
+                "Agent port cannot be zero".to_string(),
+            ));
+        }
+
+        if self.verifier_ip.is_empty() {
+            return Err(CommandError::invalid_parameter(
+                "verifier_ip",
+                "Verifier IP cannot be empty".to_string(),
+            ));
+        }
+
+        if self.verifier_port == 0 {
+            return Err(CommandError::invalid_parameter(
+                "verifier_port",
+                "Verifier port cannot be zero".to_string(),
+            ));
+        }
+
+        // Validate TPM policy is valid JSON
+        if let Err(e) = serde_json::from_str::<Value>(&self.tpm_policy) {
+            return Err(CommandError::invalid_parameter(
+                "tpm_policy",
+                format!("Invalid JSON in TPM policy: {e}"),
+            ));
+        }
+
+        // Validate metadata is valid JSON if provided
+        if let Some(metadata) = &self.metadata {
+            if let Err(e) = serde_json::from_str::<Value>(metadata) {
+                return Err(CommandError::invalid_parameter(
+                    "metadata",
+                    format!("Invalid JSON in metadata: {e}"),
+                ));
+            }
+        }
+
+        // Validate algorithm lists contain only known algorithms
+        if let Some(hash_algs) = &self.accept_tpm_hash_algs {
+            for alg in hash_algs {
+                if !is_valid_tpm_hash_algorithm(alg) {
+                    return Err(CommandError::invalid_parameter(
+                        "accept_tpm_hash_algs",
+                        format!("Unknown TPM hash algorithm: {alg}"),
+                    ));
+                }
+            }
+        }
+
+        if let Some(enc_algs) = &self.accept_tpm_encryption_algs {
+            for alg in enc_algs {
+                if !is_valid_tpm_encryption_algorithm(alg) {
+                    return Err(CommandError::invalid_parameter(
+                        "accept_tpm_encryption_algs",
+                        format!("Unknown TPM encryption algorithm: {alg}"),
+                    ));
+                }
+            }
+        }
+
+        if let Some(sign_algs) = &self.accept_tpm_signing_algs {
+            for alg in sign_algs {
+                if !is_valid_tpm_signing_algorithm(alg) {
+                    return Err(CommandError::invalid_parameter(
+                        "accept_tpm_signing_algs",
+                        format!("Unknown TPM signing algorithm: {alg}"),
+                    ));
+                }
+            }
+        }
+
+        // Validate supported version format if provided
+        if let Some(version) = &self.supported_version {
+            if !is_valid_api_version(version) {
+                return Err(CommandError::invalid_parameter(
+                    "supported_version",
+                    format!("Invalid API version format: {version}"),
+                ));
+            }
+        }
+
+        Ok(())
+    }
 }
 
 /// Add an agent to the verifier for continuous attestation monitoring
@@ -505,50 +867,55 @@ async fn add_agent(
     // Build the request payload
     let cv_agent_ip = params.verifier_ip.unwrap_or(&agent_ip);
 
-    // Resolve TPM policy from CLI argument or default
-    let tpm_policy = resolve_tpm_policy(params.tpm_policy);
+    // Resolve TPM policy with enhanced precedence handling
+    let tpm_policy =
+        resolve_tpm_policy_enhanced(params.tpm_policy, params.mb_policy)?;
 
-    let mut request_data = json!({
-        "cloudagent_ip": cv_agent_ip,
-        "cloudagent_port": agent_port,
-        "verifier_ip": config.verifier.ip,
-        "verifier_port": config.verifier.port,
-        "ak_tpm": agent_data.get("aik_tpm"),
-        "mtls_cert": agent_data.get("mtls_cert"),
-        "tpm_policy": tpm_policy,
-    });
+    // Build structured request instead of manual JSON
+    let mut request = AddAgentRequest::new(
+        cv_agent_ip.to_string(),
+        agent_port,
+        config.verifier.ip.clone(),
+        config.verifier.port,
+        tpm_policy,
+    )
+    .with_ak_tpm(agent_data.get("aik_tpm").cloned())
+    .with_mtls_cert(agent_data.get("mtls_cert").cloned());
 
     // Add V key from attestation if available
     if let Some(attestation) = &attestation_result {
         if let Some(v_key) = attestation.get("v_key") {
-            request_data["v"] = v_key.clone();
+            request = request.with_v_key(Some(v_key.clone()));
         }
     }
 
     // Add policies if provided
     if let Some(policy_path) = params.runtime_policy {
         let policy_content = load_policy_file(policy_path)?;
-        request_data["runtime_policy"] = json!(policy_content);
+        request = request.with_runtime_policy(Some(policy_content));
     }
 
     if let Some(policy_path) = params.mb_policy {
         let policy_content = load_policy_file(policy_path)?;
-        request_data["mb_policy"] = json!(policy_content);
+        request = request.with_mb_policy(Some(policy_content));
     }
 
     // Add payload if provided
     if let Some(payload_path) = params.payload {
         let payload_content = load_payload_file(payload_path)?;
-        request_data["payload"] = json!(payload_content);
+        request = request.with_payload(Some(payload_content));
     }
 
     if let Some(cert_dir_path) = params.cert_dir {
         // For now, just pass the path - in future could generate cert package
-        request_data["cert_dir"] = json!(cert_dir_path);
+        request = request.with_cert_dir(Some(cert_dir_path.to_string()));
     }
 
+    // Validate the request before sending
+    request.validate()?;
+
     let response = verifier_client
-        .add_agent(params.agent_id, request_data)
+        .add_agent(params.agent_id, serde_json::to_value(request)?)
         .await
         .map_err(|e| {
             CommandError::resource_error(
@@ -1376,13 +1743,145 @@ fn load_payload_file(path: &str) -> Result<String, CommandError> {
     })
 }
 
-/// Resolve TPM policy from various sources with proper precedence
+/// Enhanced TPM policy resolution with measured boot policy extraction
 ///
-/// Precedence order:
-/// 1. Explicit CLI --tmp-policy argument
-/// 2. Default empty policy "{}"
-fn resolve_tpm_policy(explicit_policy: Option<&str>) -> String {
-    explicit_policy.unwrap_or("{}").to_string()
+/// This function implements the full precedence chain for TPM policy resolution,
+/// matching the behavior of the Python keylime_tenant implementation.
+///
+/// # Precedence Order:
+/// 1. Explicit CLI --tpm_policy argument (highest priority)
+/// 2. TPM policy extracted from measured boot policy file
+/// 3. Default empty policy "{}" (lowest priority)
+///
+/// # Arguments
+/// * `explicit_policy` - Policy provided via CLI --tpm_policy argument
+/// * `mb_policy_path` - Path to measured boot policy file (for extraction)
+///
+/// # Returns
+/// Returns the resolved TPM policy as a JSON string
+///
+/// # Examples
+/// ```
+/// // With explicit policy (highest priority)
+/// let policy = resolve_tpm_policy_enhanced(Some("{\"pcr\": [15]}"), Some("/path/to/mb.json"));
+/// assert_eq!(policy, "{\"pcr\": [15]}");
+///
+/// // With measured boot policy extraction
+/// let policy = resolve_tpm_policy_enhanced(None, Some("/path/to/mb_with_tpm_policy.json"));
+/// // Returns extracted TPM policy from measured boot policy
+///
+/// // With default fallback
+/// let policy = resolve_tpm_policy_enhanced(None, None);
+/// assert_eq!(policy, "{}");
+/// ```
+fn resolve_tpm_policy_enhanced(
+    explicit_policy: Option<&str>,
+    mb_policy_path: Option<&str>,
+) -> Result<String, CommandError> {
+    // Priority 1: Explicit CLI argument
+    if let Some(policy) = explicit_policy {
+        debug!("Using explicit TPM policy from CLI: {policy}");
+        return Ok(policy.to_string());
+    }
+
+    // Priority 2: Extract from measured boot policy
+    if let Some(mb_path) = mb_policy_path {
+        debug!("Attempting to extract TPM policy from measured boot policy: {mb_path}");
+        match extract_tpm_policy_from_mb_policy(mb_path) {
+            Ok(Some(extracted_policy)) => {
+                debug!("Extracted TPM policy from measured boot policy: {extracted_policy}");
+                return Ok(extracted_policy);
+            }
+            Ok(None) => {
+                debug!("No TPM policy found in measured boot policy, using default");
+            }
+            Err(e) => {
+                warn!("Failed to extract TPM policy from measured boot policy: {e}");
+                debug!(
+                    "Continuing with default policy due to extraction error"
+                );
+            }
+        }
+    }
+
+    // Priority 3: Default empty policy
+    debug!("Using default empty TPM policy");
+    Ok("{}".to_string())
+}
+
+/// Extract TPM policy from a measured boot policy file
+///
+/// Measured boot policies in Keylime can contain TPM policy sections that should
+/// be extracted and used for agent attestation. This function parses the measured
+/// boot policy file and extracts any TPM-related policy information.
+///
+/// # Arguments
+/// * `mb_policy_path` - Path to the measured boot policy JSON file
+///
+/// # Returns
+/// * `Ok(Some(policy))` - Successfully extracted TPM policy
+/// * `Ok(None)` - No TPM policy found in the file
+/// * `Err(error)` - File reading or parsing error
+///
+/// # Expected Format
+/// The measured boot policy file should be a JSON file that may contain:
+/// ```json
+/// {
+///   "tpm_policy": {
+///     "pcr": [15],
+///     "hash": "sha256"
+///   },
+///   "other_mb_fields": "..."
+/// }
+/// ```
+fn extract_tpm_policy_from_mb_policy(
+    mb_policy_path: &str,
+) -> Result<Option<String>, CommandError> {
+    debug!("Reading measured boot policy file: {mb_policy_path}");
+
+    // Read the measured boot policy file
+    let policy_content = fs::read_to_string(mb_policy_path).map_err(|e| {
+        CommandError::policy_file_error(
+            mb_policy_path,
+            format!("Failed to read measured boot policy file: {e}"),
+        )
+    })?;
+
+    // Parse as JSON
+    let mb_policy: Value =
+        serde_json::from_str(&policy_content).map_err(|e| {
+            CommandError::policy_file_error(
+                mb_policy_path,
+                format!("Invalid JSON in measured boot policy file: {e}"),
+            )
+        })?;
+
+    // Look for TPM policy in various expected locations
+    let tpm_policy_value = mb_policy
+        .get("tpm_policy") // Primary location
+        .or_else(|| mb_policy.get("tpm")) // Alternative location
+        .or_else(|| mb_policy.get("tpm_policy")); // Another alternative
+
+    match tpm_policy_value {
+        Some(policy_obj) => {
+            // Convert the TPM policy object to a JSON string
+            let policy_str =
+                serde_json::to_string(policy_obj).map_err(|e| {
+                    CommandError::policy_file_error(
+                        mb_policy_path,
+                        format!(
+                            "Failed to serialize extracted TPM policy: {e}"
+                        ),
+                    )
+                })?;
+            debug!("Successfully extracted TPM policy: {policy_str}");
+            Ok(Some(policy_str))
+        }
+        None => {
+            debug!("No TPM policy section found in measured boot policy");
+            Ok(None)
+        }
+    }
 }
 
 /// Generate a random string of the specified length
@@ -1591,6 +2090,81 @@ fn encrypt_u_key_with_agent_pubkey(
     Ok(encrypted_b64)
 }
 
+/// Validate TPM hash algorithm names
+///
+/// Checks if the provided algorithm name is a known and supported TPM hash algorithm.
+/// Based on the TPM 2.0 specification and common implementations.
+fn is_valid_tpm_hash_algorithm(algorithm: &str) -> bool {
+    matches!(
+        algorithm.to_lowercase().as_str(),
+        "sha1"
+            | "sha256"
+            | "sha384"
+            | "sha512"
+            | "sha3-256"
+            | "sha3-384"
+            | "sha3-512"
+            | "sm3-256"
+    )
+}
+
+/// Validate TPM encryption algorithm names
+///
+/// Checks if the provided algorithm name is a known and supported TPM encryption algorithm.
+/// Based on the TPM 2.0 specification and common implementations.
+fn is_valid_tpm_encryption_algorithm(algorithm: &str) -> bool {
+    matches!(
+        algorithm.to_lowercase().as_str(),
+        "rsa"
+            | "ecc"
+            | "aes"
+            | "camellia"
+            | "sm4"
+            | "rsassa"
+            | "rsaes"
+            | "rsapss"
+            | "oaep"
+            | "ecdsa"
+            | "ecdh"
+            | "ecdaa"
+            | "sm2"
+            | "ecschnorr"
+    )
+}
+
+/// Validate TPM signing algorithm names
+///
+/// Checks if the provided algorithm name is a known and supported TPM signing algorithm.
+/// Based on the TPM 2.0 specification and common implementations.
+fn is_valid_tpm_signing_algorithm(algorithm: &str) -> bool {
+    matches!(
+        algorithm.to_lowercase().as_str(),
+        "rsa"
+            | "ecc"
+            | "rsassa"
+            | "rsapss"
+            | "ecdsa"
+            | "ecdaa"
+            | "sm2"
+            | "ecschnorr"
+            | "hmac"
+    )
+}
+
+/// Validate API version format
+///
+/// Checks if the provided version string follows a valid API version format (e.g., "2.1", "3.0").
+fn is_valid_api_version(version: &str) -> bool {
+    // Basic format check: should be major.minor (e.g., "2.1", "3.0")
+    let parts: Vec<&str> = version.split('.').collect();
+    if parts.len() != 2 {
+        return false;
+    }
+
+    // Check that both parts are valid numbers
+    parts[0].parse::<u32>().is_ok() && parts[1].parse::<u32>().is_ok()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1646,6 +2220,7 @@ mod tests {
             cert_dir: None,
             verify: true,
             push_model: false,
+            tpm_policy: None,
         };
 
         assert_eq!(params.agent_id, "550e8400-e29b-41d4-a716-446655440000");
@@ -1668,6 +2243,7 @@ mod tests {
             cert_dir: Some("/path/to/certs"),
             verify: false,
             push_model: true,
+            tpm_policy: Some("{\"test\": \"policy\"}"),
         };
 
         assert_eq!(params.runtime_policy, Some("/path/to/runtime.json"));
@@ -1777,6 +2353,7 @@ mod tests {
                 cert_dir: None,
                 verify: true,
                 push_model: false,
+                tpm_policy: None,
             };
 
             let remove_action = AgentAction::Remove {
@@ -1985,6 +2562,7 @@ mod tests {
                 cert_dir: None,
                 verify: false,
                 push_model: false,
+                tpm_policy: None,
             };
 
             assert_eq!(
@@ -2010,6 +2588,7 @@ mod tests {
                 cert_dir: Some("/etc/keylime/certs"),
                 verify: true,
                 push_model: true,
+                tpm_policy: Some("{\"pcr\": [\"15\"]}"),
             };
 
             assert!(params.ip.is_some());
@@ -2036,6 +2615,7 @@ mod tests {
                 cert_dir: None,
                 verify: false, // Verification different in push model
                 push_model: true,
+                tpm_policy: None,
             };
 
             assert!(params.push_model);
@@ -2063,6 +2643,7 @@ mod tests {
                 cert_dir: None,
                 verify: true,
                 push_model: false,
+                tpm_policy: None,
             };
 
             // Verify the action was created properly
@@ -2100,6 +2681,513 @@ mod tests {
 
             assert_eq!(custom_config.verifier.ip, "10.0.0.1");
             assert_eq!(custom_config.verifier.port, 9001);
+        }
+    }
+
+    // Test enhanced TPM policy handling
+    mod tpm_policy_policy_tests {
+        use super::*;
+        use std::fs;
+        use tempfile::tempdir;
+
+        #[test]
+        fn test_resolve_tpm_policy_explicit_priority() {
+            // Explicit policy should have highest priority
+            let result = resolve_tpm_policy_enhanced(
+                Some("{\"pcr\": [15]}"),
+                Some("/path/to/mb.json"),
+            )
+            .unwrap();
+            assert_eq!(result, "{\"pcr\": [15]}");
+        }
+
+        #[test]
+        fn test_resolve_tpm_policy_default_fallback() {
+            // Should fallback to default when no policies provided
+            let result = resolve_tpm_policy_enhanced(None, None).unwrap();
+            assert_eq!(result, "{}");
+        }
+
+        #[test]
+        fn test_extract_tpm_policy_from_mb_policy_success() {
+            let temp_dir = tempdir().unwrap();
+            let policy_file = temp_dir.path().join("mb_policy.json");
+
+            // Create test measured boot policy with TPM policy
+            let mb_policy_content = serde_json::json!({
+                "tpm_policy": {
+                    "pcr": [15],
+                    "hash": "sha256"
+                },
+                "other_field": "value"
+            });
+
+            fs::write(&policy_file, mb_policy_content.to_string()).unwrap();
+
+            let result = extract_tpm_policy_from_mb_policy(
+                policy_file.to_str().unwrap(),
+            )
+            .unwrap();
+
+            assert!(result.is_some());
+            let extracted = result.unwrap();
+            let parsed: Value = serde_json::from_str(&extracted).unwrap();
+            assert_eq!(parsed["pcr"], json!([15]));
+            assert_eq!(parsed["hash"], "sha256");
+        }
+
+        #[test]
+        fn test_extract_tpm_policy_alternative_locations() {
+            let temp_dir = tempdir().unwrap();
+
+            // Test "tpm" location
+            let policy_file_tpm = temp_dir.path().join("mb_policy_tpm.json");
+            let mb_policy_tpm = serde_json::json!({
+                "tpm": {"pcr": [16]},
+                "other_field": "value"
+            });
+            fs::write(&policy_file_tpm, mb_policy_tpm.to_string()).unwrap();
+
+            let result = extract_tpm_policy_from_mb_policy(
+                policy_file_tpm.to_str().unwrap(),
+            )
+            .unwrap();
+            assert!(result.is_some());
+
+            // Test "tmp_policy" location
+            let policy_file_full =
+                temp_dir.path().join("mb_policy_full.json");
+            let mb_policy_full = serde_json::json!({
+                "tpm_policy": {"pcr": [17]},
+                "other_field": "value"
+            });
+            fs::write(&policy_file_full, mb_policy_full.to_string()).unwrap();
+
+            let result = extract_tpm_policy_from_mb_policy(
+                policy_file_full.to_str().unwrap(),
+            )
+            .unwrap();
+            assert!(result.is_some());
+        }
+
+        #[test]
+        fn test_extract_tpm_policy_no_policy_found() {
+            let temp_dir = tempdir().unwrap();
+            let policy_file = temp_dir.path().join("mb_policy_no_tpm.json");
+
+            // Create measured boot policy without TPM policy
+            let mb_policy_content = serde_json::json!({
+                "other_field": "value",
+                "more_fields": "data"
+            });
+
+            fs::write(&policy_file, mb_policy_content.to_string()).unwrap();
+
+            let result = extract_tpm_policy_from_mb_policy(
+                policy_file.to_str().unwrap(),
+            )
+            .unwrap();
+
+            assert!(result.is_none());
+        }
+
+        #[test]
+        fn test_extract_tpm_policy_invalid_json() {
+            let temp_dir = tempdir().unwrap();
+            let policy_file = temp_dir.path().join("invalid.json");
+
+            // Write invalid JSON
+            fs::write(&policy_file, "{ invalid json }").unwrap();
+
+            let result = extract_tpm_policy_from_mb_policy(
+                policy_file.to_str().unwrap(),
+            );
+
+            assert!(result.is_err());
+        }
+
+        #[test]
+        fn test_extract_tpm_policy_file_not_found() {
+            let result =
+                extract_tpm_policy_from_mb_policy("/nonexistent/file.json");
+            assert!(result.is_err());
+        }
+
+        #[test]
+        fn test_resolve_tpm_policy_enhanced_with_mb_extraction() {
+            let temp_dir = tempdir().unwrap();
+            let policy_file = temp_dir.path().join("mb_with_tmp.json");
+
+            // Create measured boot policy with TPM policy
+            let mb_policy_content = serde_json::json!({
+                "tpm_policy": {
+                    "pcr": [14, 15],
+                    "hash": "sha1"
+                }
+            });
+
+            fs::write(&policy_file, mb_policy_content.to_string()).unwrap();
+
+            // Should extract from measured boot policy when no explicit policy
+            let result = resolve_tpm_policy_enhanced(
+                None,
+                Some(policy_file.to_str().unwrap()),
+            )
+            .unwrap();
+
+            let parsed: Value = serde_json::from_str(&result).unwrap();
+            assert_eq!(parsed["pcr"], json!([14, 15]));
+            assert_eq!(parsed["hash"], "sha1");
+        }
+
+        #[test]
+        fn test_resolve_tpm_policy_enhanced_extraction_error_fallback() {
+            // When extraction fails, should fallback to default
+            let result = resolve_tpm_policy_enhanced(
+                None,
+                Some("/nonexistent/file.json"),
+            )
+            .unwrap();
+
+            assert_eq!(result, "{}");
+        }
+
+        #[test]
+        fn test_resolve_tpm_policy_precedence_order() {
+            let temp_dir = tempdir().unwrap();
+            let policy_file = temp_dir.path().join("mb_policy.json");
+
+            // Create measured boot policy
+            let mb_policy_content = serde_json::json!({
+                "tpm_policy": {"pcr": [16]}
+            });
+            fs::write(&policy_file, mb_policy_content.to_string()).unwrap();
+
+            // Explicit policy should override extracted policy
+            let result = resolve_tpm_policy_enhanced(
+                Some("{\"pcr\": [15]}"),
+                Some(policy_file.to_str().unwrap()),
+            )
+            .unwrap();
+
+            // Should use explicit policy, not extracted one
+            let parsed: Value = serde_json::from_str(&result).unwrap();
+            assert_eq!(parsed["pcr"], json!([15]));
+        }
+    }
+
+    // Test comprehensive field support and validation
+    mod comprehensive_field_tests {
+        use super::*;
+        use serde_json::json;
+
+        #[test]
+        fn test_add_agent_request_with_all_fields() {
+            // Create a request with all possible fields
+            let request = AddAgentRequest::new(
+                "192.168.1.100".to_string(),
+                9002,
+                "127.0.0.1".to_string(),
+                8881,
+                "{}".to_string(),
+            )
+            .with_ak_tpm(Some(json!({"aik": "test_key"})))
+            .with_mtls_cert(Some(json!({"cert": "test_cert"})))
+            .with_v_key(Some(json!({"v": "test_v_key"})))
+            .with_runtime_policy(Some("runtime policy content".to_string()))
+            .with_runtime_policy_name(Some("runtime_policy_1".to_string()))
+            .with_runtime_policy_key(Some(json!({"key": "policy_key"})))
+            .with_mb_policy(Some("measured boot policy content".to_string()))
+            .with_mb_policy_name(Some("mb_policy_1".to_string()))
+            .with_ima_sign_verification_keys(Some("ima_keys".to_string()))
+            .with_revocation_key(Some("revocation_key".to_string()))
+            .with_accept_tpm_hash_algs(Some(vec![
+                "sha256".to_string(),
+                "sha1".to_string(),
+            ]))
+            .with_accept_tpm_encryption_algs(Some(vec![
+                "rsa".to_string(),
+                "ecc".to_string(),
+            ]))
+            .with_accept_tpm_signing_algs(Some(vec![
+                "rsa".to_string(),
+                "ecdsa".to_string(),
+            ]))
+            .with_metadata(Some("{}".to_string()))
+            .with_payload(Some("test payload".to_string()))
+            .with_cert_dir(Some("/path/to/certs".to_string()))
+            .with_supported_version(Some("2.1".to_string()));
+
+            // Validate that all fields are set correctly
+            assert_eq!(request.cloudagent_ip, "192.168.1.100");
+            assert_eq!(request.cloudagent_port, 9002);
+            assert_eq!(request.verifier_ip, "127.0.0.1");
+            assert_eq!(request.verifier_port, 8881);
+            assert_eq!(request.tpm_policy, "{}");
+
+            assert!(request.ak_tpm.is_some());
+            assert!(request.mtls_cert.is_some());
+            assert!(request.v.is_some());
+
+            assert_eq!(
+                request.runtime_policy,
+                Some("runtime policy content".to_string())
+            );
+            assert_eq!(
+                request.runtime_policy_name,
+                Some("runtime_policy_1".to_string())
+            );
+            assert!(request.runtime_policy_key.is_some());
+
+            assert_eq!(
+                request.mb_policy,
+                Some("measured boot policy content".to_string())
+            );
+            assert_eq!(
+                request.mb_policy_name,
+                Some("mb_policy_1".to_string())
+            );
+
+            assert_eq!(
+                request.ima_sign_verification_keys,
+                Some("ima_keys".to_string())
+            );
+            assert_eq!(
+                request.revocation_key,
+                Some("revocation_key".to_string())
+            );
+
+            assert!(request.accept_tpm_hash_algs.is_some());
+            assert!(request.accept_tpm_encryption_algs.is_some());
+            assert!(request.accept_tpm_signing_algs.is_some());
+
+            assert_eq!(request.metadata, Some("{}".to_string()));
+            assert_eq!(request.payload, Some("test payload".to_string()));
+            assert_eq!(request.cert_dir, Some("/path/to/certs".to_string()));
+            assert_eq!(request.supported_version, Some("2.1".to_string()));
+        }
+
+        #[test]
+        fn test_add_agent_request_validation_all_fields() {
+            let request = AddAgentRequest::new(
+                "192.168.1.100".to_string(),
+                9002,
+                "127.0.0.1".to_string(),
+                8881,
+                "{\"pcr\": [15]}".to_string(),
+            )
+            .with_accept_tpm_hash_algs(Some(vec!["sha256".to_string()]))
+            .with_accept_tpm_encryption_algs(Some(vec!["rsa".to_string()]))
+            .with_accept_tpm_signing_algs(Some(vec!["rsa".to_string()]))
+            .with_metadata(Some("{\"test\": \"value\"}".to_string()))
+            .with_supported_version(Some("2.1".to_string()));
+
+            // Should validate successfully
+            assert!(request.validate().is_ok());
+        }
+
+        #[test]
+        fn test_add_agent_request_validation_invalid_metadata() {
+            let request = AddAgentRequest::new(
+                "192.168.1.100".to_string(),
+                9002,
+                "127.0.0.1".to_string(),
+                8881,
+                "{}".to_string(),
+            )
+            .with_metadata(Some("invalid json {".to_string()));
+
+            let result = request.validate();
+            assert!(result.is_err());
+            assert!(result
+                .unwrap_err()
+                .to_string()
+                .contains("Invalid JSON in metadata"));
+        }
+
+        #[test]
+        fn test_add_agent_request_validation_invalid_hash_algorithm() {
+            let request = AddAgentRequest::new(
+                "192.168.1.100".to_string(),
+                9002,
+                "127.0.0.1".to_string(),
+                8881,
+                "{}".to_string(),
+            )
+            .with_accept_tpm_hash_algs(Some(vec![
+                "invalid_hash".to_string(),
+            ]));
+
+            let result = request.validate();
+            assert!(result.is_err());
+            assert!(result
+                .unwrap_err()
+                .to_string()
+                .contains("Unknown TPM hash algorithm"));
+        }
+
+        #[test]
+        fn test_add_agent_request_validation_invalid_encryption_algorithm() {
+            let request = AddAgentRequest::new(
+                "192.168.1.100".to_string(),
+                9002,
+                "127.0.0.1".to_string(),
+                8881,
+                "{}".to_string(),
+            )
+            .with_accept_tpm_encryption_algs(Some(vec![
+                "invalid_enc".to_string()
+            ]));
+
+            let result = request.validate();
+            assert!(result.is_err());
+            assert!(result
+                .unwrap_err()
+                .to_string()
+                .contains("Unknown TPM encryption algorithm"));
+        }
+
+        #[test]
+        fn test_add_agent_request_validation_invalid_signing_algorithm() {
+            let request = AddAgentRequest::new(
+                "192.168.1.100".to_string(),
+                9002,
+                "127.0.0.1".to_string(),
+                8881,
+                "{}".to_string(),
+            )
+            .with_accept_tpm_signing_algs(Some(vec![
+                "invalid_sign".to_string()
+            ]));
+
+            let result = request.validate();
+            assert!(result.is_err());
+            assert!(result
+                .unwrap_err()
+                .to_string()
+                .contains("Unknown TPM signing algorithm"));
+        }
+
+        #[test]
+        fn test_add_agent_request_validation_invalid_api_version() {
+            let request = AddAgentRequest::new(
+                "192.168.1.100".to_string(),
+                9002,
+                "127.0.0.1".to_string(),
+                8881,
+                "{}".to_string(),
+            )
+            .with_supported_version(Some(
+                "invalid.version.format".to_string(),
+            ));
+
+            let result = request.validate();
+            assert!(result.is_err());
+            assert!(result
+                .unwrap_err()
+                .to_string()
+                .contains("Invalid API version format"));
+        }
+
+        #[test]
+        fn test_serialization_all_fields() {
+            let request = AddAgentRequest::new(
+                "192.168.1.100".to_string(),
+                9002,
+                "127.0.0.1".to_string(),
+                8881,
+                "{}".to_string(),
+            )
+            .with_runtime_policy_name(Some("test_policy".to_string()))
+            .with_accept_tpm_hash_algs(Some(vec!["sha256".to_string()]))
+            .with_metadata(Some("{}".to_string()));
+
+            let serialized = serde_json::to_string(&request).unwrap();
+            let json_value: Value =
+                serde_json::from_str(&serialized).unwrap();
+
+            // Check that required fields are present
+            assert_eq!(json_value["cloudagent_ip"], "192.168.1.100");
+            assert_eq!(json_value["cloudagent_port"], 9002);
+            assert_eq!(json_value["verifier_ip"], "127.0.0.1");
+            assert_eq!(json_value["verifier_port"], 8881);
+            assert_eq!(json_value["tpm_policy"], "{}");
+
+            // Check that optional fields are present when set
+            assert_eq!(json_value["runtime_policy_name"], "test_policy");
+            assert_eq!(json_value["accept_tpm_hash_algs"], json!(["sha256"]));
+            assert_eq!(json_value["metadata"], "{}");
+
+            // Check that None fields are not serialized
+            assert!(json_value.get("runtime_policy").is_none());
+            assert!(json_value.get("mb_policy").is_none());
+        }
+    }
+
+    // Test validation helper functions
+    mod validation_helper_tests {
+        use super::*;
+
+        #[test]
+        fn test_is_valid_tpm_hash_algorithm() {
+            // Valid algorithms
+            assert!(is_valid_tpm_hash_algorithm("sha1"));
+            assert!(is_valid_tpm_hash_algorithm("SHA256"));
+            assert!(is_valid_tpm_hash_algorithm("sha384"));
+            assert!(is_valid_tpm_hash_algorithm("sha512"));
+            assert!(is_valid_tpm_hash_algorithm("sha3-256"));
+            assert!(is_valid_tpm_hash_algorithm("sm3-256"));
+
+            // Invalid algorithms
+            assert!(!is_valid_tpm_hash_algorithm("md5"));
+            assert!(!is_valid_tpm_hash_algorithm("invalid"));
+            assert!(!is_valid_tpm_hash_algorithm(""));
+        }
+
+        #[test]
+        fn test_is_valid_tpm_encryption_algorithm() {
+            // Valid algorithms
+            assert!(is_valid_tpm_encryption_algorithm("rsa"));
+            assert!(is_valid_tpm_encryption_algorithm("ECC"));
+            assert!(is_valid_tpm_encryption_algorithm("aes"));
+            assert!(is_valid_tpm_encryption_algorithm("oaep"));
+            assert!(is_valid_tpm_encryption_algorithm("ecdh"));
+
+            // Invalid algorithms
+            assert!(!is_valid_tpm_encryption_algorithm("des"));
+            assert!(!is_valid_tpm_encryption_algorithm("invalid"));
+            assert!(!is_valid_tpm_encryption_algorithm(""));
+        }
+
+        #[test]
+        fn test_is_valid_tpm_signing_algorithm() {
+            // Valid algorithms
+            assert!(is_valid_tpm_signing_algorithm("rsa"));
+            assert!(is_valid_tpm_signing_algorithm("ECC"));
+            assert!(is_valid_tpm_signing_algorithm("ecdsa"));
+            assert!(is_valid_tpm_signing_algorithm("rsassa"));
+            assert!(is_valid_tpm_signing_algorithm("hmac"));
+
+            // Invalid algorithms
+            assert!(!is_valid_tpm_signing_algorithm("dsa"));
+            assert!(!is_valid_tpm_signing_algorithm("invalid"));
+            assert!(!is_valid_tpm_signing_algorithm(""));
+        }
+
+        #[test]
+        fn test_is_valid_api_version() {
+            // Valid versions
+            assert!(is_valid_api_version("2.1"));
+            assert!(is_valid_api_version("3.0"));
+            assert!(is_valid_api_version("10.99"));
+
+            // Invalid versions
+            assert!(!is_valid_api_version("2"));
+            assert!(!is_valid_api_version("2.1.3"));
+            assert!(!is_valid_api_version("v2.1"));
+            assert!(!is_valid_api_version("2.x"));
+            assert!(!is_valid_api_version(""));
+            assert!(!is_valid_api_version("invalid"));
         }
     }
 }
