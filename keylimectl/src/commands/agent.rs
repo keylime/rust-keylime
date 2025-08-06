@@ -161,6 +161,7 @@ pub async fn execute(
             cert_dir,
             verify,
             push_model,
+            tpm_policy,
         } => add_agent(
             AddAgentParams {
                 agent_id: uuid,
@@ -173,6 +174,7 @@ pub async fn execute(
                 cert_dir: cert_dir.as_deref(),
                 verify: *verify,
                 push_model: *push_model,
+                tpm_policy: tpm_policy.as_deref(),
             },
             config,
             output,
@@ -258,6 +260,8 @@ struct AddAgentParams<'a> {
     verify: bool,
     /// Whether to use push model (agent connects to verifier)
     push_model: bool,
+    /// Optional TPM policy in JSON format
+    tpm_policy: Option<&'a str>,
 }
 
 /// Add an agent to the verifier for continuous attestation monitoring
@@ -501,6 +505,9 @@ async fn add_agent(
     // Build the request payload
     let cv_agent_ip = params.verifier_ip.unwrap_or(&agent_ip);
 
+    // Resolve TPM policy from CLI argument or default
+    let tpm_policy = resolve_tpm_policy(params.tpm_policy);
+
     let mut request_data = json!({
         "cloudagent_ip": cv_agent_ip,
         "cloudagent_port": agent_port,
@@ -508,6 +515,7 @@ async fn add_agent(
         "verifier_port": config.verifier.port,
         "ak_tpm": agent_data.get("aik_tpm"),
         "mtls_cert": agent_data.get("mtls_cert"),
+        "tpm_policy": tpm_policy,
     });
 
     // Add V key from attestation if available
@@ -824,6 +832,7 @@ async fn update_agent(
             cert_dir: None, // Use default cert handling
             verify: false, // Skip verification during update
             push_model: existing_push_model, // Preserve existing model
+            tpm_policy: None, // Use default policy during update
         },
         config,
         output,
@@ -1367,10 +1376,19 @@ fn load_payload_file(path: &str) -> Result<String, CommandError> {
     })
 }
 
+/// Resolve TPM policy from various sources with proper precedence
+///
+/// Precedence order:
+/// 1. Explicit CLI --tmp-policy argument
+/// 2. Default empty policy "{}"
+fn resolve_tpm_policy(explicit_policy: Option<&str>) -> String {
+    explicit_policy.unwrap_or("{}").to_string()
+}
+
 /// Generate a random string of the specified length
 ///
 /// Uses system time as seed for a simple random string generator. This is a simple
-/// replacement for the missing tpm_util::random_password function.
+/// replacement for the missing tmp_util::random_password function.
 fn generate_random_string(length: usize) -> String {
     let charset: &[u8] =
         b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";

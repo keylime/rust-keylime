@@ -176,6 +176,10 @@ enum AgentAction {
         /// Use push model (agent connects to verifier)
         #[arg(long)]
         push_model: bool,
+
+        /// TPM policy in JSON format
+        #[arg(long, value_name = "POLICY")]
+        tpm_policy: Option<String>,
     },
 
     /// Remove an agent from the verifier

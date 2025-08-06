@@ -926,7 +926,7 @@ mod tests {
                 "port": 9002,
                 "verifier_ip": "192.168.1.1",
                 "verifier_port": 8881,
-                "tmp_policy": "{}",
+                "tpm_policy": "{}",
                 "ima_policy": "{}",
                 "aik_tpm": "a".repeat(1024), // 1KB key
                 "ek_tpm": "b".repeat(1024),   // 1KB key
