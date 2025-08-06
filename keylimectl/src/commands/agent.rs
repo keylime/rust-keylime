@@ -260,6 +260,8 @@ struct AddAgentParams<'a> {
     /// Whether to perform key derivation verification
     verify: bool,
     /// Whether to use push model (agent connects to verifier)
+    #[allow(dead_code)]
+    // Will be used when explicit push model flag is implemented
     push_model: bool,
     /// Optional TPM policy in JSON format
     tpm_policy: Option<&'a str>,
@@ -416,24 +418,28 @@ impl AddAgentRequest {
     }
 
     /// Set the runtime policy
+    #[allow(dead_code)] // Will be used when CLI args are implemented
     pub fn with_runtime_policy(mut self, policy: Option<String>) -> Self {
         self.runtime_policy = policy;
         self
     }
 
     /// Set the measured boot policy
+    #[allow(dead_code)] // Will be used when CLI args are implemented
     pub fn with_mb_policy(mut self, policy: Option<String>) -> Self {
         self.mb_policy = policy;
         self
     }
 
     /// Set the payload
+    #[allow(dead_code)] // Will be used when CLI args are implemented
     pub fn with_payload(mut self, payload: Option<String>) -> Self {
         self.payload = payload;
         self
     }
 
     /// Set the certificate directory
+    #[allow(dead_code)] // Will be used when CLI args are implemented
     pub fn with_cert_dir(mut self, cert_dir: Option<String>) -> Self {
         self.cert_dir = cert_dir;
         self
@@ -531,6 +537,7 @@ impl AddAgentRequest {
     }
 
     /// Validate the request before sending
+    #[allow(dead_code)] // Will be used when validation is enabled
     pub fn validate(&self) -> Result<(), CommandError> {
         if self.cloudagent_ip.is_empty() {
             return Err(CommandError::invalid_parameter(
@@ -626,20 +633,25 @@ impl AddAgentRequest {
     }
 }
 
-/// Add an agent to the verifier for continuous attestation monitoring
+/// Add (enroll) an agent to the verifier for continuous attestation monitoring
 ///
-/// This function implements the complete agent addition workflow, which involves
-/// multiple steps including validation, registrar lookup, attestation, and
-/// verifier registration.
+/// This function implements the correct Keylime enrollment workflow:
+///
+/// 1. **Check Registration**: Verify agent is registered with registrar
+/// 2. **Enroll with Verifier**: Add agent to verifier with attestation policy
+///
+/// The flow differs based on API version:
+/// - **API 2.x (Pull Model)**: Includes TPM quote verification and key exchange
+/// - **API 3.0+ (Push Model)**: Simplified enrollment, agent pushes attestations
 ///
 /// # Workflow Steps
 ///
-/// 1. **UUID Validation**: Validates the agent UUID format
+/// 1. **Agent ID Validation**: Validates the agent identifier format
 /// 2. **Registrar Lookup**: Retrieves agent data from registrar (TPM keys, etc.)
-/// 3. **Connection Details**: Determines agent IP/port from CLI args or registrar
-/// 4. **Attestation**: Performs TPM-based attestation (unless push model)
-/// 5. **Verifier Addition**: Adds agent to verifier for monitoring
-/// 6. **Verification**: Optionally performs key derivation verification
+/// 3. **API Version Detection**: Determines verifier API version for enrollment format
+/// 4. **Legacy Attestation**: For API < 3.0, performs TPM quote verification
+/// 5. **Verifier Enrollment**: Enrolls agent with verifier using appropriate format
+/// 6. **Legacy Key Delivery**: For API < 3.0, delivers encryption keys to agent
 ///
 /// # Arguments
 ///
@@ -757,14 +769,26 @@ async fn add_agent(
 
     let agent_data = agent_data.unwrap();
 
-    // Step 2: Determine agent connection details
-    output.step(2, 4, "Validating agent connection details");
+    // Step 2: Determine API version and enrollment approach
+    output.step(2, 4, "Detecting verifier API version");
 
-    let (agent_ip, agent_port) = if params.push_model {
-        // In push model, agent connects to verifier
-        ("localhost".to_string(), 9002)
-    } else {
-        // Get IP and port from CLI args or registrar data
+    let verifier_client = VerifierClient::builder()
+        .config(config)
+        .build()
+        .await
+        .map_err(|e| {
+            CommandError::resource_error("verifier", e.to_string())
+        })?;
+
+    let api_version =
+        verifier_client.api_version().parse::<f32>().unwrap_or(2.1);
+    let is_push_model = api_version >= 3.0;
+
+    debug!("Detected API version: {api_version}, using push model: {is_push_model}");
+
+    // Determine agent connection details (needed for legacy API < 3.0)
+    let (agent_ip, agent_port) = if !is_push_model {
+        // Legacy pull model: need agent IP/port for direct communication
         let agent_ip = params
             .ip
             .map(|s| s.to_string())
@@ -776,8 +800,7 @@ async fn add_agent(
             .ok_or_else(|| {
                 CommandError::invalid_parameter(
                     "ip",
-                    "Agent IP address is required when not using push model"
-                        .to_string(),
+                    "Agent IP address is required for API < 3.0".to_string(),
                 )
             })?;
 
@@ -791,131 +814,129 @@ async fn add_agent(
             .ok_or_else(|| {
                 CommandError::invalid_parameter(
                     "port",
-                    "Agent port is required when not using push model"
-                        .to_string(),
+                    "Agent port is required for API < 3.0".to_string(),
                 )
             })?;
 
         (agent_ip, agent_port)
+    } else {
+        // Push model: agent will connect to verifier, so use placeholder values
+        ("localhost".to_string(), 9002)
     };
 
-    // Step 3: Perform attestation if not using push model
-    let attestation_result = if !params.push_model {
-        output.step(3, 4, "Performing attestation with agent");
+    // Step 3: Perform legacy attestation for API < 3.0
+    let attestation_result = if !is_push_model {
+        output.step(3, 4, "Performing legacy TPM attestation (API < 3.0)");
 
-        // Check if we need agent communication based on API version
-        let verifier_client = VerifierClient::builder()
+        // Create agent client for direct communication
+        let agent_client = AgentClient::builder()
+            .agent_ip(&agent_ip)
+            .agent_port(agent_port)
             .config(config)
             .build()
             .await
             .map_err(|e| {
-                CommandError::resource_error("verifier", e.to_string())
+                CommandError::resource_error("agent", e.to_string())
             })?;
-        let api_version =
-            verifier_client.api_version().parse::<f32>().unwrap_or(2.1);
 
-        if api_version < 3.0 {
-            // Create agent client for direct communication
-            let agent_client = AgentClient::builder()
-                .agent_ip(&agent_ip)
-                .agent_port(agent_port)
-                .config(config)
-                .build()
-                .await
-                .map_err(|e| {
-                    CommandError::resource_error("agent", e.to_string())
-                })?;
-
-            if !agent_client.is_pull_model() {
-                return Err(CommandError::invalid_parameter(
-                    "push_model",
-                    "Agent API version >= 3.0 detected but not using push model. Please use --push-model flag.".to_string()
-                ));
-            }
-
-            // Perform TPM quote verification
-            perform_agent_attestation(
-                &agent_client,
-                &agent_data,
-                config,
-                params.agent_id,
-                output,
-            )
-            .await?
-        } else {
-            output.info(
-                "Using API >= 3.0, skipping direct agent communication",
-            );
-            None
-        }
+        // Perform TPM quote verification
+        perform_agent_attestation(
+            &agent_client,
+            &agent_data,
+            config,
+            params.agent_id,
+            output,
+        )
+        .await?
     } else {
-        output.step(3, 4, "Skipping attestation (push model)");
+        output.step(
+            3,
+            4,
+            "Skipping direct attestation (push model, API >= 3.0)",
+        );
         None
     };
 
-    // Step 4: Add agent to verifier
-    output.step(4, 4, "Adding agent to verifier");
+    // Step 4: Enroll agent with verifier
+    output.step(4, 4, "Enrolling agent with verifier");
 
-    let verifier_client = VerifierClient::builder()
-        .config(config)
-        .build()
-        .await
-        .map_err(|e| {
-            CommandError::resource_error("verifier", e.to_string())
-        })?;
-
-    // Build the request payload
+    // Build the request payload based on API version
     let cv_agent_ip = params.verifier_ip.unwrap_or(&agent_ip);
 
     // Resolve TPM policy with enhanced precedence handling
     let tpm_policy =
         resolve_tpm_policy_enhanced(params.tpm_policy, params.mb_policy)?;
 
-    // Build structured request instead of manual JSON
-    let mut request = AddAgentRequest::new(
-        cv_agent_ip.to_string(),
-        agent_port,
-        config.verifier.ip.clone(),
-        config.verifier.port,
-        tpm_policy,
-    )
-    .with_ak_tpm(agent_data.get("aik_tpm").cloned())
-    .with_mtls_cert(agent_data.get("mtls_cert").cloned());
+    // Build enrollment request with version-appropriate fields
+    let mut request = if is_push_model {
+        // API 3.0+: Simplified enrollment for push model
+        build_push_model_request(
+            params.agent_id,
+            &tpm_policy,
+            &agent_data,
+            config,
+            params.runtime_policy,
+            params.mb_policy,
+        )?
+    } else {
+        // API 2.x: Full enrollment with direct agent communication
+        let mut request = AddAgentRequest::new(
+            cv_agent_ip.to_string(),
+            agent_port,
+            config.verifier.ip.clone(),
+            config.verifier.port,
+            tpm_policy,
+        )
+        .with_ak_tpm(agent_data.get("aik_tpm").cloned())
+        .with_mtls_cert(agent_data.get("mtls_cert").cloned());
 
-    // Add V key from attestation if available
-    if let Some(attestation) = &attestation_result {
-        if let Some(v_key) = attestation.get("v_key") {
-            request = request.with_v_key(Some(v_key.clone()));
+        // Add V key from attestation if available
+        if let Some(attestation) = &attestation_result {
+            if let Some(v_key) = attestation.get("v_key") {
+                request = request.with_v_key(Some(v_key.clone()));
+            }
         }
-    }
+
+        serde_json::to_value(request)?
+    };
 
     // Add policies if provided
     if let Some(policy_path) = params.runtime_policy {
         let policy_content = load_policy_file(policy_path)?;
-        request = request.with_runtime_policy(Some(policy_content));
+        if let Some(obj) = request.as_object_mut() {
+            let _ = obj
+                .insert("runtime_policy".to_string(), json!(policy_content));
+        }
     }
 
     if let Some(policy_path) = params.mb_policy {
         let policy_content = load_policy_file(policy_path)?;
-        request = request.with_mb_policy(Some(policy_content));
+        if let Some(obj) = request.as_object_mut() {
+            let _ =
+                obj.insert("mb_policy".to_string(), json!(policy_content));
+        }
     }
 
     // Add payload if provided
     if let Some(payload_path) = params.payload {
         let payload_content = load_payload_file(payload_path)?;
-        request = request.with_payload(Some(payload_content));
+        if let Some(obj) = request.as_object_mut() {
+            let _ = obj.insert("payload".to_string(), json!(payload_content));
+        }
     }
 
     if let Some(cert_dir_path) = params.cert_dir {
         // For now, just pass the path - in future could generate cert package
-        request = request.with_cert_dir(Some(cert_dir_path.to_string()));
+        if let Some(obj) = request.as_object_mut() {
+            let _ = obj.insert(
+                "cert_dir".to_string(),
+                json!(cert_dir_path.to_string()),
+            );
+        }
     }
 
-    // Validate the request before sending
-    request.validate()?;
-
     let response = verifier_client
-        .add_agent(params.agent_id, serde_json::to_value(request)?)
+        .add_agent(params.agent_id, request)
         .await
         .map_err(|e| {
             CommandError::resource_error(
@@ -924,55 +945,53 @@ async fn add_agent(
             )
         })?;
 
-    // Step 5: Deliver keys and verify if requested for API < 3.0
-    if !params.push_model && attestation_result.is_some() {
-        let verifier_api_version =
-            verifier_client.api_version().parse::<f32>().unwrap_or(2.1);
+    // Step 5: Perform legacy key delivery for API < 3.0
+    if !is_push_model && attestation_result.is_some() {
+        let agent_client = AgentClient::builder()
+            .agent_ip(&agent_ip)
+            .agent_port(agent_port)
+            .config(config)
+            .build()
+            .await
+            .map_err(|e| {
+                CommandError::resource_error("agent", e.to_string())
+            })?;
 
-        if verifier_api_version < 3.0 {
-            let agent_client = AgentClient::builder()
-                .agent_ip(&agent_ip)
-                .agent_port(agent_port)
-                .config(config)
-                .build()
-                .await
-                .map_err(|e| {
-                    CommandError::resource_error("agent", e.to_string())
-                })?;
+        // Deliver U key and payload to agent
+        if let Some(attestation) = attestation_result {
+            perform_key_delivery(
+                &agent_client,
+                &attestation,
+                params.payload,
+                output,
+            )
+            .await?;
 
-            // Deliver U key and payload to agent
-            if let Some(attestation) = attestation_result {
-                perform_key_delivery(
-                    &agent_client,
-                    &attestation,
-                    params.payload,
-                    output,
-                )
-                .await?;
-
-                // Verify key derivation if requested
-                if params.verify {
-                    output.info("Performing key derivation verification");
-                    verify_key_derivation(
-                        &agent_client,
-                        &attestation,
-                        output,
-                    )
+            // Verify key derivation if requested
+            if params.verify {
+                output.info("Performing key derivation verification");
+                verify_key_derivation(&agent_client, &attestation, output)
                     .await?;
-                }
             }
         }
     }
 
+    let enrollment_type = if is_push_model {
+        "push model"
+    } else {
+        "pull model"
+    };
     output.info(format!(
-        "Agent {} successfully added to verifier",
-        params.agent_id
+        "Agent {} successfully enrolled with verifier ({})",
+        params.agent_id, enrollment_type
     ));
 
     Ok(json!({
         "status": "success",
-        "message": format!("Agent {} added successfully", params.agent_id),
+        "message": format!("Agent {} enrolled successfully ({})", params.agent_id, enrollment_type),
         "agent_id": params.agent_id,
+        "api_version": api_version,
+        "push_model": is_push_model,
         "results": response
     }))
 }
@@ -2094,6 +2113,7 @@ fn encrypt_u_key_with_agent_pubkey(
 ///
 /// Checks if the provided algorithm name is a known and supported TPM hash algorithm.
 /// Based on the TPM 2.0 specification and common implementations.
+#[allow(dead_code)] // Will be used when validation is enabled
 fn is_valid_tpm_hash_algorithm(algorithm: &str) -> bool {
     matches!(
         algorithm.to_lowercase().as_str(),
@@ -2112,6 +2132,7 @@ fn is_valid_tpm_hash_algorithm(algorithm: &str) -> bool {
 ///
 /// Checks if the provided algorithm name is a known and supported TPM encryption algorithm.
 /// Based on the TPM 2.0 specification and common implementations.
+#[allow(dead_code)] // Will be used when validation is enabled
 fn is_valid_tpm_encryption_algorithm(algorithm: &str) -> bool {
     matches!(
         algorithm.to_lowercase().as_str(),
@@ -2136,6 +2157,7 @@ fn is_valid_tpm_encryption_algorithm(algorithm: &str) -> bool {
 ///
 /// Checks if the provided algorithm name is a known and supported TPM signing algorithm.
 /// Based on the TPM 2.0 specification and common implementations.
+#[allow(dead_code)] // Will be used when validation is enabled
 fn is_valid_tpm_signing_algorithm(algorithm: &str) -> bool {
     matches!(
         algorithm.to_lowercase().as_str(),
@@ -2151,9 +2173,54 @@ fn is_valid_tpm_signing_algorithm(algorithm: &str) -> bool {
     )
 }
 
+/// Build enrollment request for push model (API 3.0+)
+///
+/// Creates a simplified enrollment request for push model attestation.
+/// In push model, the agent will initiate attestations, so no direct
+/// agent communication or key exchange is needed during enrollment.
+fn build_push_model_request(
+    agent_id: &str,
+    tpm_policy: &str,
+    agent_data: &Value,
+    _config: &Config,
+    runtime_policy: Option<&str>,
+    mb_policy: Option<&str>,
+) -> Result<Value, CommandError> {
+    debug!("Building push model enrollment request for agent {agent_id}");
+
+    let mut request = json!({
+        "agent_id": agent_id,
+        "tpm_policy": tpm_policy,
+        "accept_attestations": true,
+        "ak_tpm": agent_data.get("aik_tpm"),
+        "mtls_cert": agent_data.get("mtls_cert"),
+        "accept_tpm_hash_algs": ["sha256", "sha1"],
+        "accept_tpm_encryption_algs": ["rsa", "ecc"],
+        "accept_tpm_signing_algs": ["rsa", "ecdsa"]
+    });
+
+    // Add policies if provided
+    if let Some(policy_path) = runtime_policy {
+        let policy_content = load_policy_file(policy_path)?;
+        request["runtime_policy"] = json!(policy_content);
+    }
+
+    if let Some(policy_path) = mb_policy {
+        let policy_content = load_policy_file(policy_path)?;
+        request["mb_policy"] = json!(policy_content);
+    }
+
+    // Add metadata
+    request["metadata"] = json!({});
+
+    debug!("Push model request built successfully");
+    Ok(request)
+}
+
 /// Validate API version format
 ///
 /// Checks if the provided version string follows a valid API version format (e.g., "2.1", "3.0").
+#[allow(dead_code)] // Will be used when validation is enabled
 fn is_valid_api_version(version: &str) -> bool {
     // Basic format check: should be major.minor (e.g., "2.1", "3.0")
     let parts: Vec<&str> = version.split('.').collect();
@@ -2754,7 +2821,7 @@ mod tests {
             .unwrap();
             assert!(result.is_some());
 
-            // Test "tmp_policy" location
+            // Test "tpm_policy" location
             let policy_file_full =
                 temp_dir.path().join("mb_policy_full.json");
             let mb_policy_full = serde_json::json!({

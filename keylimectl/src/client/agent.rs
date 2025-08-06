@@ -653,6 +653,7 @@ impl AgentClient {
     /// }
     /// # }
     /// ```
+    #[allow(dead_code)] // Will be used when agent model detection is enabled
     pub fn is_pull_model(&self) -> bool {
         if self.api_version == UNKNOWN_API_VERSION {
             // Default to pull model for unknown versions to be safe
