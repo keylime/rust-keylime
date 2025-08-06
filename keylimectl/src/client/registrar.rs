@@ -539,12 +539,9 @@ impl RegistrarClient {
                     .map_err(KeylimectlError::from)?;
 
                 // Extract agent data from registrar response format
+                // The registrar API returns agent data directly in "results", not nested under agent UUID
                 if let Some(results) = json_response.get("results") {
-                    if let Some(agent_data) = results.get(agent_uuid) {
-                        Ok(Some(agent_data.clone()))
-                    } else {
-                        Ok(None)
-                    }
+                    Ok(Some(results.clone()))
                 } else {
                     Ok(Some(json_response))
                 }

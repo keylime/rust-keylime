@@ -1969,7 +1969,10 @@ mod tests {
                 push_model: false,
             };
 
-            assert_eq!(params.agent_id, "550e8400-e29b-41d4-a716-446655440000");
+            assert_eq!(
+                params.agent_id,
+                "550e8400-e29b-41d4-a716-446655440000"
+            );
             assert!(params.ip.is_none());
             assert!(params.port.is_none());
             assert!(!params.verify);
