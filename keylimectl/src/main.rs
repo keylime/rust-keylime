@@ -137,8 +137,8 @@ enum Commands {
 enum AgentAction {
     /// Add an agent to the verifier
     Add {
-        /// Agent UUID
-        #[arg(value_name = "UUID")]
+        /// Agent identifier (can be any string, not necessarily a UUID)
+        #[arg(value_name = "AGENT_ID")]
         uuid: String,
 
         /// Agent IP address (if not using push model)
@@ -180,8 +180,8 @@ enum AgentAction {
 
     /// Remove an agent from the verifier
     Remove {
-        /// Agent UUID
-        #[arg(value_name = "UUID")]
+        /// Agent identifier
+        #[arg(value_name = "AGENT_ID")]
         uuid: String,
 
         /// Also remove from registrar
@@ -195,8 +195,8 @@ enum AgentAction {
 
     /// Update an existing agent
     Update {
-        /// Agent UUID
-        #[arg(value_name = "UUID")]
+        /// Agent identifier
+        #[arg(value_name = "AGENT_ID")]
         uuid: String,
 
         /// New runtime policy
@@ -210,8 +210,8 @@ enum AgentAction {
 
     /// Show agent status
     Status {
-        /// Agent UUID
-        #[arg(value_name = "UUID")]
+        /// Agent identifier
+        #[arg(value_name = "AGENT_ID")]
         uuid: String,
 
         /// Check verifier only
@@ -225,8 +225,8 @@ enum AgentAction {
 
     /// Reactivate a failed agent
     Reactivate {
-        /// Agent UUID
-        #[arg(value_name = "UUID")]
+        /// Agent identifier
+        #[arg(value_name = "AGENT_ID")]
         uuid: String,
     },
 }
