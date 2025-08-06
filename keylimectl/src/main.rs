@@ -121,6 +121,7 @@ enum Commands {
         action: PolicyAction,
     },
     /// Manage measured boot policies
+    #[command(alias = "mb")]
     MeasuredBoot {
         #[command(subcommand)]
         action: MeasuredBootAction,
@@ -323,6 +324,10 @@ enum ListResource {
         /// Show detailed information
         #[arg(long)]
         detailed: bool,
+
+        /// List agents from registrar only
+        #[arg(long)]
+        registrar_only: bool,
     },
 
     /// List runtime policies

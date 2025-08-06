@@ -563,7 +563,10 @@ mod tests {
             quiet: false,
             format: crate::OutputFormat::Json,
             command: crate::Commands::List {
-                resource: ListResource::Agents { detailed: false },
+                resource: ListResource::Agents {
+                    detailed: false,
+                    registrar_only: false,
+                },
             },
         }
     }

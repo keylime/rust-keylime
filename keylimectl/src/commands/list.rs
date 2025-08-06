@@ -58,11 +58,11 @@
 //! let output = OutputHandler::new(crate::OutputFormat::Json, false);
 //!
 //! // List agents with basic information
-//! let basic_agents = ListResource::Agents { detailed: false };
+//! let basic_agents = ListResource::Agents { detailed: false, registrar_only: false };
 //! let result = list::execute(&basic_agents, &config, &output).await?;
 //!
 //! // List agents with detailed information
-//! let detailed_agents = ListResource::Agents { detailed: true };
+//! let detailed_agents = ListResource::Agents { detailed: true, registrar_only: false };
 //! let result = list::execute(&detailed_agents, &config, &output).await?;
 //!
 //! // List runtime policies
@@ -176,7 +176,7 @@ use serde_json::{json, Value};
 /// let output = OutputHandler::new(crate::OutputFormat::Json, false);
 ///
 /// // List agents (basic)
-/// let agents = ListResource::Agents { detailed: false };
+/// let agents = ListResource::Agents { detailed: false, registrar_only: false };
 /// let result = list::execute(&agents, &config, &output).await?;
 /// println!("Found {} agents", result["results"].as_object().unwrap().len());
 ///
@@ -192,9 +192,10 @@ pub async fn execute(
     output: &OutputHandler,
 ) -> Result<Value, KeylimectlError> {
     match resource {
-        ListResource::Agents { detailed } => {
-            list_agents(*detailed, config, output).await
-        }
+        ListResource::Agents {
+            detailed,
+            registrar_only,
+        } => list_agents(*detailed, *registrar_only, config, output).await,
         ListResource::Policies => list_runtime_policies(config, output).await,
         ListResource::MeasuredBootPolicies => {
             list_mb_policies(config, output).await
@@ -205,19 +206,27 @@ pub async fn execute(
 /// List all agents
 async fn list_agents(
     detailed: bool,
+    registrar_only: bool,
     config: &Config,
     output: &OutputHandler,
 ) -> Result<Value, KeylimectlError> {
-    if detailed {
+    if registrar_only {
+        output.info("Listing agents from registrar only");
+
+        let registrar_client =
+            RegistrarClient::builder().config(config).build().await?;
+        let registrar_data =
+            registrar_client.list_agents().await.with_context(|| {
+                "Failed to list agents from registrar".to_string()
+            })?;
+
+        Ok(registrar_data)
+    } else if detailed {
         output.info("Retrieving detailed agent information from both verifier and registrar");
-    } else {
-        output.info("Listing agents from verifier");
-    }
 
-    let verifier_client =
-        VerifierClient::builder().config(config).build().await?;
+        let verifier_client =
+            VerifierClient::builder().config(config).build().await?;
 
-    if detailed {
         // Get detailed info from verifier
         let verifier_data = verifier_client
             .get_bulk_info(config.verifier.id.as_deref())
@@ -240,6 +249,11 @@ async fn list_agents(
             "registrar": registrar_data
         }))
     } else {
+        output.info("Listing agents from verifier");
+
+        let verifier_client =
+            VerifierClient::builder().config(config).build().await?;
+
         // Just get basic list from verifier
         let verifier_data = verifier_client
             .list_agents(config.verifier.id.as_deref())
@@ -355,11 +369,18 @@ mod tests {
 
         #[test]
         fn test_agents_basic_resource() {
-            let resource = ListResource::Agents { detailed: false };
+            let resource = ListResource::Agents {
+                detailed: false,
+                registrar_only: false,
+            };
 
             match resource {
-                ListResource::Agents { detailed } => {
+                ListResource::Agents {
+                    detailed,
+                    registrar_only,
+                } => {
                     assert!(!detailed);
+                    assert!(!registrar_only);
                 }
                 _ => panic!("Expected Agents resource"),
             }
@@ -367,11 +388,18 @@ mod tests {
 
         #[test]
         fn test_agents_detailed_resource() {
-            let resource = ListResource::Agents { detailed: true };
+            let resource = ListResource::Agents {
+                detailed: true,
+                registrar_only: false,
+            };
 
             match resource {
-                ListResource::Agents { detailed } => {
+                ListResource::Agents {
+                    detailed,
+                    registrar_only,
+                } => {
                     assert!(detailed);
+                    assert!(!registrar_only);
                 }
                 _ => panic!("Expected Agents resource"),
             }
