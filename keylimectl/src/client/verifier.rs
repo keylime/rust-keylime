@@ -549,10 +549,16 @@ impl VerifierClient {
     ) -> Result<Value, KeylimectlError> {
         debug!("Adding agent {agent_uuid} to verifier");
 
-        let url = format!(
-            "{}/v{}/agents/{}",
-            self.base.base_url, self.api_version, agent_uuid
-        );
+        // API v3.0+ uses POST /v3.0/agents/ (without agent ID)
+        // API v2.x uses POST /v2.x/agents/{agent_id}
+        let url = if self.api_version.parse::<f32>().unwrap_or(2.1) >= 3.0 {
+            format!("{}/v{}/agents/", self.base.base_url, self.api_version)
+        } else {
+            format!(
+                "{}/v{}/agents/{}",
+                self.base.base_url, self.api_version, agent_uuid
+            )
+        };
 
         debug!(
             "POST {url} with data: {}",
@@ -2087,6 +2093,51 @@ mod tests {
             assert_eq!(expected_url, "https://localhost:8881/v3.0/");
             assert!(expected_url.ends_with("/"));
             assert!(!expected_url.contains("/agents"));
+        }
+
+        #[test]
+        fn test_add_agent_url_construction() {
+            // Test that add_agent URLs are constructed correctly for different API versions
+            let config = create_test_config();
+            let mut client =
+                VerifierClient::new_without_version_detection(&config)
+                    .unwrap();
+            let base_url = &client.base.base_url;
+            let agent_uuid = "test-agent-uuid";
+
+            // Test API v2.x (includes agent UUID in URL)
+            client.api_version = "2.1".to_string();
+            let api_version_f32 =
+                client.api_version.parse::<f32>().unwrap_or(2.1);
+            let url_v2 = if api_version_f32 >= 3.0 {
+                format!("{base_url}/v{}/agents/", client.api_version)
+            } else {
+                format!(
+                    "{base_url}/v{}/agents/{agent_uuid}",
+                    client.api_version
+                )
+            };
+            assert_eq!(
+                url_v2,
+                format!("{base_url}/v2.1/agents/{agent_uuid}")
+            );
+            assert!(url_v2.contains(agent_uuid));
+
+            // Test API v3.0 (excludes agent UUID from URL)
+            client.api_version = "3.0".to_string();
+            let api_version_f32 =
+                client.api_version.parse::<f32>().unwrap_or(2.1);
+            let url_v3 = if api_version_f32 >= 3.0 {
+                format!("{base_url}/v{}/agents/", client.api_version)
+            } else {
+                format!(
+                    "{base_url}/v{}/agents/{agent_uuid}",
+                    client.api_version
+                )
+            };
+            assert_eq!(url_v3, format!("{base_url}/v3.0/agents/"));
+            assert!(!url_v3.contains(agent_uuid));
+            assert!(url_v3.ends_with("/agents/"));
         }
     }
 }
