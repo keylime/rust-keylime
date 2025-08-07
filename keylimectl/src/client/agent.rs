@@ -62,7 +62,7 @@ use crate::client::base::BaseClient;
 use crate::config::Config;
 use crate::error::{ErrorContext, KeylimectlError};
 use base64::{engine::general_purpose::STANDARD, Engine};
-use log::{debug, warn};
+use log::{debug, info, warn};
 use reqwest::{Method, StatusCode};
 use serde_json::{json, Value};
 
@@ -71,6 +71,22 @@ const UNKNOWN_API_VERSION: &str = "unknown";
 
 /// Supported API versions for agent communication (all < 3.0)
 const SUPPORTED_AGENT_API_VERSIONS: &[&str] = &["2.0", "2.1", "2.2"];
+
+/// Response structure for agent version endpoint
+#[derive(serde::Deserialize, Debug)]
+struct AgentVersionResponse {
+    #[allow(dead_code)]
+    code: serde_json::Number,
+    #[allow(dead_code)]
+    status: String,
+    results: AgentVersionResults,
+}
+
+/// Agent version results structure
+#[derive(serde::Deserialize, Debug)]
+struct AgentVersionResults {
+    supported_version: String,
+}
 
 /// Client for communicating with Keylime agents in pull model (API < 3.0)
 ///
@@ -334,9 +350,8 @@ impl AgentClient {
 
     /// Auto-detect and set the API version
     ///
-    /// Attempts to determine the agent's API version by trying each supported
-    /// API version from newest to oldest until one works. Since agents in API < 3.0
-    /// don't typically have a /version endpoint, this uses a test request approach.
+    /// Attempts to determine the agent's API version by first trying the `/version` endpoint
+    /// and then falling back to testing each API version individually if needed.
     ///
     /// # Returns
     ///
@@ -345,17 +360,33 @@ impl AgentClient {
     ///
     /// # Behavior
     ///
-    /// 1. Tries API versions from newest to oldest
-    /// 2. On success, caches the detected version for future requests
-    /// 3. On complete failure, leaves default version unchanged
+    /// 1. First try the `/version` endpoint to get the supported_version
+    /// 2. If `/version` fails, fall back to testing each API version from newest to oldest
+    /// 3. On success, caches the detected version for future requests
+    /// 4. On complete failure, leaves default version unchanged
     async fn detect_api_version(&mut self) -> Result<(), KeylimectlError> {
-        // Try each supported version from newest to oldest
+        info!("Starting agent API version detection");
+
+        // Step 1: Try the /version endpoint first
+        match self.get_agent_api_version().await {
+            Ok(version) => {
+                info!("Successfully detected agent API version from /version endpoint: {version}");
+                self.api_version = version;
+                return Ok(());
+            }
+            Err(e) => {
+                debug!("Failed to get version from /version endpoint ({e}), falling back to version probing");
+            }
+        }
+
+        // Step 2: Fall back to testing each version individually (newest to oldest)
+        info!("Falling back to individual version testing");
         for &api_version in SUPPORTED_AGENT_API_VERSIONS.iter().rev() {
-            debug!("Trying agent API version {api_version}");
+            debug!("Testing agent API version {api_version}");
 
             // Test this version by making a simple request (quotes endpoint with dummy nonce)
             if self.test_api_version(api_version).await.is_ok() {
-                debug!(
+                info!(
                     "Successfully detected agent API version: {api_version}"
                 );
                 self.api_version = api_version.to_string();
@@ -363,13 +394,57 @@ impl AgentClient {
             }
         }
 
-        // If all versions failed, set to unknown and continue with default
+        // If all versions failed, continue with default version
         warn!(
             "Could not detect agent API version, using default: {}",
             self.api_version
         );
-        self.api_version = UNKNOWN_API_VERSION.to_string();
         Ok(())
+    }
+
+    /// Get the agent API version from the '/version' endpoint
+    ///
+    /// Attempts to retrieve the agent's supported API version using the `/version` endpoint.
+    /// The expected response format is:
+    /// ```json
+    /// {
+    ///   "code": 200,
+    ///   "status": "Success",
+    ///   "results": {
+    ///     "supported_version": "2.2"
+    ///   }
+    /// }
+    /// ```
+    async fn get_agent_api_version(&self) -> Result<String, KeylimectlError> {
+        let url = format!("{}/version", self.base.base_url);
+
+        info!("Requesting agent API version from {url}");
+        debug!("GET {url}");
+
+        let response = self
+            .base
+            .client
+            .get_request(Method::GET, &url)
+            .send()
+            .await
+            .with_context(|| {
+                format!("Failed to send version request to agent at {url}")
+            })?;
+
+        if !response.status().is_success() {
+            return Err(KeylimectlError::api_error(
+                response.status().as_u16(),
+                "Agent does not support the /version endpoint".to_string(),
+                None,
+            ));
+        }
+
+        let resp: AgentVersionResponse =
+            response.json().await.with_context(|| {
+                "Failed to parse version response from agent".to_string()
+            })?;
+
+        Ok(resp.results.supported_version)
     }
 
     /// Test if a specific API version works by making a simple request
