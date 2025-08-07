@@ -388,6 +388,8 @@ impl RegistrarClient {
 
         info!("Requesting registrar API version from {url}");
 
+        debug!("GET {url}");
+
         let response = self
             .base
             .client
@@ -520,6 +522,8 @@ impl RegistrarClient {
             self.base.base_url, self.api_version, agent_uuid
         );
 
+        debug!("GET {url}");
+
         let response = self
             .base
             .client
@@ -618,6 +622,8 @@ impl RegistrarClient {
             "{}/v{}/agents/{}",
             self.base.base_url, self.api_version, agent_uuid
         );
+
+        debug!("DELETE {url}");
 
         let response = self
             .base

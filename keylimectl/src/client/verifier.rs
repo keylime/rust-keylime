@@ -554,6 +554,12 @@ impl VerifierClient {
             self.base.base_url, self.api_version, agent_uuid
         );
 
+        debug!(
+            "POST {url} with data: {}",
+            serde_json::to_string_pretty(&data)
+                .unwrap_or_else(|_| "Invalid JSON".to_string())
+        );
+
         let response = self
             .base
             .client
@@ -643,6 +649,8 @@ impl VerifierClient {
             "{}/v2.1/agents/{}", // Use v2.1 as stable legacy version
             self.base.base_url, agent_uuid
         );
+
+        debug!("GET {url}");
 
         let response = self
             .base
@@ -786,6 +794,8 @@ impl VerifierClient {
             self.base.base_url, agent_uuid
         );
 
+        debug!("DELETE {url}");
+
         let response = self
             .base
             .client
@@ -811,6 +821,8 @@ impl VerifierClient {
             "{}/v{}/agents/{}",
             self.base.base_url, self.api_version, agent_uuid
         );
+
+        debug!("DELETE {url}");
 
         let response = self
             .base
@@ -980,6 +992,8 @@ impl VerifierClient {
         if let Some(vid) = verifier_id {
             url.push_str(&format!("?verifier={vid}"));
         }
+
+        debug!("GET {url}");
 
         let response = self
             .base
@@ -1188,6 +1202,13 @@ impl VerifierClient {
         let url = format!(
             "{}/v2.1/allowlists/{}", // Use v2.1 as stable legacy version
             self.base.base_url, policy_name
+        );
+
+        debug!(
+            "POST {} with data: {}",
+            url,
+            serde_json::to_string_pretty(&policy_data)
+                .unwrap_or_else(|_| "Invalid JSON".to_string())
         );
 
         let response = self
