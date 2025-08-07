@@ -70,8 +70,10 @@ use crate::error::KeylimectlError;
 use crate::output::OutputHandler;
 use crate::AgentAction;
 use base64::{engine::general_purpose::STANDARD, Engine};
+use hex;
 use keylime::crypto;
 use log::{debug, warn};
+use openssl::rand;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::fs;
@@ -888,7 +890,61 @@ async fn add_agent(
             tpm_policy,
         )
         .with_ak_tpm(agent_data.get("aik_tpm").cloned())
-        .with_mtls_cert(agent_data.get("mtls_cert").cloned());
+        .with_mtls_cert(agent_data.get("mtls_cert").cloned())
+        .with_metadata(
+            agent_data
+                .get("metadata")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string())
+                .or_else(|| Some("{}".to_string())),
+        ) // Use agent metadata or default
+        .with_ima_sign_verification_keys(
+            agent_data
+                .get("ima_sign_verification_keys")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string())
+                .or_else(|| Some("".to_string())),
+        ) // Use agent IMA keys or default
+        .with_revocation_key(
+            agent_data
+                .get("revocation_key")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string())
+                .or_else(|| Some("".to_string())),
+        ) // Use agent revocation key or default
+        .with_accept_tpm_hash_algs(Some(vec![
+            "sha256".to_string(),
+            "sha1".to_string(),
+        ])) // Add required TPM hash algorithms
+        .with_accept_tpm_encryption_algs(Some(vec![
+            "rsa".to_string(),
+            "ecc".to_string(),
+        ])) // Add required TPM encryption algorithms
+        .with_accept_tpm_signing_algs(Some(vec![
+            "rsa".to_string(),
+            "ecdsa".to_string(),
+        ])) // Add required TPM signing algorithms
+        .with_supported_version(
+            agent_data
+                .get("supported_version")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string())
+                .or_else(|| Some("2.1".to_string())),
+        ) // Use agent supported version or default
+        .with_mb_policy_name(
+            agent_data
+                .get("mb_policy_name")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string())
+                .or_else(|| Some("".to_string())),
+        ) // Use agent MB policy name or default
+        .with_mb_policy(
+            agent_data
+                .get("mb_policy")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string())
+                .or_else(|| Some("".to_string())),
+        ); // Use agent MB policy or default
 
         // Add V key from attestation if available
         if let Some(attestation) = &attestation_result {
@@ -900,20 +956,21 @@ async fn add_agent(
         serde_json::to_value(request)?
     };
 
-    // Add policies if provided
+    // Add policies if provided (base64-encoded as expected by verifier)
     if let Some(policy_path) = params.runtime_policy {
         let policy_content = load_policy_file(policy_path)?;
+        let policy_b64 = STANDARD.encode(policy_content.as_bytes());
         if let Some(obj) = request.as_object_mut() {
-            let _ = obj
-                .insert("runtime_policy".to_string(), json!(policy_content));
+            let _ =
+                obj.insert("runtime_policy".to_string(), json!(policy_b64));
         }
     }
 
     if let Some(policy_path) = params.mb_policy {
         let policy_content = load_policy_file(policy_path)?;
+        let policy_b64 = STANDARD.encode(policy_content.as_bytes());
         if let Some(obj) = request.as_object_mut() {
-            let _ =
-                obj.insert("mb_policy".to_string(), json!(policy_content));
+            let _ = obj.insert("mb_policy".to_string(), json!(policy_b64));
         }
     }
 
@@ -1587,29 +1644,41 @@ async fn perform_agent_attestation(
 
     output.progress("Generating cryptographic keys");
 
-    // Generate U and V keys (simulated for now)
-    let u_key = generate_random_string(32);
-    let v_key = generate_random_string(32);
-    let k_key = crypto::compute_hmac(u_key.as_bytes(), "derived".as_bytes())
-        .map_err(|e| {
-            CommandError::resource_error(
-                "crypto",
-                format!("Failed to compute HMAC: {e}"),
-            )
-        })?;
+    // Generate U and V keys as random bytes (matching Keylime implementation)
+    let mut u_key_bytes = [0u8; 32]; // AES-256 key length
+    let mut v_key_bytes = [0u8; 32]; // AES-256 key length
 
-    let u_key_len = u_key.len();
-    let v_key_len = v_key.len();
-    debug!("Generated U key: {u_key_len} bytes");
-    debug!("Generated V key: {v_key_len} bytes");
+    // Use OpenSSL's random bytes generator (same as Keylime)
+    rand::rand_bytes(&mut u_key_bytes).map_err(|e| {
+        CommandError::resource_error(
+            "crypto",
+            format!("Failed to generate U key: {e}"),
+        )
+    })?;
+    rand::rand_bytes(&mut v_key_bytes).map_err(|e| {
+        CommandError::resource_error(
+            "crypto",
+            format!("Failed to generate V key: {e}"),
+        )
+    })?;
+
+    // Compute K key as XOR of U and V (as in Keylime)
+    let mut k_key_bytes = [0u8; 32];
+    for i in 0..32 {
+        k_key_bytes[i] = u_key_bytes[i] ^ v_key_bytes[i];
+    }
+
+    debug!("Generated U key: {} bytes", u_key_bytes.len());
+    debug!("Generated V key: {} bytes", v_key_bytes.len());
 
     // Encrypt U key with agent's public key
     output.progress("Encrypting U key for agent");
 
     // Implement proper RSA encryption using agent's public key
-    let encrypted_u = encrypt_u_key_with_agent_pubkey(&u_key, public_key)?;
-    let auth_tag =
-        crypto::compute_hmac(&k_key, u_key.as_bytes()).map_err(|e| {
+    let encrypted_u =
+        encrypt_u_key_with_agent_pubkey(&u_key_bytes, public_key)?;
+    let auth_tag = crypto::compute_hmac(&k_key_bytes, agent_id.as_bytes())
+        .map_err(|e| {
             CommandError::resource_error(
                 "crypto",
                 format!("Failed to compute auth tag: {e}"),
@@ -1622,11 +1691,11 @@ async fn perform_agent_attestation(
         "quote": quote,
         "public_key": public_key,
         "nonce": nonce,
-        "u_key": u_key,
-        "v_key": STANDARD.encode(v_key.as_bytes()),
-        "k_key": STANDARD.encode(&k_key),
+        "u_key": STANDARD.encode(u_key_bytes),
+        "v_key": STANDARD.encode(v_key_bytes),
+        "k_key": STANDARD.encode(k_key_bytes),
         "encrypted_u": encrypted_u,
-        "auth_tag": STANDARD.encode(&auth_tag)
+        "auth_tag": hex::encode(auth_tag)
     })))
 }
 
@@ -1664,8 +1733,16 @@ async fn perform_key_delivery(
     };
 
     // Deliver key and payload to agent
+    // Note: encrypted_u is already base64-encoded, auth_tag should be hex-encoded
+    let encrypted_u_bytes = STANDARD.decode(encrypted_u).map_err(|e| {
+        CommandError::resource_error(
+            "crypto",
+            format!("Failed to decode encrypted U key: {e}"),
+        )
+    })?;
+
     let _delivery_result = agent_client
-        .deliver_key(encrypted_u.as_bytes(), auth_tag, payload.as_deref())
+        .deliver_key(&encrypted_u_bytes, auth_tag, payload.as_deref())
         .await
         .map_err(|e| {
             CommandError::agent_operation_failed(
@@ -1987,14 +2064,109 @@ async fn validate_tpm_quote(
         )
     })?;
 
-    // Step 2: Basic format validation
-    let quote_bytes = STANDARD.decode(quote).map_err(|e| {
+    // Step 2: Parse colon-separated quote format
+    // Keylime TPM quotes are formatted as: quote:signature:additional_data
+    debug!(
+        "Original quote string length: {}, first 50 chars: '{}'",
+        quote.len(),
+        &quote.chars().take(50).collect::<String>()
+    );
+
+    let quote_parts: Vec<&str> = quote.split(':').collect();
+    if quote_parts.is_empty() {
+        return Ok(TpmQuoteValidation {
+            is_valid: false,
+            nonce_verified: false,
+            aik_verified: false,
+            details: "Quote is empty".to_string(),
+        });
+    }
+
+    // Decode the first part (actual TPM quote)
+    let quote_data = quote_parts[0];
+    debug!(
+        "Quote data part length: {}, content: '{}'",
+        quote_data.len(),
+        if quote_data.len() > 100 {
+            format!(
+                "{}...{}",
+                &quote_data[..50],
+                &quote_data[quote_data.len() - 10..]
+            )
+        } else {
+            quote_data.to_string()
+        }
+    );
+
+    // Check for invalid characters around position 179
+    if quote_data.len() > 179 {
+        let char_at_179 = quote_data.chars().nth(179).unwrap_or('?');
+        debug!(
+            "Character at position 179: '{}' (ASCII: {})",
+            char_at_179, char_at_179 as u8
+        );
+
+        // Show context around position 179
+        let start = 179usize.saturating_sub(10);
+        let end = (179usize + 10).min(quote_data.len());
+        let context = &quote_data[start..end];
+        debug!("Context around position 179: '{context}'");
+
+        // Check if there are multiple base64 segments
+        let parts_by_equals: Vec<&str> = quote_data.split("==").collect();
+        debug!("Parts split by '==': {} parts", parts_by_equals.len());
+        for (i, part) in parts_by_equals.iter().enumerate() {
+            debug!(
+                "Part {}: length {}, content: '{}'",
+                i,
+                part.len(),
+                if part.len() > 40 {
+                    format!("{}...", &part[..40])
+                } else {
+                    part.to_string()
+                }
+            );
+        }
+    }
+
+    // Handle the 'r' prefix - remove the single 'r' character as documented
+    let quote_data_clean = if let Some(stripped) = quote_data.strip_prefix('r') {
+        debug!("Removing 'r' prefix from quote data");
+        stripped
+    } else {
+        quote_data
+    };
+
+    debug!("Cleaned quote data length: {}", quote_data_clean.len());
+
+    // Ensure proper base64 padding (length must be multiple of 4)
+    let quote_data_padded = if quote_data_clean.len() % 4 != 0 {
+        let padding_needed = 4 - (quote_data_clean.len() % 4);
+        let padding = "=".repeat(padding_needed);
+        debug!("Adding {padding_needed} padding characters");
+        format!("{quote_data_clean}{padding}")
+    } else {
+        quote_data_clean.to_string()
+    };
+
+    debug!("Final quote data length: {}", quote_data_padded.len());
+
+    // Try to decode the cleaned and padded quote data
+    let quote_bytes = STANDARD.decode(&quote_data_padded).map_err(|e| {
         CommandError::agent_operation_failed(
             agent_id.to_string(),
             "quote_validation",
-            format!("Invalid base64 quote: {e}"),
+            format!(
+                "Invalid base64 quote data (after cleaning and padding): {e}"
+            ),
         )
     })?;
+
+    debug!(
+        "Parsed quote with {} parts, quote data length: {} bytes",
+        quote_parts.len(),
+        quote_bytes.len()
+    );
 
     if quote_bytes.len() < 32 {
         return Ok(TpmQuoteValidation {
@@ -2026,7 +2198,8 @@ async fn validate_tpm_quote(
     let quote_len = quote_bytes.len();
     let aik_available = !registered_aik.is_empty();
     let details = format!(
-        "Quote length: {quote_len} bytes, Nonce found: {nonce_found}, AIK consistent: {aik_consistent}, Registered AIK available: {aik_available}"
+        "Quote parts: {}, Quote length: {quote_len} bytes, Nonce found: {nonce_found}, AIK consistent: {aik_consistent}, Registered AIK available: {aik_available}",
+        quote_parts.len()
     );
 
     debug!("TPM quote validation result: {details}");
@@ -2057,30 +2230,19 @@ async fn validate_tpm_quote(
 /// - Validates public key format before encryption
 /// - Provides cryptographic confidentiality for key delivery
 fn encrypt_u_key_with_agent_pubkey(
-    u_key: &str,
+    u_key_bytes: &[u8],
     agent_public_key: &str,
 ) -> Result<String, CommandError> {
     debug!("Encrypting U key with agent's RSA public key");
 
-    // Step 1: Decode and parse the agent's public key
-    let pubkey_pem = String::from_utf8(
-        STANDARD.decode(agent_public_key).map_err(|e| {
-            CommandError::resource_error(
-                "crypto",
-                format!("Invalid base64 public key: {e}"),
-            )
-        })?,
-    )
-    .map_err(|e| {
-        CommandError::resource_error(
-            "crypto",
-            format!("Invalid UTF-8 in public key: {e}"),
-        )
-    })?;
+    // Step 1: Agent public keys are provided in PEM format by Keylime agents
+    // Based on quotes_handler.rs:95 - agents use crypto::pkey_pub_to_pem() to format keys
+    debug!("Using public key in PEM format from agent response");
+    let pubkey_pem = agent_public_key;
 
     // Step 2: Import the public key as OpenSSL PKey
     let pubkey =
-        crypto::testing::pkey_pub_from_pem(&pubkey_pem).map_err(|e| {
+        crypto::testing::pkey_pub_from_pem(pubkey_pem).map_err(|e| {
             CommandError::resource_error(
                 "crypto",
                 format!("Failed to parse public key PEM: {e}"),
@@ -2089,18 +2251,19 @@ fn encrypt_u_key_with_agent_pubkey(
 
     // Step 3: Perform RSA-OAEP encryption using keylime crypto module
     let encrypted_bytes =
-        crypto::testing::rsa_oaep_encrypt(&pubkey, u_key.as_bytes())
-            .map_err(|e| {
+        crypto::testing::rsa_oaep_encrypt(&pubkey, u_key_bytes).map_err(
+            |e| {
                 CommandError::resource_error(
                     "crypto",
                     format!("RSA encryption failed: {e}"),
                 )
-            })?;
+            },
+        )?;
 
     // Step 4: Encode result as base64 for transmission
     let encrypted_b64 = STANDARD.encode(&encrypted_bytes);
 
-    let input_len = u_key.len();
+    let input_len = u_key_bytes.len();
     let output_len = encrypted_bytes.len();
     debug!(
         "Successfully encrypted U key: {input_len} bytes -> {output_len} bytes"
@@ -2196,22 +2359,32 @@ fn build_push_model_request(
         "mtls_cert": agent_data.get("mtls_cert"),
         "accept_tpm_hash_algs": ["sha256", "sha1"],
         "accept_tpm_encryption_algs": ["rsa", "ecc"],
-        "accept_tpm_signing_algs": ["rsa", "ecdsa"]
+        "accept_tpm_signing_algs": ["rsa", "ecdsa"],
+        "ima_sign_verification_keys": agent_data.get("ima_sign_verification_keys").and_then(|v| v.as_str()).unwrap_or(""),
+        "revocation_key": agent_data.get("revocation_key").and_then(|v| v.as_str()).unwrap_or(""),
+        "supported_version": agent_data.get("supported_version").and_then(|v| v.as_str()).unwrap_or("3.0"),
+        "mb_policy_name": agent_data.get("mb_policy_name").and_then(|v| v.as_str()).unwrap_or(""),
+        "mb_policy": agent_data.get("mb_policy").and_then(|v| v.as_str()).unwrap_or("")
     });
 
-    // Add policies if provided
+    // Add policies if provided (base64-encoded as expected by verifier)
     if let Some(policy_path) = runtime_policy {
         let policy_content = load_policy_file(policy_path)?;
-        request["runtime_policy"] = json!(policy_content);
+        let policy_b64 = STANDARD.encode(policy_content.as_bytes());
+        request["runtime_policy"] = json!(policy_b64);
     }
 
     if let Some(policy_path) = mb_policy {
         let policy_content = load_policy_file(policy_path)?;
-        request["mb_policy"] = json!(policy_content);
+        let policy_b64 = STANDARD.encode(policy_content.as_bytes());
+        request["mb_policy"] = json!(policy_b64);
     }
 
-    // Add metadata
-    request["metadata"] = json!({});
+    // Add metadata from agent data or default
+    request["metadata"] = agent_data
+        .get("metadata")
+        .cloned()
+        .unwrap_or_else(|| json!({}));
 
     debug!("Push model request built successfully");
     Ok(request)

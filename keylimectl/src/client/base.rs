@@ -165,8 +165,15 @@ impl BaseClient {
         }
 
         // Add trusted CA certificates for server verification
+        debug!(
+            "Attempting to load {} trusted CA certificate(s)",
+            config.tls.trusted_ca.len()
+        );
+        let mut loaded_cas = 0;
         for ca_path in &config.tls.trusted_ca {
+            debug!("Checking CA certificate: {ca_path}");
             if std::path::Path::new(ca_path).exists() {
+                debug!("CA certificate file exists, attempting to load: {ca_path}");
                 let ca_cert = std::fs::read(ca_path).map_err(|e| {
                     ClientError::Tls(TlsError::ca_certificate_file(
                         ca_path,
@@ -183,10 +190,15 @@ impl BaseClient {
                     })?;
 
                 builder = builder.add_root_certificate(ca_cert);
+                loaded_cas += 1;
+                debug!("Successfully loaded CA certificate: {ca_path}");
             } else {
                 warn!("Trusted CA certificate file not found: {ca_path}");
             }
         }
+        debug!(
+            "Loaded {loaded_cas} CA certificate(s) for server verification"
+        );
 
         // Add client certificate if configured
         if let (Some(cert_path), Some(key_path)) =
