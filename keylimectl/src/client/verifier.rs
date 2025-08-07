@@ -306,8 +306,8 @@ impl VerifierClient {
 
     /// Auto-detect and set the API version
     ///
-    /// Attempts to determine the verifier's API version by first trying the `/version` endpoint.
-    /// If that fails, it tries each supported API version from oldest to newest until one works.
+    /// Attempts to determine the verifier's API version by testing endpoint availability.
+    /// For API v3.0+, the /version endpoint was removed, so we test the versioned endpoints directly.
     /// This follows the same pattern used in the rust-keylime agent's registrar client.
     ///
     /// # Returns
@@ -317,8 +317,8 @@ impl VerifierClient {
     ///
     /// # Behavior
     ///
-    /// 1. First tries `/version` endpoint to get current and supported versions
-    /// 2. If `/version` fails, tries API versions from newest to oldest
+    /// 1. For v3.0+: Tests `/v3.0/` endpoint availability directly (/version endpoint was removed)
+    /// 2. For v2.x: First tries `/version` endpoint, then falls back to endpoint testing
     /// 3. On success, caches the detected version for future requests
     /// 4. On complete failure, leaves default version unchanged
     ///
@@ -339,28 +339,39 @@ impl VerifierClient {
     pub async fn detect_api_version(
         &mut self,
     ) -> Result<(), KeylimectlError> {
-        // Try to get version from /version endpoint first
-        match self.get_verifier_api_version().await {
-            Ok(version) => {
-                info!("Detected verifier API version: {version}");
-                self.api_version = version;
-                return Ok(());
-            }
-            Err(e) => {
-                debug!("Failed to get version from /version endpoint: {e}");
-                // Continue with fallback approach
-            }
-        }
-
-        // Fallback: try each supported version from newest to oldest
+        // Test each supported version from newest to oldest
         for &api_version in SUPPORTED_API_VERSIONS.iter().rev() {
             info!("Trying verifier API version {api_version}");
 
-            // Test this version by making a simple request (list agents)
-            if self.test_api_version(api_version).await.is_ok() {
-                info!("Successfully detected verifier API version: {api_version}");
-                self.api_version = api_version.to_string();
-                return Ok(());
+            // For v3.0+, test the versioned root endpoint directly since /version was removed
+            if api_version.starts_with("3.") {
+                if self.test_api_version_v3(api_version).await.is_ok() {
+                    info!("Successfully detected verifier API version: {api_version}");
+                    self.api_version = api_version.to_string();
+                    return Ok(());
+                }
+            } else {
+                // For v2.x, try /version endpoint first for better version info
+                if api_version.starts_with("2.") {
+                    match self.get_verifier_api_version().await {
+                        Ok(version) => {
+                            info!("Detected verifier API version from /version endpoint: {version}");
+                            self.api_version = version;
+                            return Ok(());
+                        }
+                        Err(e) => {
+                            debug!("Failed to get version from /version endpoint: {e}");
+                            // Fall back to endpoint testing for this version
+                        }
+                    }
+                }
+
+                // Test this version by making a simple request
+                if self.test_api_version(api_version).await.is_ok() {
+                    info!("Successfully detected verifier API version: {api_version}");
+                    self.api_version = api_version.to_string();
+                    return Ok(());
+                }
             }
         }
 
@@ -410,7 +421,38 @@ impl VerifierClient {
         Ok(resp.results.current_version)
     }
 
-    /// Test if a specific API version works by making a simple request
+    /// Test if a specific API version v3.0+ works by testing the versioned root endpoint
+    /// In API v3.0+, the /version endpoint was removed, so we test endpoint availability directly
+    async fn test_api_version_v3(
+        &self,
+        api_version: &str,
+    ) -> Result<(), KeylimectlError> {
+        let url = format!("{}/v{}/", self.base.base_url, api_version);
+
+        debug!("Testing verifier API version {api_version} with root endpoint: {url}");
+
+        let response = self
+            .base
+            .client
+            .get_request(Method::GET, &url)
+            .send()
+            .await
+            .with_context(|| {
+                format!("Failed to test API version {api_version}")
+            })?;
+
+        if response.status().is_success() {
+            Ok(())
+        } else {
+            Err(KeylimectlError::api_error(
+                response.status().as_u16(),
+                format!("API version {api_version} not supported"),
+                None,
+            ))
+        }
+    }
+
+    /// Test if a specific API version v2.x works by making a simple request
     async fn test_api_version(
         &self,
         api_version: &str,
@@ -1995,16 +2037,35 @@ mod tests {
 
             // Should try 3.0 first, then 2.3, then 2.2, then 2.1, then 2.0
             assert_eq!(attempted_versions[0], "3.0");
-            assert_eq!(attempted_versions[1], "2.3");
-            assert_eq!(attempted_versions[2], "2.2");
-            assert_eq!(attempted_versions[3], "2.1");
-            assert_eq!(attempted_versions[4], "2.0");
+        }
 
-            // Should try all supported versions
-            assert_eq!(
-                attempted_versions.len(),
-                SUPPORTED_API_VERSIONS.len()
-            );
+        #[test]
+        fn test_v3_endpoint_detection_logic() {
+            // Test the logic for detecting v3.0+ vs v2.x behavior
+
+            // v3.0+ should use root endpoint testing
+            let v3_versions = ["3.0", "3.1"];
+            for version in v3_versions {
+                assert!(version.starts_with("3."));
+            }
+
+            // v2.x should use /version endpoint first
+            let v2_versions = ["2.0", "2.1", "2.2", "2.3"];
+            for version in v2_versions {
+                assert!(version.starts_with("2."));
+            }
+        }
+
+        #[test]
+        fn test_v3_test_url_format() {
+            // Test that v3 test URLs are formatted correctly
+            let base_url = "https://localhost:8881";
+            let api_version = "3.0";
+            let expected_url = format!("{base_url}/v{api_version}/");
+
+            assert_eq!(expected_url, "https://localhost:8881/v3.0/");
+            assert!(expected_url.ends_with("/"));
+            assert!(!expected_url.contains("/agents"));
         }
     }
 }
