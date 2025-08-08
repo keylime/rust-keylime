@@ -1397,7 +1397,7 @@ dependencies = [
 
 [[package]]
 name = "keylime"
-version = "0.2.7"
+version = "0.2.8"
 dependencies = [
  "actix-rt",
  "actix-web",
@@ -1438,7 +1438,7 @@ dependencies = [
 
 [[package]]
 name = "keylime-macros"
-version = "0.2.7"
+version = "0.2.8"
 dependencies = [
  "quote",
  "syn 2.0.90",
@@ -1448,7 +1448,7 @@ dependencies = [
 
 [[package]]
 name = "keylime_agent"
-version = "0.2.7"
+version = "0.2.8"
 dependencies = [
  "actix-rt",
  "actix-web",
@@ -1480,7 +1480,7 @@ dependencies = [
 
 [[package]]
 name = "keylime_ima_emulator"
-version = "0.2.7"
+version = "0.2.8"
 dependencies = [
  "clap",
  "hex",
@@ -1494,7 +1494,7 @@ dependencies = [
 
 [[package]]
 name = "keylime_push_model_agent"
-version = "0.2.7"
+version = "0.2.8"
 dependencies = [
  "actix-rt",
  "actix-web",
