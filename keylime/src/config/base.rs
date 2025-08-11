@@ -85,16 +85,10 @@ pub static DEFAULT_TRUSTED_CLIENT_CA: &str = "cv_ca/cacert.crt";
 
 // Push attestation agent option defaults
 pub const DEFAULT_DISABLED_SIGNING_ALGORITHMS: &[&str] = &["ecschnorr"];
-pub const DEFAULT_IMA_LOGS_APPENDABLE: bool = true;
-pub const DEFAULT_IMA_LOGS_FORMATS: &str = "text/plain";
-pub const DEFAULT_IMA_LOGS_SUPPORTS_PARTIAL_ACCESS: bool = true;
 pub const DEFAULT_IMA_ML_DIRECTORY_PATH: &str = "/sys/kernel/security/ima";
 pub const DEFAULT_IMA_ML_COUNT_FILE: &str =
     "/sys/kernel/security/ima/measurements";
-pub const DEFAULT_UEFI_LOGS_APPENDABLE: bool = true;
 pub const DEFAULT_UEFI_LOGS_EVIDENCE_VERSION: &str = "2.1";
-pub const DEFAULT_UEFI_LOGS_FORMATS: &str = "application/octet-stream";
-pub const DEFAULT_UEFI_LOGS_SUPPORTS_PARTIAL_ACCESS: bool = true;
 pub const DEFAULT_UEFI_LOGS_BINARY_FILE_PATH: &str =
     "/sys/kernel/security/tpm0/binary_bios_measurements";
 
@@ -168,16 +162,9 @@ pub struct AgentConfig {
 
     // Push attestation options
     pub certification_keys_server_identifier: String,
-    pub ima_logs_appendable: bool,
-    pub ima_logs_formats: String,
-    pub ima_logs_supports_partial_access: bool,
     pub ima_ml_count_file: String,
     pub registrar_api_versions: String,
-    pub uefi_logs_binary_file_path: String,
     pub uefi_logs_evidence_version: String,
-    pub uefi_logs_supports_partial_access: bool,
-    pub uefi_logs_appendable: bool,
-    pub uefi_logs_formats: String,
     pub verifier_url: String,
 }
 
@@ -325,20 +312,10 @@ impl Default for AgentConfig {
             version: CONFIG_VERSION.to_string(),
             certification_keys_server_identifier:
                 DEFAULT_CERTIFICATION_KEYS_SERVER_IDENTIFIER.to_string(),
-            ima_logs_appendable: DEFAULT_IMA_LOGS_APPENDABLE,
-            ima_logs_formats: DEFAULT_IMA_LOGS_FORMATS.to_string(),
-            ima_logs_supports_partial_access:
-                DEFAULT_IMA_LOGS_SUPPORTS_PARTIAL_ACCESS,
             ima_ml_count_file: DEFAULT_IMA_ML_COUNT_FILE.to_string(),
             registrar_api_versions: DEFAULT_REGISTRAR_API_VERSIONS.join(", "),
-            uefi_logs_binary_file_path: DEFAULT_UEFI_LOGS_BINARY_FILE_PATH
-                .to_string(),
             uefi_logs_evidence_version: DEFAULT_UEFI_LOGS_EVIDENCE_VERSION
                 .to_string(),
-            uefi_logs_supports_partial_access:
-                DEFAULT_UEFI_LOGS_SUPPORTS_PARTIAL_ACCESS,
-            uefi_logs_appendable: DEFAULT_UEFI_LOGS_APPENDABLE,
-            uefi_logs_formats: DEFAULT_UEFI_LOGS_FORMATS.to_string(),
             verifier_url: DEFAULT_VERIFIER_URL.to_string(),
         }
     }
