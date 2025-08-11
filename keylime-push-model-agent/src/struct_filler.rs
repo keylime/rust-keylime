@@ -164,10 +164,10 @@ impl<'a> FillerFromHardware<'a> {
                             capabilities: structures::LogCapabilities {
                                 evidence_version: Some(config.uefi_logs_evidence_version().to_string()),
                                 entry_count: uefi_count,
-                                supports_partial_access: config.uefi_logs_supports_partial_access(),
-                                appendable: config.uefi_logs_appendable(),
+                                supports_partial_access: false,
+                                appendable: false,
                                 // TODO: make this to not panic on failure
-                                formats: config.uefi_logs_formats().expect("failed to get uefi_logs_formats").iter().map(|e| e.to_string()).collect(),
+                                formats: vec!["application/octet-stream".to_string()]
                             },
                         },
                         structures::EvidenceSupported::EvidenceLog {
@@ -175,10 +175,10 @@ impl<'a> FillerFromHardware<'a> {
                             capabilities: structures::LogCapabilities {
                                 evidence_version: None,
                                 entry_count: ima_log_count,
-                                supports_partial_access: config.ima_logs_supports_partial_access(),
-                                appendable: config.ima_logs_appendable(),
+                                supports_partial_access: true,
+                                appendable: true,
                                 // TODO: make this to not panic on failure
-                                formats: config.ima_logs_formats().expect("failed to get ima_log_formats").iter().map(|e| e.to_string()).collect(),
+                                formats: vec!["application/text".to_string()],
                             },
                         },
                     ],

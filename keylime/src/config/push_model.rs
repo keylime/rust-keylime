@@ -43,10 +43,6 @@ pub struct PushModelConfig {
     enable_iak_idevid: bool,
     #[transform(using = override_default_ek_handle, error = OverrideError)]
     ek_handle: String,
-    ima_logs_appendable: bool,
-    #[transform(using = parse_list, error = ListParsingError)]
-    ima_logs_formats: Vec<&str>,
-    ima_logs_supports_partial_access: bool,
     ima_ml_count_file: String,
     measuredboot_ml_path: String,
     #[transform(using = parse_list, error = ListParsingError)]
@@ -59,12 +55,7 @@ pub struct PushModelConfig {
     tpm_encryption_alg: String,
     tpm_hash_alg: String,
     tpm_signing_alg: String,
-    uefi_logs_binary_file_path: String,
     uefi_logs_evidence_version: String,
-    uefi_logs_supports_partial_access: bool,
-    uefi_logs_appendable: bool,
-    #[transform(using = parse_list, error = ListParsingError)]
-    uefi_logs_formats: Vec<&str>,
     uuid: String,
     verifier_url: String,
 }
@@ -99,20 +90,6 @@ mod tests {
             DEFAULT_PUSH_EK_HANDLE
         );
         assert_eq!(config.enable_iak_idevid(), DEFAULT_ENABLE_IAK_IDEVID);
-        assert_eq!(config.ima_logs_appendable(), DEFAULT_IMA_LOGS_APPENDABLE);
-        assert_eq!(
-            config
-                .ima_logs_formats()
-                .expect("failed to parse ima_logs_formats")
-                .iter()
-                .map(|&s| s.to_string())
-                .collect::<Vec<String>>(),
-            [DEFAULT_IMA_LOGS_FORMATS]
-        );
-        assert_eq!(
-            config.ima_logs_supports_partial_access(),
-            DEFAULT_IMA_LOGS_SUPPORTS_PARTIAL_ACCESS
-        );
         assert_eq!(config.ima_ml_count_file(), DEFAULT_IMA_ML_COUNT_FILE);
         assert_eq!(config.registrar_ip(), DEFAULT_REGISTRAR_IP);
         assert_eq!(config.registrar_port(), DEFAULT_REGISTRAR_PORT);
@@ -130,29 +107,8 @@ mod tests {
         );
         assert_eq!(config.server_key_password(), DEFAULT_SERVER_KEY_PASSWORD);
         assert_eq!(
-            config.uefi_logs_appendable(),
-            DEFAULT_UEFI_LOGS_APPENDABLE
-        );
-        assert_eq!(
-            config.uefi_logs_binary_file_path(),
-            DEFAULT_UEFI_LOGS_BINARY_FILE_PATH
-        );
-        assert_eq!(
             config.uefi_logs_evidence_version(),
             DEFAULT_UEFI_LOGS_EVIDENCE_VERSION
-        );
-        assert_eq!(
-            config
-                .uefi_logs_formats()
-                .expect("failed to parse uefi_logs_formats")
-                .iter()
-                .map(|s| s.to_string())
-                .collect::<Vec<String>>(),
-            [DEFAULT_UEFI_LOGS_FORMATS]
-        );
-        assert_eq!(
-            config.uefi_logs_supports_partial_access(),
-            DEFAULT_UEFI_LOGS_SUPPORTS_PARTIAL_ACCESS
         );
         assert_eq!(config.tpm_encryption_alg(), DEFAULT_TPM_ENCRYPTION_ALG);
         assert_eq!(config.tpm_hash_alg(), DEFAULT_TPM_HASH_ALG);
