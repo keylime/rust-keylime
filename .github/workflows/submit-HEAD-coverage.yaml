@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-22.04
     name: Submit code coverage from merged PR
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v5
     - name: Install testing-farm script
       run: pip3 -v install tft-cli
     - name: Run tests on Testing Farm
