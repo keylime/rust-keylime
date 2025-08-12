@@ -164,9 +164,8 @@ impl<'a> FillerFromHardware<'a> {
                             capabilities: structures::LogCapabilities {
                                 evidence_version: Some(config.uefi_logs_evidence_version().to_string()),
                                 entry_count: uefi_count,
-                                supports_partial_access: false,
-                                appendable: false,
-                                // TODO: make this to not panic on failure
+                                supports_partial_access: true,
+                                appendable: true,
                                 formats: vec!["application/octet-stream".to_string()]
                             },
                         },
@@ -177,8 +176,7 @@ impl<'a> FillerFromHardware<'a> {
                                 entry_count: ima_log_count,
                                 supports_partial_access: true,
                                 appendable: true,
-                                // TODO: make this to not panic on failure
-                                formats: vec!["application/text".to_string()],
+                                formats: vec!["text/plain".to_string()],
                             },
                         },
                     ],
