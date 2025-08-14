@@ -465,6 +465,7 @@ impl ContextInfo {
             message: quote_message,
             signature: quote_signature,
             subject_data: pcr_values,
+            meta: None,
         })
     }
 
@@ -493,6 +494,7 @@ impl ContextInfo {
         Ok(EvidenceData::ImaLog {
             entry_count,
             entries,
+            meta: None,
         })
     }
 
@@ -519,7 +521,10 @@ impl ContextInfo {
             String::new()
         };
 
-        Ok(EvidenceData::UefiLog { entries: content })
+        Ok(EvidenceData::UefiLog {
+            entries: content,
+            meta: None,
+        })
     }
 
     pub async fn collect_evidences(

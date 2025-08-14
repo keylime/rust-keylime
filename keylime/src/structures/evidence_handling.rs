@@ -55,13 +55,19 @@ pub enum EvidenceData {
         subject_data: String,
         message: String,
         signature: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        meta: Option<JsonValue>,
     },
     UefiLog {
         entries: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        meta: Option<JsonValue>,
     },
     ImaLog {
         entry_count: usize,
         entries: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        meta: Option<JsonValue>,
     },
 }
 
@@ -85,10 +91,12 @@ impl TryFrom<JsonValue> for EvidenceData {
                     .as_str()
                     .ok_or_else(|| "Invalid signature field".to_string())?
                     .to_string();
+                let meta = value.get("meta").cloned();
                 return Ok(EvidenceData::TpmQuote {
                     subject_data: subject_data.to_string(),
                     message,
                     signature,
+                    meta,
                 });
             } else {
                 return Err("Invalid subject_data field".to_string());
@@ -105,9 +113,11 @@ impl TryFrom<JsonValue> for EvidenceData {
                     .as_str()
                     .ok_or_else(|| "Invalid entries field".to_string())?
                     .to_string();
+                let meta = value.get("meta").cloned();
                 return Ok(EvidenceData::ImaLog {
                     entry_count,
                     entries,
+                    meta,
                 });
             } else {
                 return Err("Invalid entry_count field".to_string());
@@ -120,7 +130,8 @@ impl TryFrom<JsonValue> for EvidenceData {
                     .as_str()
                     .unwrap() //#[allow_ci]
                     .to_string();
-                return Ok(EvidenceData::UefiLog { entries });
+                let meta = value.get("meta").cloned();
+                return Ok(EvidenceData::UefiLog { entries, meta });
             } else {
                 return Err("Invalid entries field".to_string());
             }
@@ -136,6 +147,7 @@ impl From<EvidenceData> for JsonValue {
                 subject_data,
                 message,
                 signature,
+                meta,
             } => {
                 let mut map = serde_json::Map::new();
                 map.insert(
@@ -147,16 +159,23 @@ impl From<EvidenceData> for JsonValue {
                     "signature".to_string(),
                     to_value(signature).unwrap(), //#[allow_ci]
                 );
+                if let Some(meta_value) = meta {
+                    map.insert("meta".to_string(), meta_value);
+                }
                 JsonValue::Object(map)
             }
-            EvidenceData::UefiLog { entries } => {
+            EvidenceData::UefiLog { entries, meta } => {
                 let mut map = serde_json::Map::new();
                 map.insert("entries".to_string(), to_value(entries).unwrap()); //#[allow_ci]
+                if let Some(meta_value) = meta {
+                    map.insert("meta".to_string(), meta_value);
+                }
                 JsonValue::Object(map)
             }
             EvidenceData::ImaLog {
                 entry_count,
                 entries,
+                meta,
             } => {
                 let mut map = serde_json::Map::new();
                 map.insert(
@@ -164,6 +183,9 @@ impl From<EvidenceData> for JsonValue {
                     to_value(entry_count).unwrap(), //#[allow_ci]
                 );
                 map.insert("entries".to_string(), to_value(entries).unwrap()); //#[allow_ci]
+                if let Some(meta_value) = meta {
+                    map.insert("meta".to_string(), meta_value);
+                }
                 JsonValue::Object(map)
             }
         }
@@ -177,6 +199,7 @@ impl From<EvidenceData> for EvidenceCollected {
                 subject_data,
                 message,
                 signature,
+                meta,
             } => EvidenceCollected {
                 evidence_class: "certification".to_string(),
                 evidence_type: "tpm_quote".to_string(),
@@ -184,9 +207,10 @@ impl From<EvidenceData> for EvidenceCollected {
                     subject_data,
                     message,
                     signature,
+                    meta,
                 },
             },
-            EvidenceData::ImaLog { entries, .. } => {
+            EvidenceData::ImaLog { entries, meta, .. } => {
                 // Count the number of entries (lines)
                 let entry_count = entries.lines().count();
                 EvidenceCollected {
@@ -195,13 +219,14 @@ impl From<EvidenceData> for EvidenceCollected {
                     data: EvidenceData::ImaLog {
                         entry_count,
                         entries,
+                        meta,
                     },
                 }
             }
-            EvidenceData::UefiLog { entries } => EvidenceCollected {
+            EvidenceData::UefiLog { entries, meta } => EvidenceCollected {
                 evidence_class: "log".to_string(),
                 evidence_type: "uefi_log".to_string(),
-                data: EvidenceData::UefiLog { entries },
+                data: EvidenceData::UefiLog { entries, meta },
             },
         }
     }
@@ -210,6 +235,8 @@ impl From<EvidenceData> for EvidenceCollected {
 #[derive(Serialize, Deserialize, Debug)]
 pub struct EvidenceHandlingResponse {
     pub data: EvidenceHandlingResponseData,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub meta: Option<EvidenceHandlingResponseMeta>,
 }
 #[derive(Serialize, Deserialize, Debug)]
 pub struct EvidenceHandlingResponseData {
@@ -217,6 +244,12 @@ pub struct EvidenceHandlingResponseData {
     pub data_type: String,
     pub attributes: EvidenceHandlingResponseAttributes,
 }
+#[derive(Serialize, Deserialize, Debug)]
+pub struct EvidenceHandlingResponseMeta {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub seconds_to_next_attestation: Option<u64>,
+}
+
 #[derive(Serialize, Deserialize, Debug)]
 pub struct EvidenceHandlingResponseAttributes {
     pub stage: String,
@@ -244,6 +277,7 @@ mod tests {
             subject_data: "test_subject".to_string(),
             message: "test_message".to_string(),
             signature: "test_signature".to_string(),
+            meta: None,
         };
         let tpm_collected: EvidenceCollected = tpm_evidence.into();
         assert_eq!(tpm_collected.evidence_class, "certification");
@@ -252,6 +286,7 @@ mod tests {
             subject_data,
             message,
             signature,
+            ..
         } = tpm_collected.data
         {
             assert_eq!(subject_data, "test_subject");
@@ -265,6 +300,7 @@ mod tests {
         let ima_evidence = EvidenceData::ImaLog {
             entry_count: 0, // This should be recalculated
             entries: "line1\nline2\nline3".to_string(),
+            meta: None,
         };
         let ima_collected: EvidenceCollected = ima_evidence.into();
         assert_eq!(ima_collected.evidence_class, "log");
@@ -272,6 +308,7 @@ mod tests {
         if let EvidenceData::ImaLog {
             entry_count,
             entries,
+            ..
         } = ima_collected.data
         {
             assert_eq!(entry_count, 3); // Should be recalculated from lines
@@ -283,11 +320,12 @@ mod tests {
         // Test UefiLog conversion
         let uefi_evidence = EvidenceData::UefiLog {
             entries: "uefi_entries".to_string(),
+            meta: None,
         };
         let uefi_collected: EvidenceCollected = uefi_evidence.into();
         assert_eq!(uefi_collected.evidence_class, "log");
         assert_eq!(uefi_collected.evidence_type, "uefi_log");
-        if let EvidenceData::UefiLog { entries } = uefi_collected.data {
+        if let EvidenceData::UefiLog { entries, .. } = uefi_collected.data {
             assert_eq!(entries, "uefi_entries");
         } else {
             panic!("Expected UefiLog"); //#[allow_ci]
@@ -300,6 +338,7 @@ mod tests {
             subject_data: "subject_data".to_string(),
             message: "message".to_string(),
             signature: "signature".to_string(),
+            meta: None,
         };
 
         let tpm_evidence_collected = EvidenceCollected {
@@ -310,6 +349,7 @@ mod tests {
 
         let uefi_evidence_data = EvidenceData::UefiLog {
             entries: "uefi_log_entries".to_string(),
+            meta: None,
         };
         let uefi_evidence_collected = EvidenceCollected {
             evidence_class: "log".to_string(),
@@ -320,6 +360,7 @@ mod tests {
         let ima_evidence_data = EvidenceData::ImaLog {
             entry_count: 95,
             entries: "ima_log_entries".to_string(),
+            meta: None,
         };
         let ima_evidence_collected = EvidenceCollected {
             evidence_class: "log".to_string(),
@@ -433,6 +474,7 @@ mod tests {
             subject_data,
             message,
             signature,
+            ..
         } = &deserialized.data.attributes.evidence_collected[0].data
         {
             assert_eq!(subject_data, "subject_data_deserialized");
@@ -449,7 +491,7 @@ mod tests {
             deserialized.data.attributes.evidence_collected[1].evidence_type,
             "uefi_log"
         );
-        if let EvidenceData::UefiLog { entries } =
+        if let EvidenceData::UefiLog { entries, .. } =
             &deserialized.data.attributes.evidence_collected[1].data
         {
             assert_eq!(entries, "uefi_log_entries_deserialized");
@@ -467,6 +509,7 @@ mod tests {
         if let EvidenceData::ImaLog {
             entry_count,
             entries,
+            ..
         } = &deserialized.data.attributes.evidence_collected[2].data
         {
             assert_eq!(*entry_count, 96);
@@ -831,6 +874,7 @@ mod tests {
                                 subject_data: "subject_data".to_string(),
                                 message: "message".to_string(),
                                 signature: "signature".to_string(),
+            meta: None,
                             },
                         },
                         EvidenceHandlingResponseAttributesEvidence {
@@ -873,6 +917,7 @@ mod tests {
                             }))),
                             data: EvidenceData::UefiLog {
                                 entries: "uefi_log_entries".to_string(),
+            meta: None,
                             },
                         },
                         EvidenceHandlingResponseAttributesEvidence {
@@ -899,6 +944,7 @@ mod tests {
                             data: EvidenceData::ImaLog {
                                 entry_count: 96,
                                 entries: "ima_log_entries".to_string(),
+            meta: None,
                             },
                         },
                     ],
@@ -907,6 +953,7 @@ mod tests {
                     },
                 },
             },
+            meta: None,
         };
         // Serialize the response to JSON and check it is correctly generated
         let serialized = serde_json::to_string_pretty(&response).unwrap(); //#[allow_ci]
@@ -1272,6 +1319,7 @@ mod tests {
             subject_data,
             message,
             signature,
+            ..
         } = &deserialized.data.attributes.evidence[0].data
         {
             assert_eq!(subject_data, "subject_data");
@@ -1372,7 +1420,7 @@ mod tests {
             deserialized.data.attributes.evidence[1].evidence_type,
             "uefi_log"
         );
-        if let EvidenceData::UefiLog { entries } =
+        if let EvidenceData::UefiLog { entries, .. } =
             &deserialized.data.attributes.evidence[1].data
         {
             assert_eq!(entries, "uefi_log_entries");
