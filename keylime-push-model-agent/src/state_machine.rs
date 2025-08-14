@@ -165,11 +165,16 @@ impl<'a> StateMachine<'a> {
                 if res.status_code == reqwest::StatusCode::ACCEPTED {
                     info!("SUCCESS! Evidence accepted by the Verifier.");
                     info!("Response body: {}", res.body);
+
+                    // Extract seconds_to_next_attestation from verifier response.
+                    let next_interval =
+                        self.extract_next_attestation_interval(&res.body);
+
                     info!(
                         "Waiting {} seconds before next attestation...",
-                        self.measurement_interval.as_secs()
+                        next_interval.as_secs()
                     );
-                    time::sleep(self.measurement_interval).await;
+                    time::sleep(next_interval).await;
                     info!("Moving back to negotiation state");
                     self.state = State::Negotiating(ctx_info);
                 } else {
@@ -189,6 +194,38 @@ impl<'a> StateMachine<'a> {
                     State::Failed(anyhow!("Attestation failed: {e:?}"));
             }
         }
+    }
+
+    /// Extracts the seconds_to_next_attestation field from the verifier response body.
+    /// The field is expected to be in the "meta" object at the top level.
+    /// If the field is not present or cannot be parsed, falls back to the default interval.
+    fn extract_next_attestation_interval(
+        &self,
+        response_body: &str,
+    ) -> Duration {
+        match serde_json::from_str::<
+            keylime::structures::EvidenceHandlingResponse,
+        >(response_body)
+        {
+            Ok(response) => {
+                if let Some(meta) = &response.meta {
+                    if let Some(seconds) = meta.seconds_to_next_attestation {
+                        debug!("Using verifier-provided interval: {seconds} seconds");
+                        return Duration::from_secs(seconds);
+                    } else {
+                        warn!("seconds_to_next_attestation field not found in meta object, using default interval of {} seconds", self.measurement_interval.as_secs());
+                    }
+                } else {
+                    warn!("meta object not found in verifier response, using default interval of {} seconds", self.measurement_interval.as_secs());
+                }
+            }
+            Err(e) => {
+                warn!("Failed to parse verifier response as EvidenceHandlingResponse: {}, using default interval of {} seconds", e, self.measurement_interval.as_secs());
+            }
+        }
+
+        // Fallback to the default interval.
+        self.measurement_interval
     }
 
     // Expose current state for testing.
@@ -1022,5 +1059,117 @@ mod tests {
         let debug_output = format!("{:?}", state_machine.get_current_state());
         assert!(debug_output.contains("Failed"));
         assert!(debug_output.contains("Test error message"));
+    }
+
+    #[actix_rt::test]
+    async fn test_extract_next_attestation_interval_with_valid_field() {
+        let config = create_test_agent_config();
+        let test_config = create_test_config(
+            "http://localhost",
+            5000,
+            3,
+            1000,
+            Some(30000),
+        );
+        let attestation_client =
+            AttestationClient::new(&test_config).unwrap();
+
+        let state_machine = StateMachine::new(
+            &config,
+            attestation_client,
+            test_config,
+            None,
+            DEFAULT_ATTESTATION_INTERVAL_SECONDS,
+        );
+
+        // Test with valid seconds_to_next_attestation field in meta object.
+        let response_body = r#"{
+            "data": {
+                "type": "attestation",
+                "attributes": {
+                    "stage": "evaluating_evidence",
+                    "evidence": [],
+                    "system_info": {
+                        "boot_time": "2025-04-08T12:00:17Z"
+                    }
+                }
+            },
+            "meta": {
+                "seconds_to_next_attestation": 120
+            }
+        }"#;
+        let interval =
+            state_machine.extract_next_attestation_interval(response_body);
+        assert_eq!(interval.as_secs(), 120);
+
+        // Test without the meta object (should use default).
+        let response_body = r#"{
+            "data": {
+                "type": "attestation",
+                "attributes": {
+                    "stage": "evaluating_evidence",
+                    "evidence": [],
+                    "system_info": {
+                        "boot_time": "2025-04-08T12:00:17Z"
+                    }
+                }
+            }
+        }"#;
+        let interval =
+            state_machine.extract_next_attestation_interval(response_body);
+        assert_eq!(interval.as_secs(), DEFAULT_ATTESTATION_INTERVAL_SECONDS);
+
+        // Test with meta object but without the field (should use default).
+        let response_body = r#"{
+            "data": {
+                "type": "attestation",
+                "attributes": {
+                    "stage": "evaluating_evidence",
+                    "evidence": [],
+                    "system_info": {
+                        "boot_time": "2025-04-08T12:00:17Z"
+                    }
+                }
+            },
+            "meta": {
+                "other_field": "value"
+            }
+        }"#;
+        let interval =
+            state_machine.extract_next_attestation_interval(response_body);
+        assert_eq!(interval.as_secs(), DEFAULT_ATTESTATION_INTERVAL_SECONDS);
+
+        // Test with invalid JSON (should use default).
+        let response_body = "invalid json";
+        let interval =
+            state_machine.extract_next_attestation_interval(response_body);
+        assert_eq!(interval.as_secs(), DEFAULT_ATTESTATION_INTERVAL_SECONDS);
+
+        // Test with valid JSON but wrong structure (should use default).
+        let response_body =
+            r#"{"meta": {"seconds_to_next_attestation": 150}}"#;
+        let interval =
+            state_machine.extract_next_attestation_interval(response_body);
+        assert_eq!(interval.as_secs(), DEFAULT_ATTESTATION_INTERVAL_SECONDS);
+
+        // Test with the full response structure example.
+        let response_body = r#"{
+            "data": {
+                "type": "attestation",
+                "attributes": {
+                    "stage": "evaluating_evidence",
+                    "evidence": [],
+                    "system_info": {
+                        "boot_time": "2025-04-08T12:00:17Z"
+                    }
+                }
+            },
+            "meta": {
+                "seconds_to_next_attestation": 90
+            }
+        }"#;
+        let interval =
+            state_machine.extract_next_attestation_interval(response_body);
+        assert_eq!(interval.as_secs(), 90);
     }
 }
