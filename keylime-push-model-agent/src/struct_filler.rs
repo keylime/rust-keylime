@@ -7,7 +7,7 @@ use keylime::context_info::ContextInfo;
 use keylime::ima::ImaLog;
 use keylime::structures;
 use keylime::uefi::uefi_log_handler;
-use log::error;
+use log::{error, warn};
 
 #[async_trait]
 pub trait StructureFiller {
@@ -45,6 +45,16 @@ impl StructureFiller for FillerFromHardware<'_> {
     ) -> structures::EvidenceHandlingRequest {
         self.get_evidence_handling_request_final(response_info, config)
             .await
+    }
+}
+
+fn boot_time() -> chrono::DateTime<chrono::Utc> {
+    match keylime::boot_time::get_boot_time() {
+        Ok(time) => time,
+        Err(e) => {
+            warn!("Failed to get boot time: {e}, falling back to UNIX_EPOCH time");
+            chrono::DateTime::UNIX_EPOCH
+        }
     }
 }
 
@@ -181,7 +191,7 @@ impl<'a> FillerFromHardware<'a> {
                         },
                     ],
                     system_info: structures::SystemInfo {
-                        boot_time: chrono::Utc::now(),
+                        boot_time: boot_time(),
                     },
                 },
             },
@@ -288,7 +298,7 @@ impl StructureFiller for TestingFiller {
                 attributes: structures::Attributes {
                     evidence_supported: vec![],
                     system_info: structures::SystemInfo {
-                        boot_time: chrono::Utc::now(),
+                        boot_time: boot_time(),
                     },
                 },
             },
