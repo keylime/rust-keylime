@@ -2,6 +2,7 @@ pub mod agent_data;
 pub mod agent_identity;
 pub mod agent_registration;
 pub mod algorithms;
+pub mod boot_time;
 pub mod cert;
 pub mod config;
 pub mod context_info;
