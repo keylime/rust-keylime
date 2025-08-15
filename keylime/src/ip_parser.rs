@@ -28,7 +28,7 @@ pub enum IpParsingError {
     UnexpectedEOI,
 }
 
-fn get_inner_ip(pair: Pair<Rule>) -> Result<&str, IpParsingError> {
+fn get_inner_ip(pair: Pair<'_, Rule>) -> Result<&str, IpParsingError> {
     let Some(item) = pair.into_inner().next() else {
         unreachable!()
     };
