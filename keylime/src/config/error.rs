@@ -78,4 +78,8 @@ pub enum KeylimeConfigError {
     // Error from serde crate
     #[error("Serde error")]
     Serde(#[from] serde_json::Error),
+
+    // Configuration singleton already initialized
+    #[error("Configuration singleton already initialized")]
+    SingletonAlreadyInitialized,
 }

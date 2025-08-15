@@ -2,7 +2,7 @@
 // Copyright 2025 Keylime Authors
 use async_trait::async_trait;
 use keylime::algorithms::HashAlgorithm;
-use keylime::config::{AgentConfig, PushModelConfigTrait};
+use keylime::config::PushModelConfigTrait;
 use keylime::context_info::ContextInfo;
 use keylime::ima::ImaLog;
 use keylime::structures;
@@ -65,10 +65,7 @@ pub struct FillerFromHardware<'a> {
 
 impl<'a> FillerFromHardware<'a> {
     pub fn new(tpm_context_info: &'a mut ContextInfo) -> Self {
-        // TODO: Change this to avoid loading the configuration multiple times
-        // TODO: Modify here to avoid panic on failure
-        let config =
-            AgentConfig::new().expect("failed to load configuration");
+        let config = keylime::config::get_config();
         let ml_path = config.measuredboot_ml_path();
         let uefi_log_handler = uefi_log_handler::UefiLogHandler::new(ml_path);
         match uefi_log_handler {
@@ -85,15 +82,11 @@ impl<'a> FillerFromHardware<'a> {
             }
         }
     }
-    // TODO: Change this function to use the attestation request appropriately
-    // Add self to the function signature to use the tpm_context
+
     fn get_attestation_request_final(
         &mut self,
     ) -> structures::AttestationRequest {
-        // TODO: Change this to avoid loading the configuration multiple times
-        // TODO Modify this to not panic on failure
-        let config =
-            AgentConfig::new().expect("failed to load configuration");
+        let config = keylime::config::get_config();
 
         // Get all supported hash algorithms from the TPM
         let supported_algorithms = self
@@ -644,6 +637,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg(feature = "testing")]
     async fn test_filler_from_hardware_new_with_uefi_error() {
         use keylime::config::{
             clear_testing_config_override, get_testing_config,

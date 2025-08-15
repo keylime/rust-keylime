@@ -2,7 +2,7 @@
 // Copyright 2025 Keylime Authors
 use anyhow::Result;
 use clap::Parser;
-use keylime::config::{AgentConfig, PushModelConfigTrait};
+use keylime::config::PushModelConfigTrait;
 use log::{debug, error, info};
 mod attestation;
 mod auth;
@@ -121,9 +121,9 @@ async fn run(args: &Args) -> Result<()> {
     debug!("Certificate file: {}", args.certificate);
     debug!("Key file: {}", args.key);
     debug!("Insecure: {}", args.insecure.unwrap_or(false));
-    let config = AgentConfig::new()?;
+    let config = keylime::config::get_config();
     let avoid_tpm = get_avoid_tpm_from_args(args);
-    context_info_handler::init_context_info(&config, avoid_tpm)?;
+    context_info_handler::init_context_info(avoid_tpm)?;
     debug!("Avoid TPM: {avoid_tpm}");
     let ctx_info = match context_info_handler::get_context_info(avoid_tpm) {
         Ok(Some(context_info)) => Some(context_info),
@@ -175,7 +175,6 @@ async fn run(args: &Args) -> Result<()> {
     let attestation_client =
         attestation::AttestationClient::new(&neg_config)?;
     let mut state_machine = state_machine::StateMachine::new(
-        &config,
         attestation_client,
         neg_config,
         ctx_info,
