@@ -199,6 +199,8 @@ impl<'a> FillerFromHardware<'a> {
     }
 
     // TODO: Change this function to use the session request appropriately
+    // TODO: This is expected to be used once the PoP authentication is implemented
+    #[allow(dead_code)]
     pub fn get_session_request_final(
         &mut self,
     ) -> structures::SessionRequest {

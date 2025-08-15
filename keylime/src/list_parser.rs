@@ -15,7 +15,7 @@ pub enum ListParsingError {
     ParseError(#[source] Box<pest::error::Error<Rule>>),
 }
 
-fn get_inner_str(pair: Pair<Rule>) -> Vec<&str> {
+fn get_inner_str(pair: Pair<'_, Rule>) -> Vec<&str> {
     let mut l = Vec::new();
     for item in pair.into_inner() {
         match item.as_rule() {
