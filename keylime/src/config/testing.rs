@@ -14,8 +14,9 @@ use std::{
 };
 
 // Global storage for testing configuration override
-static TESTING_CONFIG_OVERRIDE: OnceLock<Mutex<Option<AgentConfig>>> =
-    OnceLock::new();
+pub(crate) static TESTING_CONFIG_OVERRIDE: OnceLock<
+    Mutex<Option<AgentConfig>>,
+> = OnceLock::new();
 
 /// Create a configuration based on a temporary directory
 ///
@@ -165,7 +166,7 @@ fn apply_config_overrides(
             }
             "verifier_url" => config.verifier_url = value,
             _ => {
-                log::warn!("Unknown configuration override key: {}", key);
+                log::warn!("Unknown configuration override key: {key}");
             }
         }
     }
@@ -264,7 +265,7 @@ mod tests {
         // Verify override is returned
         let retrieved = get_testing_config_override();
         assert!(retrieved.is_some());
-        let retrieved_config = retrieved.unwrap();
+        let retrieved_config = retrieved.expect("failed to retrieve config");
         assert_eq!(retrieved_config.ip, "test.example.com");
         assert_eq!(retrieved_config.port, 12345);
 
