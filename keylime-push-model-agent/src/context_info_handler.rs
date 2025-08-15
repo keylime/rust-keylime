@@ -7,14 +7,13 @@ use std::sync::{Mutex, OnceLock};
 static GLOBAL_CONTEXT: OnceLock<Mutex<Result<ContextInfo, String>>> =
     OnceLock::new();
 
-pub fn init_context_info<T: PushModelConfigTrait>(
-    config: &T,
-    avoid_tpm: bool,
-) -> Result<()> {
+pub fn init_context_info(avoid_tpm: bool) -> Result<()> {
     if avoid_tpm {
         debug!("TPM is avoided, skipping context initialization.");
         return Ok(());
     }
+
+    let config = keylime::config::get_config();
 
     let result = GLOBAL_CONTEXT.set(Mutex::new(
         (|| -> Result<ContextInfo, String> {
@@ -91,7 +90,10 @@ mod tests {
         let config = get_testing_config(tmpdir.path(), None);
 
         const AVOID_TPM: bool = true;
-        let init_res = init_context_info(&config, AVOID_TPM);
+        // Set testing configuration override
+        keylime::config::set_testing_config_override(config);
+
+        let init_res = init_context_info(AVOID_TPM);
         assert!(init_res.is_ok());
         let context_res = get_context_info(AVOID_TPM);
         assert!(context_res.is_ok());
@@ -99,6 +101,9 @@ mod tests {
             context_res.unwrap().is_none(),
             "Context should be None when TPM is avoided"
         );
+
+        // Clear testing configuration override
+        keylime::config::clear_testing_config_override();
     }
 
     #[tokio::test]
@@ -109,8 +114,11 @@ mod tests {
         let tmpdir = tempfile::tempdir().expect("failed to create tmpdir");
         let config = get_testing_config(tmpdir.path(), None);
 
+        // Set testing configuration override
+        keylime::config::set_testing_config_override(config);
+
         const DONT_AVOID_TPM: bool = false;
-        let init_res = init_context_info(&config, DONT_AVOID_TPM);
+        let init_res = init_context_info(DONT_AVOID_TPM);
         assert!(init_res.is_ok());
         let context_res = get_context_info(DONT_AVOID_TPM);
         assert!(context_res.is_ok());
@@ -121,5 +129,8 @@ mod tests {
         );
         let mut context_info = context_info_handler.unwrap(); //#[allow_ci]
         context_info.flush_context().unwrap(); //#[allow_ci]
+
+        // Clear testing configuration override
+        keylime::config::clear_testing_config_override();
     }
 }

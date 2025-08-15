@@ -9,7 +9,7 @@ use crate::registration;
 #[cfg(test)]
 use crate::DEFAULT_ATTESTATION_INTERVAL_SECONDS;
 use anyhow::anyhow;
-use keylime::config::AgentConfig;
+// AgentConfig no longer needed since we use singleton
 use keylime::context_info::ContextInfo;
 use log::*;
 use std::time::Duration;
@@ -27,7 +27,6 @@ pub enum State {
 
 pub struct StateMachine<'a> {
     state: State,
-    config: &'a AgentConfig,
     attestation_client: AttestationClient,
     negotiation_config: NegotiationConfig<'a>,
     context_info: Option<ContextInfo>,
@@ -36,7 +35,6 @@ pub struct StateMachine<'a> {
 
 impl<'a> StateMachine<'a> {
     pub fn new(
-        config: &'a AgentConfig,
         attestation_client: AttestationClient,
         negotiation_config: NegotiationConfig<'a>,
         context_info: Option<ContextInfo>,
@@ -48,7 +46,6 @@ impl<'a> StateMachine<'a> {
 
         Self {
             state: initial_state,
-            config,
             attestation_client,
             negotiation_config,
             context_info,
@@ -93,11 +90,8 @@ impl<'a> StateMachine<'a> {
     }
 
     async fn register(&mut self) {
-        let res = registration::check_registration(
-            self.config,
-            self.context_info.clone(),
-        )
-        .await;
+        let res =
+            registration::check_registration(self.context_info.clone()).await;
 
         match res {
             Ok(()) => {
@@ -239,7 +233,6 @@ impl<'a> StateMachine<'a> {
 #[cfg(all(test, feature = "testing"))]
 mod registration {
     use anyhow::anyhow;
-    use keylime::config::AgentConfig;
     use keylime::context_info::ContextInfo;
     use std::sync::{Arc, Mutex, OnceLock};
 
@@ -251,7 +244,6 @@ mod registration {
     }
 
     pub async fn check_registration(
-        _config: &AgentConfig,
         _context_info: Option<ContextInfo>,
     ) -> anyhow::Result<()> {
         let result = get_mock_result().lock().unwrap().clone();
@@ -270,7 +262,6 @@ mod tpm_tests {
     use super::*;
     use crate::attestation::{AttestationClient, NegotiationConfig};
     use anyhow::anyhow;
-    use keylime::config::AgentConfig;
     use keylime::context_info::ContextInfo;
     use keylime::tpm::testing;
     use reqwest::StatusCode;
@@ -349,11 +340,6 @@ mod tpm_tests {
         }
     }
 
-    // Helper function to create test agent configuration.
-    fn create_test_agent_config() -> AgentConfig {
-        AgentConfig::default()
-    }
-
     /// Helper function to create TPM test configuration.
     fn create_tpm_test_config<'a>(
         url: &'a str,
@@ -379,25 +365,44 @@ mod tpm_tests {
         }
     }
 
+    #[cfg(feature = "testing")]
     fn create_test_state_machine<'a>(
-        agent_config: &'a AgentConfig,
         neg_config: &'a NegotiationConfig<'a>,
     ) -> StateMachine<'a> {
+        // Initialize test config
+        let tmpdir = tempfile::tempdir().expect("failed to create tmpdir");
+        let config = keylime::config::get_testing_config(tmpdir.path(), None);
+        // Set testing configuration override for this test
+        keylime::config::set_testing_config_override(config);
+
         let client = AttestationClient::new(neg_config).unwrap();
 
-        let context_info =
-            ContextInfo::new(keylime::context_info::AlgorithmConfiguration {
+        // Create context with proper error handling to avoid TPM resource leaks
+        let context_info = match ContextInfo::new(
+            keylime::context_info::AlgorithmConfiguration {
                 tpm_encryption_alg:
                     keylime::algorithms::EncryptionAlgorithm::Rsa2048,
                 tpm_hash_alg: keylime::algorithms::HashAlgorithm::Sha256,
                 tpm_signing_alg: keylime::algorithms::SignAlgorithm::RsaSsa,
                 agent_data_path: "".to_string(),
                 disabled_signing_algorithms: vec![],
-            })
-            .expect("This test requires TPM access with proper permissions");
+            },
+        ) {
+            Ok(ctx) => ctx,
+            Err(e) => {
+                // Log the error but don't panic to avoid leaving TPM objects behind
+                eprintln!("TPM context creation failed: {e:?}. This test requires TPM access with proper permissions");
+                // Return a state machine without context instead of panicking
+                return StateMachine::new(
+                    client,
+                    neg_config.clone(),
+                    None,
+                    DEFAULT_ATTESTATION_INTERVAL_SECONDS,
+                );
+            }
+        };
 
         StateMachine::new(
-            agent_config,
             client,
             neg_config.clone(),
             Some(context_info),
@@ -408,7 +413,6 @@ mod tpm_tests {
     #[tokio::test]
     async fn test_negotiate_success_transition() {
         let _mutex = testing::lock_tests().await;
-        let agent_config = create_test_agent_config();
         let neg_config = create_tpm_test_config(
             "http://localhost",
             5000,
@@ -416,7 +420,7 @@ mod tpm_tests {
             1000,
             Some(30000),
         );
-        let mut sm = create_test_state_machine(&agent_config, &neg_config);
+        let mut sm = create_test_state_machine(&neg_config);
         let mut context_info = sm.context_info.clone().unwrap();
         sm.state = State::Registered(context_info.clone());
 
@@ -437,12 +441,14 @@ mod tpm_tests {
 
         assert!(matches!(sm.get_current_state(), State::Attesting(_, _)));
         assert!(context_info.flush_context().is_ok());
+
+        // Clear testing configuration override
+        keylime::config::clear_testing_config_override();
     }
 
     #[tokio::test]
     async fn test_negotiate_failure_on_bad_status() {
         let _mutex = testing::lock_tests().await;
-        let agent_config = create_test_agent_config();
         let neg_config = create_tpm_test_config(
             "http://localhost",
             5000,
@@ -450,7 +456,7 @@ mod tpm_tests {
             1000,
             Some(30000),
         );
-        let mut sm = create_test_state_machine(&agent_config, &neg_config);
+        let mut sm = create_test_state_machine(&neg_config);
         let mut context_info = sm.context_info.clone().unwrap();
         sm.state = State::Registered(context_info.clone());
 
@@ -475,12 +481,14 @@ mod tpm_tests {
 
         assert!(matches!(sm.get_current_state(), State::Failed(_)));
         assert!(context_info.flush_context().is_ok());
+
+        // Clear testing configuration override
+        keylime::config::clear_testing_config_override();
     }
 
     #[tokio::test]
     async fn test_attest_success_transition() {
         let _mutex = testing::lock_tests().await;
-        let agent_config = create_test_agent_config();
         let neg_config = create_tpm_test_config(
             "http://localhost",
             5000,
@@ -488,7 +496,7 @@ mod tpm_tests {
             1000,
             Some(30000),
         );
-        let mut sm = create_test_state_machine(&agent_config, &neg_config);
+        let mut sm = create_test_state_machine(&neg_config);
         let mut context_info = sm.context_info.clone().unwrap();
         sm.state = State::Attesting(
             context_info.clone(),
@@ -515,12 +523,14 @@ mod tpm_tests {
 
         assert!(matches!(sm.get_current_state(), State::Negotiating(_)));
         assert!(context_info.flush_context().is_ok());
+
+        // Clear testing configuration override
+        keylime::config::clear_testing_config_override();
     }
 
     #[tokio::test]
     async fn test_attest_failure_on_bad_status() {
         let _mutex = testing::lock_tests().await;
-        let agent_config = create_test_agent_config();
         let neg_config = create_tpm_test_config(
             "http://localhost",
             5000,
@@ -528,7 +538,7 @@ mod tpm_tests {
             1000,
             Some(30000),
         );
-        let mut sm = create_test_state_machine(&agent_config, &neg_config);
+        let mut sm = create_test_state_machine(&neg_config);
         let mut context_info = sm.context_info.clone().unwrap();
         sm.state = State::Attesting(
             context_info.clone(),
@@ -562,12 +572,14 @@ mod tpm_tests {
 
         assert!(matches!(sm.get_current_state(), State::Failed(_)));
         assert!(context_info.flush_context().is_ok());
+
+        // Clear testing configuration override
+        keylime::config::clear_testing_config_override();
     }
 
     #[tokio::test]
     async fn test_register_success_transition() {
         let _mutex = testing::lock_tests().await;
-        let agent_config = create_test_agent_config();
         let neg_config = create_tpm_test_config(
             "http://localhost",
             5000,
@@ -575,15 +587,13 @@ mod tpm_tests {
             1000,
             Some(30000),
         );
-        let mut sm = create_test_state_machine(&agent_config, &neg_config);
+        let mut sm = create_test_state_machine(&neg_config);
         let mut context_info = sm.context_info.clone().unwrap();
 
         registration::set_mock_result(Ok(()));
-        let res = registration::check_registration(
-            &agent_config,
-            Some(context_info.clone()),
-        )
-        .await;
+        let res =
+            registration::check_registration(Some(context_info.clone()))
+                .await;
 
         match res {
             Ok(()) => {
@@ -601,6 +611,9 @@ mod tpm_tests {
         }
         assert!(matches!(sm.get_current_state(), State::Registered(_)));
         assert!(context_info.flush_context().is_ok());
+
+        // Clear testing configuration override
+        keylime::config::clear_testing_config_override();
     }
 
     #[tokio::test]
@@ -608,7 +621,13 @@ mod tpm_tests {
         let _mutex = testing::lock_tests().await;
 
         registration::set_mock_result(Ok(()));
-        let agent_config = create_test_agent_config();
+
+        // Initialize test config
+        let tmpdir = tempfile::tempdir().expect("failed to create tmpdir");
+        let config = keylime::config::get_testing_config(tmpdir.path(), None);
+        // Set testing configuration override for this test
+        keylime::config::set_testing_config_override(config);
+
         let mut context_info =
             ContextInfo::new(keylime::context_info::AlgorithmConfiguration {
                 tpm_encryption_alg:
@@ -619,11 +638,8 @@ mod tpm_tests {
                 disabled_signing_algorithms: vec![],
             })
             .expect("This test requires TPM access with proper permissions");
-        let _ = registration::check_registration(
-            &agent_config,
-            Some(context_info.clone()),
-        )
-        .await;
+        let _ = registration::check_registration(Some(context_info.clone()))
+            .await;
 
         let mock_server = MockServer::start().await;
 
@@ -668,7 +684,6 @@ mod tpm_tests {
         let attestation_client = AttestationClient::new(&neg_config).unwrap();
 
         let sm = StateMachine::new(
-            &agent_config,
             attestation_client,
             neg_config,
             Some(context_info.clone()),
@@ -684,7 +699,10 @@ mod tpm_tests {
             matches!(sm.get_current_state(), State::Unregistered),
             "StateMachine should start in Unregistered state, but was {:?}",
             sm.get_current_state()
-        )
+        );
+
+        // Clear testing configuration override
+        keylime::config::clear_testing_config_override();
     }
 } // feature testing tests
 
@@ -692,7 +710,6 @@ mod tpm_tests {
 mod tests {
     use super::*;
     use crate::attestation::{AttestationClient, NegotiationConfig};
-    use keylime::config::AgentConfig;
 
     // Helper function to create test configuration.
     fn create_test_config<'a>(
@@ -719,14 +736,8 @@ mod tests {
         }
     }
 
-    // Helper function to create test agent configuration.
-    fn create_test_agent_config() -> AgentConfig {
-        AgentConfig::default()
-    }
-
     #[actix_rt::test]
     async fn test_state_machine_creation_without_context_info() {
-        let config = create_test_agent_config();
         let test_config = create_test_config(
             "http://localhost",
             5000,
@@ -738,7 +749,6 @@ mod tests {
             AttestationClient::new(&test_config).unwrap();
 
         let state_machine = StateMachine::new(
-            &config,
             attestation_client,
             test_config,
             None,
@@ -755,7 +765,6 @@ mod tests {
 
     #[actix_rt::test]
     async fn test_state_debug_trait() {
-        let config = create_test_agent_config();
         let test_config = create_test_config(
             "http://localhost",
             5000,
@@ -767,7 +776,6 @@ mod tests {
             AttestationClient::new(&test_config).unwrap();
 
         let state_machine = StateMachine::new(
-            &config,
             attestation_client,
             test_config,
             None,
@@ -780,7 +788,6 @@ mod tests {
 
     #[actix_rt::test]
     async fn test_register_without_context_info() {
-        let config = create_test_agent_config();
         let test_config = create_test_config(
             "http://localhost",
             5000,
@@ -792,7 +799,6 @@ mod tests {
             AttestationClient::new(&test_config).unwrap();
 
         let mut state_machine = StateMachine::new(
-            &config,
             attestation_client,
             test_config,
             None,
@@ -818,7 +824,6 @@ mod tests {
 
     #[actix_rt::test]
     async fn test_state_machine_initial_state_without_context() {
-        let config = create_test_agent_config();
         let test_config = create_test_config(
             "http://localhost",
             5000,
@@ -830,7 +835,6 @@ mod tests {
             AttestationClient::new(&test_config).unwrap();
 
         let state_machine = StateMachine::new(
-            &config,
             attestation_client,
             test_config,
             None,
@@ -846,7 +850,6 @@ mod tests {
 
     #[actix_rt::test]
     async fn test_state_machine_context_info_storage_none() {
-        let config = create_test_agent_config();
         let test_config = create_test_config(
             "http://localhost",
             5000,
@@ -858,7 +861,6 @@ mod tests {
             AttestationClient::new(&test_config).unwrap();
 
         let state_machine = StateMachine::new(
-            &config,
             attestation_client,
             test_config,
             None,
@@ -871,7 +873,6 @@ mod tests {
 
     #[actix_rt::test]
     async fn test_state_machine_config_references() {
-        let config = create_test_agent_config();
         let test_config = create_test_config(
             "http://localhost",
             5000,
@@ -883,7 +884,6 @@ mod tests {
             AttestationClient::new(&test_config).unwrap();
 
         let state_machine = StateMachine::new(
-            &config,
             attestation_client,
             test_config,
             None,
@@ -900,7 +900,6 @@ mod tests {
 
     #[actix_rt::test]
     async fn test_state_machine_failed_state_construction() {
-        let config = create_test_agent_config();
         let test_config = create_test_config(
             "http://localhost",
             5000,
@@ -912,7 +911,6 @@ mod tests {
             AttestationClient::new(&test_config).unwrap();
 
         let mut state_machine = StateMachine::new(
-            &config,
             attestation_client,
             test_config,
             None,
@@ -933,7 +931,6 @@ mod tests {
 
     #[actix_rt::test]
     async fn test_state_machine_error_state_handling() {
-        let config = create_test_agent_config();
         let test_config = create_test_config(
             "http://localhost",
             5000,
@@ -945,7 +942,6 @@ mod tests {
             AttestationClient::new(&test_config).unwrap();
 
         let mut state_machine = StateMachine::new(
-            &config,
             attestation_client,
             test_config,
             None,
@@ -966,15 +962,12 @@ mod tests {
 
     #[actix_rt::test]
     async fn test_state_machine_with_different_config_values() {
-        let config = create_test_agent_config();
-
         // Test with different configuration values.
         let test_config1 =
             create_test_config("http://localhost", 1000, 5, 500, Some(10000));
         let attestation_client1 =
             AttestationClient::new(&test_config1).unwrap();
         let state_machine1 = StateMachine::new(
-            &config,
             attestation_client1,
             test_config1,
             None,
@@ -990,7 +983,6 @@ mod tests {
         let attestation_client2 =
             AttestationClient::new(&test_config2).unwrap();
         let state_machine2 = StateMachine::new(
-            &config,
             attestation_client2,
             test_config2,
             None,
@@ -1004,7 +996,6 @@ mod tests {
 
     #[actix_rt::test]
     async fn test_state_machine_avoid_tpm_configuration() {
-        let config = create_test_agent_config();
         let test_config = create_test_config(
             "http://localhost",
             5000,
@@ -1016,7 +1007,6 @@ mod tests {
             AttestationClient::new(&test_config).unwrap();
 
         let state_machine = StateMachine::new(
-            &config,
             attestation_client,
             test_config,
             None,
@@ -1033,7 +1023,6 @@ mod tests {
 
     #[actix_rt::test]
     async fn test_state_machine_error_debug_formatting() {
-        let config = create_test_agent_config();
         let test_config = create_test_config(
             "http://localhost",
             5000,
@@ -1045,7 +1034,6 @@ mod tests {
             AttestationClient::new(&test_config).unwrap();
 
         let mut state_machine = StateMachine::new(
-            &config,
             attestation_client,
             test_config,
             None,
@@ -1062,8 +1050,11 @@ mod tests {
     }
 
     #[actix_rt::test]
+    #[cfg(feature = "testing")]
     async fn test_extract_next_attestation_interval_with_valid_field() {
-        let config = create_test_agent_config();
+        let tmpdir = tempfile::tempdir().expect("failed to create tmpdir");
+        let _config =
+            keylime::config::get_testing_config(tmpdir.path(), None);
         let test_config = create_test_config(
             "http://localhost",
             5000,
@@ -1075,7 +1066,6 @@ mod tests {
             AttestationClient::new(&test_config).unwrap();
 
         let state_machine = StateMachine::new(
-            &config,
             attestation_client,
             test_config,
             None,
