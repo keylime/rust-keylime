@@ -1449,13 +1449,14 @@ impl Context<'_> {
         result
     }
 
-    /// This function certifies an attestation key with the IAK, using any qualifying data provided,
-    /// producing an attestation document and signature
-    pub fn certify_credential_with_iak(
+    /// This function is used to certify a credential using TPM2_Certify.
+    /// The object_handle is the object being certified.
+    /// The signing_key_handle is the key used to sign the attestation.
+    pub fn certify_credential(
         &mut self,
         qualifying_data: Data,
-        ak: KeyHandle,
-        iak: KeyHandle,
+        object_handle: KeyHandle,
+        signing_key_handle: KeyHandle,
     ) -> Result<(Attest, Signature)> {
         let mut ctx = self.inner.lock().unwrap(); //#[allow_ci]
 
@@ -1468,8 +1469,8 @@ impl Context<'_> {
                 ),
                 |context| {
                     context.certify(
-                        ak.into(),
-                        iak,
+                        object_handle.into(),
+                        signing_key_handle,
                         qualifying_data,
                         SignatureScheme::Null,
                     )
@@ -1481,6 +1482,17 @@ impl Context<'_> {
         ctx.clear_sessions();
 
         result
+    }
+
+    /// This function certifies an attestation key with the IAK, using any qualifying data provided,
+    /// producing an attestation document and signature
+    pub fn certify_credential_with_iak(
+        &mut self,
+        qualifying_data: Data,
+        ak: KeyHandle,
+        iak: KeyHandle,
+    ) -> Result<(Attest, Signature)> {
+        self.certify_credential(qualifying_data, ak, iak)
     }
 
     /// This function extends PCR#16 with the digest, then creates a PcrList
