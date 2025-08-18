@@ -61,7 +61,7 @@ mod test {
         // Get the configuration using a temporary directory as `keylime_dir`
         let tempdir =
             tempfile::tempdir().expect("failed to create temporary dir");
-        let default = get_testing_config(tempdir.path());
+        let default = get_testing_config(tempdir.path(), None);
 
         let env_config = EnvConfig::new().unwrap(); //#[allow_ci]
 
@@ -166,7 +166,7 @@ mod test {
         // Get the configuration using a temporary directory as `keylime_dir`
         let tempdir =
             tempfile::tempdir().expect("failed to create temporary dir");
-        let default = get_testing_config(tempdir.path());
+        let default = get_testing_config(tempdir.path(), None);
 
         // For possible variable
         for (c, v) in override_map.into_iter() {
