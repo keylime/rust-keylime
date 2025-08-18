@@ -415,7 +415,7 @@ echo hello > test-output
     #[test]
     fn test_setup_unzipped() {
         let temp_workdir = tempfile::tempdir().unwrap(); //#[allow_ci]
-        let test_config = get_testing_config(temp_workdir.path());
+        let test_config = get_testing_config(temp_workdir.path(), None);
         let secure_mount =
             PathBuf::from(&temp_workdir.path().join("tmpfs-dev"));
         fs::create_dir(&secure_mount).unwrap(); //#[allow_ci]
@@ -448,7 +448,7 @@ echo hello > test-output
     #[test]
     fn test_unzip_payload() {
         let temp_workdir = tempfile::tempdir().unwrap(); //#[allow_ci]
-        let test_config = get_testing_config(temp_workdir.path());
+        let test_config = get_testing_config(temp_workdir.path(), None);
         let payload_path = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("test-data")
             .join("payload.zip");
@@ -481,7 +481,7 @@ echo hello > test-output
             .lock()
             .await;
         let temp_workdir = tempfile::tempdir().unwrap(); //#[allow_ci]
-        let test_config = get_testing_config(temp_workdir.path());
+        let test_config = get_testing_config(temp_workdir.path(), None);
         let secure_mount =
             PathBuf::from(&temp_workdir.path().join("tmpfs-dev"));
         fs::create_dir(&secure_mount).unwrap(); //#[allow_ci]
@@ -531,7 +531,7 @@ echo hello > test-output
         use crate::{config::DEFAULT_PAYLOAD_SCRIPT, secure_mount};
 
         let temp_workdir = tempfile::tempdir().unwrap(); //#[allow_ci]
-        let test_config = get_testing_config(temp_workdir.path());
+        let test_config = get_testing_config(temp_workdir.path(), None);
         let secure_mount =
             PathBuf::from(&temp_workdir.path().join("tmpfs-dev"));
         fs::create_dir(&secure_mount).unwrap(); //#[allow_ci]

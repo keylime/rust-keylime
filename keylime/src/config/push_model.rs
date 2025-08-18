@@ -70,7 +70,7 @@ mod tests {
     #[test]
     fn test_push_model_trait() {
         let tmpdir = tempfile::tempdir().expect("failed to create tmpdir");
-        let config = get_testing_config(tmpdir.path());
+        let config = get_testing_config(tmpdir.path(), None);
         assert_eq!(
             config.certification_keys_server_identifier(),
             DEFAULT_CERTIFICATION_KEYS_SERVER_IDENTIFIER

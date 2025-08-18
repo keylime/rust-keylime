@@ -170,6 +170,16 @@ pub struct AgentConfig {
 
 impl AgentConfig {
     pub fn new() -> Result<Self, KeylimeConfigError> {
+        // Check for testing configuration override first
+        #[cfg(feature = "testing")]
+        {
+            if let Some(testing_config) =
+                crate::config::testing::get_testing_config_override()
+            {
+                return Ok(testing_config);
+            }
+        }
+
         #[derive(Deserialize)]
         struct Wrapper {
             agent: AgentConfig,
@@ -339,7 +349,7 @@ fn config_get_setting(
 }
 
 /// Replace the options that support keywords with the final value
-fn config_translate_keywords(
+pub(crate) fn config_translate_keywords(
     config: &AgentConfig,
 ) -> Result<AgentConfig, KeylimeConfigError> {
     let uuid = get_uuid(&config.uuid);
@@ -672,26 +682,6 @@ fn get_uuid(agent_uuid_config: &str) -> String {
     }
 }
 
-/// Create a configuration based on a temporary directory
-///
-/// # Arguments
-///
-/// `tempdir`: Path to be used as the keylime directory in the generated configuration
-///
-/// # Returns
-///
-/// A `AgentConfig` structure using the given path as the `keylime_dir` option
-#[cfg(feature = "testing")]
-pub fn get_testing_config(tempdir: &Path) -> AgentConfig {
-    let config = AgentConfig {
-        keylime_dir: tempdir.display().to_string(),
-        ..AgentConfig::default()
-    };
-
-    // It is expected that the translation of keywords will not fail
-    config_translate_keywords(&config).expect("failed to translate keywords")
-}
-
 // Unit Testing
 #[cfg(test)]
 mod tests {
@@ -700,20 +690,24 @@ mod tests {
     #[cfg(feature = "testing")]
     #[test]
     fn test_get_testing_config() {
+        use crate::config::get_testing_config;
+
         let dir = tempfile::tempdir()
             .expect("failed to create temporary directory");
 
         // Get the config and check that the value is correct
-        let config = get_testing_config(dir.path());
+        let config = get_testing_config(dir.path(), None);
         assert_eq!(config.keylime_dir, dir.path().display().to_string());
     }
 
     #[cfg(feature = "testing")]
     #[test]
     fn test_default() {
+        use crate::config::get_testing_config;
+
         let tempdir =
             tempfile::tempdir().expect("failed to create temporary dir");
-        let default = get_testing_config(tempdir.path());
+        let default = get_testing_config(tempdir.path(), None);
 
         // Modify the keylime directory to refer to the created temporary directory
         let c = AgentConfig {
@@ -755,9 +749,11 @@ mod tests {
     #[cfg(feature = "testing")]
     #[test]
     fn get_revocation_cert_path_default() {
+        use crate::config::get_testing_config;
+
         let tempdir =
             tempfile::tempdir().expect("failed to create temporary dir");
-        let test_config = get_testing_config(tempdir.path());
+        let test_config = get_testing_config(tempdir.path(), None);
         let revocation_cert_path = test_config.revocation_cert.clone();
         let expected = Path::new(&test_config.keylime_dir)
             .join("secure/unzipped")

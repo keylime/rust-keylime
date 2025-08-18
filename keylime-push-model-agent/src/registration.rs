@@ -112,7 +112,7 @@ mod tests {
     async fn test_avoid_registration() {
         let _mutex = testing::lock_tests().await;
         let tmpdir = tempfile::tempdir().expect("failed to create tempdir");
-        let config = get_testing_config(tmpdir.path());
+        let config = get_testing_config(tmpdir.path(), None);
         let result = check_registration(&config, None).await;
         assert!(result.is_ok());
     }
@@ -121,7 +121,7 @@ mod tests {
     async fn test_register_agent() {
         let _mutex = testing::lock_tests().await;
         let tmpdir = tempfile::tempdir().expect("failed to create tmpdir");
-        let mut config = get_testing_config(tmpdir.path());
+        let mut config = get_testing_config(tmpdir.path(), None);
         let alg_config = AlgorithmConfigurationString {
             tpm_encryption_alg: "rsa".to_string(),
             tpm_hash_alg: "sha256".to_string(),

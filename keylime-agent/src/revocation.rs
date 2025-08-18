@@ -525,7 +525,7 @@ mod tests {
     fn revocation_scripts_ok() {
         let work_dir = tempfile::tempdir()
             .expect("failed to create temporary directory");
-        let test_config = get_testing_config(work_dir.path());
+        let test_config = get_testing_config(work_dir.path(), None);
         let json_file = concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/tests/unzipped/test_ok.json"
@@ -566,7 +566,7 @@ mod tests {
     fn revocation_scripts_err() {
         let work_dir = tempfile::tempdir()
             .expect("failed to create temporary directory");
-        let test_config = get_testing_config(work_dir.path());
+        let test_config = get_testing_config(work_dir.path(), None);
         let json_file = concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/tests/unzipped/test_err.json"
@@ -596,7 +596,7 @@ mod tests {
     fn revocation_scripts_from_config() {
         let work_dir = tempfile::tempdir()
             .expect("failed to create temporary directory");
-        let test_config = get_testing_config(work_dir.path());
+        let test_config = get_testing_config(work_dir.path(), None);
         let json_file = concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/tests/unzipped/test_ok.json"
@@ -764,7 +764,7 @@ mod tests {
     fn test_process_revocation() {
         let work_dir = tempfile::tempdir()
             .expect("failed to create temporary directory");
-        let test_config = get_testing_config(work_dir.path());
+        let test_config = get_testing_config(work_dir.path(), None);
 
         let sig_path = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("test-data/revocation.sig");
