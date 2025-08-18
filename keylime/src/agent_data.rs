@@ -79,7 +79,7 @@ mod test {
 
         let tempdir =
             tempfile::tempdir().expect("failed to create temporary dir");
-        let config = config::get_testing_config(tempdir.path());
+        let config = config::get_testing_config(tempdir.path(), None);
 
         let mut ctx = tpm::Context::new().unwrap(); //#[allow_ci]
 
@@ -138,7 +138,7 @@ mod test {
         let _mutex = tpm::testing::lock_tests().await;
         let tempdir =
             tempfile::tempdir().expect("failed to create temporary dir");
-        let config = config::get_testing_config(tempdir.path());
+        let config = config::get_testing_config(tempdir.path(), None);
 
         let mut ctx = tpm::Context::new().unwrap(); //#[allow_ci]
 

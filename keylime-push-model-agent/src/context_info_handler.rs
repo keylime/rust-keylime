@@ -88,7 +88,7 @@ mod tests {
         // Use temporary directory instead of assuming /var/lib/keylime exists
         let _mutex = testing::lock_tests().await;
         let tmpdir = tempfile::tempdir().expect("failed to create tmpdir");
-        let config = get_testing_config(tmpdir.path());
+        let config = get_testing_config(tmpdir.path(), None);
 
         const AVOID_TPM: bool = true;
         let init_res = init_context_info(&config, AVOID_TPM);
@@ -107,7 +107,7 @@ mod tests {
         // Use temporary directory instead of assuming /var/lib/keylime exists
         let _mutex = testing::lock_tests().await;
         let tmpdir = tempfile::tempdir().expect("failed to create tmpdir");
-        let config = get_testing_config(tmpdir.path());
+        let config = get_testing_config(tmpdir.path(), None);
 
         const DONT_AVOID_TPM: bool = false;
         let init_res = init_context_info(&config, DONT_AVOID_TPM);

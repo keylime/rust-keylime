@@ -881,7 +881,7 @@ mod tests {
     async fn test_u_or_v_key(key_len: usize, payload: Option<&[u8]>) {
         // Create temporary working directory and secure mount
         let temp_workdir = tempfile::tempdir().unwrap(); //#[allow_ci]
-        let test_config = get_testing_config(temp_workdir.path());
+        let test_config = get_testing_config(temp_workdir.path(), None);
 
         let (mut fixture, mutex) = QuoteData::fixture().await.unwrap(); //#[allow_ci]
 
