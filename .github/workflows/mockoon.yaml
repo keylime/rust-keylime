@@ -13,7 +13,7 @@ jobs:
     container:
       image: quay.io/keylime/keylime-ci:latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: NPM installation
         run: dnf install -y npm
       - name: Run Mockoon CLI
