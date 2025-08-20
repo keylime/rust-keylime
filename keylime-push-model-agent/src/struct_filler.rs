@@ -209,12 +209,10 @@ impl<'a> FillerFromHardware<'a> {
                 data_type: "session".to_string(),
                 attributes: structures::SessionRequestAttributes {
                     agent_id: "example-agent".to_string(),
-                    auth_supported: vec![
-                        structures::SessionRequestAuthSupported {
-                            auth_class: "pop".to_string(),
-                            auth_type: "tpm_pop".to_string(),
-                        },
-                    ],
+                    auth_supported: vec![structures::SupportedAuthMethod {
+                        auth_class: "pop".to_string(),
+                        auth_type: "tpm_pop".to_string(),
+                    }],
                 },
             },
         }
