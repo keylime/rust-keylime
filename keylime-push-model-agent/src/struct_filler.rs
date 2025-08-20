@@ -2,7 +2,7 @@
 // Copyright 2025 Keylime Authors
 use async_trait::async_trait;
 use keylime::algorithms::HashAlgorithm;
-use keylime::config::{AgentConfig, PushModelConfigTrait};
+use keylime::config::PushModelConfigTrait;
 use keylime::context_info::ContextInfo;
 use keylime::ima::ImaLog;
 use keylime::structures;
@@ -65,10 +65,7 @@ pub struct FillerFromHardware<'a> {
 
 impl<'a> FillerFromHardware<'a> {
     pub fn new(tpm_context_info: &'a mut ContextInfo) -> Self {
-        // TODO: Change this to avoid loading the configuration multiple times
-        // TODO: Modify here to avoid panic on failure
-        let config =
-            AgentConfig::new().expect("failed to load configuration");
+        let config = keylime::config::get_config();
         let ml_path = config.measuredboot_ml_path();
         let uefi_log_handler = uefi_log_handler::UefiLogHandler::new(ml_path);
         match uefi_log_handler {
@@ -85,15 +82,11 @@ impl<'a> FillerFromHardware<'a> {
             }
         }
     }
-    // TODO: Change this function to use the attestation request appropriately
-    // Add self to the function signature to use the tpm_context
+
     fn get_attestation_request_final(
         &mut self,
     ) -> structures::AttestationRequest {
-        // TODO: Change this to avoid loading the configuration multiple times
-        // TODO Modify this to not panic on failure
-        let config =
-            AgentConfig::new().expect("failed to load configuration");
+        let config = keylime::config::get_config();
 
         // Get all supported hash algorithms from the TPM
         let supported_algorithms = self
@@ -646,7 +639,13 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg(feature = "testing")]
     async fn test_filler_from_hardware_new_with_uefi_error() {
+        use keylime::config::{
+            clear_testing_config_override, get_testing_config,
+            set_testing_config_override,
+        };
+
         let _mutex = testing::lock_tests().await;
         let context_info_result = context_info::ContextInfo::new_from_str(
             context_info::AlgorithmConfigurationString {
@@ -659,32 +658,26 @@ mod tests {
         );
 
         if let Ok(mut ctx) = context_info_result {
-            // Temporarily override config to point to a non-existent path
-            let original_path =
-                std::env::var("KEYLIME_CONFIG_PATH").unwrap_or_default();
-            std::env::set_var(
-                "KEYLIME_CONFIG_PATH",
-                "test-data/non-existent-config.conf",
-            );
-
-            // Create a temporary config file with an invalid path for measuredboot_ml_path
+            // Create a temporary directory for testing
             let temp_dir = tempfile::tempdir().unwrap();
-            let config_path = temp_dir.path().join("keylime.conf");
-            let mut file = std::fs::File::create(&config_path).unwrap();
-            use std::io::Write;
-            writeln!(file, "[agent]").unwrap();
-            writeln!(
-                file,
-                "measuredboot_ml_path = /path/to/non/existent/log"
-            )
-            .unwrap();
-            std::env::set_var("KEYLIME_CONFIG_PATH", config_path);
+
+            // Create testing configuration with non-existent measuredboot_ml_path
+            let mut overrides = std::collections::HashMap::new();
+            overrides.insert(
+                "measuredboot_ml_path".to_string(),
+                "/path/to/non/existent/log".to_string(),
+            );
+            let test_config =
+                get_testing_config(temp_dir.path(), Some(overrides));
+
+            // Set the testing configuration override
+            set_testing_config_override(test_config);
 
             let filler = FillerFromHardware::new(&mut ctx);
             assert!(filler.uefi_log_handler.is_none());
 
-            // Restore original config path
-            std::env::set_var("KEYLIME_CONFIG_PATH", original_path);
+            // Clear the testing configuration override
+            clear_testing_config_override();
             assert!(ctx.flush_context().is_ok());
         }
     }

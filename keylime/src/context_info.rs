@@ -1,7 +1,7 @@
 use crate::{
     agent_data::AgentData,
     algorithms::{self, HashAlgorithm as KeylimeInternalHashAlgorithm},
-    config::{AgentConfig, KeylimeConfigError, PushModelConfigTrait},
+    config::{KeylimeConfigError, PushModelConfigTrait},
     hash_ek,
     ima::ImaLog,
     structures::{CertificationKey, EvidenceData, EvidenceRequest},
@@ -173,27 +173,57 @@ impl ContextInfo {
         let ak = if let Some(ak) = loaded_ak {
             ak
         } else {
-            tpm_context.create_ak(
+            match tpm_context.create_ak(
                 ek_result.key_handle,
                 tpm_hash_alg,
                 tpm_encryption_alg,
                 tpm_signing_alg,
-            )?
+            ) {
+                Ok(ak) => ak,
+                Err(e) => {
+                    // Clean up EK handle before returning error
+                    let _ = tpm_context
+                        .flush_context(ek_result.key_handle.into());
+                    return Err(ContextInfoError::Tpm(e));
+                }
+            }
         };
 
-        let ak_handle = tpm_context.load_ak(ek_result.key_handle, &ak)?;
+        let ak_handle = match tpm_context.load_ak(ek_result.key_handle, &ak) {
+            Ok(handle) => handle,
+            Err(e) => {
+                // Clean up EK handle before returning error
+                let _ =
+                    tpm_context.flush_context(ek_result.key_handle.into());
+                return Err(ContextInfoError::Tpm(e));
+            }
+        };
 
         if !config.agent_data_path.is_empty() {
-            let agent_data_to_store = AgentData::create(
+            let agent_data_to_store = match AgentData::create(
                 tpm_hash_alg,
                 tpm_signing_alg,
                 &ak,
                 ek_hash.as_bytes(),
-            )
-            .map_err(|e| ContextInfoError::Keylime(e.to_string()))?;
-            agent_data_to_store
-                .store(Path::new(&config.agent_data_path))
-                .map_err(|e| ContextInfoError::Keylime(e.to_string()))?;
+            ) {
+                Ok(data) => data,
+                Err(e) => {
+                    // Clean up both handles before returning error
+                    let _ = tpm_context
+                        .flush_context(ek_result.key_handle.into());
+                    let _ = tpm_context.flush_context(ak_handle.into());
+                    return Err(ContextInfoError::Keylime(e.to_string()));
+                }
+            };
+            if let Err(e) =
+                agent_data_to_store.store(Path::new(&config.agent_data_path))
+            {
+                // Clean up both handles before returning error
+                let _ =
+                    tpm_context.flush_context(ek_result.key_handle.into());
+                let _ = tpm_context.flush_context(ak_handle.into());
+                return Err(ContextInfoError::Keylime(e.to_string()));
+            }
         }
 
         Ok(ContextInfo {
@@ -344,8 +374,7 @@ impl ContextInfo {
     pub fn get_ak_certification_data(
         &mut self,
     ) -> Result<CertificationKey, ContextInfoError> {
-        // TODO Receive the configuration instead of reading it again
-        let config = AgentConfig::new()?;
+        let config = crate::config::get_config();
 
         // Extract the AK's actual signing scheme and hash algorithm
         let (ak_signing_scheme, ak_hash_algorithm) = self

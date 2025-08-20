@@ -956,7 +956,7 @@ mod testing {
             let work_dir =
                 Path::new(env!("CARGO_MANIFEST_DIR")).join("tests");
 
-            let test_config = get_testing_config(&work_dir);
+            let test_config = get_testing_config(&work_dir, None);
             let mut ctx = tpm::Context::new()?;
 
             let tpm_encryption_alg =
