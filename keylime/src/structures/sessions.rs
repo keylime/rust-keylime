@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 *      Request.  *
 ******************/
 #[derive(Serialize, Deserialize, Debug)]
-pub struct SessionRequestAuthSupported {
+pub struct SupportedAuthMethod {
     #[serde(rename(
         serialize = "authentication_class",
         deserialize = "authentication_class"
@@ -28,7 +28,7 @@ pub struct SessionRequestAttributes {
         serialize = "authentication_supported",
         deserialize = "authentication_supported"
     ))]
-    pub auth_supported: Vec<SessionRequestAuthSupported>,
+    pub auth_supported: Vec<SupportedAuthMethod>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -103,7 +103,7 @@ pub struct SessionResponse {
 *      Request.       *
 ***********************/
 #[derive(Serialize, Deserialize, Debug)]
-pub struct SessionIdRequestAuthProvidedData {
+pub struct ProofOfPossession {
     pub message: String,
     pub signature: String,
 }
@@ -122,11 +122,11 @@ pub struct SessionIdRequestAuthProvided {
     ))]
     pub auth_type: String,
 
-    pub data: SessionIdRequestAuthProvidedData,
+    pub data: ProofOfPossession,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-pub struct SessionIdRequestAtttributes {
+pub struct SessionUpdateAttributes {
     pub agent_id: String,
     #[serde(rename(
         serialize = "authentication_provided",
@@ -140,7 +140,7 @@ pub struct SessionIdRequestData {
     #[serde(rename(serialize = "type", deserialize = "type"))]
     data_type: String,
     pub id: u64,
-    pub attributes: SessionIdRequestAtttributes,
+    pub attributes: SessionUpdateAttributes,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -185,7 +185,7 @@ pub struct SessionIdResponseAuth {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-pub struct SessionIdResponseAtttributes {
+pub struct AuthenticationResultAttributes {
     pub agent_id: String,
     pub evaluation: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -209,7 +209,7 @@ pub struct SessionIdResponseData {
     #[serde(rename(serialize = "type", deserialize = "type"))]
     data_type: String,
     pub id: u64,
-    pub attributes: SessionIdResponseAtttributes,
+    pub attributes: AuthenticationResultAttributes,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -229,7 +229,7 @@ mod tests {
                 data_type: "session".to_string(),
                 attributes: SessionRequestAttributes {
                     agent_id: "example-agent".to_string(),
-                    auth_supported: vec![SessionRequestAuthSupported {
+                    auth_supported: vec![SupportedAuthMethod {
                         auth_class: "pop".to_string(),
                         auth_type: "tpm_pop".to_string(),
                     }],
@@ -392,12 +392,12 @@ mod tests {
             data: SessionIdRequestData {
                 data_type: "session".to_string(),
                 id: 1,
-                attributes: SessionIdRequestAtttributes {
+                attributes: SessionUpdateAttributes {
                     agent_id: "example-agent".to_string(),
                     auth_provided: vec![SessionIdRequestAuthProvided {
                         auth_class: "pop".to_string(),
                         auth_type: "tpm_pop".to_string(),
-                        data: SessionIdRequestAuthProvidedData {
+                        data: ProofOfPossession {
                             message: "example-message".to_string(),
                             signature: "example-signature".to_string(),
                         },
@@ -480,7 +480,7 @@ mod tests {
             data: SessionIdResponseData {
                 data_type: "session".to_string(),
                 id: 1,
-                attributes: SessionIdResponseAtttributes {
+                attributes: AuthenticationResultAttributes {
                     agent_id: "example-agent".to_string(),
                     evaluation: "success".to_string(),
                     token: Some("example-token".to_string()),
@@ -628,7 +628,7 @@ mod tests {
             data: SessionIdResponseData {
                 data_type: "session".to_string(),
                 id: 1,
-                attributes: SessionIdResponseAtttributes {
+                attributes: AuthenticationResultAttributes {
                     agent_id: "example-agent".to_string(),
                     evaluation: "fail".to_string(),
                     token: None,
