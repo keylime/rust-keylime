@@ -1,4 +1,5 @@
 use super::capabilities_negotiation::*;
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::to_value;
 use serde_json::Value as JsonValue;
@@ -233,10 +234,17 @@ impl From<EvidenceData> for EvidenceCollected {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
+pub struct JsonApiInfo {
+    pub version: String,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
 pub struct EvidenceHandlingResponse {
     pub data: EvidenceHandlingResponseData,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub meta: Option<EvidenceHandlingResponseMeta>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub jsonapi: Option<JsonApiInfo>,
 }
 #[derive(Serialize, Deserialize, Debug)]
 pub struct EvidenceHandlingResponseData {
@@ -254,13 +262,28 @@ pub struct EvidenceHandlingResponseMeta {
 pub struct EvidenceHandlingResponseAttributes {
     pub stage: String,
     pub evidence: Vec<EvidenceHandlingResponseAttributesEvidence>,
-    pub system_info: SystemInfo,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub system_info: Option<SystemInfo>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub capabilities_received_at: Option<DateTime<Utc>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub challenges_expire_at: Option<DateTime<Utc>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub evidence_received_at: Option<DateTime<Utc>>,
 }
+
+#[derive(Serialize, Deserialize, Debug)]
+#[serde(untagged)]
+pub enum EvidenceCapabilities {
+    Certification(Capabilities),
+    Log(LogCapabilities),
+}
+
 #[derive(Serialize, Deserialize, Debug)]
 pub struct EvidenceHandlingResponseAttributesEvidence {
     pub evidence_class: String,
     pub evidence_type: String,
-    pub capabilities: Capabilities,
+    pub capabilities: EvidenceCapabilities,
     pub chosen_parameters: Option<ChosenParameters>,
     pub data: EvidenceData,
 }
@@ -835,125 +858,153 @@ mod tests {
                         EvidenceHandlingResponseAttributesEvidence {
                             evidence_class: "certification".to_string(),
                             evidence_type: "tpm_quote".to_string(),
-                            capabilities: Capabilities {
-                                component_version: "2.0".to_string(),
-                                hash_algorithms: vec!["sha3_512".to_string()],
-                                signature_schemes: vec!["rsassa".to_string()],
-                                available_subjects: PcrBanks {
-                                    sha1: Some(vec![0x01, 0x02, 0x03]),
-                                    sha256: Some(vec![0x04, 0x05, 0x06]),
-                                    sha384: None,
-                                    sha512: None,
-                                    sm3_256: None,
+                            capabilities: EvidenceCapabilities::Certification(
+                                Capabilities {
+                                    component_version: "2.0".to_string(),
+                                    hash_algorithms: vec!["sha3_512".to_string()],
+                                    signature_schemes: vec!["rsassa".to_string()],
+                                    available_subjects: PcrBanks {
+                                        sha1: Some(vec![0x01, 0x02, 0x03]),
+                                        sha256: Some(vec![0x04, 0x05, 0x06]),
+                                        sha384: None,
+                                        sha512: None,
+                                        sm3_256: None,
+                                    },
+                                    certification_keys: vec![],
                                 },
-                                certification_keys: vec![],
-                            },
-                            chosen_parameters: Some(ChosenParameters::Parameters(Box::new(CertificationParameters {
-                                challenge: Some("challenge".to_string()),
-                                selected_subjects: Some(PcrBanks {
-                                    sha1: Some(vec![0x01, 0x02, 0x03]),
-                                    sha256: Some(vec![0x04, 0x05, 0x06]),
-                                    sha384: None,
-                                    sha512: None,
-                                    sm3_256: None,
-                                }),
-                                hash_algorithm: Some("sha384".to_string()),
-                                signature_scheme: Some("rsassa".to_string()),
-                                certification_key: Some(CertificationKey {
-                                    key_class: "asymmetric".to_string(),
-                                    key_size: 2048,
-                                    server_identifier: "ak".to_string(),
-                                    local_identifier: "att_local_identifier".to_string(),
-                                    key_algorithm: "rsa".to_string(),
-                                    public: "OTgtMjkzODQ1LTg5MjMtNDk1OGlrYXNkamZnO2Frc2pka2ZqYXM7a2RqZjtramJrY3hqejk4MS0zMjQ5MDhpLWpmZDth".to_string(),
-                                    allowable_hash_algorithms: None,
-                                    allowable_signature_schemes: None,
-                                }),
-                            }))),
+                            ),
+                            chosen_parameters: Some(
+                                ChosenParameters::Parameters(Box::new(
+                                    CertificationParameters {
+                                        challenge: Some("challenge".to_string()),
+                                        selected_subjects: Some(PcrBanks {
+                                            sha1: Some(vec![0x01, 0x02, 0x03]),
+                                            sha256: Some(vec![0x04, 0x05, 0x06]),
+                                            sha384: None,
+                                            sha512: None,
+                                            sm3_256: None,
+                                        }),
+                                        hash_algorithm: Some(
+                                            "sha384".to_string(),
+                                        ),
+                                        signature_scheme: Some(
+                                            "rsassa".to_string(),
+                                        ),
+                                        certification_key: Some(CertificationKey {
+                                            key_class: "asymmetric".to_string(),
+                                            key_size: 2048,
+                                            server_identifier: "ak".to_string(),
+                                            local_identifier: "att_local_identifier".to_string(),
+                                            key_algorithm: "rsa".to_string(),
+                                            public: "OTgtMjkzODQ1LTg5MjMtNDk1OGlrYXNkamZnO2Frc2pka2ZqYXM7a2RqZjtramJrY3hqejk4MS0zMjQ5MDhpLWpmZDth".to_string(),
+                                            allowable_hash_algorithms: None,
+                                            allowable_signature_schemes: None,
+                                        }),
+                                    },
+                                )),
+                            ),
                             data: EvidenceData::TpmQuote {
                                 subject_data: "subject_data".to_string(),
                                 message: "message".to_string(),
                                 signature: "signature".to_string(),
-            meta: None,
+                                meta: None,
                             },
                         },
                         EvidenceHandlingResponseAttributesEvidence {
                             evidence_class: "log".to_string(),
                             evidence_type: "uefi_log".to_string(),
-                            capabilities: Capabilities {
-                                component_version: "2.0".to_string(),
-                                hash_algorithms: vec!["sha3_512".to_string()],
-                                signature_schemes: vec!["rsassa".to_string()],
-                                available_subjects: PcrBanks {
-                                    sha1: Some(vec![0x01, 0x02, 0x03]),
-                                    sha256: Some(vec![0x04, 0x05, 0x06]),
-                                    sha384: None,
-                                    sha512: None,
-                                    sm3_256: None,
+                            capabilities: EvidenceCapabilities::Log(
+                                LogCapabilities {
+                                    evidence_version: Some("1.0".to_string()),
+                                    entry_count: 50,
+                                    supports_partial_access: false,
+                                    appendable: false,
+                                    formats: vec![
+                                        "application/octet-stream".to_string()
+                                    ],
                                 },
-                                certification_keys: vec![],
-                            },
-                            chosen_parameters: Some(ChosenParameters::Parameters(Box::new(CertificationParameters {
-                                challenge: Some("challenge".to_string()),
-                                selected_subjects: Some(PcrBanks {
-                                    sha1: Some(vec![0x01, 0x02, 0x03]),
-                                    sha256: Some(vec![0x04, 0x05, 0x06]),
-                                    sha384: None,
-                                    sha512: None,
-                                    sm3_256: None,
-                                }),
-                                hash_algorithm: Some("sha384".to_string()),
-                                signature_scheme: Some("rsassa".to_string()),
-                                certification_key: Some(CertificationKey {
-                                    key_class: "asymmetric".to_string(),
-                                    key_size: 2048,
-                                    server_identifier: "ak".to_string(),
-                                    local_identifier: "att_local_identifier".to_string(),
-                                    key_algorithm: "rsa".to_string(),
-                                    public: "OTgtMjkzODQ1LTg5MjMtNDk1OGlrYXNkamZnO2Frc2pka2ZqYXM7a2RqZjtramJrY3hqejk4MS0zMjQ5MDhpLWpmZDth".to_string(),
-                                    allowable_hash_algorithms: None,
-                                    allowable_signature_schemes: None,
-                                }),
-                            }))),
+                            ),
+                            chosen_parameters: Some(
+                                ChosenParameters::Parameters(Box::new(
+                                    CertificationParameters {
+                                        challenge: Some("challenge".to_string()),
+                                        selected_subjects: Some(PcrBanks {
+                                            sha1: Some(vec![0x01, 0x02, 0x03]),
+                                            sha256: Some(vec![0x04, 0x05, 0x06]),
+                                            sha384: None,
+                                            sha512: None,
+                                            sm3_256: None,
+                                        }),
+                                        hash_algorithm: Some(
+                                            "sha384".to_string(),
+                                        ),
+                                        signature_scheme: Some(
+                                            "rsassa".to_string(),
+                                        ),
+                                        certification_key: Some(CertificationKey {
+                                            key_class: "asymmetric".to_string(),
+                                            key_size: 2048,
+                                            server_identifier: "ak".to_string(),
+                                            local_identifier: "att_local_identifier".to_string(),
+                                            key_algorithm: "rsa".to_string(),
+                                            public: "OTgtMjkzODQ1LTg5MjMtNDk1OGlrYXNkamZnO2Frc2pka2ZqYXM7a2RqZjtramJrY3hqejk4MS0zMjQ5MDhpLWpmZDth".to_string(),
+                                            allowable_hash_algorithms: None,
+                                            allowable_signature_schemes: None,
+                                        }),
+                                    },
+                                )),
+                            ),
                             data: EvidenceData::UefiLog {
                                 entries: "uefi_log_entries".to_string(),
-            meta: None,
+                                meta: None,
                             },
                         },
                         EvidenceHandlingResponseAttributesEvidence {
                             evidence_class: "log".to_string(),
                             evidence_type: "ima_log".to_string(),
-                            capabilities: Capabilities {
-                                component_version: "2.0".to_string(),
-                                hash_algorithms: vec!["sha3_512".to_string()],
-                                signature_schemes: vec!["rsassa".to_string()],
-                                available_subjects: PcrBanks {
-                                    sha1: Some(vec![0x01, 0x02, 0x03]),
-                                    sha256: Some(vec![0x04, 0x05, 0x06]),
-                                    sha384: None,
-                                    sha512: None,
-                                    sm3_256: None,
+                            capabilities: EvidenceCapabilities::Log(
+                                LogCapabilities {
+                                    evidence_version: None,
+                                    entry_count: 150,
+                                    supports_partial_access: true,
+                                    appendable: true,
+                                    formats: vec!["text/plain".to_string()],
                                 },
-                                certification_keys: vec![],
-                            },
-                            chosen_parameters: Some(ChosenParameters::Offset(LogParameters {
-                                format: "application/octet-stream".to_string(),
-                                starting_offset: None,
-                                entry_count: None,
-                            })),
+                            ),
+                            chosen_parameters: Some(ChosenParameters::Offset(
+                                LogParameters {
+                                    format: "application/octet-stream".to_string(),
+                                    starting_offset: None,
+                                    entry_count: None,
+                                },
+                            )),
                             data: EvidenceData::ImaLog {
                                 entry_count: 96,
                                 entries: "ima_log_entries".to_string(),
-            meta: None,
+                                meta: None,
                             },
                         },
                     ],
-                    system_info: SystemInfo {
-                        boot_time: "2025-04-08T12:00:17Z".parse().unwrap(), //#[allow_ci]
-                    },
+                    system_info: Some(SystemInfo {
+                        boot_time: "2025-08-27T11:00:17Z".parse().unwrap(), //#[allow_ci]
+                    }),
+                    capabilities_received_at: Some(
+                        "2025-08-27T11:01:17Z".parse().unwrap(), //#[allow_ci]
+                    ),
+                    challenges_expire_at: Some(
+                        "2025-08-27T11:01:17Z".parse().unwrap(), //#[allow_ci]
+                    ),
+                    evidence_received_at: Some(
+                        "2025-08-27T11:01:17Z".parse().unwrap(), //#[allow_ci]
+                    ),
                 },
             },
-            meta: None,
+            meta: Some(EvidenceHandlingResponseMeta {
+                seconds_to_next_attestation: Some(120),
+            }),
+            jsonapi: Some(JsonApiInfo {
+                version: "1.1".to_string(),
+            }),
         };
         // Serialize the response to JSON and check it is correctly generated
         let serialized = serde_json::to_string_pretty(&response).unwrap(); //#[allow_ci]
@@ -1025,26 +1076,13 @@ mod tests {
           "evidence_class": "log",
           "evidence_type": "uefi_log",
           "capabilities": {
-            "component_version": "2.0",
-            "hash_algorithms": [
-              "sha3_512"
-            ],
-            "signature_schemes": [
-              "rsassa"
-            ],
-            "available_subjects": {
-              "sha1": [
-                1,
-                2,
-                3
-              ],
-              "sha256": [
-                4,
-                5,
-                6
-              ]
-            },
-            "certification_keys": []
+            "evidence_version": "1.0",
+            "entry_count": 50,
+            "supports_partial_access": false,
+            "appendable": false,
+            "formats": [
+              "application/octet-stream"
+            ]
           },
           "chosen_parameters": {
             "certification_key": {
@@ -1079,26 +1117,12 @@ mod tests {
           "evidence_class": "log",
           "evidence_type": "ima_log",
           "capabilities": {
-            "component_version": "2.0",
-            "hash_algorithms": [
-              "sha3_512"
-            ],
-            "signature_schemes": [
-              "rsassa"
-            ],
-            "available_subjects": {
-              "sha1": [
-                1,
-                2,
-                3
-              ],
-              "sha256": [
-                4,
-                5,
-                6
-              ]
-            },
-            "certification_keys": []
+            "entry_count": 150,
+            "supports_partial_access": true,
+            "appendable": true,
+            "formats": [
+              "text/plain"
+            ]
           },
           "chosen_parameters": {
             "format": "application/octet-stream"
@@ -1110,9 +1134,18 @@ mod tests {
         }
       ],
       "system_info": {
-        "boot_time": "2025-04-08T12:00:17Z"
-      }
+        "boot_time": "2025-08-27T11:00:17Z"
+      },
+      "capabilities_received_at": "2025-08-27T11:01:17Z",
+      "challenges_expire_at": "2025-08-27T11:01:17Z",
+      "evidence_received_at": "2025-08-27T11:01:17Z"
     }
+  },
+  "meta": {
+    "seconds_to_next_attestation": 120
+  },
+  "jsonapi": {
+    "version": "1.1"
   }
 }"#
         );
@@ -1297,9 +1330,9 @@ mod tests {
           }
         }
       ],
-      "system_info": {
-        "boot_time": "2025-04-08T12:00:17Z"
-      }
+      "evidence_received_at": "2025-08-07T12:05:17.228706Z",
+      "capabilities_received_at": "2025-08-07T11:52:17.228706Z",
+      "challenges_expire_at": "2025-08-07T12:22:17.228706Z"
     }
   }
 }"#;
@@ -1328,54 +1361,39 @@ mod tests {
         } else {
             panic!("Expected TpmQuoteData"); //#[allow_ci]
         }
-        assert_eq!(
-            deserialized.data.attributes.evidence[0]
-                .capabilities
-                .component_version,
-            "2.0"
-        );
-        assert_eq!(
-            deserialized.data.attributes.evidence[0]
-                .capabilities
-                .hash_algorithms,
-            vec!["sha3_512"]
-        );
-        assert_eq!(
-            deserialized.data.attributes.evidence[0]
-                .capabilities
-                .signature_schemes,
-            vec!["rsassa"]
-        );
-        assert_eq!(
-            deserialized.data.attributes.evidence[0]
-                .capabilities
-                .available_subjects
-                .sha1,
-            Some(vec![0x01, 0x02, 0x03])
-        );
-        assert_eq!(
-            deserialized.data.attributes.evidence[0]
-                .capabilities
-                .available_subjects
-                .sha256,
-            Some(vec![0x04, 0x05, 0x06])
-        );
-        let some_certification_keys = deserialized.data.attributes.evidence
-            [0]
-        .capabilities
-        .certification_keys
-        .first();
-        assert!(some_certification_keys.is_some());
-        let certification_key = some_certification_keys.unwrap(); //#[allow_ci]
-        assert_eq!(certification_key.key_class, "asymmetric");
-        assert_eq!(
-            certification_key.local_identifier,
-            "att_local_identifier"
-        );
-        assert_eq!(certification_key.key_algorithm, "rsa");
-        assert_eq!(certification_key.key_size, 2048);
-        assert_eq!(certification_key.server_identifier, "ak");
-        assert_eq!(certification_key.public, "OTgtMjkzODQ1LTg5MjMtNDk1OGlrYXNkamZnO2Frc2pka2ZqYXM7a2RqZjtramJrY3hqejk4MS0zMjQ5MDhpLWpmZDth");
+        assert!(matches!(
+            deserialized.data.attributes.evidence[0].capabilities,
+            EvidenceCapabilities::Certification(_)
+        ));
+        if let EvidenceCapabilities::Certification(capabilities) =
+            &deserialized.data.attributes.evidence[0].capabilities
+        {
+            assert_eq!(capabilities.component_version, "2.0");
+            assert_eq!(capabilities.hash_algorithms, vec!["sha3_512"]);
+            assert_eq!(capabilities.signature_schemes, vec!["rsassa"]);
+            assert_eq!(
+                capabilities.available_subjects.sha1,
+                Some(vec![0x01, 0x02, 0x03])
+            );
+            assert_eq!(
+                capabilities.available_subjects.sha256,
+                Some(vec![0x04, 0x05, 0x06])
+            );
+            let some_certification_keys =
+                capabilities.certification_keys.first();
+            assert!(some_certification_keys.is_some());
+            let certification_key = some_certification_keys.unwrap(); //#[allow_ci]
+            assert_eq!(certification_key.key_class, "asymmetric");
+            assert_eq!(
+                certification_key.local_identifier,
+                "att_local_identifier"
+            );
+            assert_eq!(certification_key.key_algorithm, "rsa");
+            assert_eq!(certification_key.key_size, 2048);
+            assert_eq!(certification_key.server_identifier, "ak");
+            assert_eq!(certification_key.public, "OTgtMjkzODQ1LTg5MjMtNDk1OGlrYXNkamZnO2Frc2pka2ZqYXM7a2RqZjtramJrY3hqejk4MS0zMjQ5MDhpLWpmZDth");
+        }
+
         let some_chosen_parameters = deserialized.data.attributes.evidence[0]
             .chosen_parameters
             .as_ref();
@@ -1427,5 +1445,34 @@ mod tests {
         } else {
             panic!("Expected UefiLog"); //#[allow_ci]
         }
+        assert!(deserialized.data.attributes.system_info.is_none());
+        let evidence_received_at =
+            deserialized.data.attributes.evidence_received_at;
+        assert!(evidence_received_at.is_some());
+        let evidence_received_at_utc = evidence_received_at.unwrap(); //#[allow_ci]
+        assert_eq!(
+            evidence_received_at_utc.to_string(),
+            "2025-08-07 12:05:17.228706 UTC"
+        );
+        let capabilities_received_at =
+            deserialized.data.attributes.capabilities_received_at;
+        assert!(capabilities_received_at.is_some());
+        let capabilities_received_at_utc = deserialized
+            .data
+            .attributes
+            .capabilities_received_at
+            .unwrap(); //#[allow_ci]
+        assert_eq!(
+            capabilities_received_at_utc.to_string(),
+            "2025-08-07 11:52:17.228706 UTC"
+        );
+        let challenges_expire_at =
+            deserialized.data.attributes.challenges_expire_at;
+        assert!(challenges_expire_at.is_some());
+        let challenges_expire_at_utc = challenges_expire_at.unwrap(); //#[allow_ci]
+        assert_eq!(
+            challenges_expire_at_utc.to_string(),
+            "2025-08-07 12:22:17.228706 UTC"
+        );
     } //serialize_evidence_handling_response
 }
