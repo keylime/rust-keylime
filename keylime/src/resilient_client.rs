@@ -1,7 +1,11 @@
+use async_trait::async_trait;
+use http::Extensions;
 use log::{debug, warn};
+use rand::Rng;
 use reqwest::{Client, Method, Response, StatusCode};
 use reqwest_middleware::{
-    ClientBuilder, ClientWithMiddleware, Error, RequestBuilder,
+    ClientBuilder, ClientWithMiddleware, Error, Middleware, Next,
+    RequestBuilder,
 };
 use reqwest_retry::{
     default_on_request_failure, default_on_request_success,
@@ -14,6 +18,32 @@ use std::time::Duration;
 // We define a default maximum delay for retries, which in the pracitical sense
 // is set to 1 hour. This can be adjusted based on the application's needs.
 const DEFAULT_MAX_DELAY: Duration = Duration::from_secs(3600);
+
+const REQUEST_ID_HEADER: &str = "X-Request-ID";
+
+/// Middleware for logging request details.
+#[derive(Debug, Clone)]
+struct LoggingMiddleware;
+
+#[async_trait]
+impl Middleware for LoggingMiddleware {
+    async fn handle(
+        &self,
+        req: reqwest::Request,
+        extensions: &mut Extensions,
+        next: Next<'_>,
+    ) -> Result<Response, Error> {
+        debug!(
+            "Sending request(method:{}, url:{}) with headers:",
+            req.method(),
+            req.url()
+        );
+        for (key, value) in req.headers() {
+            debug!("  {key}: {value:?}");
+        }
+        next.run(req, extensions).await
+    }
+}
 
 /// Custom strategy to determine which responses are retryable.
 /// It considers any status code NOT in the `success_codes` list as a potential transient error.
@@ -82,6 +112,7 @@ impl ResilientClient {
                     success_codes: success_codes.to_vec(),
                 },
             ))
+            .with(LoggingMiddleware)
             .build();
 
         Self {
@@ -89,9 +120,24 @@ impl ResilientClient {
         }
     }
 
+    /// Generates a six-character lowercase alphanumeric request ID.
+    fn generate_request_id() -> String {
+        const CHARSET: &[u8] = b"abcdefghijklmnopqrstuvwxyz0123456789";
+        let mut rng = rand::rng();
+        let request_id: String = (0..6)
+            .map(|_| {
+                let idx = rng.random_range(0..CHARSET.len());
+                CHARSET[idx] as char
+            })
+            .collect();
+        request_id
+    }
+
     /// Sends a non JSON request using the client.
     pub fn get_request(&self, method: Method, url: &str) -> RequestBuilder {
-        self.client.request(method, url)
+        self.client
+            .request(method, url)
+            .header(REQUEST_ID_HEADER, Self::generate_request_id())
     }
 
     /// Prepares a request with a JSON body, returning a Result.
@@ -105,6 +151,7 @@ impl ResilientClient {
         let builder = self
             .client
             .request(method, url)
+            .header(REQUEST_ID_HEADER, Self::generate_request_id())
             .body(json_string.to_string());
 
         match custom_content_type {
@@ -414,5 +461,45 @@ mod tests {
         let received_requests =
             mock_server.received_requests().await.unwrap(); //#[allow_ci]
         assert_eq!(received_requests.len(), 1);
+    }
+
+    #[actix_rt::test]
+    async fn test_x_request_id_with_mockoon() {
+        if std::env::var("MOCKOON").is_err() {
+            return;
+        }
+        // Mockoon checks if the request is using the X-Request-Id header
+        let client = ResilientClient::new(
+            None,
+            Duration::from_millis(10),
+            3,
+            &[StatusCode::OK],
+            None,
+        );
+
+        let response = client
+            .get_request(
+                Method::GET,
+                "http://localhost:3000/x-request-id-test",
+            )
+            .send()
+            .await;
+        // Mockoon x-request-id-test only returns 200 OK if X-Request-ID exists
+        assert!(response.is_ok());
+        assert_eq!(response.unwrap().status(), StatusCode::OK); //#[allow_ci]
+
+        let response = client
+            .get_json_request(
+                Method::GET,
+                "http://localhost:3000/x-request-id-test",
+                "{}",
+                None,
+            )
+            .expect("Failed to create JSON request")
+            .send()
+            .await;
+
+        assert!(response.is_ok());
+        assert_eq!(response.unwrap().status(), StatusCode::OK); //#[allow_ci]
     }
 }
