@@ -33,6 +33,7 @@ use thiserror::Error;
 /// This enum covers all error conditions that can occur during configuration
 /// operations, from file loading to validation and environment variable processing.
 #[derive(Error, Debug)]
+#[allow(dead_code)]
 pub enum ConfigError {
     /// Configuration file loading errors
     #[error("Configuration file error: {0}")]
@@ -56,6 +57,7 @@ pub enum ConfigError {
 /// These errors represent issues when loading configuration files,
 /// including file system errors and format issues.
 #[derive(Error, Debug)]
+#[allow(dead_code)]
 pub enum LoadError {}
 
 /// Configuration validation errors
@@ -63,6 +65,7 @@ pub enum LoadError {}
 /// These errors represent validation failures for specific configuration
 /// values, providing detailed context about what is wrong and how to fix it.
 #[derive(Error, Debug)]
+#[allow(dead_code)]
 pub enum ValidationError {}
 
 impl ConfigError {}

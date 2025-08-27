@@ -661,11 +661,7 @@ mod tests {
         if let Ok(mut ctx) = context_info_result {
             // Temporarily override config to point to a non-existent path
             let original_path =
-                std::env::var("KEYLIME_CONFIG_PATH").unwrap_or_default();
-            std::env::set_var(
-                "KEYLIME_CONFIG_PATH",
-                "test-data/non-existent-config.conf",
-            );
+                std::env::var("KEYLIME_AGENT_CONFIG").unwrap_or_default();
 
             // Create a temporary config file with an invalid path for measuredboot_ml_path
             let temp_dir = tempfile::tempdir().unwrap();
@@ -675,16 +671,20 @@ mod tests {
             writeln!(file, "[agent]").unwrap();
             writeln!(
                 file,
-                "measuredboot_ml_path = /path/to/non/existent/log"
+                "measuredboot_ml_path = \"/path/to/non/existent/log\""
             )
             .unwrap();
-            std::env::set_var("KEYLIME_CONFIG_PATH", config_path);
+            std::env::set_var("KEYLIME_AGENT_CONFIG", config_path);
 
             let filler = FillerFromHardware::new(&mut ctx);
             assert!(filler.uefi_log_handler.is_none());
 
             // Restore original config path
-            std::env::set_var("KEYLIME_CONFIG_PATH", original_path);
+            if original_path.is_empty() {
+                std::env::remove_var("KEYLIME_AGENT_CONFIG");
+            } else {
+                std::env::set_var("KEYLIME_AGENT_CONFIG", original_path);
+            }
             assert!(ctx.flush_context().is_ok());
         }
     }

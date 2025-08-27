@@ -2130,12 +2130,13 @@ async fn validate_tpm_quote(
     }
 
     // Handle the 'r' prefix - remove the single 'r' character as documented
-    let quote_data_clean = if let Some(stripped) = quote_data.strip_prefix('r') {
-        debug!("Removing 'r' prefix from quote data");
-        stripped
-    } else {
-        quote_data
-    };
+    let quote_data_clean =
+        if let Some(stripped) = quote_data.strip_prefix('r') {
+            debug!("Removing 'r' prefix from quote data");
+            stripped
+        } else {
+            quote_data
+        };
 
     debug!("Cleaned quote data length: {}", quote_data_clean.len());
 
