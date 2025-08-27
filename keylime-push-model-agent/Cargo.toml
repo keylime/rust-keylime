@@ -12,6 +12,7 @@ actix-web.workspace = true
 anyhow.workspace = true
 assert_cmd.workspace = true
 async-trait.workspace = true
+base64.workspace = true
 chrono.workspace = true
 clap.workspace = true
 keylime.workspace = true
