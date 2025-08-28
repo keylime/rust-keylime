@@ -22,6 +22,7 @@ pub enum State {
     Negotiating(ContextInfo),
     Attesting(ContextInfo, ResponseInformation),
     RegistrationFailed(anyhow::Error),
+    AttestationFailed(anyhow::Error, ContextInfo),
     Failed(anyhow::Error),
 }
 
@@ -80,13 +81,27 @@ impl<'a> StateMachine<'a> {
                 }
                 State::RegistrationFailed(e) => {
                     error!("Registration failed: {e:?}");
-                    debug!("Resetting state to Unregistered and retrying");
+                    debug!("Resetting state to Unregistered and retrying after a delay ({:?})", self.measurement_interval);
+                    // Add a delay before retrying registration to avoid spamming.
+                    time::sleep(self.measurement_interval).await;
                     self.state = State::Unregistered;
                 }
-                State::Failed(e) => {
+                State::AttestationFailed(e, ctx_info) => {
                     error!("Attestation failed: {e:?}");
+                    debug!(
+                        "Retrying attestation after a delay ({:?})",
+                        self.measurement_interval
+                    );
+                    // Wait for the default interval before retrying negotiation.
+                    time::sleep(self.measurement_interval).await;
+                    self.state = State::Negotiating(ctx_info);
+                }
+                State::Failed(e) => {
+                    error!(
+                        "Unrecoverable error: {e:?}. Exiting state machine."
+                    );
                     self.state = State::Failed(e);
-                    break;
+                    break; // Exit the loop on terminal failure
                 }
             }
         }
@@ -134,15 +149,22 @@ impl<'a> StateMachine<'a> {
                 if neg.status_code == reqwest::StatusCode::CREATED {
                     self.state = State::Attesting(ctx_info, neg);
                 } else {
-                    self.state = State::Failed(anyhow!(
-                        "Negotiation failed with status code: {}",
-                        neg.status_code
-                    ));
+                    // Treat negotiation failure as a retryable attestation error
+                    self.state = State::AttestationFailed(
+                        anyhow!(
+                            "Negotiation failed with status code: {}",
+                            neg.status_code
+                        ),
+                        ctx_info,
+                    );
                 }
             }
             Err(e) => {
-                self.state =
-                    State::Failed(anyhow!("Negotiation failed: {e:?}"));
+                // Treat negotiation failure as a retryable attestation error
+                self.state = State::AttestationFailed(
+                    anyhow!("Negotiation failed: {e:?}"),
+                    ctx_info,
+                );
             }
         }
     }
@@ -183,15 +205,22 @@ impl<'a> StateMachine<'a> {
                         res.status_code
                     );
                     error!("Response body: {}", res.body);
-                    self.state = State::Failed(anyhow!(
-                        "Verifier rejected the evidence with code: {}",
-                        res.status_code
-                    ));
+                    // This is now a retryable error
+                    self.state = State::AttestationFailed(
+                        anyhow!(
+                            "Verifier rejected the evidence with code: {}",
+                            res.status_code
+                        ),
+                        ctx_info,
+                    );
                 }
             }
             Err(e) => {
-                self.state =
-                    State::Failed(anyhow!("Attestation failed: {e:?}"));
+                // This is now a retryable error
+                self.state = State::AttestationFailed(
+                    anyhow!("Attestation failed: {e:?}"),
+                    ctx_info,
+                );
             }
         }
     }
