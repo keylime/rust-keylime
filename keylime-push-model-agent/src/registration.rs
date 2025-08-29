@@ -8,23 +8,19 @@ use keylime::{
     error::Result,
 };
 
-pub async fn check_registration<T: PushModelConfigTrait>(
-    config: &T,
+pub async fn check_registration(
     context_info: Option<context_info::ContextInfo>,
 ) -> Result<()> {
     if context_info.is_some() {
-        crate::registration::register_agent(
-            config,
-            &mut context_info.unwrap(),
-        )
-        .await?;
+        crate::registration::register_agent(&mut context_info.unwrap())
+            .await?;
     }
     Ok(())
 }
 
-fn get_retry_config<T: PushModelConfigTrait>(
-    config: &T,
-) -> Option<RetryConfig> {
+fn get_retry_config() -> Option<RetryConfig> {
+    let config = keylime::config::get_config();
+
     if config.exponential_backoff_max_retries().is_none()
         && config.exponential_backoff_initial_delay().is_none()
         && config.exponential_backoff_max_delay().is_none()
@@ -43,10 +39,11 @@ fn get_retry_config<T: PushModelConfigTrait>(
     }
 }
 
-pub async fn register_agent<T: PushModelConfigTrait>(
-    config: &T,
+pub async fn register_agent(
     context_info: &mut context_info::ContextInfo,
 ) -> Result<()> {
+    let config = keylime::config::get_config();
+
     let ac = AgentRegistrationConfig {
         contact_ip: config.contact_ip().to_string(),
         contact_port: config.contact_port(),
@@ -71,7 +68,7 @@ pub async fn register_agent<T: PushModelConfigTrait>(
 
     let server_cert_key = cert::cert_from_server_key(&cert_config)?;
 
-    let retry_config = get_retry_config(config);
+    let retry_config = get_retry_config();
 
     let aa = AgentRegistration {
         ak: context_info.ak.clone(),
@@ -111,17 +108,19 @@ mod tests {
     #[actix_rt::test]
     async fn test_avoid_registration() {
         let _mutex = testing::lock_tests().await;
+
         let tmpdir = tempfile::tempdir().expect("failed to create tempdir");
-        let config = get_testing_config(tmpdir.path());
-        let result = check_registration(&config, None).await;
+        let _config = get_testing_config(tmpdir.path(), None);
+        let result = check_registration(None).await;
         assert!(result.is_ok());
     }
 
     #[tokio::test]
     async fn test_register_agent() {
         let _mutex = testing::lock_tests().await;
+
         let tmpdir = tempfile::tempdir().expect("failed to create tmpdir");
-        let mut config = get_testing_config(tmpdir.path());
+        let mut config = get_testing_config(tmpdir.path(), None);
         let alg_config = AlgorithmConfigurationString {
             tpm_encryption_alg: "rsa".to_string(),
             tpm_hash_alg: "sha256".to_string(),
@@ -133,9 +132,12 @@ mod tests {
         config.exponential_backoff_max_retries = None;
         config.exponential_backoff_max_delay = None;
 
+        // Create guard that will automatically clear override when dropped
+        let _guard = keylime::config::TestConfigGuard::new(config);
+
         let mut context_info = ContextInfo::new_from_str(alg_config)
             .expect("Failed to create context info from string");
-        let result = register_agent(&config, &mut context_info).await;
+        let result = register_agent(&mut context_info).await;
         assert!(result.is_err());
         assert!(context_info.flush_context().is_ok());
     }

@@ -7,14 +7,13 @@ use std::sync::{Mutex, OnceLock};
 static GLOBAL_CONTEXT: OnceLock<Mutex<Result<ContextInfo, String>>> =
     OnceLock::new();
 
-pub fn init_context_info<T: PushModelConfigTrait>(
-    config: &T,
-    avoid_tpm: bool,
-) -> Result<()> {
+pub fn init_context_info(avoid_tpm: bool) -> Result<()> {
     if avoid_tpm {
         debug!("TPM is avoided, skipping context initialization.");
         return Ok(());
     }
+
+    let config = keylime::config::get_config();
 
     let result = GLOBAL_CONTEXT.set(Mutex::new(
         (|| -> Result<ContextInfo, String> {
@@ -88,10 +87,13 @@ mod tests {
         // Use temporary directory instead of assuming /var/lib/keylime exists
         let _mutex = testing::lock_tests().await;
         let tmpdir = tempfile::tempdir().expect("failed to create tmpdir");
-        let config = get_testing_config(tmpdir.path());
+        let config = get_testing_config(tmpdir.path(), None);
 
         const AVOID_TPM: bool = true;
-        let init_res = init_context_info(&config, AVOID_TPM);
+        // Create guard that will automatically clear override when dropped
+        let _guard = keylime::config::TestConfigGuard::new(config);
+
+        let init_res = init_context_info(AVOID_TPM);
         assert!(init_res.is_ok());
         let context_res = get_context_info(AVOID_TPM);
         assert!(context_res.is_ok());
@@ -107,10 +109,13 @@ mod tests {
         // Use temporary directory instead of assuming /var/lib/keylime exists
         let _mutex = testing::lock_tests().await;
         let tmpdir = tempfile::tempdir().expect("failed to create tmpdir");
-        let config = get_testing_config(tmpdir.path());
+        let config = get_testing_config(tmpdir.path(), None);
+
+        // Create guard that will automatically clear override when dropped
+        let _guard = keylime::config::TestConfigGuard::new(config);
 
         const DONT_AVOID_TPM: bool = false;
-        let init_res = init_context_info(&config, DONT_AVOID_TPM);
+        let init_res = init_context_info(DONT_AVOID_TPM);
         assert!(init_res.is_ok());
         let context_res = get_context_info(DONT_AVOID_TPM);
         assert!(context_res.is_ok());
