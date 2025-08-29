@@ -9,7 +9,6 @@ use crate::registration;
 #[cfg(test)]
 use crate::DEFAULT_ATTESTATION_INTERVAL_SECONDS;
 use anyhow::anyhow;
-// AgentConfig no longer needed since we use singleton
 use keylime::context_info::ContextInfo;
 use log::*;
 use std::time::Duration;
@@ -397,12 +396,12 @@ mod tpm_tests {
     #[cfg(feature = "testing")]
     fn create_test_state_machine<'a>(
         neg_config: &'a NegotiationConfig<'a>,
-    ) -> StateMachine<'a> {
+    ) -> (StateMachine<'a>, keylime::config::TestConfigGuard) {
         // Initialize test config
         let tmpdir = tempfile::tempdir().expect("failed to create tmpdir");
         let config = keylime::config::get_testing_config(tmpdir.path(), None);
-        // Set testing configuration override for this test
-        keylime::config::set_testing_config_override(config);
+        // Create guard that will automatically clear override when dropped
+        let guard = keylime::config::TestConfigGuard::new(config);
 
         let client = AttestationClient::new(neg_config).unwrap();
 
@@ -422,20 +421,26 @@ mod tpm_tests {
                 // Log the error but don't panic to avoid leaving TPM objects behind
                 eprintln!("TPM context creation failed: {e:?}. This test requires TPM access with proper permissions");
                 // Return a state machine without context instead of panicking
-                return StateMachine::new(
-                    client,
-                    neg_config.clone(),
-                    None,
-                    DEFAULT_ATTESTATION_INTERVAL_SECONDS,
+                return (
+                    StateMachine::new(
+                        client,
+                        neg_config.clone(),
+                        None,
+                        DEFAULT_ATTESTATION_INTERVAL_SECONDS,
+                    ),
+                    guard,
                 );
             }
         };
 
-        StateMachine::new(
-            client,
-            neg_config.clone(),
-            Some(context_info),
-            DEFAULT_ATTESTATION_INTERVAL_SECONDS,
+        (
+            StateMachine::new(
+                client,
+                neg_config.clone(),
+                Some(context_info),
+                DEFAULT_ATTESTATION_INTERVAL_SECONDS,
+            ),
+            guard,
         )
     }
 
@@ -449,7 +454,7 @@ mod tpm_tests {
             1000,
             Some(30000),
         );
-        let mut sm = create_test_state_machine(&neg_config);
+        let (mut sm, _guard) = create_test_state_machine(&neg_config);
         let mut context_info = sm.context_info.clone().unwrap();
         sm.state = State::Registered(context_info.clone());
 
@@ -470,9 +475,6 @@ mod tpm_tests {
 
         assert!(matches!(sm.get_current_state(), State::Attesting(_, _)));
         assert!(context_info.flush_context().is_ok());
-
-        // Clear testing configuration override
-        keylime::config::clear_testing_config_override();
     }
 
     #[tokio::test]
@@ -485,7 +487,7 @@ mod tpm_tests {
             1000,
             Some(30000),
         );
-        let mut sm = create_test_state_machine(&neg_config);
+        let (mut sm, _guard) = create_test_state_machine(&neg_config);
         let mut context_info = sm.context_info.clone().unwrap();
         sm.state = State::Registered(context_info.clone());
 
@@ -510,9 +512,6 @@ mod tpm_tests {
 
         assert!(matches!(sm.get_current_state(), State::Failed(_)));
         assert!(context_info.flush_context().is_ok());
-
-        // Clear testing configuration override
-        keylime::config::clear_testing_config_override();
     }
 
     #[tokio::test]
@@ -525,7 +524,7 @@ mod tpm_tests {
             1000,
             Some(30000),
         );
-        let mut sm = create_test_state_machine(&neg_config);
+        let (mut sm, _guard) = create_test_state_machine(&neg_config);
         let mut context_info = sm.context_info.clone().unwrap();
         sm.state = State::Attesting(
             context_info.clone(),
@@ -552,9 +551,6 @@ mod tpm_tests {
 
         assert!(matches!(sm.get_current_state(), State::Negotiating(_)));
         assert!(context_info.flush_context().is_ok());
-
-        // Clear testing configuration override
-        keylime::config::clear_testing_config_override();
     }
 
     #[tokio::test]
@@ -567,7 +563,7 @@ mod tpm_tests {
             1000,
             Some(30000),
         );
-        let mut sm = create_test_state_machine(&neg_config);
+        let (mut sm, _guard) = create_test_state_machine(&neg_config);
         let mut context_info = sm.context_info.clone().unwrap();
         sm.state = State::Attesting(
             context_info.clone(),
@@ -601,9 +597,6 @@ mod tpm_tests {
 
         assert!(matches!(sm.get_current_state(), State::Failed(_)));
         assert!(context_info.flush_context().is_ok());
-
-        // Clear testing configuration override
-        keylime::config::clear_testing_config_override();
     }
 
     #[tokio::test]
@@ -616,7 +609,7 @@ mod tpm_tests {
             1000,
             Some(30000),
         );
-        let mut sm = create_test_state_machine(&neg_config);
+        let (mut sm, _guard) = create_test_state_machine(&neg_config);
         let mut context_info = sm.context_info.clone().unwrap();
 
         registration::set_mock_result(Ok(()));
@@ -640,9 +633,6 @@ mod tpm_tests {
         }
         assert!(matches!(sm.get_current_state(), State::Registered(_)));
         assert!(context_info.flush_context().is_ok());
-
-        // Clear testing configuration override
-        keylime::config::clear_testing_config_override();
     }
 
     #[tokio::test]
@@ -654,8 +644,8 @@ mod tpm_tests {
         // Initialize test config
         let tmpdir = tempfile::tempdir().expect("failed to create tmpdir");
         let config = keylime::config::get_testing_config(tmpdir.path(), None);
-        // Set testing configuration override for this test
-        keylime::config::set_testing_config_override(config);
+        // Create guard that will automatically clear override when dropped
+        let _guard = keylime::config::TestConfigGuard::new(config);
 
         let mut context_info =
             ContextInfo::new(keylime::context_info::AlgorithmConfiguration {
@@ -729,9 +719,6 @@ mod tpm_tests {
             "StateMachine should start in Unregistered state, but was {:?}",
             sm.get_current_state()
         );
-
-        // Clear testing configuration override
-        keylime::config::clear_testing_config_override();
     }
 } // feature testing tests
 

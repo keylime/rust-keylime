@@ -132,16 +132,13 @@ mod tests {
         config.exponential_backoff_max_retries = None;
         config.exponential_backoff_max_delay = None;
 
-        // Set testing configuration override for this test
-        keylime::config::set_testing_config_override(config);
+        // Create guard that will automatically clear override when dropped
+        let _guard = keylime::config::TestConfigGuard::new(config);
 
         let mut context_info = ContextInfo::new_from_str(alg_config)
             .expect("Failed to create context info from string");
         let result = register_agent(&mut context_info).await;
         assert!(result.is_err());
         assert!(context_info.flush_context().is_ok());
-
-        // Clear testing configuration override
-        keylime::config::clear_testing_config_override();
     }
 }

@@ -639,10 +639,7 @@ mod tests {
     #[tokio::test]
     #[cfg(feature = "testing")]
     async fn test_filler_from_hardware_new_with_uefi_error() {
-        use keylime::config::{
-            clear_testing_config_override, get_testing_config,
-            set_testing_config_override,
-        };
+        use keylime::config::{get_testing_config, TestConfigGuard};
 
         let _mutex = testing::lock_tests().await;
         let context_info_result = context_info::ContextInfo::new_from_str(
@@ -668,14 +665,12 @@ mod tests {
             let test_config =
                 get_testing_config(temp_dir.path(), Some(overrides));
 
-            // Set the testing configuration override
-            set_testing_config_override(test_config);
+            // Create guard that will automatically clear override when dropped
+            let _guard = TestConfigGuard::new(test_config);
 
             let filler = FillerFromHardware::new(&mut ctx);
             assert!(filler.uefi_log_handler.is_none());
 
-            // Clear the testing configuration override
-            clear_testing_config_override();
             assert!(ctx.flush_context().is_ok());
         }
     }
