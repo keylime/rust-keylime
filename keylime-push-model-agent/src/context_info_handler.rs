@@ -90,8 +90,8 @@ mod tests {
         let config = get_testing_config(tmpdir.path(), None);
 
         const AVOID_TPM: bool = true;
-        // Set testing configuration override
-        keylime::config::set_testing_config_override(config);
+        // Create guard that will automatically clear override when dropped
+        let _guard = keylime::config::TestConfigGuard::new(config);
 
         let init_res = init_context_info(AVOID_TPM);
         assert!(init_res.is_ok());
@@ -101,9 +101,6 @@ mod tests {
             context_res.unwrap().is_none(),
             "Context should be None when TPM is avoided"
         );
-
-        // Clear testing configuration override
-        keylime::config::clear_testing_config_override();
     }
 
     #[tokio::test]
@@ -114,8 +111,8 @@ mod tests {
         let tmpdir = tempfile::tempdir().expect("failed to create tmpdir");
         let config = get_testing_config(tmpdir.path(), None);
 
-        // Set testing configuration override
-        keylime::config::set_testing_config_override(config);
+        // Create guard that will automatically clear override when dropped
+        let _guard = keylime::config::TestConfigGuard::new(config);
 
         const DONT_AVOID_TPM: bool = false;
         let init_res = init_context_info(DONT_AVOID_TPM);
@@ -129,8 +126,5 @@ mod tests {
         );
         let mut context_info = context_info_handler.unwrap(); //#[allow_ci]
         context_info.flush_context().unwrap(); //#[allow_ci]
-
-        // Clear testing configuration override
-        keylime::config::clear_testing_config_override();
     }
 }

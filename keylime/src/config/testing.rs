@@ -179,7 +179,7 @@ fn apply_config_overrides(
 /// # Arguments
 ///
 /// * `config`: The configuration to use as override during testing
-pub fn set_testing_config_override(config: AgentConfig) {
+fn set_testing_config_override(config: AgentConfig) {
     let mutex = TESTING_CONFIG_OVERRIDE.get_or_init(|| Mutex::new(None));
     if let Ok(mut guard) = mutex.lock() {
         *guard = Some(config);
@@ -187,7 +187,7 @@ pub fn set_testing_config_override(config: AgentConfig) {
 }
 
 /// Clear the testing configuration override, restoring normal configuration loading behavior
-pub fn clear_testing_config_override() {
+fn clear_testing_config_override() {
     let mutex = TESTING_CONFIG_OVERRIDE.get_or_init(|| Mutex::new(None));
     if let Ok(mut guard) = mutex.lock() {
         *guard = None;
@@ -209,6 +209,49 @@ pub fn get_testing_config_override() -> Option<AgentConfig> {
         guard.clone()
     } else {
         None
+    }
+}
+
+/// RAII guard for testing configuration overrides
+///
+/// This guard automatically clears the testing configuration override when dropped,
+/// ensuring proper cleanup without requiring manual calls to clear_testing_config_override().
+///
+/// # Example
+///
+/// ```
+/// use keylime::config::{TestConfigGuard, AgentConfig};
+///
+/// {
+///     let test_config = AgentConfig::default();
+///     let _guard = TestConfigGuard::new(test_config);
+///     // Testing configuration override is active
+///     // ... test code ...
+/// } // Configuration override is automatically cleared here
+/// ```
+pub struct TestConfigGuard {
+    _private: (),
+}
+
+impl TestConfigGuard {
+    /// Create a new TestConfigGuard and set the testing configuration override
+    ///
+    /// # Arguments
+    ///
+    /// * `config`: The configuration to use as override during testing
+    ///
+    /// # Returns
+    ///
+    /// A TestConfigGuard that will automatically clear the override when dropped
+    pub fn new(config: AgentConfig) -> Self {
+        set_testing_config_override(config);
+        Self { _private: () }
+    }
+}
+
+impl Drop for TestConfigGuard {
+    fn drop(&mut self) {
+        clear_testing_config_override();
     }
 }
 
@@ -291,5 +334,35 @@ mod tests {
         assert_eq!(config.ip, "192.168.1.1");
         assert!(config.enable_iak_idevid);
         assert_eq!(config.disabled_signing_algorithms, vec!["rsa", "ecdsa"]);
+    }
+
+    #[test]
+    fn test_testconfig_guard_automatic_cleanup() {
+        // Clear any existing override
+        clear_testing_config_override();
+
+        // Verify no override is set
+        assert!(get_testing_config_override().is_none());
+
+        // Create a scope with a guard
+        {
+            let test_config = AgentConfig {
+                ip: "guard.example.com".to_string(),
+                port: 54321,
+                ..AgentConfig::default()
+            };
+            let _guard = TestConfigGuard::new(test_config.clone());
+
+            // Verify override is active within the scope
+            let retrieved = get_testing_config_override();
+            assert!(retrieved.is_some());
+            let retrieved_config =
+                retrieved.expect("config should be available");
+            assert_eq!(retrieved_config.ip, "guard.example.com");
+            assert_eq!(retrieved_config.port, 54321);
+        } // Guard goes out of scope here, should automatically clear
+
+        // Verify override was automatically cleared when guard was dropped
+        assert!(get_testing_config_override().is_none());
     }
 }
