@@ -1,5 +1,8 @@
+use anyhow::anyhow;
 use async_trait::async_trait;
+use chrono::Utc;
 use http::Extensions;
+use httpdate::parse_http_date;
 use log::{debug, warn};
 use rand::Rng;
 use reqwest::{Client, Method, Response, StatusCode};
@@ -20,6 +23,8 @@ use std::time::Duration;
 const DEFAULT_MAX_DELAY: Duration = Duration::from_secs(3600);
 
 const REQUEST_ID_HEADER: &str = "X-Request-ID";
+
+const RESPONSE_RETRY_AFTER_HEADER: &str = "Retry-After";
 
 /// Middleware for logging request details.
 #[derive(Debug, Clone)]
@@ -45,6 +50,49 @@ impl Middleware for LoggingMiddleware {
     }
 }
 
+/// A middleware to specifically handle the `Retry-After` header.
+#[derive(Debug, Clone)]
+struct RetryAfterMiddleware;
+
+#[async_trait]
+impl Middleware for RetryAfterMiddleware {
+    async fn handle(
+        &self,
+        req: reqwest::Request,
+        extensions: &mut Extensions,
+        next: Next<'_>,
+    ) -> Result<Response, Error> {
+        // Clone the request so we can retry it if needed
+        let req_clone = req.try_clone().ok_or_else(|| {
+            Error::Middleware(anyhow!("Request is not cloneable"))
+        })?;
+
+        let res = next.clone().run(req, extensions).await;
+
+        let response = match res {
+            Ok(response) => response,
+            // If there's a network error, let the main retry middleware handle it
+            Err(e) => return Err(e),
+        };
+
+        if let Some(header_value) =
+            response.headers().get(RESPONSE_RETRY_AFTER_HEADER)
+        {
+            if let Some(duration) = parse_retry_after(header_value) {
+                debug!(
+                    "Server specified {:?} header: waiting {:?} seconds",
+                    RESPONSE_RETRY_AFTER_HEADER, duration
+                );
+                tokio::time::sleep(duration).await;
+                debug!("Retrying request");
+                // To retry, we recursively call our own handle method
+                return self.handle(req_clone, extensions, next).await;
+            }
+        }
+        Ok(response)
+    }
+}
+
 /// Custom strategy to determine which responses are retryable.
 /// It considers any status code NOT in the `success_codes` list as a potential transient error.
 #[derive(Clone)]
@@ -57,12 +105,20 @@ impl RetryableStrategy for StopOnSuccessStrategy {
         match res {
             // If we got a response, check its status code.
             Ok(response) => {
-                // If the status code is one of our defined success codes, it's NOT retryable.
-                if self.success_codes.contains(&response.status()) {
-                    debug!(
-                        "Received expected success status code: {}",
-                        response.status()
-                    );
+                let status = response.status();
+                // If the status code is a success code, it's NOT retryable.
+                if self.success_codes.contains(&status) {
+                    return None;
+                }
+                // If a `Retry-After` header is present, we must not apply a second
+                // delay from the exponential backoff policy. We return None to signal
+                // that this strategy will not handle it, deferring to the dedicated
+                // RetryAfterMiddleware instead.
+                if response
+                    .headers()
+                    .contains_key(RESPONSE_RETRY_AFTER_HEADER)
+                {
+                    debug!("{:?} header found; deferring to RetryAfterMiddleware.", RESPONSE_RETRY_AFTER_HEADER);
                     None
                 } else {
                     // For any other status, let the default strategy decide if it's a transient error.
@@ -80,6 +136,29 @@ impl RetryableStrategy for StopOnSuccessStrategy {
             }
         }
     }
+}
+
+/// Parses the `Retry-After` header value.
+/// It can be either an integer number of seconds or an HTTP-date.
+fn parse_retry_after(
+    header_value: &reqwest::header::HeaderValue,
+) -> Option<Duration> {
+    if let Ok(value_str) = header_value.to_str() {
+        // Try parsing as an integer (seconds) first.
+        if let Ok(seconds) = value_str.parse::<u64>() {
+            return Some(Duration::from_secs(seconds));
+        }
+        // Otherwise, try parsing as an HTTP-date.
+        if let Ok(http_date) = parse_http_date(value_str) {
+            let now = Utc::now().into();
+            // If `duration_since` fails, it means the time has already passed.
+            // In that case, we can retry immediately (duration of zero).
+            return Some(
+                http_date.duration_since(now).unwrap_or(Duration::ZERO),
+            );
+        }
+    }
+    None
 }
 
 /// A client that transparently handles retries with exponential backoff.
@@ -106,6 +185,7 @@ impl ResilientClient {
             .build_with_max_retries(max_retries);
 
         let client_with_middleware = ClientBuilder::new(base_client)
+            .with(RetryAfterMiddleware)
             .with(RetryTransientMiddleware::new_with_policy_and_strategy(
                 retry_policy,
                 StopOnSuccessStrategy {
@@ -186,6 +266,8 @@ impl ResilientClient {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::Utc;
+    use httpdate;
     use reqwest::header;
     use serde_json::json;
     use std::net::TcpListener;
@@ -461,6 +543,103 @@ mod tests {
         let received_requests =
             mock_server.received_requests().await.unwrap(); //#[allow_ci]
         assert_eq!(received_requests.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_honors_retry_after_header_with_seconds() {
+        let mock_server = MockServer::start().await;
+
+        // The server will first respond with a 429 and a `Retry-After: 2` header.
+        Mock::given(method("GET"))
+            .and(path("/test"))
+            .respond_with(
+                ResponseTemplate::new(429).insert_header("Retry-After", "2"),
+            )
+            .up_to_n_times(1) // Only respond this way once
+            .mount(&mock_server)
+            .await;
+
+        // The second time, it will succeed.
+        Mock::given(method("GET"))
+            .and(path("/test"))
+            .respond_with(ResponseTemplate::new(200))
+            .mount(&mock_server)
+            .await;
+
+        let client = ResilientClient::new(
+            None,
+            Duration::from_millis(10), // Short initial delay
+            1,                         // Max 1 retry
+            &[StatusCode::OK],
+            None,
+        );
+
+        let start_time = std::time::Instant::now();
+        let response = client
+            .get_request(Method::GET, &format!("{}/test", &mock_server.uri()))
+            .send()
+            .await
+            .unwrap();
+        let elapsed = start_time.elapsed();
+
+        // The total time should be at least 2 seconds due to the Retry-After header.
+        assert!(elapsed >= Duration::from_secs(2));
+        assert_eq!(response.status(), StatusCode::OK);
+        let received_requests =
+            mock_server.received_requests().await.unwrap(); //#[allow_ci]
+        assert_eq!(received_requests.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_honors_retry_after_header_with_http_date() {
+        let mock_server = MockServer::start().await;
+        use chrono::Timelike;
+        // Create a date string for 1 second in the future
+        let now_truncated = Utc::now().with_nanosecond(0).unwrap();
+        let retry_at = now_truncated + chrono::Duration::seconds(1);
+        let http_date = httpdate::fmt_http_date(retry_at.into());
+
+        // The server will first respond with a 503 and a future date.
+        Mock::given(method("GET"))
+            .and(path("/test"))
+            .respond_with(
+                ResponseTemplate::new(503)
+                    .insert_header("Retry-After", http_date.as_str()),
+            )
+            .up_to_n_times(1)
+            .mount(&mock_server)
+            .await;
+
+        // The second time, it will succeed.
+        Mock::given(method("GET"))
+            .and(path("/test"))
+            .respond_with(ResponseTemplate::new(200))
+            .mount(&mock_server)
+            .await;
+
+        let client = ResilientClient::new(
+            None,
+            Duration::from_millis(10),
+            1,
+            &[StatusCode::OK],
+            None,
+        );
+
+        let start_time = std::time::Instant::now();
+        let response = client
+            .get_request(Method::GET, &format!("{}/test", &mock_server.uri()))
+            .send()
+            .await
+            .unwrap();
+        let elapsed = start_time.elapsed();
+
+        assert!(
+            elapsed > Duration::from_secs(0),
+            "The client waited for {:?}, which is less than the expected",
+            elapsed
+        );
+        assert!(elapsed < Duration::from_secs(2));
+        assert_eq!(response.status(), StatusCode::OK);
     }
 
     #[actix_rt::test]
