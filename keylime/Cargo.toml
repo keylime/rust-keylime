@@ -18,6 +18,7 @@ config.workspace = true
 glob.workspace = true
 hex.workspace = true
 http.workspace = true
+httpdate.workspace = true
 libc.workspace = true
 keylime-macros.workspace = true
 log.workspace = true
