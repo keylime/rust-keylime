@@ -22,6 +22,7 @@ use tokio::sync::Mutex;
 
 /// Configuration for the authentication client
 #[derive(Debug, Clone)]
+#[allow(dead_code)] // TODO: Remove when auth client is integrated
 pub struct AuthConfig {
     /// Base URL of the verifier (e.g., "https://verifier.example.com")
     pub verifier_base_url: String,
@@ -52,6 +53,7 @@ impl Default for AuthConfig {
 
 /// Session token with expiration information
 #[derive(Debug, Clone)]
+#[allow(dead_code)] // TODO: Remove when auth client is integrated
 struct SessionToken {
     token: String,
     expires_at: DateTime<Utc>,
@@ -59,6 +61,7 @@ struct SessionToken {
 }
 
 impl SessionToken {
+    #[allow(dead_code)] // TODO: Remove when auth client is integrated
     fn is_valid(&self, buffer_minutes: i64) -> bool {
         let buffer = Duration::minutes(buffer_minutes);
         Utc::now() + buffer < self.expires_at
@@ -66,12 +69,14 @@ impl SessionToken {
 }
 
 /// Mock TPM operations for testing
+#[allow(dead_code)] // TODO: Remove when auth client is integrated
 pub trait TpmOperations: Send + Sync {
     fn generate_proof(&self, challenge: &str) -> Result<ProofOfPossession>;
 }
 
 /// Default mock TPM implementation
 #[derive(Debug, Clone)]
+#[allow(dead_code)] // TODO: Remove when auth client is integrated
 pub struct MockTpmOperations;
 
 impl TpmOperations for MockTpmOperations {
@@ -92,6 +97,7 @@ impl TpmOperations for MockTpmOperations {
 }
 
 /// Standalone authentication client implementing the challenge-response protocol
+#[allow(dead_code)] // TODO: Remove when auth client is integrated
 pub struct AuthenticationClient {
     config: AuthConfig,
     http_client: Client,
@@ -99,6 +105,7 @@ pub struct AuthenticationClient {
     tpm_ops: Box<dyn TpmOperations>,
 }
 
+#[allow(dead_code)] // TODO: Remove when auth client is integrated
 impl AuthenticationClient {
     /// Create a new authentication client with the given configuration
     pub fn new(config: AuthConfig) -> Result<Self> {
@@ -118,6 +125,42 @@ impl AuthenticationClient {
 
     /// Create a new authentication client with custom TPM operations
     pub fn with_tpm_ops(
+        config: AuthConfig,
+        tpm_ops: Box<dyn TpmOperations>,
+    ) -> Result<Self> {
+        let timeout = std::time::Duration::from_millis(config.timeout_ms);
+        let http_client = Client::builder()
+            .timeout(timeout)
+            .danger_accept_invalid_certs(true) // For testing
+            .build()?;
+
+        Ok(Self {
+            config,
+            http_client,
+            session_token: Arc::new(Mutex::new(None)),
+            tpm_ops,
+        })
+    }
+
+    /// Create a raw authentication client with no middleware
+    /// This is used internally by the authentication middleware to avoid infinite loops
+    pub fn new_raw(config: AuthConfig) -> Result<Self> {
+        let timeout = std::time::Duration::from_millis(config.timeout_ms);
+        let http_client = Client::builder()
+            .timeout(timeout)
+            .danger_accept_invalid_certs(true) // For testing
+            .build()?;
+
+        Ok(Self {
+            config,
+            http_client,
+            session_token: Arc::new(Mutex::new(None)),
+            tpm_ops: Box::new(MockTpmOperations),
+        })
+    }
+
+    /// Create a raw authentication client with custom TPM operations and no middleware
+    pub fn new_raw_with_tpm_ops(
         config: AuthConfig,
         tpm_ops: Box<dyn TpmOperations>,
     ) -> Result<Self> {
@@ -174,6 +217,47 @@ impl AuthenticationClient {
         let mut token_guard = self.session_token.lock().await;
         *token_guard = None;
         debug!("Authentication token cleared");
+    }
+
+    /// Get a valid authentication token with metadata (token, expiration, session_id)
+    /// This method is used by the authentication middleware to access token details
+    pub async fn get_auth_token_with_metadata(
+        &self,
+    ) -> Result<(String, DateTime<Utc>, u64)> {
+        let token_guard = self.session_token.lock().await;
+
+        // Check if we have a valid token
+        if let Some(ref token) = *token_guard {
+            if token.is_valid(self.config.token_refresh_buffer_minutes) {
+                debug!("Using existing valid token with metadata");
+                return Ok((
+                    token.token.clone(),
+                    token.expires_at,
+                    token.session_id,
+                ));
+            } else {
+                debug!(
+                    "Token expired or expiring soon, need to re-authenticate"
+                );
+            }
+        } else {
+            debug!("No token available, need to authenticate");
+        }
+
+        drop(token_guard); // Release lock before authentication
+
+        // Perform authentication and return metadata
+        let _token_string = self.authenticate().await?;
+
+        // Get the token details from the newly stored token
+        let token_guard = self.session_token.lock().await;
+        if let Some(ref token) = *token_guard {
+            Ok((token.token.clone(), token.expires_at, token.session_id))
+        } else {
+            Err(anyhow!(
+                "Token was not stored properly after authentication"
+            ))
+        }
     }
 
     /// Perform the complete authentication flow
@@ -722,5 +806,48 @@ mod tests {
         client.clear_token().await;
 
         assert!(!client.has_valid_token().await);
+    }
+
+    #[tokio::test]
+    async fn test_raw_client_creation() {
+        let config = AuthConfig {
+            verifier_base_url: "https://127.0.0.1:8881".to_string(),
+            agent_id: "test-agent-raw".to_string(),
+            avoid_tpm: true,
+            timeout_ms: 1000,
+            token_refresh_buffer_minutes: 5,
+            max_auth_retries: 2,
+        };
+
+        let raw_client = AuthenticationClient::new_raw(config).unwrap();
+
+        // Verify the client was created successfully
+        assert_eq!(raw_client.config.agent_id, "test-agent-raw");
+        assert_eq!(raw_client.config.timeout_ms, 1000);
+        assert!(raw_client.config.avoid_tpm);
+    }
+
+    #[tokio::test]
+    async fn test_raw_client_with_tpm_ops() {
+        let config = AuthConfig {
+            verifier_base_url: "https://127.0.0.1:8881".to_string(),
+            agent_id: "test-agent-raw-tpm".to_string(),
+            avoid_tpm: false,
+            timeout_ms: 2000,
+            token_refresh_buffer_minutes: 10,
+            max_auth_retries: 1,
+        };
+
+        let custom_tpm_ops = Box::new(MockTpmOperations);
+        let raw_client = AuthenticationClient::new_raw_with_tpm_ops(
+            config,
+            custom_tpm_ops,
+        )
+        .unwrap();
+
+        // Verify the client was created successfully
+        assert_eq!(raw_client.config.agent_id, "test-agent-raw-tpm");
+        assert_eq!(raw_client.config.timeout_ms, 2000);
+        assert!(!raw_client.config.avoid_tpm);
     }
 }
