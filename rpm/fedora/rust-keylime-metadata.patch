@@ -45,26 +45,26 @@
 
  [package.metadata.deb]
  section = "net"
---- a/keylime-push-model-agent/Cargo.toml	2025-08-06 10:13:43.759016863 +0200
-+++ b/keylime-push-model-agent/Cargo.toml	2025-08-06 10:14:02.665288860 +0200
-@@ -28,14 +28,12 @@
+--- a/keylime-push-model-agent/Cargo.toml	2025-09-01 16:15:47.167875866 +0200
++++ b/keylime-push-model-agent/Cargo.toml	2025-09-01 16:20:04.672419233 +0200
+@@ -29,14 +29,11 @@
  [dev-dependencies]
  actix-rt.workspace = true
  tempfile.workspace = true
 -wiremock = {version = "0.6"}
-
+-
 
  [features]
  # The features enabled by default
  default = []
- testing = []
+ testing = ["keylime/testing"]
 -legacy-python-actions = []
 
  [package.metadata.deb]
  section = "net"
 --- a/keylime-push-model-agent/src/state_machine.rs	2025-08-06 10:16:06.677153521 +0200
 +++ b/keylime-push-model-agent/src/state_machine.rs	2025-08-06 10:18:49.944060220 +0200
-@@ -229,6 +229,7 @@
+@@ -287,6 +287,7 @@
 
  #[cfg(test)]
  #[cfg(feature = "testing")]
@@ -84,7 +84,7 @@
      use std::fs::File;
 --- a/keylime/src/resilient_client.rs	2025-08-06 11:11:57.994406294 +0200
 +++ b/keylime/src/resilient_client.rs	2025-08-06 11:12:25.077633103 +0200
-@@ -137,6 +137,7 @@
+@@ -186,6 +186,7 @@
  }
 
  #[cfg(test)]
