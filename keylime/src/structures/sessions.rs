@@ -89,7 +89,7 @@ pub struct SessionResponseAttributes {
 pub struct SessionResponseData {
     #[serde(rename(serialize = "type", deserialize = "type"))]
     pub data_type: String,
-    pub id: u64,
+    pub id: String, // JSON:API requires IDs to be strings (can be UUID or numeric)
     pub attributes: SessionResponseAttributes,
 }
 
@@ -139,13 +139,26 @@ pub struct SessionUpdateAttributes {
 pub struct SessionIdRequestData {
     #[serde(rename(serialize = "type", deserialize = "type"))]
     data_type: String,
-    pub id: u64,
+    pub id: String, // JSON:API requires IDs to be strings
     pub attributes: SessionUpdateAttributes,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct SessionIdRequest {
     pub data: SessionIdRequestData,
+}
+
+impl SessionIdRequest {
+    /// Create a new session ID request (for PATCH /sessions/:id)
+    pub fn new(id: String, attributes: SessionUpdateAttributes) -> Self {
+        Self {
+            data: SessionIdRequestData {
+                data_type: "session".to_string(),
+                id,
+                attributes,
+            },
+        }
+    }
 }
 
 /**********************
@@ -208,7 +221,7 @@ pub struct AuthenticationResultAttributes {
 pub struct SessionIdResponseData {
     #[serde(rename(serialize = "type", deserialize = "type"))]
     data_type: String,
-    pub id: u64,
+    pub id: String, // JSON:API requires IDs to be strings
     pub attributes: AuthenticationResultAttributes,
 }
 
@@ -295,7 +308,7 @@ mod tests {
         let session_response = SessionResponse {
             data: SessionResponseData {
                 data_type: "session".to_string(),
-                id: 1,
+                id: "1".to_string(),
                 attributes: SessionResponseAttributes {
                     agent_id: "example-agent".to_string(),
                     auth_requested: vec![SessionResponseAuthRequested {
@@ -319,7 +332,7 @@ mod tests {
         let expected = r#"{
   "data": {
     "type": "session",
-    "id": 1,
+    "id": "1",
     "attributes": {
       "agent_id": "example-agent",
       "authentication_requested": [
@@ -344,7 +357,7 @@ mod tests {
         let json = r#"{
             "data": {
                 "type": "session",
-                "id": 1,
+                "id": "1",
                 "attributes": {
                     "agent_id": "example-deserialized-agent",
                     "authentication_requested": [
@@ -364,7 +377,7 @@ mod tests {
         let deserialized: SessionResponse =
             serde_json::from_str(json).unwrap(); //#[allow_ci]
         assert_eq!(deserialized.data.data_type, "session");
-        assert_eq!(deserialized.data.id, 1);
+        assert_eq!(deserialized.data.id, "1");
         assert_eq!(
             deserialized.data.attributes.agent_id,
             "example-deserialized-agent"
@@ -391,7 +404,7 @@ mod tests {
         let session_id_request = SessionIdRequest {
             data: SessionIdRequestData {
                 data_type: "session".to_string(),
-                id: 1,
+                id: "1".to_string(),
                 attributes: SessionUpdateAttributes {
                     agent_id: "example-agent".to_string(),
                     auth_provided: vec![SessionIdRequestAuthProvided {
@@ -411,7 +424,7 @@ mod tests {
         let expected = r#"{
   "data": {
     "type": "session",
-    "id": 1,
+    "id": "1",
     "attributes": {
       "agent_id": "example-agent",
       "authentication_provided": [
@@ -435,7 +448,7 @@ mod tests {
         let json = r#"{
             "data": {
                 "type": "session",
-                "id": 1,
+                "id": "1",
                 "attributes": {
                     "agent_id": "example-deserialized-agent",
                     "authentication_provided": [
@@ -454,7 +467,7 @@ mod tests {
         let deserialized: SessionIdRequest =
             serde_json::from_str(json).unwrap(); //#[allow_ci]
         assert_eq!(deserialized.data.data_type, "session");
-        assert_eq!(deserialized.data.id, 1);
+        assert_eq!(deserialized.data.id, "1");
         assert_eq!(
             deserialized.data.attributes.agent_id,
             "example-deserialized-agent"
@@ -479,10 +492,10 @@ mod tests {
         let session_id_response = SessionIdResponse {
             data: SessionIdResponseData {
                 data_type: "session".to_string(),
-                id: 1,
+                id: "1".to_string(),
                 attributes: AuthenticationResultAttributes {
                     agent_id: "example-agent".to_string(),
-                    evaluation: "success".to_string(),
+                    evaluation: "pass".to_string(),
                     token: Some("example-token".to_string()),
                     auth: vec![SessionIdResponseAuth {
                         auth_class: "pop".to_string(),
@@ -516,10 +529,10 @@ mod tests {
         let expected = r#"{
   "data": {
     "type": "session",
-    "id": 1,
+    "id": "1",
     "attributes": {
       "agent_id": "example-agent",
-      "evaluation": "success",
+      "evaluation": "pass",
       "token": "example-token",
       "authentication": [
         {
@@ -549,10 +562,10 @@ mod tests {
         let json = r#"{
             "data": {
                 "type": "session",
-                "id": 1,
+                "id": "1",
                 "attributes": {
                     "agent_id": "example-deserialized-agent",
-                    "evaluation": "success",
+                    "evaluation": "pass",
                     "token": "example-deserialized-token",
                     "authentication": [
                         {
@@ -577,12 +590,12 @@ mod tests {
         let deserialized: SessionIdResponse =
             serde_json::from_str(json).unwrap(); //#[allow_ci]
         assert_eq!(deserialized.data.data_type, "session");
-        assert_eq!(deserialized.data.id, 1);
+        assert_eq!(deserialized.data.id, "1");
         assert_eq!(
             deserialized.data.attributes.agent_id,
             "example-deserialized-agent"
         );
-        assert_eq!(deserialized.data.attributes.evaluation, "success");
+        assert_eq!(deserialized.data.attributes.evaluation, "pass");
         assert_eq!(
             deserialized.data.attributes.token,
             Some("example-deserialized-token".to_string())
@@ -627,7 +640,7 @@ mod tests {
         let session_id_response = SessionIdResponse {
             data: SessionIdResponseData {
                 data_type: "session".to_string(),
-                id: 1,
+                id: "1".to_string(),
                 attributes: AuthenticationResultAttributes {
                     agent_id: "example-agent".to_string(),
                     evaluation: "fail".to_string(),
@@ -659,7 +672,7 @@ mod tests {
         let expected = r#"{
   "data": {
     "type": "session",
-    "id": 1,
+    "id": "1",
     "attributes": {
       "agent_id": "example-agent",
       "evaluation": "fail",

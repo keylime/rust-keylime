@@ -3,9 +3,8 @@
 use anyhow::Result;
 use clap::Parser;
 use keylime::config::PushModelConfigTrait;
-use log::{debug, error, info};
+use log::{debug, error, info, warn};
 mod attestation;
-mod auth;
 mod context_info_handler;
 mod header_validation;
 mod registration;
@@ -14,7 +13,9 @@ mod state_machine;
 mod struct_filler;
 mod url_selector;
 
-const DEFAULT_TIMEOUT_MILLIS: &str = "5000";
+use keylime::config::DEFAULT_REGISTRAR_URL;
+
+const DEFAULT_TIMEOUT_MILLIS: &str = "5000"; // Keep as string for clap default_value
 const DEFAULT_METHOD: &str = "POST";
 const DEFAULT_MESSAGE_TYPE_STR: &str = "Attestation";
 const DEFAULT_ATTESTATION_INTERVAL_SECONDS: u64 = 60;
@@ -78,7 +79,7 @@ struct Args {
     method: Option<String>,
     /// Registrar URL
     /// Default: "http://127.0.0.1:8888"
-    #[arg(long, default_value = "http://127.0.0.1:8888")]
+    #[arg(long, default_value = DEFAULT_REGISTRAR_URL)]
     registrar_url: String,
     /// Session ID
     /// Default: 1
@@ -123,6 +124,22 @@ async fn run(args: &Args) -> Result<()> {
     debug!("Key file: {}", args.key);
     debug!("Insecure: {}", args.insecure.unwrap_or(false));
     let config = keylime::config::get_config();
+
+    // Warn if insecure TLS settings are enabled
+    if config.tls_accept_invalid_certs {
+        warn!("INSECURE: TLS certificate validation is DISABLED!");
+        warn!("INSECURE: The agent will accept invalid or self-signed certificates.");
+        warn!("INSECURE: Only use this setting for testing or debugging purposes.");
+    }
+
+    if config.tls_accept_invalid_hostnames {
+        warn!("INSECURE: TLS hostname verification is DISABLED!");
+        warn!(
+            "INSECURE: The agent will accept certificates for ANY hostname."
+        );
+        warn!("INSECURE: Only use this setting for testing or debugging purposes.");
+    }
+
     let avoid_tpm = get_avoid_tpm_from_args(args);
     context_info_handler::init_context_info(avoid_tpm)?;
     debug!("Avoid TPM: {avoid_tpm}");
@@ -160,6 +177,8 @@ async fn run(args: &Args) -> Result<()> {
         avoid_tpm,
         ca_certificate: &args.ca_certificate,
         client_certificate: &args.certificate,
+        enable_authentication: config.enable_authentication(),
+        agent_id: &agent_identifier,
         ima_log_path: Some(config.ima_ml_path.as_str()),
         initial_delay_ms: config
             .exponential_backoff_initial_delay
@@ -172,6 +191,8 @@ async fn run(args: &Args) -> Result<()> {
         uefi_log_path: Some(config.measuredboot_ml_path.as_str()),
         url: &negotiations_request_url,
         verifier_url: verifier_url.as_str(),
+        tls_accept_invalid_certs: config.tls_accept_invalid_certs,
+        tls_accept_invalid_hostnames: config.tls_accept_invalid_hostnames,
     };
     let attestation_client =
         attestation::AttestationClient::new(&neg_config)?;

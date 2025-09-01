@@ -408,6 +408,92 @@ impl ContextInfo {
         }
     }
 
+    /// Generate TPM authentication proof using TPM2_Certify
+    /// This certifies the AK with itself to prove possession of the private key
+    ///
+    /// # Security Note
+    /// The challenge is included as `extraData` (qualifying data) in the TPM2_Certify
+    /// operation. The server MUST validate that:
+    /// 1. The TPMS_ATTEST structure's `extraData` field contains the exact challenge sent
+    /// 2. The signature over the attestation is valid
+    /// 3. The attested object matches the expected AK
+    ///
+    /// Without these checks, the proof could be replayed or forged.
+    pub async fn generate_tpm_auth_proof(
+        &mut self,
+        challenge: &str,
+    ) -> Result<EvidenceData, ContextInfoError> {
+        // Decode challenge as base64
+        //
+        // Per authentication protocol spec, challenges must be base64-encoded random bytes
+        // from the verifier. This ensures unambiguous interpretation and prevents encoding
+        // issues where the same string could be interpreted as either base64 or UTF-8.
+        let challenge_bytes = base64_standard.decode(challenge).map_err(|e| {
+            ContextInfoError::Keylime(format!(
+                "Challenge must be base64-encoded (error: {}). Challenge preview: '{}'",
+                e,
+                challenge.chars().take(50).collect::<String>()
+            ))
+        })?;
+
+        debug!(
+            "Challenge decoded from base64 ({} bytes)",
+            challenge_bytes.len()
+        );
+
+        let ak_handle = self.ak_handle;
+        let mut tpm_context = self.get_mutable_tpm_context().clone();
+
+        // Use TPM2_Certify to certify the AK with itself
+        let (attest, signature) = task::spawn_blocking(move || {
+            tpm_context.certify_credential(
+                challenge_bytes.try_into().map_err(|_| {
+                    tpm::TpmError::Other(
+                        "Failed to convert challenge to Data".to_string(),
+                    )
+                })?,
+                ak_handle, // Object being certified (the AK)
+                ak_handle, // Signing key (also the AK - self-certification)
+            )
+        })
+        .await
+        .map_err(|e| ContextInfoError::Keylime(e.to_string()))??;
+
+        // Encode the attestation and signature as base64
+        let attest_bytes = attest.marshall().map_err(|e| {
+            ContextInfoError::Keylime(format!(
+                "Failed to marshall attestation: {}",
+                e
+            ))
+        })?;
+        let sig_bytes = signature.marshall().map_err(|e| {
+            ContextInfoError::Keylime(format!(
+                "Failed to marshall signature: {}",
+                e
+            ))
+        })?;
+
+        let message = base64_standard.encode(&attest_bytes);
+        let sig = base64_standard.encode(&sig_bytes);
+
+        Ok(EvidenceData::TpmQuote {
+            message,
+            signature: sig,
+            subject_data: String::new(), // No PCR data for authentication
+            meta: None,
+        })
+    }
+
+    /// Generate TPM quote evidence for attestation
+    ///
+    /// # Security Note
+    /// The challenge is included as `extraData` (qualifying data) in the TPM2_Quote
+    /// operation. The server MUST validate that:
+    /// 1. The TPMS_ATTEST structure's `extraData` field contains the exact challenge sent
+    /// 2. The signature over the quote is valid
+    /// 3. The PCR values match the expected measurements
+    ///
+    /// Without these checks, the quote could be replayed or forged.
     pub async fn generate_tpm_quote_evidence(
         &mut self,
         challenge: &str,
@@ -451,7 +537,24 @@ impl ContextInfo {
 
         let pubkey_for_quote = self.build_openssl_pkey_from_params()?;
         let ak_handle = self.ak_handle;
-        let challenge_bytes = challenge.to_string().into_bytes();
+        // Try to decode challenge as base64, fallback to raw UTF-8 bytes if it fails
+        // The server currently sends base64-encoded random bytes, but we handle both cases
+        let challenge_bytes = match base64_standard.decode(challenge) {
+            Ok(decoded) => {
+                debug!(
+                    "Challenge decoded from base64 ({} bytes)",
+                    decoded.len()
+                );
+                decoded
+            }
+            Err(_) => {
+                warn!(
+                    "Challenge is not valid base64, using raw UTF-8 bytes. \
+                     Server should send base64-encoded challenges for binary nonces."
+                );
+                challenge.as_bytes().to_vec()
+            }
+        };
         let mut tpm_context = self.get_mutable_tpm_context().clone();
 
         let full_quote_str = task::spawn_blocking(move || {

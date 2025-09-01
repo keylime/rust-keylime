@@ -29,6 +29,8 @@ pub struct NegotiationConfig<'a> {
     pub avoid_tpm: bool,
     pub ca_certificate: &'a str,
     pub client_certificate: &'a str,
+    pub enable_authentication: bool,
+    pub agent_id: &'a str,
     pub ima_log_path: Option<&'a str>,
     pub initial_delay_ms: u64,
     pub insecure: Option<bool>,
@@ -39,6 +41,8 @@ pub struct NegotiationConfig<'a> {
     pub uefi_log_path: Option<&'a str>,
     pub url: &'a str,
     pub verifier_url: &'a str,
+    pub tls_accept_invalid_certs: bool,
+    pub tls_accept_invalid_hostnames: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -59,22 +63,47 @@ impl AttestationClient {
                     key: config.key.to_string(),
                     insecure: config.insecure,
                     timeout: config.timeout,
+                    accept_invalid_hostnames: config
+                        .tls_accept_invalid_hostnames,
                 },
             )?)
         } else {
             None
         };
 
-        debug!("ResilientClient: initial delay: {} ms, max retries: {}, max delay: {:?} ms", 
+        debug!("ResilientClient: initial delay: {} ms, max retries: {}, max delay: {:?} ms",
             config.initial_delay_ms, config.max_retries, config.max_delay_ms);
-        let client = ResilientClient::new(
+
+        // Create authentication config if enabled
+        let auth_config = if config.enable_authentication {
+            info!("Authentication ENABLED - creating auth middleware");
+            Some(keylime::auth::AuthConfig {
+                verifier_base_url: config.verifier_url.to_string(),
+                agent_id: config.agent_id.to_string(),
+                api_version: None, // Use default v3.0
+                avoid_tpm: config.avoid_tpm,
+                timeout_ms: keylime::config::DEFAULT_AUTH_TIMEOUT_MS,
+                max_auth_retries: keylime::config::DEFAULT_AUTH_MAX_RETRIES,
+                accept_invalid_certs: config.tls_accept_invalid_certs,
+                accept_invalid_hostnames: config.tls_accept_invalid_hostnames,
+            })
+        } else {
+            debug!("Authentication DISABLED - no auth middleware");
+            None
+        };
+
+        let client = ResilientClient::new_with_auth(
             base_client,
+            auth_config,
             Duration::from_millis(config.initial_delay_ms),
             config.max_retries,
             // The success codes that stop retries
             &[StatusCode::OK, StatusCode::CREATED, StatusCode::ACCEPTED],
             config.max_delay_ms.map(Duration::from_millis),
-        );
+        )
+        .map_err(|e| {
+            anyhow::anyhow!("Failed to create resilient client: {}", e)
+        })?;
 
         Ok(AttestationClient { client })
     }
@@ -244,6 +273,8 @@ mod tests {
             avoid_tpm: true,
             ca_certificate: ca_path,
             client_certificate: cert_path,
+            enable_authentication: false, // Disabled by default for tests
+            agent_id: "test-agent-id",
             ima_log_path: None,
             initial_delay_ms: 0, // No initial delay in the old tests
             insecure: Some(false),
@@ -254,6 +285,8 @@ mod tests {
             uefi_log_path: None,
             url,
             verifier_url: "http://verifier.example.com",
+            tls_accept_invalid_certs: false,
+            tls_accept_invalid_hostnames: false,
         }
     }
 

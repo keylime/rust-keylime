@@ -164,6 +164,44 @@ impl From<tss_esapi::Error> for Error {
 
 pub type Result<T> = std::result::Result<T, Error>;
 
+/// Helper function to analyze and log TLS-related errors with helpful hints
+///
+/// This function examines error messages for common TLS issues and provides
+/// specific guidance on which configuration options to use.
+pub fn log_tls_error_hints<E: std::fmt::Debug + std::fmt::Display>(
+    error: &E,
+) {
+    use log::warn;
+
+    let error_str = format!("{:?}", error);
+
+    // Check for hostname mismatch first (most specific)
+    if error_str.contains("hostname mismatch") {
+        warn!("TLS Error: Server certificate hostname doesn't match the connection URL");
+        warn!("→ Set tls_accept_invalid_hostnames = true to bypass hostname verification");
+        warn!("  (Not recommended for production - use proper certificates instead)");
+    } else if error_str.contains("hostname")
+        || error_str.contains("InvalidDNSName")
+    {
+        warn!("TLS Error: Hostname verification failed");
+        warn!("→ Set tls_accept_invalid_hostnames = true to bypass hostname verification");
+        warn!("  (Not recommended for production - use proper certificates instead)");
+    } else if error_str.contains("self-signed certificate") {
+        warn!("TLS Error: Self-signed certificate in certificate chain");
+        warn!("→ Option 1: Configure the CA certificate properly in agent configuration");
+        warn!("→ Option 2: Set tls_accept_invalid_certs = true to accept self-signed certificates");
+        warn!("  (Not recommended for production - use proper CA setup instead)");
+    } else if error_str.contains("certificate verify failed")
+        || error_str.contains("certificate")
+        || error_str.contains("Certificate")
+    {
+        warn!("TLS Error: Certificate validation failed");
+        warn!("→ Option 1: Check that the CA certificate is correctly configured in agent configuration");
+        warn!("→ Option 2: Set tls_accept_invalid_certs = true to bypass certificate validation");
+        warn!("  (Not recommended for production - fix certificate issues instead)");
+    }
+}
+
 #[cfg(test)]
 mod tests {
 
