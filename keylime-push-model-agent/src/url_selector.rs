@@ -4,6 +4,7 @@
 //! URL selection and validation for Push Model agent using RFC compliance
 
 use anyhow::Result;
+use keylime::auth::{get_push_api_version, DEFAULT_PUSH_API_VERSION};
 use log::warn;
 use url::Url;
 
@@ -108,20 +109,13 @@ fn validate_and_resolve_url(
     resolve_url(base_url, relative_url).map_err(|e| e.to_string())
 }
 
-pub const DEFAULT_API_VERSION: &str = "v3.0";
+pub const DEFAULT_API_VERSION: &str = DEFAULT_PUSH_API_VERSION;
 
 pub struct UrlArgs {
     pub verifier_url: String,
     pub agent_identifier: Option<String>,
     pub api_version: Option<String>,
     pub location: Option<String>,
-}
-
-fn get_api_version(args: &UrlArgs) -> String {
-    if args.api_version.is_some() {
-        return args.api_version.clone().unwrap();
-    }
-    DEFAULT_API_VERSION.to_string()
 }
 
 /// Get negotiations request URL with RFC 3986 compliance validation
@@ -135,7 +129,7 @@ pub fn get_negotiations_request_url(args: &UrlArgs) -> String {
         None => return "ERROR: No agent identifier provided".to_string(),
     };
 
-    let api_version = get_api_version(args);
+    let api_version = get_push_api_version(args.api_version.as_ref());
     let relative_path = format!("{}/agents/{}/attestations", api_version, id);
 
     // Validate and resolve URL according to RFC 3986 in one step
@@ -490,27 +484,13 @@ mod tests {
     }
 
     #[test]
-    fn test_get_api_version() {
+    fn test_get_push_api_version() {
         // Test with custom API version
-        let args_with_version = UrlArgs {
-            verifier_url: "https://example.com".to_string(),
-            agent_identifier: Some("test".to_string()),
-            api_version: Some("v2.0".to_string()),
-            location: None,
-        };
-        assert_eq!(get_api_version(&args_with_version), "v2.0");
+        let custom_version = Some("v2.0".to_string());
+        assert_eq!(get_push_api_version(custom_version.as_ref()), "v2.0");
 
         // Test with None API version (should return default)
-        let args_without_version = UrlArgs {
-            verifier_url: "https://example.com".to_string(),
-            agent_identifier: Some("test".to_string()),
-            api_version: None,
-            location: None,
-        };
-        assert_eq!(
-            get_api_version(&args_without_version),
-            DEFAULT_API_VERSION
-        );
+        assert_eq!(get_push_api_version(None), DEFAULT_API_VERSION);
     }
 
     #[test]

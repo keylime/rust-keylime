@@ -31,6 +31,9 @@ url.workspace = true
 actix-rt.workspace = true
 tempfile.workspace = true
 wiremock = {version = "0.6"}
+# Dependencies for examples (auth_test)
+tracing = "0.1"
+tracing-subscriber = "0.3"
 
 
 [features]

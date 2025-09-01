@@ -37,6 +37,7 @@ pub struct PushModelConfig {
     certification_keys_server_identifier: String,
     contact_ip: String,
     contact_port: u32,
+    enable_authentication: bool,
     exponential_backoff_max_delay: Option<u64>,
     exponential_backoff_max_retries: Option<u32>,
     exponential_backoff_initial_delay: Option<u64>,
@@ -153,6 +154,36 @@ mod tests {
         assert_ne!(
             config.attestation_interval_seconds(),
             DEFAULT_ATTESTATION_INTERVAL_SECONDS
+        );
+    }
+
+    #[test]
+    fn test_enable_authentication_default() {
+        let tmpdir = tempfile::tempdir().expect("failed to create tmpdir");
+        let config = get_testing_config(tmpdir.path(), None);
+
+        // Verify default is false (disabled)
+        assert_eq!(
+            config.enable_authentication(),
+            DEFAULT_ENABLE_AUTHENTICATION
+        );
+        assert!(!config.enable_authentication());
+    }
+
+    #[test]
+    fn test_enable_authentication_custom() {
+        let tmpdir = tempfile::tempdir().expect("failed to create tmpdir");
+        let mut config = get_testing_config(tmpdir.path(), None);
+
+        // Enable authentication
+        config.enable_authentication = true;
+
+        assert!(config.enable_authentication());
+
+        // Verify it's different from default
+        assert_ne!(
+            config.enable_authentication(),
+            DEFAULT_ENABLE_AUTHENTICATION
         );
     }
 }

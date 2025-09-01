@@ -141,6 +141,12 @@ impl<'a> StateMachine<'a> {
             Ok(neg) => {
                 if neg.status_code == reqwest::StatusCode::CREATED {
                     self.state = State::Attesting(ctx_info, neg);
+                } else if neg.status_code == reqwest::StatusCode::UNAUTHORIZED
+                {
+                    // 401 Unauthorized: token expired, middleware has cleared it
+                    // Retry immediately - next request will re-authenticate
+                    info!("Received 401 Unauthorized, retrying immediately to re-authenticate");
+                    self.state = State::Negotiating(ctx_info);
                 } else {
                     // Treat negotiation failure as a retryable attestation error
                     self.state = State::AttestationFailed(
@@ -190,6 +196,12 @@ impl<'a> StateMachine<'a> {
                     );
                     time::sleep(next_interval).await;
                     info!("Moving back to negotiation state");
+                    self.state = State::Negotiating(ctx_info);
+                } else if res.status_code == reqwest::StatusCode::UNAUTHORIZED
+                {
+                    // 401 Unauthorized: token expired, middleware has cleared it
+                    // Retry immediately - next request will re-authenticate
+                    info!("Received 401 Unauthorized, retrying immediately to re-authenticate");
                     self.state = State::Negotiating(ctx_info);
                 } else {
                     error!(
@@ -379,6 +391,8 @@ mod tpm_tests {
             avoid_tpm: true,
             ca_certificate: "",
             client_certificate: "",
+            enable_authentication: false,
+            agent_id: "test-agent-id",
             ima_log_path: None,
             initial_delay_ms,
             insecure: Some(true),
@@ -389,6 +403,8 @@ mod tpm_tests {
             uefi_log_path: None,
             url,
             verifier_url: url,
+            tls_accept_invalid_certs: true,
+            tls_accept_invalid_hostnames: true,
         }
     }
 
@@ -736,6 +752,8 @@ mod tests {
             avoid_tpm: true,
             ca_certificate: "",
             client_certificate: "",
+            enable_authentication: false,
+            agent_id: "test-agent-id",
             ima_log_path: None,
             initial_delay_ms,
             insecure: Some(true),
@@ -746,6 +764,8 @@ mod tests {
             uefi_log_path: None,
             url,
             verifier_url: "http://verifier.example.com",
+            tls_accept_invalid_certs: true,
+            tls_accept_invalid_hostnames: true,
         }
     }
 

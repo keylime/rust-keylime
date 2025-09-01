@@ -101,12 +101,19 @@ pub const DEFAULT_EXP_BACKOFF_MAX_DELAY: u32 = 300000; // 300 seconds
 // Default attestation interval for push model (in seconds)
 pub const DEFAULT_ATTESTATION_INTERVAL_SECONDS: u64 = 60;
 
+// Default values for authentication
+pub const DEFAULT_ENABLE_AUTHENTICATION: bool = false;
+pub const DEFAULT_AUTH_TIMEOUT_MS: u64 = 5000;
+pub const DEFAULT_AUTH_MAX_RETRIES: u32 = 3;
+pub const DEFAULT_AUTH_TOKEN_EXPIRATION_FALLBACK_MINUTES: i64 = 15;
+
 // TODO These should be temporary
 pub const DEFAULT_CERTIFICATION_KEYS_SERVER_IDENTIFIER: &str = "ak";
 pub static DEFAULT_PUSH_API_VERSIONS: &[&str] = &["3.0"];
 pub static DEFAULT_PUSH_EK_HANDLE: &str = "";
 
 pub static DEFAULT_VERIFIER_URL: &str = "https://localhost:8881";
+pub static DEFAULT_REGISTRAR_URL: &str = "http://localhost:8888";
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 pub struct AgentConfig {
@@ -168,10 +175,17 @@ pub struct AgentConfig {
     // Push attestation options
     pub attestation_interval_seconds: u64,
     pub certification_keys_server_identifier: String,
+    pub enable_authentication: bool,
     pub ima_ml_count_file: String,
     pub registrar_api_versions: String,
     pub uefi_logs_evidence_version: String,
     pub verifier_url: String,
+
+    // TLS security options
+    /// Accept invalid TLS certificates (INSECURE - for testing only)
+    pub tls_accept_invalid_certs: bool,
+    /// Accept invalid TLS hostnames (INSECURE - for testing only)
+    pub tls_accept_invalid_hostnames: bool,
 }
 
 impl AgentConfig {
@@ -328,11 +342,16 @@ impl Default for AgentConfig {
                 DEFAULT_ATTESTATION_INTERVAL_SECONDS,
             certification_keys_server_identifier:
                 DEFAULT_CERTIFICATION_KEYS_SERVER_IDENTIFIER.to_string(),
+            enable_authentication: DEFAULT_ENABLE_AUTHENTICATION,
             ima_ml_count_file: DEFAULT_IMA_ML_COUNT_FILE.to_string(),
             registrar_api_versions: DEFAULT_REGISTRAR_API_VERSIONS.join(", "),
             uefi_logs_evidence_version: DEFAULT_UEFI_LOGS_EVIDENCE_VERSION
                 .to_string(),
             verifier_url: DEFAULT_VERIFIER_URL.to_string(),
+
+            // TLS security defaults - SECURE by default
+            tls_accept_invalid_certs: false,
+            tls_accept_invalid_hostnames: false,
         }
     }
 }

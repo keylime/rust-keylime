@@ -536,6 +536,8 @@ mod tests {
                     avoid_tpm: false,
                     ca_certificate: "",
                     client_certificate: "",
+                    enable_authentication: false,
+                    agent_id: "test-agent-id",
                     ima_log_path: Some("test-data/ima_log.txt"),
                     initial_delay_ms: 1000,
                     insecure: Some(false),
@@ -546,6 +548,8 @@ mod tests {
                     uefi_log_path: Some("test-data/uefi_log.bin"),
                     url: "http://localhost",
                     verifier_url: "http://localhost",
+                    tls_accept_invalid_certs: false,
+                    tls_accept_invalid_hostnames: false,
                 },
             )
             .await;
@@ -615,6 +619,8 @@ mod tests {
             timeout: 0,
             ca_certificate: "",
             client_certificate: "",
+            enable_authentication: false,
+            agent_id: "test-agent-id",
             key: "",
             insecure: None,
             ima_log_path: None,
@@ -623,6 +629,8 @@ mod tests {
             initial_delay_ms: 0,
             max_delay_ms: None,
             verifier_url: "",
+            tls_accept_invalid_certs: false,
+            tls_accept_invalid_hostnames: false,
         };
         let evidence_req = filler
             .get_evidence_handling_request(&dummy_response, &dummy_config)
@@ -695,6 +703,8 @@ mod tests {
                 timeout: 0,
                 ca_certificate: "",
                 client_certificate: "",
+                enable_authentication: false,
+                agent_id: "test-agent-id",
                 key: "",
                 insecure: None,
                 ima_log_path: None,
@@ -703,6 +713,8 @@ mod tests {
                 initial_delay_ms: 0,
                 max_delay_ms: None,
                 verifier_url: "",
+                tls_accept_invalid_certs: false,
+                tls_accept_invalid_hostnames: false,
             };
 
             let result = filler
