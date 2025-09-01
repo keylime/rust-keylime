@@ -1,28 +1,25 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2025 Keylime Authors
 
-//! Challenge-Response Authentication Module
+//! Authentication types and utilities
 //!
-//! This module implements the challenge-response authentication protocol
-//! as described in Keylime Enhancement 103. It provides a standalone
-//! authentication client that can be used independently or integrated
-//! with existing HTTP clients.
+//! This module provides common types and utilities for authentication
+//! that are shared between different components of the Keylime system.
 
-use anyhow::{anyhow, Result};
-use chrono::{DateTime, Duration, Utc};
-use keylime::structures::{
+use crate::structures::{
     ProofOfPossession, SessionIdResponse, SessionRequest,
     SessionRequestAttributes, SessionRequestData, SessionResponse,
     SupportedAuthMethod,
 };
+use anyhow::{anyhow, Result};
+use chrono::{DateTime, Duration, Utc};
 use log::{debug, info, warn};
-use reqwest::{Client, Method, StatusCode};
+use reqwest::Client;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
-/// Configuration for the authentication client
+/// Configuration for authentication
 #[derive(Debug, Clone)]
-#[allow(dead_code)] // TODO: Remove when auth client is integrated
 pub struct AuthConfig {
     /// Base URL of the verifier (e.g., "https://verifier.example.com")
     pub verifier_base_url: String,
@@ -53,34 +50,37 @@ impl Default for AuthConfig {
 
 /// Session token with expiration information
 #[derive(Debug, Clone)]
-#[allow(dead_code)] // TODO: Remove when auth client is integrated
-struct SessionToken {
-    token: String,
-    expires_at: DateTime<Utc>,
-    session_id: u64,
+pub struct SessionToken {
+    pub token: String,
+    pub expires_at: DateTime<Utc>,
+    pub session_id: u64,
 }
 
 impl SessionToken {
-    #[allow(dead_code)] // TODO: Remove when auth client is integrated
-    fn is_valid(&self, buffer_minutes: i64) -> bool {
+    pub fn is_valid(&self, buffer_minutes: i64) -> bool {
         let buffer = Duration::minutes(buffer_minutes);
         Utc::now() + buffer < self.expires_at
     }
 }
 
 /// Mock TPM operations for testing
-#[allow(dead_code)] // TODO: Remove when auth client is integrated
 pub trait TpmOperations: Send + Sync {
-    fn generate_proof(&self, challenge: &str) -> Result<ProofOfPossession>;
+    fn generate_proof(
+        &self,
+        challenge: &str,
+    ) -> Result<crate::structures::ProofOfPossession>;
 }
 
 /// Default mock TPM implementation
 #[derive(Debug, Clone)]
-#[allow(dead_code)] // TODO: Remove when auth client is integrated
 pub struct MockTpmOperations;
 
 impl TpmOperations for MockTpmOperations {
-    fn generate_proof(&self, challenge: &str) -> Result<ProofOfPossession> {
+    fn generate_proof(
+        &self,
+        challenge: &str,
+    ) -> Result<crate::structures::ProofOfPossession> {
+        use log::debug;
         debug!("Generating mock TPM proof for challenge: {challenge}");
 
         // Create a deterministic but unique proof based on the challenge
@@ -89,7 +89,7 @@ impl TpmOperations for MockTpmOperations {
 
         use base64::{engine::general_purpose, Engine as _};
 
-        Ok(ProofOfPossession {
+        Ok(crate::structures::ProofOfPossession {
             message: general_purpose::STANDARD.encode(message),
             signature: general_purpose::STANDARD.encode(signature),
         })
@@ -97,7 +97,6 @@ impl TpmOperations for MockTpmOperations {
 }
 
 /// Standalone authentication client implementing the challenge-response protocol
-#[allow(dead_code)] // TODO: Remove when auth client is integrated
 pub struct AuthenticationClient {
     config: AuthConfig,
     http_client: Client,
@@ -105,7 +104,17 @@ pub struct AuthenticationClient {
     tpm_ops: Box<dyn TpmOperations>,
 }
 
-#[allow(dead_code)] // TODO: Remove when auth client is integrated
+impl std::fmt::Debug for AuthenticationClient {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AuthenticationClient")
+            .field("config", &self.config)
+            .field("http_client", &"<Client>")
+            .field("session_token", &"<Arc<Mutex<SessionToken>>>")
+            .field("tpm_ops", &"<Box<dyn TpmOperations>>")
+            .finish()
+    }
+}
+
 impl AuthenticationClient {
     /// Create a new authentication client with the given configuration
     pub fn new(config: AuthConfig) -> Result<Self> {
@@ -178,45 +187,9 @@ impl AuthenticationClient {
         })
     }
 
-    /// Get a valid authentication token, performing authentication if necessary
-    pub async fn get_auth_token(&self) -> Result<String> {
-        let token_guard = self.session_token.lock().await;
-
-        // Check if we have a valid token
-        if let Some(ref token) = *token_guard {
-            if token.is_valid(self.config.token_refresh_buffer_minutes) {
-                debug!("Using existing valid token");
-                return Ok(token.token.clone());
-            } else {
-                debug!(
-                    "Token expired or expiring soon, need to re-authenticate"
-                );
-            }
-        } else {
-            debug!("No token available, need to authenticate");
-        }
-
-        drop(token_guard); // Release lock before authentication
-
-        // Perform authentication
-        self.authenticate().await
-    }
-
-    /// Check if we currently have a valid token
-    pub async fn has_valid_token(&self) -> bool {
-        let token_guard = self.session_token.lock().await;
-        if let Some(ref token) = *token_guard {
-            token.is_valid(self.config.token_refresh_buffer_minutes)
-        } else {
-            false
-        }
-    }
-
-    /// Clear the current token (e.g., after receiving 401)
-    pub async fn clear_token(&self) {
-        let mut token_guard = self.session_token.lock().await;
-        *token_guard = None;
-        debug!("Authentication token cleared");
+    /// Get the authentication configuration
+    pub fn config(&self) -> &AuthConfig {
+        &self.config
     }
 
     /// Get a valid authentication token with metadata (token, expiration, session_id)
@@ -494,41 +467,12 @@ impl AuthenticationClient {
 
         Ok(token.clone())
     }
-
-    /// Make an authenticated HTTP request (convenience method for testing)
-    pub async fn make_authenticated_request(
-        &self,
-        method: Method,
-        url: &str,
-        body: Option<String>,
-    ) -> Result<reqwest::Response> {
-        let token = self.get_auth_token().await?;
-
-        let mut request = self.http_client.request(method, url);
-        request = request.header("Authorization", format!("Bearer {token}"));
-
-        if let Some(body) = body {
-            request = request
-                .header("Content-Type", "application/vnd.api+json")
-                .body(body);
-        }
-
-        let response = request.send().await?;
-
-        // Handle 401 responses by clearing token
-        if response.status() == StatusCode::UNAUTHORIZED {
-            warn!("Received 401, clearing token");
-            self.clear_token().await;
-            return Err(anyhow!("Authentication token was rejected (401)"));
-        }
-
-        Ok(response)
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json;
     use wiremock::matchers::{header, method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -544,7 +488,7 @@ mod tests {
             max_auth_retries: 2,
         };
 
-        AuthenticationClient::new(config).unwrap()
+        AuthenticationClient::new(config).unwrap() //#[allow_ci]
     }
 
     #[tokio::test]
@@ -615,16 +559,16 @@ mod tests {
 
         let client = create_test_client(&mock_server.uri()).await;
 
-        // Test authentication
-        let token = client.get_auth_token().await.unwrap();
+        // Test authentication - get token with metadata since that's our main method
+        let (token, _expires_at, session_id) =
+            client.get_auth_token_with_metadata().await.unwrap(); //#[allow_ci]
         assert_eq!(token, "test-token-456");
+        assert_eq!(session_id, 1);
 
-        // Test that token is cached
-        assert!(client.has_valid_token().await);
-
-        // Test that subsequent calls use cached token
-        let token2 = client.get_auth_token().await.unwrap();
-        assert_eq!(token2, "test-token-456");
+        // Verify token is valid
+        let token_guard = client.session_token.lock().await;
+        let session_token = token_guard.as_ref().unwrap(); //#[allow_ci]
+        assert!(session_token.is_valid(5));
     }
 
     #[tokio::test]
@@ -691,10 +635,10 @@ mod tests {
 
         let client = create_test_client(&mock_server.uri()).await;
 
-        let result = client.get_auth_token().await;
+        let result = client.get_auth_token_with_metadata().await;
         assert!(result.is_err());
         assert!(result
-            .unwrap_err()
+            .unwrap_err() //#[allow_ci]
             .to_string()
             .contains("Authentication failed"));
     }
@@ -726,7 +670,7 @@ mod tests {
                     }
                 }),
             ))
-            .expect(1..) // May be called multiple times
+            .expect(1..) //#[allow_ci] // May be called multiple times
             .mount(&mock_server)
             .await;
 
@@ -762,7 +706,7 @@ mod tests {
                     }
                 }),
             ))
-            .expect(1..) // May be called multiple times
+            .expect(1..) //#[allow_ci] // May be called multiple times
             .mount(&mock_server)
             .await;
 
@@ -775,37 +719,18 @@ mod tests {
             max_auth_retries: 2,
         };
 
-        let client = AuthenticationClient::new(config).unwrap();
+        let client = AuthenticationClient::new(config).unwrap(); //#[allow_ci]
 
         // Since token expires in 1 minute but we have 5 minute buffer,
         // it should be considered invalid and trigger re-authentication
-        let token = client.get_auth_token().await.unwrap();
+        let (token, _, _) =
+            client.get_auth_token_with_metadata().await.unwrap(); //#[allow_ci]
         assert_eq!(token, "short-lived-token");
 
         // Check that token is considered invalid due to buffer
-        assert!(!client.has_valid_token().await);
-    }
-
-    #[tokio::test]
-    async fn test_clear_token() {
-        let mock_server = MockServer::start().await;
-        let client = create_test_client(&mock_server.uri()).await;
-
-        // Manually insert a token
-        {
-            let mut token_guard = client.session_token.lock().await;
-            *token_guard = Some(SessionToken {
-                token: "test-token".to_string(),
-                expires_at: Utc::now() + Duration::hours(1),
-                session_id: 1,
-            });
-        }
-
-        assert!(client.has_valid_token().await);
-
-        client.clear_token().await;
-
-        assert!(!client.has_valid_token().await);
+        let token_guard = client.session_token.lock().await;
+        let session_token = token_guard.as_ref().unwrap(); //#[allow_ci]
+        assert!(!session_token.is_valid(5));
     }
 
     #[tokio::test]
@@ -819,7 +744,7 @@ mod tests {
             max_auth_retries: 2,
         };
 
-        let raw_client = AuthenticationClient::new_raw(config).unwrap();
+        let raw_client = AuthenticationClient::new_raw(config).unwrap(); //#[allow_ci]
 
         // Verify the client was created successfully
         assert_eq!(raw_client.config.agent_id, "test-agent-raw");
@@ -843,7 +768,7 @@ mod tests {
             config,
             custom_tpm_ops,
         )
-        .unwrap();
+        .unwrap(); //#[allow_ci]
 
         // Verify the client was created successfully
         assert_eq!(raw_client.config.agent_id, "test-agent-raw-tpm");
