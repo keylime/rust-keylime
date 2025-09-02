@@ -604,7 +604,7 @@ mod tests {
             .get_request(Method::GET, &format!("{}/test", &mock_server.uri()))
             .send()
             .await
-            .unwrap();
+            .unwrap(); //#[allow_ci]
         let elapsed = start_time.elapsed();
 
         // The total time should be at least 2 seconds due to the Retry-After header.
@@ -620,7 +620,7 @@ mod tests {
         let mock_server = MockServer::start().await;
         use chrono::Timelike;
         // Create a date string for 1 second in the future
-        let now_truncated = Utc::now().with_nanosecond(0).unwrap();
+        let now_truncated = Utc::now().with_nanosecond(0).unwrap(); //#[allow_ci]
         let retry_at = now_truncated + chrono::Duration::seconds(1);
         let http_date = httpdate::fmt_http_date(retry_at.into());
 
@@ -655,7 +655,7 @@ mod tests {
             .get_request(Method::GET, &format!("{}/test", &mock_server.uri()))
             .send()
             .await
-            .unwrap();
+            .unwrap(); //#[allow_ci]
         let elapsed = start_time.elapsed();
 
         assert!(
@@ -694,7 +694,7 @@ mod tests {
             .get_request(Method::GET, &format!("{}/test", &mock_server.uri()))
             .send()
             .await
-            .unwrap();
+            .unwrap(); //#[allow_ci]
         let elapsed = start_time.elapsed();
 
         // Should return 429 after max_retries
@@ -702,7 +702,7 @@ mod tests {
 
         // Should have made exactly max_retries + 1 requests (initial + retries)
         let received_requests =
-            mock_server.received_requests().await.unwrap();
+            mock_server.received_requests().await.unwrap(); //#[allow_ci]
         assert_eq!(received_requests.len(), (max_retries + 1) as usize);
 
         // Should have waited for max_retries seconds (each retry waits 1 second)
@@ -786,7 +786,7 @@ mod tests {
             .get_request(Method::GET, &format!("{}/test", &mock_server.uri()))
             .send()
             .await
-            .unwrap();
+            .unwrap(); //#[allow_ci]
         let elapsed = start_time.elapsed();
 
         // Should eventually succeed
@@ -794,7 +794,7 @@ mod tests {
 
         // Should have made 3 total requests (2 failures + 1 success)
         let received_requests =
-            mock_server.received_requests().await.unwrap();
+            mock_server.received_requests().await.unwrap(); //#[allow_ci]
         assert_eq!(received_requests.len(), 3);
 
         // Should have waited for ~2 seconds (for the two retries)
