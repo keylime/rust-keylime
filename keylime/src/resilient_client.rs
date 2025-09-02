@@ -801,4 +801,74 @@ mod tests {
         assert!(elapsed >= Duration::from_secs(2));
         assert!(elapsed < Duration::from_secs(3));
     }
+
+    #[tokio::test]
+    async fn test_parse_retry_after_logic() {
+        use reqwest::header::HeaderValue;
+        use std::time::SystemTime;
+
+        // 1. Test with valid integer seconds
+        let header = HeaderValue::from_static("5");
+        assert_eq!(parse_retry_after(&header), Some(Duration::from_secs(5)));
+
+        // 2. Test with zero seconds (edge case)
+        let header = HeaderValue::from_static("0");
+        assert_eq!(parse_retry_after(&header), Some(Duration::from_secs(0)));
+
+        // 3. Test with large valid number
+        let header = HeaderValue::from_static("86400"); // 24 hours
+        assert_eq!(
+            parse_retry_after(&header),
+            Some(Duration::from_secs(86400))
+        );
+
+        // 4. Test with whitespace (should fail - HTTP headers shouldn't have leading/trailing spaces)
+        let header = HeaderValue::from_static(" 5 ");
+        assert_eq!(parse_retry_after(&header), None);
+
+        // 5. Test with fractional seconds (should fail)
+        let header = HeaderValue::from_static("1.5");
+        assert_eq!(parse_retry_after(&header), None);
+
+        // 6. Test with a valid HTTP-date in future
+        let future_time = SystemTime::now() + Duration::from_secs(10);
+        let date_str = httpdate::fmt_http_date(future_time);
+        let header = HeaderValue::from_str(&date_str).unwrap(); //#[allow_ci]
+        let duration = parse_retry_after(&header).unwrap(); //#[allow_ci]
+                                                            // Check that the duration is close to 10s, allowing for minor timing delays
+        assert!(duration.as_secs() >= 9 && duration.as_secs() <= 10);
+
+        // 7. Test with HTTP-date in the past (should return Duration::ZERO)
+        let past_time = SystemTime::now() - Duration::from_secs(10);
+        let past_date_str = httpdate::fmt_http_date(past_time);
+        let header = HeaderValue::from_str(&past_date_str).unwrap(); //#[allow_ci]
+        assert_eq!(parse_retry_after(&header), Some(Duration::ZERO));
+
+        // 8. Test with malformed string value
+        let header = HeaderValue::from_static("not-a-valid-value");
+        assert_eq!(parse_retry_after(&header), None);
+
+        // 9. Test with invalid UTF-8 sequence
+        let invalid_utf8_bytes = &[0xC3, 0x28]; // This is an invalid UTF-8 sequence
+        let header = HeaderValue::from_bytes(invalid_utf8_bytes).unwrap(); //#[allow_ci]
+        assert_eq!(
+            parse_retry_after(&header),
+            None,
+            "Should return None for non-UTF-8 header values"
+        );
+
+        // 10. Test with empty string
+        let header = HeaderValue::from_static("");
+        assert_eq!(parse_retry_after(&header), None);
+
+        // 11. Test with negative number (should fail)
+        let header = HeaderValue::from_static("-5");
+        assert_eq!(parse_retry_after(&header), None);
+
+        // 12. Test with very large number that might overflow
+        let header = HeaderValue::from_static("18446744073709551615"); // u64::MAX
+                                                                       // This should either work or fail gracefully, but not panic
+        let result = parse_retry_after(&header);
+        assert!(result.is_some() || result.is_none()); // Just ensure no panic
+    }
 }
