@@ -1,4 +1,3 @@
-use anyhow::anyhow;
 use async_trait::async_trait;
 use chrono::Utc;
 use http::Extensions;
@@ -25,6 +24,9 @@ const DEFAULT_MAX_DELAY: Duration = Duration::from_secs(3600);
 const REQUEST_ID_HEADER: &str = "X-Request-ID";
 
 const RESPONSE_RETRY_AFTER_HEADER: &str = "Retry-After";
+
+// Maximum number of retry attempts when Retry-After header is present
+const MAX_RETRY_AFTER_ATTEMPTS: u32 = 5;
 
 /// Middleware for logging request details.
 #[derive(Debug, Clone)]
@@ -58,38 +60,62 @@ struct RetryAfterMiddleware;
 impl Middleware for RetryAfterMiddleware {
     async fn handle(
         &self,
-        req: reqwest::Request,
+        mut req: reqwest::Request,
         extensions: &mut Extensions,
         next: Next<'_>,
     ) -> Result<Response, Error> {
-        // Clone the request so we can retry it if needed
-        let req_clone = req.try_clone().ok_or_else(|| {
-            Error::Middleware(anyhow!("Request is not cloneable"))
-        })?;
+        let mut retry_count = 0u32;
 
-        let res = next.clone().run(req, extensions).await;
+        loop {
+            // Clone the request for potential retry
+            let req_for_retry = if retry_count < MAX_RETRY_AFTER_ATTEMPTS {
+                req.try_clone()
+            } else {
+                None
+            };
 
-        let response = match res {
-            Ok(response) => response,
-            // If there's a network error, let the main retry middleware handle it
-            Err(e) => return Err(e),
-        };
+            let res = next.clone().run(req, extensions).await;
 
-        if let Some(header_value) =
-            response.headers().get(RESPONSE_RETRY_AFTER_HEADER)
-        {
-            if let Some(duration) = parse_retry_after(header_value) {
-                debug!(
-                    "Server specified {:?} header: waiting {:?} seconds",
-                    RESPONSE_RETRY_AFTER_HEADER, duration
-                );
-                tokio::time::sleep(duration).await;
-                debug!("Retrying request");
-                // To retry, we recursively call our own handle method
-                return self.handle(req_clone, extensions, next).await;
+            let response = match res {
+                Ok(response) => response,
+                // If there's a network error, let the main retry middleware handle it
+                Err(e) => return Err(e),
+            };
+
+            // Check if we should retry based on Retry-After header
+            if let Some(header_value) =
+                response.headers().get(RESPONSE_RETRY_AFTER_HEADER)
+            {
+                if retry_count >= MAX_RETRY_AFTER_ATTEMPTS {
+                    warn!(
+                        "Maximum Retry-After attempts ({}) reached, not retrying further",
+                        MAX_RETRY_AFTER_ATTEMPTS
+                    );
+                    return Ok(response);
+                }
+
+                if let Some(req_clone) = req_for_retry {
+                    if let Some(duration) = parse_retry_after(header_value) {
+                        retry_count += 1;
+                        debug!(
+                            "Server specified {:?} header: waiting {:?} (attempt {}/{})",
+                            RESPONSE_RETRY_AFTER_HEADER, duration, retry_count, MAX_RETRY_AFTER_ATTEMPTS
+                        );
+                        tokio::time::sleep(duration).await;
+                        debug!("Retrying request after Retry-After delay");
+
+                        // Use the cloned request for the next iteration
+                        req = req_clone;
+                        continue;
+                    }
+                } else {
+                    warn!("Request is not cloneable, cannot retry with Retry-After header");
+                }
             }
+
+            // No Retry-After header or unable to retry, return the response
+            return Ok(response);
         }
-        Ok(response)
     }
 }
 
@@ -640,6 +666,56 @@ mod tests {
         );
         assert!(elapsed < Duration::from_secs(2));
         assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn test_max_retry_after_attempts_limit() {
+        let mock_server = MockServer::start().await;
+
+        // Server will respond with 429 and Retry-After header every time
+        Mock::given(method("GET"))
+            .and(path("/test"))
+            .respond_with(
+                ResponseTemplate::new(429).insert_header("Retry-After", "1"),
+            )
+            .mount(&mock_server)
+            .await;
+
+        let client = ResilientClient::new(
+            None,
+            Duration::from_millis(10),
+            1, // Regular retry limit (this should not be reached due to Retry-After handling)
+            &[StatusCode::OK],
+            None,
+        );
+
+        let start_time = std::time::Instant::now();
+        let response = client
+            .get_request(Method::GET, &format!("{}/test", &mock_server.uri()))
+            .send()
+            .await
+            .unwrap();
+        let elapsed = start_time.elapsed();
+
+        // Should return 429 after MAX_RETRY_AFTER_ATTEMPTS retries
+        assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+
+        // Should have made exactly MAX_RETRY_AFTER_ATTEMPTS + 1 requests (initial + retries)
+        let received_requests =
+            mock_server.received_requests().await.unwrap();
+        assert_eq!(
+            received_requests.len(),
+            (MAX_RETRY_AFTER_ATTEMPTS + 1) as usize
+        );
+
+        // Should have waited for MAX_RETRY_AFTER_ATTEMPTS seconds (each retry waits 1 second)
+        assert!(
+            elapsed >= Duration::from_secs(MAX_RETRY_AFTER_ATTEMPTS as u64)
+        );
+        assert!(
+            elapsed
+                < Duration::from_secs((MAX_RETRY_AFTER_ATTEMPTS + 2) as u64)
+        );
     }
 
     #[actix_rt::test]
