@@ -30,7 +30,7 @@ futures = "0.3.6"
 glob = "0.3"
 hex = "0.4"
 http = "1.1.0"
-httpdate = "1.0.2"
+httpdate = "1.0.3"
 keylime = { version = "=0.2.8", path = "keylime" }
 keylime-macros = { version = "=0.2.8", path = "keylime-macros" }
 libc = "0.2.43"
