@@ -25,9 +25,6 @@ const REQUEST_ID_HEADER: &str = "X-Request-ID";
 
 const RESPONSE_RETRY_AFTER_HEADER: &str = "Retry-After";
 
-// Maximum number of retry attempts when Retry-After header is present
-const MAX_RETRY_AFTER_ATTEMPTS: u32 = 5;
-
 /// Middleware for logging request details.
 #[derive(Debug, Clone)]
 struct LoggingMiddleware;
@@ -54,7 +51,9 @@ impl Middleware for LoggingMiddleware {
 
 /// A middleware to specifically handle the `Retry-After` header.
 #[derive(Debug, Clone)]
-struct RetryAfterMiddleware;
+struct RetryAfterMiddleware {
+    max_retries: u32,
+}
 
 #[async_trait]
 impl Middleware for RetryAfterMiddleware {
@@ -68,7 +67,7 @@ impl Middleware for RetryAfterMiddleware {
 
         loop {
             // Clone the request for potential retry
-            let req_for_retry = if retry_count < MAX_RETRY_AFTER_ATTEMPTS {
+            let req_for_retry = if retry_count < self.max_retries {
                 req.try_clone()
             } else {
                 None
@@ -86,10 +85,10 @@ impl Middleware for RetryAfterMiddleware {
             if let Some(header_value) =
                 response.headers().get(RESPONSE_RETRY_AFTER_HEADER)
             {
-                if retry_count >= MAX_RETRY_AFTER_ATTEMPTS {
+                if retry_count >= self.max_retries {
                     warn!(
                         "Maximum Retry-After attempts ({}) reached, not retrying further",
-                        MAX_RETRY_AFTER_ATTEMPTS
+                        self.max_retries
                     );
                     return Ok(response);
                 }
@@ -99,7 +98,7 @@ impl Middleware for RetryAfterMiddleware {
                         retry_count += 1;
                         debug!(
                             "Server specified {:?} header: waiting {:?} (attempt {}/{})",
-                            RESPONSE_RETRY_AFTER_HEADER, duration, retry_count, MAX_RETRY_AFTER_ATTEMPTS
+                            RESPONSE_RETRY_AFTER_HEADER, duration, retry_count, self.max_retries
                         );
                         tokio::time::sleep(duration).await;
                         debug!("Retrying request after Retry-After delay");
@@ -211,7 +210,7 @@ impl ResilientClient {
             .build_with_max_retries(max_retries);
 
         let client_with_middleware = ClientBuilder::new(base_client)
-            .with(RetryAfterMiddleware)
+            .with(RetryAfterMiddleware { max_retries })
             .with(RetryTransientMiddleware::new_with_policy_and_strategy(
                 retry_policy,
                 StopOnSuccessStrategy {
@@ -681,10 +680,11 @@ mod tests {
             .mount(&mock_server)
             .await;
 
+        let max_retries = 3;
         let client = ResilientClient::new(
             None,
             Duration::from_millis(10),
-            1, // Regular retry limit (this should not be reached due to Retry-After handling)
+            max_retries,
             &[StatusCode::OK],
             None,
         );
@@ -697,25 +697,17 @@ mod tests {
             .unwrap();
         let elapsed = start_time.elapsed();
 
-        // Should return 429 after MAX_RETRY_AFTER_ATTEMPTS retries
+        // Should return 429 after max_retries
         assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
 
-        // Should have made exactly MAX_RETRY_AFTER_ATTEMPTS + 1 requests (initial + retries)
+        // Should have made exactly max_retries + 1 requests (initial + retries)
         let received_requests =
             mock_server.received_requests().await.unwrap();
-        assert_eq!(
-            received_requests.len(),
-            (MAX_RETRY_AFTER_ATTEMPTS + 1) as usize
-        );
+        assert_eq!(received_requests.len(), (max_retries + 1) as usize);
 
-        // Should have waited for MAX_RETRY_AFTER_ATTEMPTS seconds (each retry waits 1 second)
-        assert!(
-            elapsed >= Duration::from_secs(MAX_RETRY_AFTER_ATTEMPTS as u64)
-        );
-        assert!(
-            elapsed
-                < Duration::from_secs((MAX_RETRY_AFTER_ATTEMPTS + 2) as u64)
-        );
+        // Should have waited for max_retries seconds (each retry waits 1 second)
+        assert!(elapsed >= Duration::from_secs(max_retries as u64));
+        assert!(elapsed < Duration::from_secs((max_retries + 2) as u64));
     }
 
     #[actix_rt::test]
@@ -756,5 +748,57 @@ mod tests {
 
         assert!(response.is_ok());
         assert_eq!(response.unwrap().status(), StatusCode::OK); //#[allow_ci]
+    }
+
+    #[tokio::test]
+    async fn test_recovers_before_retry_after_limit() {
+        let mock_server = MockServer::start().await;
+
+        let retry_response =
+            ResponseTemplate::new(429).insert_header("Retry-After", "1");
+
+        // Fail the first two times
+        Mock::given(method("GET"))
+            .and(path("/test"))
+            .respond_with(retry_response)
+            .up_to_n_times(2) // Respond this way twice
+            .mount(&mock_server)
+            .await;
+
+        // Succeed on the third attempt
+        Mock::given(method("GET"))
+            .and(path("/test"))
+            .respond_with(ResponseTemplate::new(200))
+            .up_to_n_times(1) // Only respond this way once
+            .mount(&mock_server)
+            .await;
+
+        let client = ResilientClient::new(
+            None,
+            Duration::from_millis(10),
+            5, // Regular retry limit
+            &[StatusCode::OK],
+            None,
+        );
+
+        let start_time = std::time::Instant::now();
+        let response = client
+            .get_request(Method::GET, &format!("{}/test", &mock_server.uri()))
+            .send()
+            .await
+            .unwrap();
+        let elapsed = start_time.elapsed();
+
+        // Should eventually succeed
+        assert_eq!(response.status(), StatusCode::OK);
+
+        // Should have made 3 total requests (2 failures + 1 success)
+        let received_requests =
+            mock_server.received_requests().await.unwrap();
+        assert_eq!(received_requests.len(), 3);
+
+        // Should have waited for ~2 seconds (for the two retries)
+        assert!(elapsed >= Duration::from_secs(2));
+        assert!(elapsed < Duration::from_secs(3));
     }
 }
