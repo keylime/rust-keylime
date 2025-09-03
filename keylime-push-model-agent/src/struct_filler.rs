@@ -357,7 +357,7 @@ mod tests {
         let mut filler = FillerFromHardware::new(&mut context_info);
         let attestation_request = filler.get_attestation_request_final();
         assert_eq!(attestation_request.data.type_, "attestation");
-        let serialized = serde_json::to_string(&attestation_request).unwrap();
+        let serialized = serde_json::to_string(&attestation_request).unwrap(); //#[allow_ci]
         assert!(!serialized.is_empty());
         assert!(context_info.flush_context().is_ok());
     } // test_attestation_request
@@ -421,7 +421,7 @@ mod tests {
                 "AK certification key should be present"
             );
         } else {
-            panic!("Expected Certification evidence for tpm_quote");
+            panic!("Expected Certification evidence for tpm_quote"); //#[allow_ci]
         }
 
         let _ = attributes.evidence_supported.iter().find(|e| {
@@ -460,7 +460,7 @@ mod tests {
         let mut filler = FillerFromHardware::new(&mut context_info);
         let session_request = filler.get_session_request_final();
         assert_eq!(session_request.data.data_type, "session");
-        let serialized = serde_json::to_string(&session_request).unwrap();
+        let serialized = serde_json::to_string(&session_request).unwrap(); //#[allow_ci]
         assert!(!serialized.is_empty());
         assert!(context_info.flush_context().is_ok());
     } // test_session_request
@@ -654,7 +654,7 @@ mod tests {
 
         if let Ok(mut ctx) = context_info_result {
             // Create a temporary directory for testing
-            let temp_dir = tempfile::tempdir().unwrap();
+            let temp_dir = tempfile::tempdir().unwrap(); //#[allow_ci]
 
             // Create testing configuration with non-existent measuredboot_ml_path
             let mut overrides = std::collections::HashMap::new();

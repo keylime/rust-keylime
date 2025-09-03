@@ -274,12 +274,12 @@ mod registration {
     pub async fn check_registration(
         _context_info: Option<ContextInfo>,
     ) -> anyhow::Result<()> {
-        let result = get_mock_result().lock().unwrap().clone();
+        let result = get_mock_result().lock().unwrap().clone(); //#[allow_ci]
         result.map_err(|e| anyhow!(e))
     }
 
     pub fn set_mock_result(result: Result<(), String>) {
-        let mut guard = get_mock_result().lock().unwrap();
+        let mut guard = get_mock_result().lock().unwrap(); //#[allow_ci]
         *guard = result;
     }
 }
@@ -312,7 +312,7 @@ mod tpm_tests {
             &self,
             response: Result<ResponseInformation, anyhow::Error>,
         ) {
-            *self.negotiation_response.lock().unwrap() = response;
+            *self.negotiation_response.lock().unwrap() = response; //#[allow_ci]
         }
 
         async fn send_negotiation(
@@ -321,7 +321,7 @@ mod tpm_tests {
         ) -> anyhow::Result<ResponseInformation> {
             self.negotiation_response
                 .lock()
-                .unwrap()
+                .unwrap() //#[allow_ci]
                 .as_ref()
                 .cloned()
                 .map_err(|e| anyhow!(e.to_string()))
@@ -331,7 +331,7 @@ mod tpm_tests {
             &self,
             response: Result<ResponseInformation, anyhow::Error>,
         ) {
-            *self.evidence_response.lock().unwrap() = response;
+            *self.evidence_response.lock().unwrap() = response; //#[allow_ci]
         }
 
         async fn handle_evidence_submission(
@@ -341,7 +341,7 @@ mod tpm_tests {
         ) -> anyhow::Result<ResponseInformation> {
             self.evidence_response
                 .lock()
-                .unwrap()
+                .unwrap() //#[allow_ci]
                 .as_ref()
                 .cloned()
                 .map_err(|e| anyhow!(e.to_string()))
@@ -403,7 +403,7 @@ mod tpm_tests {
         // Create guard that will automatically clear override when dropped
         let guard = keylime::config::TestConfigGuard::new(config);
 
-        let client = AttestationClient::new(neg_config).unwrap();
+        let client = AttestationClient::new(neg_config).unwrap(); //#[allow_ci]
 
         // Create context with proper error handling to avoid TPM resource leaks
         let context_info = match ContextInfo::new(
@@ -455,7 +455,7 @@ mod tpm_tests {
             Some(30000),
         );
         let (mut sm, _guard) = create_test_state_machine(&neg_config);
-        let mut context_info = sm.context_info.clone().unwrap();
+        let mut context_info = sm.context_info.clone().unwrap(); //#[allow_ci]
         sm.state = State::Registered(context_info.clone());
 
         let mock_client = MockAttestationClient::default();
@@ -488,7 +488,7 @@ mod tpm_tests {
             Some(30000),
         );
         let (mut sm, _guard) = create_test_state_machine(&neg_config);
-        let mut context_info = sm.context_info.clone().unwrap();
+        let mut context_info = sm.context_info.clone().unwrap(); //#[allow_ci]
         sm.state = State::Registered(context_info.clone());
 
         let mock_client = MockAttestationClient::default();
@@ -525,7 +525,7 @@ mod tpm_tests {
             Some(30000),
         );
         let (mut sm, _guard) = create_test_state_machine(&neg_config);
-        let mut context_info = sm.context_info.clone().unwrap();
+        let mut context_info = sm.context_info.clone().unwrap(); //#[allow_ci]
         sm.state = State::Attesting(
             context_info.clone(),
             ResponseInformation::default(),
@@ -542,7 +542,7 @@ mod tpm_tests {
 
         // Verify the response is successful
         assert!(evidence_response.is_ok());
-        let res = evidence_response.unwrap();
+        let res = evidence_response.unwrap(); //#[allow_ci]
         assert_eq!(res.status_code, StatusCode::ACCEPTED);
 
         // After successful attestation, the state machine should transition back to Negotiating
@@ -564,7 +564,7 @@ mod tpm_tests {
             Some(30000),
         );
         let (mut sm, _guard) = create_test_state_machine(&neg_config);
-        let mut context_info = sm.context_info.clone().unwrap();
+        let mut context_info = sm.context_info.clone().unwrap(); //#[allow_ci]
         sm.state = State::Attesting(
             context_info.clone(),
             ResponseInformation::default(),
@@ -610,7 +610,7 @@ mod tpm_tests {
             Some(30000),
         );
         let (mut sm, _guard) = create_test_state_machine(&neg_config);
-        let mut context_info = sm.context_info.clone().unwrap();
+        let mut context_info = sm.context_info.clone().unwrap(); //#[allow_ci]
 
         registration::set_mock_result(Ok(()));
         let res =
@@ -700,7 +700,7 @@ mod tpm_tests {
             None,
         );
 
-        let attestation_client = AttestationClient::new(&neg_config).unwrap();
+        let attestation_client = AttestationClient::new(&neg_config).unwrap(); //#[allow_ci]
 
         let sm = StateMachine::new(
             attestation_client,
@@ -762,7 +762,7 @@ mod tests {
             Some(30000),
         );
         let attestation_client =
-            AttestationClient::new(&test_config).unwrap();
+            AttestationClient::new(&test_config).unwrap(); //#[allow_ci]
 
         let state_machine = StateMachine::new(
             attestation_client,
@@ -789,7 +789,7 @@ mod tests {
             Some(30000),
         );
         let attestation_client =
-            AttestationClient::new(&test_config).unwrap();
+            AttestationClient::new(&test_config).unwrap(); //#[allow_ci]
 
         let state_machine = StateMachine::new(
             attestation_client,
@@ -812,7 +812,7 @@ mod tests {
             Some(30000),
         );
         let attestation_client =
-            AttestationClient::new(&test_config).unwrap();
+            AttestationClient::new(&test_config).unwrap(); //#[allow_ci]
 
         let mut state_machine = StateMachine::new(
             attestation_client,
@@ -848,7 +848,7 @@ mod tests {
             Some(30000),
         );
         let attestation_client =
-            AttestationClient::new(&test_config).unwrap();
+            AttestationClient::new(&test_config).unwrap(); //#[allow_ci]
 
         let state_machine = StateMachine::new(
             attestation_client,
@@ -874,7 +874,7 @@ mod tests {
             Some(30000),
         );
         let attestation_client =
-            AttestationClient::new(&test_config).unwrap();
+            AttestationClient::new(&test_config).unwrap(); //#[allow_ci]
 
         let state_machine = StateMachine::new(
             attestation_client,
@@ -897,7 +897,7 @@ mod tests {
             Some(30000),
         );
         let attestation_client =
-            AttestationClient::new(&test_config).unwrap();
+            AttestationClient::new(&test_config).unwrap(); //#[allow_ci]
 
         let state_machine = StateMachine::new(
             attestation_client,
@@ -924,7 +924,7 @@ mod tests {
             Some(30000),
         );
         let attestation_client =
-            AttestationClient::new(&test_config).unwrap();
+            AttestationClient::new(&test_config).unwrap(); //#[allow_ci]
 
         let mut state_machine = StateMachine::new(
             attestation_client,
@@ -955,7 +955,7 @@ mod tests {
             Some(30000),
         );
         let attestation_client =
-            AttestationClient::new(&test_config).unwrap();
+            AttestationClient::new(&test_config).unwrap(); //#[allow_ci]
 
         let mut state_machine = StateMachine::new(
             attestation_client,
@@ -982,7 +982,7 @@ mod tests {
         let test_config1 =
             create_test_config("http://localhost", 1000, 5, 500, Some(10000));
         let attestation_client1 =
-            AttestationClient::new(&test_config1).unwrap();
+            AttestationClient::new(&test_config1).unwrap(); //#[allow_ci]
         let state_machine1 = StateMachine::new(
             attestation_client1,
             test_config1,
@@ -997,7 +997,7 @@ mod tests {
         let test_config2 =
             create_test_config("http://localhost", 2000, 10, 1000, None);
         let attestation_client2 =
-            AttestationClient::new(&test_config2).unwrap();
+            AttestationClient::new(&test_config2).unwrap(); //#[allow_ci]
         let state_machine2 = StateMachine::new(
             attestation_client2,
             test_config2,
@@ -1020,7 +1020,7 @@ mod tests {
             Some(30000),
         );
         let attestation_client =
-            AttestationClient::new(&test_config).unwrap();
+            AttestationClient::new(&test_config).unwrap(); //#[allow_ci]
 
         let state_machine = StateMachine::new(
             attestation_client,
@@ -1047,7 +1047,7 @@ mod tests {
             Some(30000),
         );
         let attestation_client =
-            AttestationClient::new(&test_config).unwrap();
+            AttestationClient::new(&test_config).unwrap(); //#[allow_ci]
 
         let mut state_machine = StateMachine::new(
             attestation_client,
@@ -1079,7 +1079,7 @@ mod tests {
             Some(30000),
         );
         let attestation_client =
-            AttestationClient::new(&test_config).unwrap();
+            AttestationClient::new(&test_config).unwrap(); //#[allow_ci]
 
         let state_machine = StateMachine::new(
             attestation_client,
