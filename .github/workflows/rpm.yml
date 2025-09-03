@@ -1,0 +1,25 @@
+---
+name: rpm-test
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+jobs:
+  fedora:
+    name: Check that Fedora RPM patches still apply
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Check that Fedora patches apply
+        run: for p in rpm/fedora/*.patch; do patch -p1 < "$p"; done
+  centos:
+    runs-on: ubuntu-latest
+    name: Check that CentOS RPM patches still apply
+    steps:
+      - uses: actions/checkout@v5
+      - name: Check that CentOS patches apply
+        run: for p in rpm/centos/*.patch; do patch -p1 < "$p"; done
