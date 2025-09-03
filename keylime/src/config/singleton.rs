@@ -66,33 +66,48 @@ pub fn is_initialized() -> bool {
 }
 
 #[cfg(test)]
+#[cfg(feature = "testing")]
 mod tests {
     use super::*;
+    use crate::config::testing::get_testing_config;
     use crate::config::PushModelConfigTrait;
+    use crate::config::DEFAULT_AGENT_DATA_PATH;
 
-    #[test]
-    fn test_lazy_initialization() {
+    #[actix_rt::test]
+    async fn test_singleton() {
+        let _mutex = crate::tpm::testing::lock_tests().await;
+        let tmpdir = tempfile::tempdir().expect("failed to create tmpdir");
+        let config = get_testing_config(tmpdir.path(), None);
+        let _guard = crate::config::TestConfigGuard::new(config);
+
         // Test that get_config() works with automatic initialization
         let config = get_config();
 
         // Verify we got a valid configuration
-        assert!(!config.uuid().is_empty(), "Config should have a valid UUID");
+        assert!(
+            !config.agent_data_path().is_empty(),
+            "Config should have a valid agent data path"
+        );
         assert!(
             !config.keylime_dir.is_empty(),
             "Config should have a keylime directory"
         );
 
-        // After first access, should be initialized
-        assert!(
-            is_initialized(),
-            "Config should be initialized after first access"
+        assert_eq!(config.keylime_dir, tmpdir.path().display().to_string());
+        assert_eq!(
+            config.agent_data_path,
+            tmpdir
+                .path()
+                .join(DEFAULT_AGENT_DATA_PATH)
+                .display()
+                .to_string()
         );
 
         // Subsequent calls should return the same instance
         let config2 = get_config();
         assert_eq!(
-            config.uuid(),
-            config2.uuid(),
+            config.agent_data_path(),
+            config2.agent_data_path(),
             "Should return same config instance"
         );
     }
