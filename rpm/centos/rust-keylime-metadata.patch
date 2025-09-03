@@ -1,6 +1,6 @@
---- a/keylime/Cargo.toml	2025-08-06 10:04:19.246120602 +0200
-+++ b/keylime/Cargo.toml	2025-08-06 10:12:12.694471716 +0200
-@@ -40,14 +40,11 @@
+--- a/keylime/Cargo.toml	2025-09-03 13:40:50.312319072 +0200
++++ b/keylime/Cargo.toml	2025-09-03 13:41:15.200337821 +0200
+@@ -43,7 +43,6 @@
  tokio.workspace = true
  uuid.workspace = true
  zip.workspace = true
@@ -8,16 +8,16 @@
 
  [dev-dependencies]
  tempfile.workspace = true
- actix-rt.workspace = true
--wiremock = {version = "0.6"}
+@@ -51,6 +50,5 @@
+ wiremock = {version = "0.6"}
 
  [features]
 +default = []
  testing = []
 -# This feature is deprecated and will be removed on next major release
 -with-zmq = ["zmq"]
---- a/keylime-agent/Cargo.toml	2025-08-06 10:08:23.650703421 +0200
-+++ b/keylime-agent/Cargo.toml	2025-08-06 10:09:30.080590640 +0200
+--- a/keylime-agent/Cargo.toml	2025-09-03 13:40:44.826218516 +0200
++++ b/keylime-agent/Cargo.toml	2025-09-03 13:44:24.357847991 +0200
 @@ -32,7 +32,6 @@
  thiserror.workspace = true
  uuid.workspace = true
@@ -45,16 +45,9 @@
 
  [package.metadata.deb]
  section = "net"
---- a/keylime-push-model-agent/Cargo.toml	2025-09-01 16:15:47.167875866 +0200
-+++ b/keylime-push-model-agent/Cargo.toml	2025-09-01 16:20:04.672419233 +0200
-@@ -29,14 +29,11 @@
- [dev-dependencies]
- actix-rt.workspace = true
- tempfile.workspace = true
--wiremock = {version = "0.6"}
--
-
- [features]
+--- a/keylime-push-model-agent/Cargo.toml	2025-09-03 13:40:40.221414602 +0200
++++ b/keylime-push-model-agent/Cargo.toml	2025-09-03 13:45:30.856052632 +0200
+@@ -36,7 +36,6 @@
  # The features enabled by default
  default = []
  testing = ["keylime/testing"]
@@ -62,33 +55,3 @@
 
  [package.metadata.deb]
  section = "net"
---- a/keylime-push-model-agent/src/state_machine.rs	2025-08-06 10:16:06.677153521 +0200
-+++ b/keylime-push-model-agent/src/state_machine.rs	2025-08-06 10:18:49.944060220 +0200
-@@ -287,6 +287,7 @@
-
- #[cfg(test)]
- #[cfg(feature = "testing")]
-+#[cfg(feature = "with-wiremock")]
- mod tpm_tests {
-     use super::*;
-     use crate::attestation::{AttestationClient, NegotiationConfig};
---- a/keylime-push-model-agent/src/attestation.rs	2025-08-06 10:21:35.514185935 +0200
-+++ b/keylime-push-model-agent/src/attestation.rs	2025-08-06 10:22:19.399032540 +0200
-@@ -210,6 +210,7 @@
- }
-
- #[cfg(test)]
-+#[cfg(feature = "with-wiremock")]
- mod tests {
-     use super::*;
-     use std::fs::File;
---- a/keylime/src/resilient_client.rs	2025-08-06 11:11:57.994406294 +0200
-+++ b/keylime/src/resilient_client.rs	2025-08-06 11:12:25.077633103 +0200
-@@ -186,6 +186,7 @@
- }
-
- #[cfg(test)]
-+#[cfg(feature = "with-wiremock")]
- mod tests {
-     use super::*;
-     use reqwest::header;
