@@ -500,6 +500,6 @@ mod tests {
             .await;
 
         assert!(response.is_ok());
-        assert_eq!(response.unwrap().status(), StatusCode::OK); //#[allow_ci]
+        assert_eq!(response.unwrap().status(), StatusCode::OK);
     }
 }
