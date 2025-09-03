@@ -22,6 +22,7 @@ use tokio::sync::Mutex;
 
 /// Configuration for the authentication client
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct AuthConfig {
     /// Base URL of the verifier (e.g., "https://verifier.example.com")
     pub verifier_base_url: String,
@@ -52,6 +53,7 @@ impl Default for AuthConfig {
 
 /// Session token with expiration information
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 struct SessionToken {
     token: String,
     expires_at: DateTime<Utc>,
@@ -59,6 +61,7 @@ struct SessionToken {
 }
 
 impl SessionToken {
+    #[allow(dead_code)]
     fn is_valid(&self, buffer_minutes: i64) -> bool {
         let buffer = Duration::minutes(buffer_minutes);
         Utc::now() + buffer < self.expires_at
@@ -66,6 +69,7 @@ impl SessionToken {
 }
 
 /// Mock TPM operations for testing
+#[allow(dead_code)]
 pub trait TpmOperations: Send + Sync {
     fn generate_proof(&self, challenge: &str) -> Result<ProofOfPossession>;
 }
@@ -92,6 +96,7 @@ impl TpmOperations for MockTpmOperations {
 }
 
 /// Standalone authentication client implementing the challenge-response protocol
+#[allow(dead_code)]
 pub struct AuthenticationClient {
     config: AuthConfig,
     http_client: Client,
@@ -101,6 +106,7 @@ pub struct AuthenticationClient {
 
 impl AuthenticationClient {
     /// Create a new authentication client with the given configuration
+    #[allow(dead_code)]
     pub fn new(config: AuthConfig) -> Result<Self> {
         let timeout = std::time::Duration::from_millis(config.timeout_ms);
         let http_client = Client::builder()
@@ -117,6 +123,7 @@ impl AuthenticationClient {
     }
 
     /// Create a new authentication client with custom TPM operations
+    #[allow(dead_code)]
     pub fn with_tpm_ops(
         config: AuthConfig,
         tpm_ops: Box<dyn TpmOperations>,
@@ -136,6 +143,7 @@ impl AuthenticationClient {
     }
 
     /// Get a valid authentication token, performing authentication if necessary
+    #[allow(dead_code)]
     pub async fn get_auth_token(&self) -> Result<String> {
         let token_guard = self.session_token.lock().await;
 
@@ -160,6 +168,7 @@ impl AuthenticationClient {
     }
 
     /// Check if we currently have a valid token
+    #[allow(dead_code)]
     pub async fn has_valid_token(&self) -> bool {
         let token_guard = self.session_token.lock().await;
         if let Some(ref token) = *token_guard {
@@ -170,6 +179,7 @@ impl AuthenticationClient {
     }
 
     /// Clear the current token (e.g., after receiving 401)
+    #[allow(dead_code)]
     pub async fn clear_token(&self) {
         let mut token_guard = self.session_token.lock().await;
         *token_guard = None;
@@ -177,6 +187,7 @@ impl AuthenticationClient {
     }
 
     /// Perform the complete authentication flow
+    #[allow(dead_code)]
     async fn authenticate(&self) -> Result<String> {
         info!(
             "Starting authentication flow for agent: {}",
@@ -218,6 +229,7 @@ impl AuthenticationClient {
     }
 
     /// Internal authentication implementation
+    #[allow(dead_code)]
     async fn do_authenticate(&self) -> Result<String> {
         // Step 1: Request challenge
         debug!("Step 1: Requesting challenge from verifier");
@@ -240,6 +252,7 @@ impl AuthenticationClient {
     }
 
     /// Step 1: Request challenge from verifier
+    #[allow(dead_code)]
     async fn request_challenge(&self) -> Result<SessionResponse> {
         let session_request = SessionRequest {
             data: SessionRequestData {
@@ -287,6 +300,7 @@ impl AuthenticationClient {
     }
 
     /// Step 2: Generate TPM proof of possession
+    #[allow(dead_code)]
     fn generate_tpm_proof(
         &self,
         challenge_response: &SessionResponse,
@@ -311,6 +325,7 @@ impl AuthenticationClient {
     }
 
     /// Step 3: Submit proof and get authentication result
+    #[allow(dead_code)]
     async fn submit_proof(
         &self,
         session_id: u64,
@@ -372,6 +387,7 @@ impl AuthenticationClient {
     }
 
     /// Step 4: Process authentication result and store token
+    #[allow(dead_code)]
     async fn process_auth_result(
         &self,
         auth_response: SessionIdResponse,
@@ -412,6 +428,7 @@ impl AuthenticationClient {
     }
 
     /// Make an authenticated HTTP request (convenience method for testing)
+    #[allow(dead_code)]
     pub async fn make_authenticated_request(
         &self,
         method: Method,
