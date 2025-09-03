@@ -369,13 +369,13 @@ mod tpm_tests {
     }
 
     /// Helper function to create TPM test configuration.
-    fn create_tpm_test_config<'a>(
-        url: &'a str,
+    fn create_tpm_test_config(
+        url: &str,
         timeout: u64,
         max_retries: u32,
         initial_delay_ms: u64,
         max_delay_ms: Option<u64>,
-    ) -> NegotiationConfig<'a> {
+    ) -> NegotiationConfig<'_> {
         NegotiationConfig {
             avoid_tpm: true,
             ca_certificate: "",
@@ -728,13 +728,13 @@ mod tests {
     use crate::attestation::{AttestationClient, NegotiationConfig};
 
     // Helper function to create test configuration.
-    fn create_test_config<'a>(
-        url: &'a str,
+    fn create_test_config(
+        url: &str,
         timeout: u64,
         max_retries: u32,
         initial_delay_ms: u64,
         max_delay_ms: Option<u64>,
-    ) -> NegotiationConfig<'a> {
+    ) -> NegotiationConfig<'_> {
         NegotiationConfig {
             avoid_tpm: true,
             ca_certificate: "",
