@@ -38,6 +38,7 @@
        - /compatibility/api_version_compatibility
        - /compatibility/basic-attestation-on-localhost-api-version-bump
        - /compatibility/basic-attestation-on-localhost-with-allowlist-excludelist
+       - /functional/add-agent-with-malformed-ek-cert
        - /functional/agent_UUID_assignment_options
        - /functional/basic-attestation-on-localhost
        - /functional/basic-attestation-with-custom-certificates
