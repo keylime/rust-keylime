@@ -1,4 +1,4 @@
-use crate::auth::{AuthConfig, SessionToken};
+use crate::auth::{AuthConfig, AuthenticationClient, SessionToken};
 use anyhow;
 use async_trait::async_trait;
 use chrono::Utc;
@@ -197,17 +197,23 @@ struct TokenState {
     token: RwLock<Option<SessionToken>>,
     /// Mutex for refresh operations - ensures single writer
     refresh_lock: Mutex<()>,
-    /// Authentication configuration
-    auth_config: AuthConfig,
+    /// Raw authentication client (no middleware to avoid loops)
+    auth_client: AuthenticationClient,
 }
 
 impl TokenState {
-    fn new(auth_config: AuthConfig) -> Self {
-        Self {
+    fn new(
+        auth_config: AuthConfig,
+    ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+        // Create a raw authentication client to avoid middleware loops
+        let auth_client = AuthenticationClient::new_raw(auth_config)
+            .map_err(|e| format!("Failed to create auth client: {}", e))?;
+
+        Ok(Self {
             token: RwLock::new(None),
             refresh_lock: Mutex::new(()),
-            auth_config,
-        }
+            auth_client,
+        })
     }
 
     async fn get_valid_token(
@@ -217,9 +223,9 @@ impl TokenState {
         {
             let token_guard = self.token.read().await;
             if let Some(ref token) = *token_guard {
-                if token
-                    .is_valid(self.auth_config.token_refresh_buffer_minutes)
-                {
+                if token.is_valid(
+                    self.auth_client.config().token_refresh_buffer_minutes,
+                ) {
                     debug!("Using existing valid token from middleware");
                     return Ok(token.token.clone());
                 }
@@ -240,19 +246,39 @@ impl TokenState {
         {
             let token_guard = self.token.read().await;
             if let Some(ref token) = *token_guard {
-                if token
-                    .is_valid(self.auth_config.token_refresh_buffer_minutes)
-                {
+                if token.is_valid(
+                    self.auth_client.config().token_refresh_buffer_minutes,
+                ) {
                     debug!("Token was refreshed by another request");
                     return Ok(token.token.clone());
                 }
             }
         }
 
-        // TODO: Next, we'll integrate with the actual AuthenticationClient
-        // For now, this is a placeholder that will be replaced
-        warn!("Token refresh not yet implemented");
-        Err("Authentication not yet integrated".into())
+        // Use the raw authentication client to get a new token with metadata
+        debug!("Performing token refresh using raw authentication client");
+        match self.auth_client.get_auth_token_with_metadata().await {
+            Ok((token_string, expires_at, session_id)) => {
+                let new_token = SessionToken {
+                    token: token_string.clone(),
+                    expires_at,
+                    session_id,
+                };
+
+                // Store the new token
+                {
+                    let mut token_guard = self.token.write().await;
+                    *token_guard = Some(new_token);
+                }
+
+                debug!("Token refresh completed successfully");
+                Ok(token_string)
+            }
+            Err(e) => {
+                warn!("Token refresh failed: {}", e);
+                Err(format!("Authentication failed: {}", e).into())
+            }
+        }
     }
 
     async fn clear_token(&self) {
@@ -269,9 +295,11 @@ pub struct AuthenticationMiddleware {
 }
 
 impl AuthenticationMiddleware {
-    pub fn new(auth_config: AuthConfig) -> Self {
-        let token_state = Arc::new(TokenState::new(auth_config));
-        Self { token_state }
+    pub fn new(
+        auth_config: AuthConfig,
+    ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+        let token_state = Arc::new(TokenState::new(auth_config)?);
+        Ok(Self { token_state })
     }
 
     fn is_auth_endpoint(&self, req: &reqwest::Request) -> bool {
@@ -384,7 +412,7 @@ impl ResilientClient {
         max_retries: u32,
         success_codes: &[StatusCode],
         max_delay: Option<std::time::Duration>,
-    ) -> Self {
+    ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         let base_client = client.unwrap_or_default();
         let final_max_delay = max_delay.unwrap_or(DEFAULT_MAX_DELAY);
 
@@ -405,15 +433,15 @@ impl ResilientClient {
         // Add authentication middleware if config is provided
         if let Some(auth_cfg) = auth_config {
             debug!("Adding authentication middleware to client");
-            let auth_middleware = AuthenticationMiddleware::new(auth_cfg);
+            let auth_middleware = AuthenticationMiddleware::new(auth_cfg)?;
             builder = builder.with(auth_middleware);
         }
 
         let client_with_middleware = builder.with(LoggingMiddleware).build();
 
-        Self {
+        Ok(Self {
             client: client_with_middleware,
-        }
+        })
     }
 
     /// Generates a six-character lowercase alphanumeric request ID.
@@ -1084,7 +1112,8 @@ mod tests {
             3,
             &[StatusCode::OK],
             None,
-        );
+        )
+        .unwrap(); //#[allow_ci]
 
         // Verify the client was created successfully
         // (We can't easily test the middleware behavior without a mock server,
@@ -1101,7 +1130,8 @@ mod tests {
             3,
             &[StatusCode::OK],
             None,
-        );
+        )
+        .unwrap(); //#[allow_ci]
 
         // Verify the client was created successfully
     }
@@ -1119,7 +1149,7 @@ mod tests {
             max_auth_retries: 3,
         };
 
-        let middleware = AuthenticationMiddleware::new(auth_config);
+        let middleware = AuthenticationMiddleware::new(auth_config).unwrap(); //#[allow_ci]
 
         // Mock a request to a sessions endpoint (should be detected as auth endpoint)
         let mock_request = reqwest::Request::new(
@@ -1157,15 +1187,21 @@ mod tests {
                 max_auth_retries: 3,
             };
 
-            let token_state = TokenState::new(auth_config);
+            let token_state = TokenState::new(auth_config).unwrap(); //#[allow_ci]
 
-            // Test initially no token
+            // Test initially no token - should trigger authentication
             let result = token_state.get_valid_token().await;
-            assert!(result.is_err());
-            assert!(result
-                .unwrap_err() //#[allow_ci]
-                .to_string()
-                .contains("Authentication not yet integrated"));
+            assert!(
+                result.is_err(),
+                "Should fail when no auth server available"
+            );
+            // Since we're using a real auth client, we expect authentication-related errors
+            let error_msg = result.unwrap_err().to_string(); //#[allow_ci]
+            assert!(
+                error_msg.contains("Authentication failed"),
+                "Error: {}",
+                error_msg
+            );
 
             // Test clear token when no token exists (should not panic)
             token_state.clear_token().await;
@@ -1206,7 +1242,7 @@ mod tests {
                 max_auth_retries: 3,
             };
 
-            let token_state = TokenState::new(auth_config);
+            let token_state = TokenState::new(auth_config).unwrap(); //#[allow_ci]
 
             // Insert token that expires within buffer time (should be considered invalid)
             {
@@ -1220,11 +1256,17 @@ mod tests {
 
             // Should try to refresh because token is within buffer time
             let result = token_state.get_valid_token().await;
-            assert!(result.is_err());
-            assert!(result
-                .unwrap_err() //#[allow_ci]
-                .to_string()
-                .contains("Authentication not yet integrated"));
+            assert!(
+                result.is_err(),
+                "Should fail due to token expiring within buffer"
+            );
+            // Since we're using a real auth client, we expect authentication-related errors
+            let error_msg = result.unwrap_err().to_string(); //#[allow_ci]
+            assert!(
+                error_msg.contains("Authentication failed"),
+                "Error: {}",
+                error_msg
+            );
         }
 
         #[tokio::test]
@@ -1238,7 +1280,8 @@ mod tests {
                 max_auth_retries: 3,
             };
 
-            let middleware = AuthenticationMiddleware::new(auth_config);
+            let middleware =
+                AuthenticationMiddleware::new(auth_config).unwrap(); //#[allow_ci]
 
             // Test different auth endpoint patterns
             let test_cases = vec![
@@ -1276,7 +1319,7 @@ mod tests {
                 max_auth_retries: 3,
             };
 
-            let token_state = Arc::new(TokenState::new(auth_config));
+            let token_state = Arc::new(TokenState::new(auth_config).unwrap()); //#[allow_ci]
 
             // Test concurrent access to token state (should not deadlock)
             let mut handles = vec![];
