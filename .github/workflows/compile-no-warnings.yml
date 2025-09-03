@@ -1,0 +1,28 @@
+---
+name: Rust
+
+"on":
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  basic-compilation:
+    name: Compilation with no warnings
+    runs-on: ubuntu-latest
+    container:
+      image: quay.io/keylime/keylime-ci:latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Check compilation (no warnings)
+        run: RUSTFLAGS="-D warnings" cargo build
+      - name: Check test compilation (no warnings)
+        run: RUSTFLAGS="-D warnings" cargo test
+      - name: Check clippy errors (no warnings included)
+        run: cargo clippy --all-features --all-targets  -- -D clippy::all -D warnings
+      - name: Check clippy test errors (no warnings included)
+        run: cargo clippy --all-features --all-targets --tests -- -D clippy::all -D warnings
