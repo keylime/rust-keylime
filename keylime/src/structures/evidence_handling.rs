@@ -60,13 +60,13 @@ pub enum EvidenceData {
         meta: Option<JsonValue>,
     },
     UefiLog {
-        entries: String,
+        entries: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
         meta: Option<JsonValue>,
     },
     ImaLog {
         entry_count: usize,
-        entries: String,
+        entries: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
         meta: Option<JsonValue>,
     },
@@ -110,10 +110,19 @@ impl TryFrom<JsonValue> for EvidenceData {
                     as usize;
                 let entries = value
                     .get("entries")
-                    .ok_or_else(|| "Missing entries field".to_string())?
-                    .as_str()
-                    .ok_or_else(|| "Invalid entries field".to_string())?
-                    .to_string();
+                    .ok_or_else(|| "Missing entries field".to_string())?;
+                let entries = if entries.is_null() {
+                    None
+                } else {
+                    Some(
+                        entries
+                            .as_str()
+                            .ok_or_else(|| {
+                                "Invalid entries field".to_string()
+                            })?
+                            .to_string(),
+                    )
+                };
                 let meta = value.get("meta").cloned();
                 return Ok(EvidenceData::ImaLog {
                     entry_count,
@@ -123,19 +132,21 @@ impl TryFrom<JsonValue> for EvidenceData {
             } else {
                 return Err("Invalid entry_count field".to_string());
             }
-        } else if let Some(entries) = value.get("entries") {
-            if entries.is_string() {
-                let entries = value
-                    .get("entries")
-                    .unwrap() //#[allow_ci]
-                    .as_str()
-                    .unwrap() //#[allow_ci]
-                    .to_string();
-                let meta = value.get("meta").cloned();
-                return Ok(EvidenceData::UefiLog { entries, meta });
+        } else if let Some(entries_value) = value.get("entries") {
+            let entries = if entries_value.is_null() {
+                None
+            } else if entries_value.is_string() {
+                Some(
+                    entries_value
+                        .as_str()
+                        .ok_or_else(|| "Invalid entries field".to_string())?
+                        .to_string(),
+                )
             } else {
                 return Err("Invalid entries field".to_string());
-            }
+            };
+            let meta = value.get("meta").cloned();
+            return Ok(EvidenceData::UefiLog { entries, meta });
         };
         Err("Failed to deserialize EvidenceData".to_string())
     }
@@ -213,7 +224,8 @@ impl From<EvidenceData> for EvidenceCollected {
             },
             EvidenceData::ImaLog { entries, meta, .. } => {
                 // Count the number of entries (lines)
-                let entry_count = entries.lines().count();
+                let entry_count =
+                    entries.as_ref().map_or(0, |e| e.lines().count());
                 EvidenceCollected {
                     evidence_class: "log".to_string(),
                     evidence_type: "ima_log".to_string(),
@@ -322,7 +334,7 @@ mod tests {
         // Test ImaLog conversion
         let ima_evidence = EvidenceData::ImaLog {
             entry_count: 0, // This should be recalculated
-            entries: "line1\nline2\nline3".to_string(),
+            entries: Some("line1\nline2\nline3".to_string()),
             meta: None,
         };
         let ima_collected: EvidenceCollected = ima_evidence.into();
@@ -335,21 +347,21 @@ mod tests {
         } = ima_collected.data
         {
             assert_eq!(entry_count, 3); // Should be recalculated from lines
-            assert_eq!(entries, "line1\nline2\nline3");
+            assert_eq!(entries, Some("line1\nline2\nline3".to_string()));
         } else {
             panic!("Expected ImaLog"); //#[allow_ci]
         }
 
         // Test UefiLog conversion
         let uefi_evidence = EvidenceData::UefiLog {
-            entries: "uefi_entries".to_string(),
+            entries: Some("uefi_entries".to_string()),
             meta: None,
         };
         let uefi_collected: EvidenceCollected = uefi_evidence.into();
         assert_eq!(uefi_collected.evidence_class, "log");
         assert_eq!(uefi_collected.evidence_type, "uefi_log");
         if let EvidenceData::UefiLog { entries, .. } = uefi_collected.data {
-            assert_eq!(entries, "uefi_entries");
+            assert_eq!(entries, Some("uefi_entries".to_string()));
         } else {
             panic!("Expected UefiLog"); //#[allow_ci]
         }
@@ -371,7 +383,7 @@ mod tests {
         };
 
         let uefi_evidence_data = EvidenceData::UefiLog {
-            entries: "uefi_log_entries".to_string(),
+            entries: Some("uefi_log_entries".to_string()),
             meta: None,
         };
         let uefi_evidence_collected = EvidenceCollected {
@@ -382,7 +394,7 @@ mod tests {
 
         let ima_evidence_data = EvidenceData::ImaLog {
             entry_count: 95,
-            entries: "ima_log_entries".to_string(),
+            entries: Some("ima_log_entries".to_string()),
             meta: None,
         };
         let ima_evidence_collected = EvidenceCollected {
@@ -517,7 +529,10 @@ mod tests {
         if let EvidenceData::UefiLog { entries, .. } =
             &deserialized.data.attributes.evidence_collected[1].data
         {
-            assert_eq!(entries, "uefi_log_entries_deserialized");
+            assert_eq!(
+                entries,
+                &Some("uefi_log_entries_deserialized".to_string())
+            );
         } else {
             panic!("Expected UefiLog"); //#[allow_ci]
         }
@@ -536,7 +551,10 @@ mod tests {
         } = &deserialized.data.attributes.evidence_collected[2].data
         {
             assert_eq!(*entry_count, 96);
-            assert_eq!(entries, "ima_log_entries_deserialized");
+            assert_eq!(
+                entries,
+                &Some("ima_log_entries_deserialized".to_string())
+            );
         } else {
             panic!("Expected ImaLog"); //#[allow_ci]
         }
@@ -955,7 +973,7 @@ mod tests {
                                 )),
                             ),
                             data: EvidenceData::UefiLog {
-                                entries: "uefi_log_entries".to_string(),
+                                entries: Some("uefi_log_entries".to_string()),
                                 meta: None,
                             },
                         },
@@ -980,7 +998,7 @@ mod tests {
                             )),
                             data: EvidenceData::ImaLog {
                                 entry_count: 96,
-                                entries: "ima_log_entries".to_string(),
+                                entries: Some("ima_log_entries".to_string()),
                                 meta: None,
                             },
                         },
@@ -1441,7 +1459,7 @@ mod tests {
         if let EvidenceData::UefiLog { entries, .. } =
             &deserialized.data.attributes.evidence[1].data
         {
-            assert_eq!(entries, "uefi_log_entries");
+            assert_eq!(entries, &Some("uefi_log_entries".to_string()));
         } else {
             panic!("Expected UefiLog"); //#[allow_ci]
         }
@@ -1475,4 +1493,148 @@ mod tests {
             "2025-08-07 12:22:17.228706 UTC"
         );
     } //serialize_evidence_handling_response
+
+    #[test]
+    fn deserialize_evidence_handling_request_null_entries_uefi() {
+        let json = r#"{
+    "data": {
+        "type": "attestation",
+        "attributes": {
+            "evidence_collected": [
+                {
+                    "evidence_class": "log",
+                    "evidence_type": "uefi_log",
+                    "data": {
+                        "entries": null
+                    }
+                }
+            ]
+        }
+    }
+}"#;
+        let deserialized: EvidenceHandlingRequest =
+            serde_json::from_str(json).unwrap(); //#[allow_ci]
+
+        assert_eq!(deserialized.data.data_type, "attestation");
+        assert_eq!(deserialized.data.attributes.evidence_collected.len(), 1);
+        assert_eq!(
+            deserialized.data.attributes.evidence_collected[0].evidence_class,
+            "log"
+        );
+        assert_eq!(
+            deserialized.data.attributes.evidence_collected[0].evidence_type,
+            "uefi_log"
+        );
+        if let EvidenceData::UefiLog { entries, .. } =
+            &deserialized.data.attributes.evidence_collected[0].data
+        {
+            assert!(entries.is_none());
+        } else {
+            panic!("Expected UefiLog"); //#[allow_ci]
+        }
+    }
+
+    #[test]
+    fn deserialize_evidence_handling_request_null_entries_ima() {
+        let json = r#"{
+    "data": {
+        "type": "attestation",
+        "attributes": {
+            "evidence_collected": [
+                {
+                    "evidence_class": "log",
+                    "evidence_type": "ima_log",
+                    "data": {
+                        "entries": null,
+                        "entry_count": 0
+                    }
+                }
+            ]
+        }
+    }
+}"#;
+        let deserialized: EvidenceHandlingRequest =
+            serde_json::from_str(json).unwrap(); //#[allow_ci]
+
+        assert_eq!(deserialized.data.data_type, "attestation");
+        assert_eq!(deserialized.data.attributes.evidence_collected.len(), 1);
+        assert_eq!(
+            deserialized.data.attributes.evidence_collected[0].evidence_class,
+            "log"
+        );
+        assert_eq!(
+            deserialized.data.attributes.evidence_collected[0].evidence_type,
+            "ima_log"
+        );
+        if let EvidenceData::ImaLog {
+            entries,
+            entry_count,
+            ..
+        } = &deserialized.data.attributes.evidence_collected[0].data
+        {
+            assert!(entries.is_none());
+            assert_eq!(*entry_count, 0);
+        } else {
+            panic!("Expected ImaLog"); //#[allow_ci]
+        }
+    }
+
+    #[test]
+    fn serialize_evidence_data_null_entries() {
+        // Test serialization of UefiLog with null entries
+        let uefi_evidence = EvidenceData::UefiLog {
+            entries: None,
+            meta: None,
+        };
+        let serialized = serde_json::to_string(&uefi_evidence).unwrap(); //#[allow_ci]
+        assert!(serialized.contains("\"entries\":null"));
+
+        // Test serialization of ImaLog with null entries
+        let ima_evidence = EvidenceData::ImaLog {
+            entry_count: 0,
+            entries: None,
+            meta: None,
+        };
+        let serialized = serde_json::to_string(&ima_evidence).unwrap(); //#[allow_ci]
+        assert!(serialized.contains("\"entries\":null"));
+        assert!(serialized.contains("\"entry_count\":0"));
+    }
+
+    #[test]
+    fn evidence_data_to_evidence_collected_null_entries() {
+        // Test ImaLog with null entries conversion
+        let ima_evidence = EvidenceData::ImaLog {
+            entry_count: 0,
+            entries: None,
+            meta: None,
+        };
+        let ima_collected: EvidenceCollected = ima_evidence.into();
+        assert_eq!(ima_collected.evidence_class, "log");
+        assert_eq!(ima_collected.evidence_type, "ima_log");
+        if let EvidenceData::ImaLog {
+            entry_count,
+            entries,
+            ..
+        } = ima_collected.data
+        {
+            assert_eq!(entry_count, 0); // Should be 0 for null entries
+            assert!(entries.is_none());
+        } else {
+            panic!("Expected ImaLog"); //#[allow_ci]
+        }
+
+        // Test UefiLog with null entries conversion
+        let uefi_evidence = EvidenceData::UefiLog {
+            entries: None,
+            meta: None,
+        };
+        let uefi_collected: EvidenceCollected = uefi_evidence.into();
+        assert_eq!(uefi_collected.evidence_class, "log");
+        assert_eq!(uefi_collected.evidence_type, "uefi_log");
+        if let EvidenceData::UefiLog { entries, .. } = uefi_collected.data {
+            assert!(entries.is_none());
+        } else {
+            panic!("Expected UefiLog"); //#[allow_ci]
+        }
+    }
 }
