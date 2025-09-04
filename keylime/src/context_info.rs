@@ -522,7 +522,7 @@ impl ContextInfo {
         let entry_count = entries.lines().count();
         Ok(EvidenceData::ImaLog {
             entry_count,
-            entries,
+            entries: Some(entries),
             meta: None,
         })
     }
@@ -551,7 +551,7 @@ impl ContextInfo {
         };
 
         Ok(EvidenceData::UefiLog {
-            entries: content,
+            entries: Some(content),
             meta: None,
         })
     }
