@@ -287,7 +287,7 @@ mod tests {
     fn test_process_negotiation_response_with_all_evidence_types() {
         let result = process_negotiation_response(VALID_RESPONSE_BODY);
         assert!(result.is_ok(), "Parsing a valid response should succeed");
-        let evidence_requests = result.unwrap();
+        let evidence_requests = result.unwrap(); //#[allow_ci]
 
         assert_eq!(evidence_requests.len(), 3);
 
@@ -303,20 +303,20 @@ mod tests {
             assert_eq!(signature_scheme, "rsassa");
             assert_eq!(hash_algorithm, "sha384");
             let empty_sha1: Vec<u32> = vec![];
-            assert_eq!(selected_subjects.get("sha1").unwrap(), &empty_sha1);
+            assert_eq!(selected_subjects.get("sha1").unwrap(), &empty_sha1); //#[allow_ci]
             assert_eq!(
-                selected_subjects.get("sha256").unwrap(),
+                selected_subjects.get("sha256").unwrap(), //#[allow_ci]
                 &vec![0, 1, 2, 3, 4, 5, 6]
             );
         } else {
-            panic!("Expected TpmQuote request");
+            panic!("Expected TpmQuote request"); //#[allow_ci]
         }
 
         // Check UefiLog request
         if let EvidenceRequest::UefiLog { .. } = &evidence_requests[1] {
             // UefiLog request found
         } else {
-            panic!("Expected UefiLog request");
+            panic!("Expected UefiLog request"); //#[allow_ci]
         }
 
         // Check ImaLog request
@@ -329,7 +329,7 @@ mod tests {
             assert_eq!(*starting_offset, Some(3925));
             assert_eq!(*entry_count, Some(100));
         } else {
-            panic!("Expected ImaLog request");
+            panic!("Expected ImaLog request"); //#[allow_ci]
         }
     }
 
@@ -338,7 +338,7 @@ mod tests {
         // Test with only TPM quote - should succeed
         let result = process_negotiation_response(RESPONSE_ONLY_TPM_QUOTE);
         assert!(result.is_ok());
-        let evidence_requests = result.unwrap();
+        let evidence_requests = result.unwrap(); //#[allow_ci]
         assert_eq!(evidence_requests.len(), 1);
         assert!(matches!(
             evidence_requests[0],
@@ -348,7 +348,7 @@ mod tests {
         // Test with only IMA log - should succeed
         let result = process_negotiation_response(RESPONSE_ONLY_IMA_LOG);
         assert!(result.is_ok());
-        let evidence_requests = result.unwrap();
+        let evidence_requests = result.unwrap(); //#[allow_ci]
         assert_eq!(evidence_requests.len(), 1);
         assert!(matches!(
             evidence_requests[0],
@@ -358,7 +358,7 @@ mod tests {
         // Test with only UEFI log - should succeed
         let result = process_negotiation_response(RESPONSE_ONLY_UEFI_LOG);
         assert!(result.is_ok());
-        let evidence_requests = result.unwrap();
+        let evidence_requests = result.unwrap(); //#[allow_ci]
         assert_eq!(evidence_requests.len(), 1);
         assert!(matches!(
             evidence_requests[0],
@@ -390,7 +390,7 @@ mod tests {
     fn test_set_evidence_log_paths() {
         let result = process_negotiation_response(VALID_RESPONSE_BODY);
         assert!(result.is_ok());
-        let mut evidence_requests = result.unwrap();
+        let mut evidence_requests = result.unwrap(); //#[allow_ci]
 
         // Initially, log paths should be None
         for request in &evidence_requests {
@@ -417,13 +417,13 @@ mod tests {
             match request {
                 EvidenceRequest::ImaLog { log_path, .. } => {
                     assert_eq!(
-                        log_path.as_ref().unwrap(),
+                        log_path.as_ref().unwrap(), //#[allow_ci]
                         "/path/to/ima.log"
                     );
                 }
                 EvidenceRequest::UefiLog { log_path, .. } => {
                     assert_eq!(
-                        log_path.as_ref().unwrap(),
+                        log_path.as_ref().unwrap(), //#[allow_ci]
                         "/path/to/uefi.log"
                     );
                 }
@@ -441,7 +441,7 @@ mod tests {
         );
 
         assert!(evidence_requests.is_ok());
-        let requests = evidence_requests.unwrap();
+        let requests = evidence_requests.unwrap(); //#[allow_ci]
         assert_eq!(requests.len(), 3);
 
         // Verify the TPM quote request
@@ -456,14 +456,14 @@ mod tests {
             assert_eq!(signature_scheme, "rsassa");
             assert_eq!(hash_algorithm, "sha384");
         } else {
-            panic!("Expected first request to be TPM quote");
+            panic!("Expected first request to be TPM quote"); //#[allow_ci]
         }
 
         // Verify the UEFI log request has the path set
         if let EvidenceRequest::UefiLog { log_path, .. } = &requests[1] {
-            assert_eq!(log_path.as_ref().unwrap(), "/path/to/uefi.log");
+            assert_eq!(log_path.as_ref().unwrap(), "/path/to/uefi.log"); //#[allow_ci]
         } else {
-            panic!("Expected second request to be UEFI log");
+            panic!("Expected second request to be UEFI log"); //#[allow_ci]
         }
 
         // Verify the IMA log request has the path set
@@ -473,10 +473,10 @@ mod tests {
             ..
         } = &requests[2]
         {
-            assert_eq!(log_path.as_ref().unwrap(), "/path/to/ima.log");
+            assert_eq!(log_path.as_ref().unwrap(), "/path/to/ima.log"); //#[allow_ci]
             assert_eq!(*starting_offset, Some(3925));
         } else {
-            panic!("Expected third request to be IMA log");
+            panic!("Expected third request to be IMA log"); //#[allow_ci]
         }
     }
 }

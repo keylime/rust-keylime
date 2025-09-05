@@ -10,7 +10,7 @@ import pathlib
 
 banned = ["unwrap(", "panic!("]
 
-toplevel = ["keylime", "keylime-agent", "keylime-ima-emulator"]
+toplevel = ["keylime", "keylime-agent", "keylime-ima-emulator", "keylime-push-model-agent"]
 
 srcs = []
 

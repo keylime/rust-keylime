@@ -264,17 +264,17 @@ mod tests {
         let mut config = create_test_config(&uri, "", "", "");
         config.max_retries = 3; // Allow up to 3 retries
 
-        let client = AttestationClient::new(&config).unwrap();
+        let client = AttestationClient::new(&config).unwrap(); //#[allow_ci]
         let result = client.send_negotiation(&config).await;
 
         // The final request should be successful
         assert!(result.is_ok());
-        let response = result.unwrap();
+        let response = result.unwrap(); //#[allow_ci]
         assert_eq!(response.status_code, StatusCode::CREATED);
 
         // The server should have received 3 requests in total (2 failures + 1 success)
         let received_requests =
-            mock_server.received_requests().await.unwrap();
+            mock_server.received_requests().await.unwrap(); //#[allow_ci]
         assert_eq!(received_requests.len(), 3);
     }
 
@@ -283,12 +283,12 @@ mod tests {
         let negotiation_config =
             create_test_config("http://127.0.0.1:9999/test", "", "", "");
 
-        let client = AttestationClient::new(&negotiation_config).unwrap();
+        let client = AttestationClient::new(&negotiation_config).unwrap(); //#[allow_ci]
         let result =
             client.send_negotiation(&negotiation_config.clone()).await;
 
         assert!(result.is_err());
-        let err_msg = result.unwrap_err().to_string();
+        let err_msg = result.unwrap_err().to_string(); //#[allow_ci]
         assert!(err_msg.contains("error sending request"));
     }
 
@@ -304,32 +304,32 @@ mod tests {
         let client_result = AttestationClient::new(&config);
 
         assert!(client_result.is_err());
-        let err_msg = client_result.unwrap_err().to_string();
+        let err_msg = client_result.unwrap_err().to_string(); //#[allow_ci]
         assert!(err_msg.contains("Failed to open"));
     }
 
     #[actix_rt::test]
     async fn test_send_negotiation_bad_certs() {
-        let temp_dir = tempdir().unwrap();
+        let temp_dir = tempdir().unwrap(); //#[allow_ci]
         let ca_path = temp_dir.path().join("ca.pem");
         let cert_path = temp_dir.path().join("cert.pem");
         let key_path = temp_dir.path().join("key.pem");
 
-        File::create(&ca_path).unwrap();
-        File::create(&cert_path).unwrap();
-        File::create(&key_path).unwrap();
+        File::create(&ca_path).unwrap(); //#[allow_ci]
+        File::create(&cert_path).unwrap(); //#[allow_ci]
+        File::create(&key_path).unwrap(); //#[allow_ci]
 
         let config = create_test_config(
             "https://1.2.3.4:9999/test",
-            ca_path.to_str().unwrap(),
-            cert_path.to_str().unwrap(),
-            key_path.to_str().unwrap(),
+            ca_path.to_str().unwrap(),   //#[allow_ci]
+            cert_path.to_str().unwrap(), //#[allow_ci]
+            key_path.to_str().unwrap(),  //#[allow_ci]
         );
 
         let client_result = AttestationClient::new(&config);
 
         assert!(client_result.is_err());
-        let err_msg = client_result.unwrap_err().to_string();
+        let err_msg = client_result.unwrap_err().to_string(); //#[allow_ci]
         assert!(err_msg.to_lowercase().contains("certificate"));
     }
 
@@ -344,7 +344,7 @@ mod tests {
             "", "", "",
         );
 
-        let client = AttestationClient::new(&config).unwrap();
+        let client = AttestationClient::new(&config).unwrap(); //#[allow_ci]
         let result = client.send_negotiation(&config).await;
 
         assert!(
@@ -352,7 +352,7 @@ mod tests {
             "Request to mockoon failed: {:?}",
             result.err()
         );
-        let response_info = result.unwrap();
+        let response_info = result.unwrap(); //#[allow_ci]
         assert_eq!(
             response_info.status_code,
             StatusCode::CREATED,
@@ -365,7 +365,7 @@ mod tests {
     #[actix_rt::test]
     async fn test_handle_evidence_submission_no_location_header() {
         let config = create_test_config("http://localhost:3000", "", "", "");
-        let client = AttestationClient::new(&config).unwrap();
+        let client = AttestationClient::new(&config).unwrap(); //#[allow_ci]
 
         // Create a response with no Location header
         let neg_response = ResponseInformation {
@@ -380,7 +380,7 @@ mod tests {
 
         assert!(result.is_err());
         assert!(result
-            .unwrap_err()
+            .unwrap_err() //#[allow_ci]
             .to_string()
             .contains("missing 'Location' header"));
     }
@@ -408,19 +408,19 @@ mod tests {
         let config = create_test_config(&uri, "", "", "");
 
         // Create the client
-        let client = AttestationClient::new(&config).unwrap();
+        let client = AttestationClient::new(&config).unwrap(); //#[allow_ci]
 
         let result =
             client.send_evidence(single_serialized_body, &config).await;
 
         // Assertions
         assert!(result.is_ok(), "send_evidence should succeed");
-        let response = result.unwrap();
+        let response = result.unwrap(); //#[allow_ci]
         assert_eq!(response.status_code, StatusCode::ACCEPTED);
 
         // Verify that the mock server received exactly one request.
         let received_requests =
-            mock_server.received_requests().await.unwrap();
+            mock_server.received_requests().await.unwrap(); //#[allow_ci]
         assert_eq!(received_requests.len(), 1);
     }
 }

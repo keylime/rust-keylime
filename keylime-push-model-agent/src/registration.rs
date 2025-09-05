@@ -12,7 +12,7 @@ pub async fn check_registration(
     context_info: Option<context_info::ContextInfo>,
 ) -> Result<()> {
     if context_info.is_some() {
-        crate::registration::register_agent(&mut context_info.unwrap())
+        crate::registration::register_agent(&mut context_info.unwrap()) //#[allow_ci]
             .await?;
     }
     Ok(())

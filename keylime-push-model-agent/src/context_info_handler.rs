@@ -98,7 +98,7 @@ mod tests {
         let context_res = get_context_info(AVOID_TPM);
         assert!(context_res.is_ok());
         assert!(
-            context_res.unwrap().is_none(),
+            context_res.unwrap().is_none(), //#[allow_ci]
             "Context should be None when TPM is avoided"
         );
     }

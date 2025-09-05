@@ -11,7 +11,7 @@ pub struct UrlArgs {
 
 fn get_api_version(args: &UrlArgs) -> String {
     if args.api_version.is_some() {
-        return args.api_version.clone().unwrap();
+        return args.api_version.clone().unwrap(); //#[allow_ci]
     }
     DEFAULT_API_VERSION.to_string()
 }

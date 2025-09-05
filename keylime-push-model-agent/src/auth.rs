@@ -460,7 +460,7 @@ mod tests {
             max_auth_retries: 2,
         };
 
-        AuthenticationClient::new(config).unwrap()
+        AuthenticationClient::new(config).unwrap() //#[allow_ci]
     }
 
     #[tokio::test]
@@ -532,14 +532,14 @@ mod tests {
         let client = create_test_client(&mock_server.uri()).await;
 
         // Test authentication
-        let token = client.get_auth_token().await.unwrap();
+        let token = client.get_auth_token().await.unwrap(); //#[allow_ci]
         assert_eq!(token, "test-token-456");
 
         // Test that token is cached
         assert!(client.has_valid_token().await);
 
         // Test that subsequent calls use cached token
-        let token2 = client.get_auth_token().await.unwrap();
+        let token2 = client.get_auth_token().await.unwrap(); //#[allow_ci]
         assert_eq!(token2, "test-token-456");
     }
 
@@ -610,7 +610,7 @@ mod tests {
         let result = client.get_auth_token().await;
         assert!(result.is_err());
         assert!(result
-            .unwrap_err()
+            .unwrap_err() //#[allow_ci]
             .to_string()
             .contains("Authentication failed"));
     }
@@ -691,11 +691,11 @@ mod tests {
             max_auth_retries: 2,
         };
 
-        let client = AuthenticationClient::new(config).unwrap();
+        let client = AuthenticationClient::new(config).unwrap(); //#[allow_ci]
 
         // Since token expires in 1 minute but we have 5 minute buffer,
         // it should be considered invalid and trigger re-authentication
-        let token = client.get_auth_token().await.unwrap();
+        let token = client.get_auth_token().await.unwrap(); //#[allow_ci]
         assert_eq!(token, "short-lived-token");
 
         // Check that token is considered invalid due to buffer
