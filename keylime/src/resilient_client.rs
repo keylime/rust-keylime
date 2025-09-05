@@ -1,3 +1,5 @@
+use crate::auth::{AuthConfig, AuthenticationClient, SessionToken};
+use anyhow;
 use async_trait::async_trait;
 use chrono::Utc;
 use http::Extensions;
@@ -15,7 +17,9 @@ use reqwest_retry::{
     Retryable, RetryableStrategy,
 };
 use serde::Serialize;
+use std::sync::Arc;
 use std::time::Duration;
+use tokio::sync::{Mutex, RwLock};
 
 // We define a default maximum delay for retries, which in the pracitical sense
 // is set to 1 hour. This can be adjusted based on the application's needs.
@@ -186,6 +190,181 @@ fn parse_retry_after(
     None
 }
 
+/// Shared state for authentication tokens with proper concurrency control
+#[derive(Debug)]
+struct TokenState {
+    /// RwLock for the actual token - allows concurrent reads
+    token: RwLock<Option<SessionToken>>,
+    /// Mutex for refresh operations - ensures single writer
+    refresh_lock: Mutex<()>,
+    /// Raw authentication client (no middleware to avoid loops)
+    auth_client: AuthenticationClient,
+}
+
+impl TokenState {
+    fn new(
+        auth_config: AuthConfig,
+    ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+        // Create a raw authentication client to avoid middleware loops
+        let auth_client = AuthenticationClient::new_raw(auth_config)
+            .map_err(|e| format!("Failed to create auth client: {}", e))?;
+
+        Ok(Self {
+            token: RwLock::new(None),
+            refresh_lock: Mutex::new(()),
+            auth_client,
+        })
+    }
+
+    async fn get_valid_token(
+        &self,
+    ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+        // Fast path: try to read existing valid token
+        {
+            let token_guard = self.token.read().await;
+            if let Some(ref token) = *token_guard {
+                if token.is_valid(
+                    self.auth_client.config().token_refresh_buffer_minutes,
+                ) {
+                    debug!("Using existing valid token from middleware");
+                    return Ok(token.token.clone());
+                }
+            }
+        }
+
+        // Slow path: token is invalid or missing, need to refresh
+        self.refresh_token().await
+    }
+
+    async fn refresh_token(
+        &self,
+    ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+        // Acquire refresh lock to ensure only one refresh at a time
+        let _refresh_guard = self.refresh_lock.lock().await;
+
+        // Double-check: another request might have refreshed while we waited
+        {
+            let token_guard = self.token.read().await;
+            if let Some(ref token) = *token_guard {
+                if token.is_valid(
+                    self.auth_client.config().token_refresh_buffer_minutes,
+                ) {
+                    debug!("Token was refreshed by another request");
+                    return Ok(token.token.clone());
+                }
+            }
+        }
+
+        // Use the raw authentication client to get a new token with metadata
+        debug!("Performing token refresh using raw authentication client");
+        match self.auth_client.get_auth_token_with_metadata().await {
+            Ok((token_string, expires_at, session_id)) => {
+                let new_token = SessionToken {
+                    token: token_string.clone(),
+                    expires_at,
+                    session_id,
+                };
+
+                // Store the new token
+                {
+                    let mut token_guard = self.token.write().await;
+                    *token_guard = Some(new_token);
+                }
+
+                debug!("Token refresh completed successfully");
+                Ok(token_string)
+            }
+            Err(e) => {
+                warn!("Token refresh failed: {}", e);
+                Err(format!("Authentication failed: {}", e).into())
+            }
+        }
+    }
+
+    async fn clear_token(&self) {
+        let mut token_guard = self.token.write().await;
+        *token_guard = None;
+        debug!("Authentication token cleared from shared state");
+    }
+}
+
+/// Middleware for transparent authentication using challenge-response protocol
+#[derive(Debug)]
+pub struct AuthenticationMiddleware {
+    token_state: Arc<TokenState>,
+}
+
+impl AuthenticationMiddleware {
+    pub fn new(
+        auth_config: AuthConfig,
+    ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+        let token_state = Arc::new(TokenState::new(auth_config)?);
+        Ok(Self { token_state })
+    }
+
+    fn is_auth_endpoint(&self, req: &reqwest::Request) -> bool {
+        let path = req.url().path();
+        // Skip authentication for auth endpoints to prevent infinite loops
+        path.contains("/sessions")
+    }
+}
+
+#[async_trait]
+impl Middleware for AuthenticationMiddleware {
+    async fn handle(
+        &self,
+        mut req: reqwest::Request,
+        extensions: &mut Extensions,
+        next: Next<'_>,
+    ) -> Result<Response, Error> {
+        // Skip authentication for auth endpoints to prevent infinite loops
+        if self.is_auth_endpoint(&req) {
+            debug!(
+                "Skipping auth for authentication endpoint: {}",
+                req.url().path()
+            );
+            return next.run(req, extensions).await;
+        }
+
+        // Add Authorization header if not present
+        if !req.headers().contains_key("Authorization") {
+            match self.token_state.get_valid_token().await {
+                Ok(token) => {
+                    debug!("Adding authentication token to request");
+                    req.headers_mut().insert(
+                        "Authorization",
+                        format!("Bearer {}", token).parse().map_err(|e| {
+                            Error::Middleware(anyhow::anyhow!(
+                                "Invalid token format: {}",
+                                e
+                            ))
+                        })?,
+                    );
+                }
+                Err(e) => {
+                    warn!("Failed to get auth token: {}", e);
+                    return Err(Error::Middleware(anyhow::anyhow!(
+                        "Authentication failed: {}",
+                        e
+                    )));
+                }
+            }
+        }
+
+        let response = next.run(req, extensions).await?;
+
+        // Handle 401 responses by clearing token
+        if response.status() == StatusCode::UNAUTHORIZED {
+            warn!("Received 401, clearing token for future requests");
+            self.token_state.clear_token().await;
+            // Note: We don't retry here to avoid infinite loops
+            // The retry will happen naturally on the next request
+        }
+
+        Ok(response)
+    }
+}
+
 /// A client that transparently handles retries with exponential backoff.
 #[derive(Debug, Clone)]
 pub struct ResilientClient {
@@ -223,6 +402,46 @@ impl ResilientClient {
         Self {
             client: client_with_middleware,
         }
+    }
+
+    /// Creates a new client with optional authentication middleware
+    pub fn new_with_auth(
+        client: Option<Client>,
+        auth_config: Option<AuthConfig>,
+        initial_delay: std::time::Duration,
+        max_retries: u32,
+        success_codes: &[StatusCode],
+        max_delay: Option<std::time::Duration>,
+    ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+        let base_client = client.unwrap_or_default();
+        let final_max_delay = max_delay.unwrap_or(DEFAULT_MAX_DELAY);
+
+        let retry_policy = ExponentialBackoff::builder()
+            .retry_bounds(initial_delay, final_max_delay)
+            .jitter(Jitter::None)
+            .build_with_max_retries(max_retries);
+
+        let mut builder = ClientBuilder::new(base_client).with(
+            RetryTransientMiddleware::new_with_policy_and_strategy(
+                retry_policy,
+                StopOnSuccessStrategy {
+                    success_codes: success_codes.to_vec(),
+                },
+            ),
+        );
+
+        // Add authentication middleware if config is provided
+        if let Some(auth_cfg) = auth_config {
+            debug!("Adding authentication middleware to client");
+            let auth_middleware = AuthenticationMiddleware::new(auth_cfg)?;
+            builder = builder.with(auth_middleware);
+        }
+
+        let client_with_middleware = builder.with(LoggingMiddleware).build();
+
+        Ok(Self {
+            client: client_with_middleware,
+        })
     }
 
     /// Generates a six-character lowercase alphanumeric request ID.
@@ -870,5 +1089,263 @@ mod tests {
                                                                        // This should either work or fail gracefully, but not panic
         let result = parse_retry_after(&header);
         assert!(result.is_some() || result.is_none()); // Just ensure no panic
+    }
+
+    #[tokio::test]
+    async fn test_resilient_client_with_auth_config() {
+        use crate::auth::AuthConfig;
+
+        let auth_config = AuthConfig {
+            verifier_base_url: "https://verifier.example.com".to_string(),
+            agent_id: "test-agent".to_string(),
+            avoid_tpm: true,
+            timeout_ms: 5000,
+            token_refresh_buffer_minutes: 5,
+            max_auth_retries: 3,
+        };
+
+        // Test with authentication
+        let _client_with_auth = ResilientClient::new_with_auth(
+            None,
+            Some(auth_config),
+            std::time::Duration::from_millis(10),
+            3,
+            &[StatusCode::OK],
+            None,
+        )
+        .unwrap(); //#[allow_ci]
+
+        // Verify the client was created successfully
+        // (We can't easily test the middleware behavior without a mock server,
+        // but we can at least verify the client creation doesn't panic)
+    }
+
+    #[tokio::test]
+    async fn test_resilient_client_without_auth_config() {
+        // Test without authentication (should behave like the original client)
+        let _client_without_auth = ResilientClient::new_with_auth(
+            None,
+            None, // No auth config
+            std::time::Duration::from_millis(10),
+            3,
+            &[StatusCode::OK],
+            None,
+        )
+        .unwrap(); //#[allow_ci]
+
+        // Verify the client was created successfully
+    }
+
+    #[tokio::test]
+    async fn test_authentication_middleware_path_detection() {
+        use crate::auth::AuthConfig;
+
+        let auth_config = AuthConfig {
+            verifier_base_url: "https://verifier.example.com".to_string(),
+            agent_id: "test-agent".to_string(),
+            avoid_tpm: true,
+            timeout_ms: 5000,
+            token_refresh_buffer_minutes: 5,
+            max_auth_retries: 3,
+        };
+
+        let middleware = AuthenticationMiddleware::new(auth_config).unwrap(); //#[allow_ci]
+
+        // Mock a request to a sessions endpoint (should be detected as auth endpoint)
+        let mock_request = reqwest::Request::new(
+            Method::POST,
+            "https://verifier.example.com/v3.0/sessions"
+                .parse()
+                .unwrap(), //#[allow_ci]
+        );
+        assert!(middleware.is_auth_endpoint(&mock_request));
+
+        // Mock a request to a non-auth endpoint
+        let mock_request2 = reqwest::Request::new(
+            Method::GET,
+            "https://verifier.example.com/v3.0/agents/123/attestations"
+                .parse()
+                .unwrap(), //#[allow_ci]
+        );
+        assert!(!middleware.is_auth_endpoint(&mock_request2));
+    }
+
+    mod auth_middleware_tests {
+        use super::*;
+        use crate::auth::{AuthConfig, SessionToken};
+        use chrono::{Duration, Utc};
+        use std::sync::Arc;
+
+        #[tokio::test]
+        async fn test_token_state_basic_operations() {
+            let auth_config = AuthConfig {
+                verifier_base_url: "https://verifier.example.com".to_string(),
+                agent_id: "test-agent".to_string(),
+                avoid_tpm: true,
+                timeout_ms: 5000,
+                token_refresh_buffer_minutes: 5,
+                max_auth_retries: 3,
+            };
+
+            let token_state = TokenState::new(auth_config).unwrap(); //#[allow_ci]
+
+            // Test initially no token - should trigger authentication
+            let result = token_state.get_valid_token().await;
+            assert!(
+                result.is_err(),
+                "Should fail when no auth server available"
+            );
+            // Since we're using a real auth client, we expect authentication-related errors
+            let error_msg = result.unwrap_err().to_string(); //#[allow_ci]
+            assert!(
+                error_msg.contains("Authentication failed"),
+                "Error: {}",
+                error_msg
+            );
+
+            // Test clear token when no token exists (should not panic)
+            token_state.clear_token().await;
+
+            // Manually insert a valid token for testing
+            {
+                let mut token_guard = token_state.token.write().await;
+                *token_guard = Some(SessionToken {
+                    token: "test-token-123".to_string(),
+                    expires_at: Utc::now() + Duration::hours(1), // Valid for 1 hour
+                    session_id: 42,
+                });
+            }
+
+            // Test get valid token with valid token - should succeed now
+            let result = token_state.get_valid_token().await;
+            assert!(result.is_ok(), "Should succeed with valid token");
+            assert_eq!(result.unwrap(), "test-token-123"); //#[allow_ci]
+
+            // Test clear token
+            token_state.clear_token().await;
+
+            // Verify token was cleared
+            {
+                let token_guard = token_state.token.read().await;
+                assert!(token_guard.is_none());
+            }
+        }
+
+        #[tokio::test]
+        async fn test_token_state_expiration_logic() {
+            let auth_config = AuthConfig {
+                verifier_base_url: "https://verifier.example.com".to_string(),
+                agent_id: "test-agent".to_string(),
+                avoid_tpm: true,
+                timeout_ms: 5000,
+                token_refresh_buffer_minutes: 10, // 10 minute buffer
+                max_auth_retries: 3,
+            };
+
+            let token_state = TokenState::new(auth_config).unwrap(); //#[allow_ci]
+
+            // Insert token that expires within buffer time (should be considered invalid)
+            {
+                let mut token_guard = token_state.token.write().await;
+                *token_guard = Some(SessionToken {
+                    token: "expiring-token".to_string(),
+                    expires_at: Utc::now() + Duration::minutes(5), // Expires in 5 min, but 10 min buffer
+                    session_id: 123,
+                });
+            }
+
+            // Should try to refresh because token is within buffer time
+            let result = token_state.get_valid_token().await;
+            assert!(
+                result.is_err(),
+                "Should fail due to token expiring within buffer"
+            );
+            // Since we're using a real auth client, we expect authentication-related errors
+            let error_msg = result.unwrap_err().to_string(); //#[allow_ci]
+            assert!(
+                error_msg.contains("Authentication failed"),
+                "Error: {}",
+                error_msg
+            );
+        }
+
+        #[tokio::test]
+        async fn test_authentication_middleware_advanced_patterns() {
+            let auth_config = AuthConfig {
+                verifier_base_url: "https://verifier.example.com".to_string(),
+                agent_id: "test-agent".to_string(),
+                avoid_tpm: true,
+                timeout_ms: 5000,
+                token_refresh_buffer_minutes: 5,
+                max_auth_retries: 3,
+            };
+
+            let middleware =
+                AuthenticationMiddleware::new(auth_config).unwrap(); //#[allow_ci]
+
+            // Test different auth endpoint patterns
+            let test_cases = vec![
+                ("https://verifier.example.com/sessions", true),
+                ("https://verifier.example.com/v3.0/sessions", true),
+                ("https://verifier.example.com/api/sessions/123", true),
+                ("https://verifier.example.com/agents", false),
+                ("https://verifier.example.com/attestations", false),
+                ("https://verifier.example.com/keys", false),
+            ];
+
+            for (url, expected_is_auth) in test_cases {
+                let mock_request = reqwest::Request::new(
+                    Method::GET,
+                    url.parse().unwrap(), //#[allow_ci]
+                );
+                assert_eq!(
+                    middleware.is_auth_endpoint(&mock_request),
+                    expected_is_auth,
+                    "URL {} should be auth endpoint: {}",
+                    url,
+                    expected_is_auth
+                );
+            }
+        }
+
+        #[tokio::test]
+        async fn test_middleware_concurrent_access() {
+            let auth_config = AuthConfig {
+                verifier_base_url: "https://verifier.example.com".to_string(),
+                agent_id: "test-agent".to_string(),
+                avoid_tpm: true,
+                timeout_ms: 5000,
+                token_refresh_buffer_minutes: 5,
+                max_auth_retries: 3,
+            };
+
+            let token_state = Arc::new(TokenState::new(auth_config).unwrap()); //#[allow_ci]
+
+            // Test concurrent access to token state (should not deadlock)
+            let mut handles = vec![];
+
+            for i in 0..5 {
+                let token_state_clone = Arc::clone(&token_state);
+                let handle = tokio::spawn(async move {
+                    if i % 2 == 0 {
+                        // Even threads try to get token
+                        let _result =
+                            token_state_clone.get_valid_token().await;
+                    } else {
+                        // Odd threads clear token
+                        token_state_clone.clear_token().await;
+                    }
+                });
+                handles.push(handle);
+            }
+
+            // Wait for all tasks to complete (should not hang)
+            for handle in handles {
+                handle.await.unwrap(); //#[allow_ci]
+            }
+
+            // Verify we can still access the token state
+            token_state.clear_token().await;
+        }
     }
 }
