@@ -167,8 +167,8 @@ impl<'a> FillerFromHardware<'a> {
                             capabilities: structures::LogCapabilities {
                                 evidence_version: Some(config.uefi_logs_evidence_version().to_string()),
                                 entry_count: uefi_count,
-                                supports_partial_access: true,
-                                appendable: true,
+                                supports_partial_access: false,
+                                appendable: false,
                                 formats: vec!["application/octet-stream".to_string()]
                             },
                         },
@@ -723,5 +723,53 @@ mod tests {
             assert!(result.data.attributes.evidence_collected.is_empty());
             assert!(ctx.flush_context().is_ok());
         }
+    }
+
+    #[tokio::test]
+    async fn test_uefi_log_capabilities_flags() {
+        let _mutex = testing::lock_tests().await;
+        let context_info_result = context_info::ContextInfo::new_from_str(
+            context_info::AlgorithmConfigurationString {
+                tpm_encryption_alg: "rsa".to_string(),
+                tpm_hash_alg: "sha256".to_string(),
+                tpm_signing_alg: "rsassa".to_string(),
+                agent_data_path: "".to_string(),
+                disabled_signing_algorithms: vec![],
+            },
+        );
+
+        let mut context_info = match context_info_result {
+            Ok(ctx) => ctx,
+            Err(_) => {
+                println!("Skipping test_uefi_log_capabilities_flags: TPM not available");
+                return;
+            }
+        };
+
+        let mut filler = FillerFromHardware::new(&mut context_info);
+        let request = filler.get_attestation_request();
+
+        let uefi_log_evidence = request.data.attributes.evidence_supported.iter().find(|e| {
+            matches!(e, structures::EvidenceSupported::EvidenceLog { evidence_type, .. } if evidence_type == "uefi_log")
+        }).expect("uefi_log evidence not found");
+
+        if let structures::EvidenceSupported::EvidenceLog {
+            capabilities,
+            ..
+        } = uefi_log_evidence
+        {
+            assert!(
+                !capabilities.supports_partial_access,
+                "UEFI log supports_partial_access should be false"
+            );
+            assert!(
+                !capabilities.appendable,
+                "UEFI log appendable should be false"
+            );
+        } else {
+            panic!("Expected EvidenceLog for uefi_log"); //#[allow_ci]
+        }
+
+        assert!(context_info.flush_context().is_ok());
     }
 }
