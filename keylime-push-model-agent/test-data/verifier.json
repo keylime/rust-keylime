@@ -24,7 +24,11 @@
           "headers": [
             {
               "key": "Content-Type",
-              "value": "application/json"
+              "value": "application/vnd.api+json"
+            },
+            {
+              "key": "Location",
+              "value": "/v3.0/agents/d432fbb3-d2f1-4a97-9ef7-75bd81c00000/attestations/1"
             },
             {
               "key": "Access-Control-Allow-Origin",
@@ -72,7 +76,7 @@
           "headers": [
             {
               "key": "Content-Type",
-              "value": "application/json"
+              "value": "application/vnd.api+json"
             },
             {
               "key": "Access-Control-Allow-Origin",
@@ -120,7 +124,7 @@
           "headers": [
             {
               "key": "Content-Type",
-              "value": "application/json"
+              "value": "application/vnd.api+json"
             }
           ],
           "bodyType": "INLINE",
@@ -156,7 +160,7 @@
           "headers": [
             {
               "key": "Content-Type",
-              "value": "application/json"
+              "value": "application/vnd.api+json"
             }
           ],
           "bodyType": "INLINE",
@@ -233,6 +237,90 @@
       "responseMode": null,
       "streamingMode": null,
       "streamingInterval": 0
+    },
+    {
+      "uuid": "bbec2d1c-6b75-470e-b550-8765b8e845d6",
+      "type": "http",
+      "documentation": "RFC compliance test endpoint for header validation testing",
+      "method": "post",
+      "endpoint": "v3.0/rfc-compliance-test",
+      "responses": [
+        {
+          "uuid": "ac10860e-3dbc-4441-89b3-826bf3d0383f",
+          "body": "{\n  \"data\": {\n    \"type\": \"test\",\n    \"id\": \"rfc-test-123\",\n    \"attributes\": {\n      \"test_type\": \"rfc_compliance\",\n      \"status\": \"created\",\n      \"validation_results\": {\n        \"rfc_3986_compliance\": true,\n        \"rfc_9110_compliance\": true,\n        \"location_header_valid\": true,\n        \"content_type_valid\": true\n      }\n    }\n  }\n}",
+          "latency": 0,
+          "statusCode": 201,
+          "label": "RFC 9110 compliant 201 Created response",
+          "headers": [
+            {
+              "key": "Content-Type",
+              "value": "application/vnd.api+json"
+            },
+            {
+              "key": "Location",
+              "value": "/v3.0/rfc-compliance-test/rfc-test-123"
+            },
+            {
+              "key": "X-RFC-Test",
+              "value": "3986-9110-compliance"
+            },
+            {
+              "key": "Access-Control-Allow-Origin",
+              "value": "*"
+            }
+          ],
+          "bodyType": "INLINE",
+          "filePath": "",
+          "databucketID": "",
+          "sendFileAsBody": false,
+          "rules": [
+            {
+              "target": "header",
+              "modifier": "Content-Type",
+              "value": "application/vnd.api+json",
+              "invert": false,
+              "operator": "equals"
+            }
+          ],
+          "rulesOperator": "OR",
+          "disableTemplating": false,
+          "fallbackTo404": false,
+          "default": false,
+          "crudKey": "id",
+          "callbacks": []
+        },
+        {
+          "uuid": "73a28ee9-75d4-4631-963d-46adbe31aed8",
+          "body": "{\n  \"errors\": [\n    {\n      \"status\": \"400\",\n      \"title\": \"Invalid Content-Type\",\n      \"detail\": \"Content-Type must be application/vnd.api+json for RFC compliance testing\"\n    }\n  ]\n}",
+          "latency": 0,
+          "statusCode": 400,
+          "label": "Bad Request for invalid Content-Type",
+          "headers": [
+            {
+              "key": "Content-Type",
+              "value": "application/vnd.api+json"
+            },
+            {
+              "key": "X-RFC-Error",
+              "value": "invalid-content-type"
+            }
+          ],
+          "bodyType": "INLINE",
+          "filePath": "",
+          "databucketID": "",
+          "sendFileAsBody": false,
+          "rules": [],
+          "rulesOperator": "OR",
+          "disableTemplating": false,
+          "fallbackTo404": false,
+          "default": true,
+          "crudKey": "id",
+          "callbacks": []
+        }
+      ],
+      "responseMode": null,
+      "streamingMode": null,
+      "streamingInterval": 0
     }
   ],
   "rootChildren": [
@@ -255,6 +343,10 @@
     {
       "type": "route",
       "uuid": "f9567112-05ca-4f8b-9944-d6e966226423"
+    },
+    {
+      "type": "route",
+      "uuid": "bbec2d1c-6b75-470e-b550-8765b8e845d6"
     }
   ],
   "proxyMode": false,

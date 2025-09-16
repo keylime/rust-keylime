@@ -114,6 +114,8 @@ pub enum Error {
     ),
     #[error("UEFI Log parser error: {0}")]
     UEFILog(String),
+    #[error("RFC compliance error: {0}")]
+    RfcCompliance(#[from] crate::rfc3986_compliance::RfcComplianceError),
     #[error("{0}")]
     Other(String),
 }

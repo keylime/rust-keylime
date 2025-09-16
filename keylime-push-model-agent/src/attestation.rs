@@ -1,9 +1,11 @@
-use crate::{context_info_handler, struct_filler, url_selector};
+use crate::{
+    context_info_handler, header_validation::HeaderValidator, struct_filler,
+    url_selector,
+};
 use anyhow::Result;
 use keylime::resilient_client::ResilientClient;
-use log::{debug, info};
+use log::{debug, info, warn};
 use reqwest::header::HeaderMap;
-use reqwest::header::LOCATION;
 use reqwest::StatusCode;
 use std::time::Duration;
 
@@ -92,16 +94,14 @@ impl AttestationClient {
         let req = filler.get_attestation_request();
         debug!("Request body: {:?}", serde_json::to_string(&req));
 
-        let response = self
-            .client
-            .get_json_request_from_struct(
-                reqwest::Method::POST,
-                config.url,
-                &req,
-                Some("application/vnd.api+json".to_string()),
-            )?
-            .send()
-            .await?;
+        let request_builder = self.client.get_json_request_from_struct(
+            reqwest::Method::POST,
+            config.url,
+            &req,
+            Some("application/vnd.api+json".to_string()),
+        )?;
+
+        let response = request_builder.send().await?;
 
         let sc = response.status();
         let headers = response.headers().clone();
@@ -128,16 +128,14 @@ impl AttestationClient {
     ) -> Result<ResponseInformation> {
         debug!("PATCH Request body: {json_body}");
 
-        let response = self
-            .client
-            .get_json_request(
-                reqwest::Method::PATCH,
-                config.url,
-                &json_body,
-                Some("application/vnd.api+json".to_string()),
-            )?
-            .send()
-            .await?;
+        let request_builder = self.client.get_json_request(
+            reqwest::Method::PATCH,
+            config.url,
+            &json_body,
+            Some("application/vnd.api+json".to_string()),
+        )?;
+
+        let response = request_builder.send().await?;
 
         let sc = response.status();
         let headers = response.headers().clone();
@@ -145,6 +143,18 @@ impl AttestationClient {
 
         info!("PATCH Response code:{sc}");
         info!("PATCH Response headers: {headers:?}");
+
+        // Only validate Location header for 201 Created responses per RFC 9110 Section 10.2.2
+        if sc.as_u16() == 201 {
+            if let Err(e) = HeaderValidator::validate_201_created_response(
+                &headers,
+                Some(config.url),
+            ) {
+                warn!("201 Created response validation failed: {}", e);
+                // Don't fail the request, just log the warning for now
+            }
+        }
+
         if !response_body.is_empty() {
             info!("PATCH Response body: {response_body}");
         }
@@ -162,13 +172,20 @@ impl AttestationClient {
         config: &NegotiationConfig<'_>,
     ) -> Result<ResponseInformation> {
         info!("--- Phase 2: Preparing and Sending Evidence ---");
-        let location_header = neg_response
-            .headers
-            .get(LOCATION)
-            .ok_or_else(|| {
-                anyhow::anyhow!("Verifier response missing 'Location' header")
-            })?
-            .to_str()?;
+
+        // Use RFC-compliant Location header validation
+        let location_header = match HeaderValidator::validate_location_header(
+            &neg_response.headers,
+            Some(config.verifier_url),
+        ) {
+            Ok(location) => location,
+            Err(e) => {
+                return Err(anyhow::anyhow!(
+                    "Location header validation failed: {}",
+                    e
+                ));
+            }
+        };
 
         let patch_url = url_selector::get_evidence_submission_request_url(
             &url_selector::UrlArgs {
@@ -363,6 +380,130 @@ mod tests {
     }
 
     #[actix_rt::test]
+    async fn test_rfc_compliance_with_mockoon() {
+        if std::env::var("MOCKOON").is_err() {
+            return;
+        }
+
+        let config = create_test_config(
+            "http://localhost:3000/v3.0/agents/d432fbb3-d2f1-4a97-9ef7-75bd81c00000/attestations",
+            "", "", "",
+        );
+
+        let client = AttestationClient::new(&config).unwrap();
+        let result = client.send_negotiation(&config).await;
+
+        assert!(
+            result.is_ok(),
+            "Request to mockoon failed: {:?}",
+            result.err()
+        );
+
+        let response_info = result.unwrap();
+
+        // Test RFC 9110 Section 10.2.2 compliance - 201 Created must have Location header
+        assert_eq!(
+            response_info.status_code,
+            StatusCode::CREATED,
+            "Expected 201 Created from Mockoon, but got {}",
+            response_info.status_code
+        );
+
+        // Validate Location header for 201 Created responses per RFC 9110 Section 10.2.2
+        let validation_result = if response_info.status_code.as_u16() == 201 {
+            HeaderValidator::validate_201_created_response(
+                &response_info.headers,
+                Some("http://localhost:3000"),
+            )
+            .map(|_| ())
+        } else {
+            Ok(())
+        };
+
+        assert!(
+            validation_result.is_ok(),
+            "RFC compliance validation failed: {:?}",
+            validation_result.err()
+        );
+
+        // Specifically test Location header validation according to RFC 3986
+        let location_validation = HeaderValidator::validate_location_header(
+            &response_info.headers,
+            Some("http://localhost:3000"),
+        );
+
+        assert!(
+            location_validation.is_ok(),
+            "Location header validation failed: {:?}",
+            location_validation.err()
+        );
+
+        // Verify the Location header contains a valid URI
+        let location = location_validation.unwrap();
+        assert!(
+            location.starts_with("http://")
+                || location.starts_with("https://")
+                || location.starts_with("/"),
+            "Location header should be a valid URI reference: {}",
+            location
+        );
+
+        // Test evidence submission with RFC-compliant Location header
+        let has_location = response_info
+            .headers
+            .contains_key(reqwest::header::LOCATION);
+        let response_body = response_info.body.clone(); // Clone the body for later use
+
+        if has_location {
+            let evidence_result = client
+                .handle_evidence_submission(response_info, &config)
+                .await;
+
+            // The evidence submission may fail due to mock data, but header validation should succeed
+            // We're mainly testing that the RFC compliance validation doesn't prevent the request
+            match evidence_result {
+                Ok(evidence_response) => {
+                    info!(
+                        "Evidence submission succeeded with status: {}",
+                        evidence_response.status_code
+                    );
+
+                    // Validate Location header for 201 Created responses per RFC 9110 Section 10.2.2
+                    let evidence_validation =
+                        if evidence_response.status_code.as_u16() == 201 {
+                            HeaderValidator::validate_201_created_response(
+                                &evidence_response.headers,
+                                Some("http://localhost:3000"),
+                            )
+                            .map(|_| ())
+                        } else {
+                            Ok(())
+                        };
+
+                    if evidence_validation.is_err() {
+                        warn!("Evidence response header validation failed: {:?}", evidence_validation.err());
+                        // Don't fail the test, just log as this might be due to mock server limitations
+                    }
+                }
+                Err(e) => {
+                    // Evidence submission failure is acceptable for this test
+                    // We're primarily testing RFC compliance validation
+                    info!(
+                        "Evidence submission failed (expected with mock): {}",
+                        e
+                    );
+                }
+            }
+
+            // Use the cloned body for the final assertion
+            assert!(response_body.contains("evidence_requested"));
+        } else {
+            // If no Location header, just check the body directly
+            assert!(response_info.body.contains("evidence_requested"));
+        }
+    }
+
+    #[actix_rt::test]
     async fn test_handle_evidence_submission_no_location_header() {
         let config = create_test_config("http://localhost:3000", "", "", "");
         let client = AttestationClient::new(&config).unwrap();
@@ -379,10 +520,11 @@ mod tests {
             .await;
 
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("missing 'Location' header"));
+        let error_msg = result.unwrap_err().to_string();
+        assert!(
+            error_msg.contains("Location header validation failed")
+                || error_msg.contains("missing 'Location' header")
+        );
     }
 
     #[actix_rt::test]

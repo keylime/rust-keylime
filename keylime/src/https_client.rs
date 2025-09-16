@@ -1,3 +1,4 @@
+use crate::rfc3986_compliance::UriReference;
 use anyhow::{Context, Result};
 use std::{
     fs::{self, File},
@@ -11,6 +12,30 @@ pub struct ClientArgs {
     pub key: String,
     pub insecure: Option<bool>,
     pub timeout: u64,
+}
+
+/// Validate a URL according to RFC 3986
+pub fn validate_url(url: &str) -> Result<UriReference> {
+    UriReference::parse(url).map_err(|e| {
+        anyhow::anyhow!("Invalid URL according to RFC 3986: {}", e)
+    })
+}
+
+/// Resolve a relative URL against a base URL according to RFC 3986
+pub fn resolve_url(base_url: &str, relative_url: &str) -> Result<String> {
+    let base = validate_url(base_url)?;
+    let relative = validate_url(relative_url)?;
+
+    if !relative.is_relative() {
+        // If the relative URL is actually absolute, return it as-is
+        return Ok(relative.to_string());
+    }
+
+    let resolved = relative
+        .resolve_against(&base)
+        .map_err(|e| anyhow::anyhow!("Failed to resolve URL: {}", e))?;
+
+    Ok(resolved.to_string())
 }
 
 pub fn get_https_client(args: &ClientArgs) -> Result<reqwest::Client> {
@@ -64,4 +89,66 @@ pub fn get_https_client(args: &ClientArgs) -> Result<reqwest::Client> {
             .danger_accept_invalid_hostnames(true)
     }
     builder.build().context("Failed to create HTTPS client")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_validate_url() {
+        // Test valid absolute URLs
+        assert!(validate_url("https://example.com/path").is_ok());
+        assert!(validate_url("http://localhost:8080/api/v1").is_ok());
+        assert!(validate_url(
+            "https://example.com:443/path?query=value#fragment"
+        )
+        .is_ok());
+
+        // Test valid relative URLs
+        assert!(validate_url("/path/to/resource").is_ok());
+        assert!(validate_url("../relative/path").is_ok());
+        assert!(validate_url("?query=value").is_ok());
+        assert!(validate_url("#fragment").is_ok());
+
+        // Test invalid URLs (with control characters)
+        assert!(validate_url("invalid\x00url").is_err());
+        assert!(validate_url("").is_ok()); // Empty string is a valid relative reference
+    }
+
+    #[test]
+    fn test_resolve_url() {
+        let base = "https://example.com:8080/api/v1/resources";
+
+        // Test resolving relative paths
+        let resolved = resolve_url(base, "../v2/users").unwrap(); //#[allow_ci]
+        assert_eq!(resolved, "https://example.com:8080/api/v2/users");
+
+        let resolved = resolve_url(base, "/absolute/path").unwrap(); //#[allow_ci]
+        assert_eq!(resolved, "https://example.com:8080/absolute/path");
+
+        // Test with absolute URL (should return as-is)
+        let absolute = "https://other.com/path";
+        let resolved = resolve_url(base, absolute).unwrap(); //#[allow_ci]
+        assert_eq!(resolved, absolute);
+
+        // Test with query and fragment
+        let resolved = resolve_url(base, "?query=test").unwrap(); //#[allow_ci]
+        assert_eq!(
+            resolved,
+            "https://example.com:8080/api/v1/resources?query=test"
+        );
+    }
+
+    #[test]
+    fn test_dot_segment_resolution() {
+        let base = "https://example.com/a/b/c/d";
+
+        // Test removal of dot segments
+        let resolved = resolve_url(base, "../../../g").unwrap(); //#[allow_ci]
+        assert_eq!(resolved, "https://example.com/g");
+
+        let resolved = resolve_url(base, "./././g").unwrap(); //#[allow_ci]
+        assert_eq!(resolved, "https://example.com/a/b/c/g");
+    }
 }
