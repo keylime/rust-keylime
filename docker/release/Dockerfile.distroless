@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # the builder stage which uses the official rust base image (based on Debian 11) to build the keylime agent
-FROM rust:1.70-bullseye AS builder
+FROM rust:1.81-bullseye AS builder
 
 # we are using the "generate-bindings" feature for the tss-esapi crate which requires clang/llvm
 RUN apt-get update && apt-get install -y --no-install-recommends clang llvm
