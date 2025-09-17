@@ -79,7 +79,7 @@ mod tests {
             HeaderValidator::validate_location_header(&headers, None);
         assert!(result.is_ok());
         assert_eq!(
-            result.unwrap(),
+            result.unwrap(), //#[allow_ci]
             "https://example.com/v3.0/agents/123/attestations/1"
         );
     }
@@ -96,7 +96,7 @@ mod tests {
         );
         assert!(result.is_ok());
         assert_eq!(
-            result.unwrap(),
+            result.unwrap(), //#[allow_ci]
             "https://example.com/v3.0/agents/123/attestations/1"
         );
     }
@@ -108,7 +108,7 @@ mod tests {
             HeaderValidator::validate_location_header(&headers, None);
         assert!(result.is_err());
         assert!(matches!(
-            result.unwrap_err(),
+            result.unwrap_err(), //#[allow_ci]
             RfcComplianceError::MissingLocationHeader
         ));
     }
@@ -155,7 +155,7 @@ mod tests {
                 HeaderValidator::validate_location_header(&headers, None);
             assert!(result.is_err());
             assert!(matches!(
-                result.unwrap_err(),
+                result.unwrap_err(), //#[allow_ci]
                 RfcComplianceError::InvalidLocationHeader(_)
             ));
         }
@@ -167,7 +167,7 @@ mod tests {
         let result =
             HeaderValidator::validate_location_header(&headers, None);
         assert!(result.is_ok());
-        assert_eq!(result.unwrap(), "/relative/path");
+        assert_eq!(result.unwrap(), "/relative/path"); //#[allow_ci]
     }
 
     #[test]
@@ -180,7 +180,7 @@ mod tests {
         );
         assert!(result.is_ok());
         assert_eq!(
-            result.unwrap(),
+            result.unwrap(), //#[allow_ci]
             "https://api.example.com/v1/relative/path"
         );
     }
@@ -195,7 +195,7 @@ mod tests {
             Some(base_url),
         );
         assert!(result.is_ok());
-        assert_eq!(result.unwrap(), "https://other.com/resource");
+        assert_eq!(result.unwrap(), "https://other.com/resource"); //#[allow_ci]
     }
 
     #[test]
@@ -207,7 +207,7 @@ mod tests {
             HeaderValidator::validate_location_header(&headers, None);
         assert!(result.is_ok());
         assert_eq!(
-            result.unwrap(),
+            result.unwrap(), //#[allow_ci]
             "https://example.com/resource?id=123#section"
         );
     }
@@ -224,7 +224,7 @@ mod tests {
         );
         assert!(result.is_ok());
         assert_eq!(
-            result.unwrap(),
+            result.unwrap(), //#[allow_ci]
             "https://api.example.com/resource?id=123&type=test#section"
         );
     }
@@ -235,7 +235,7 @@ mod tests {
         let result =
             HeaderValidator::validate_location_header(&headers, None);
         assert!(result.is_ok());
-        assert_eq!(result.unwrap(), "");
+        assert_eq!(result.unwrap(), ""); //#[allow_ci]
     }
 
     #[test]
@@ -247,7 +247,7 @@ mod tests {
             HeaderValidator::validate_location_header(&headers, None);
         assert!(result.is_ok());
         assert_eq!(
-            result.unwrap(),
+            result.unwrap(), //#[allow_ci]
             "https://example.com:8443/api/v1/resource"
         );
     }
@@ -293,7 +293,7 @@ mod tests {
         );
         assert!(result.is_ok());
         // The RFC implementation should handle path normalization
-        let resolved = result.unwrap();
+        let resolved = result.unwrap(); //#[allow_ci]
         assert!(resolved.starts_with("https://api.example.com/"));
     }
 
@@ -306,7 +306,7 @@ mod tests {
             HeaderValidator::validate_location_header(&headers, None);
         assert!(result.is_ok());
         assert_eq!(
-            result.unwrap(),
+            result.unwrap(), //#[allow_ci]
             "https://example.com/resource%20with%20spaces"
         );
     }
@@ -316,10 +316,9 @@ mod tests {
         let headers = create_test_headers_with_location(
             "https://xn--e1afmkfd.xn--p1ai/resource",
         );
-        let result =
-            HeaderValidator::validate_location_header(&headers, None);
-        assert!(result.is_ok());
-        assert_eq!(result.unwrap(), "https://xn--e1afmkfd.xn--p1ai/resource");
+        let r = HeaderValidator::validate_location_header(&headers, None);
+        assert!(r.is_ok());
+        assert_eq!(r.unwrap(), "https://xn--e1afmkfd.xn--p1ai/resource"); //#[allow_ci]
     }
 
     #[test]
@@ -331,7 +330,7 @@ mod tests {
             Some(base_url),
         );
         assert!(result.is_ok());
-        assert_eq!(result.unwrap(), "https://api.example.com/");
+        assert_eq!(result.unwrap(), "https://api.example.com/"); //#[allow_ci]
     }
 
     #[test]
@@ -345,7 +344,7 @@ mod tests {
         );
         assert!(result.is_ok());
         // The RFC implementation should normalize dot segments
-        let resolved = result.unwrap();
+        let resolved = result.unwrap(); //#[allow_ci]
         assert!(resolved.contains("resource"));
     }
 }
