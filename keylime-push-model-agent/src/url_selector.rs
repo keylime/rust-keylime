@@ -3,8 +3,39 @@
 
 //! URL selection and validation for Push Model agent using RFC compliance
 
-use keylime::https_client::{resolve_url, validate_url};
+use keylime::https_client::resolve_url;
 use log::warn;
+use url::Url;
+
+/// Validate URL according to RFC 3986 - can be absolute or relative
+fn validate_url_rfc3986(url_str: &str) -> Result<(), String> {
+    // Check for control characters (excluding tab) as per RFC 3986
+    for (i, &byte) in url_str.as_bytes().iter().enumerate() {
+        if byte < 0x20 && byte != 0x09 {
+            // Allow tab (0x09) but reject other control chars
+            return Err(format!("Control character at position {}", i));
+        }
+        if byte == 0x7F {
+            // DEL character
+            return Err(format!("DEL character at position {}", i));
+        }
+    }
+
+    // First try to parse as absolute URL
+    if Url::parse(url_str).is_ok() {
+        return Ok(());
+    }
+
+    // If that fails, check if it's a valid relative URL by trying to resolve it against a dummy base
+    let dummy_base = "http://example.com";
+    if let Ok(base) = Url::parse(dummy_base) {
+        if base.join(url_str).is_ok() {
+            return Ok(());
+        }
+    }
+
+    Err("Invalid URL according to RFC 3986".to_string())
+}
 
 pub const DEFAULT_API_VERSION: &str = "v3.0";
 
@@ -29,7 +60,7 @@ pub fn get_negotiations_request_url(args: &UrlArgs) -> String {
     }
 
     // Validate the base verifier URL according to RFC 3986
-    if let Err(e) = validate_url(&args.verifier_url) {
+    if let Err(e) = validate_url_rfc3986(&args.verifier_url) {
         warn!("Invalid verifier URL according to RFC 3986: {}", e);
         return format!("ERROR: Invalid verifier URL: {}", e);
     }
@@ -59,7 +90,7 @@ pub fn get_evidence_submission_request_url(args: &UrlArgs) -> String {
     }
 
     // Validate the base verifier URL according to RFC 3986
-    if let Err(e) = validate_url(&args.verifier_url) {
+    if let Err(e) = validate_url_rfc3986(&args.verifier_url) {
         warn!("Invalid verifier URL according to RFC 3986: {}", e);
         return format!("ERROR: Invalid verifier URL: {}", e);
     }
@@ -67,7 +98,7 @@ pub fn get_evidence_submission_request_url(args: &UrlArgs) -> String {
     let location = match &args.location {
         Some(loc) => {
             // Validate the location header according to RFC 3986
-            if let Err(e) = validate_url(loc) {
+            if let Err(e) = validate_url_rfc3986(loc) {
                 warn!("Invalid location header according to RFC 3986: {}", e);
                 return format!("ERROR: Invalid location header: {}", e);
             }

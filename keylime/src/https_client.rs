@@ -1,10 +1,10 @@
-use crate::rfc3986_compliance::UriReference;
 use anyhow::{Context, Result};
 use std::{
     fs::{self, File},
     io::Read,
     time::Duration,
 };
+use url::Url;
 
 pub struct ClientArgs {
     pub ca_certificate: String,
@@ -14,25 +14,13 @@ pub struct ClientArgs {
     pub timeout: u64,
 }
 
-/// Validate a URL according to RFC 3986
-pub fn validate_url(url: &str) -> Result<UriReference> {
-    UriReference::parse(url).map_err(|e| {
-        anyhow::anyhow!("Invalid URL according to RFC 3986: {}", e)
-    })
-}
-
-/// Resolve a relative URL against a base URL according to RFC 3986
+/// Resolve a relative URL against a base URL using the url crate
 pub fn resolve_url(base_url: &str, relative_url: &str) -> Result<String> {
-    let base = validate_url(base_url)?;
-    let relative = validate_url(relative_url)?;
+    let base = Url::parse(base_url)
+        .map_err(|e| anyhow::anyhow!("Invalid base URL: {}", e))?;
 
-    if !relative.is_relative() {
-        // If the relative URL is actually absolute, return it as-is
-        return Ok(relative.to_string());
-    }
-
-    let resolved = relative
-        .resolve_against(&base)
+    let resolved = base
+        .join(relative_url)
         .map_err(|e| anyhow::anyhow!("Failed to resolve URL: {}", e))?;
 
     Ok(resolved.to_string())
@@ -94,27 +82,6 @@ pub fn get_https_client(args: &ClientArgs) -> Result<reqwest::Client> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_validate_url() {
-        // Test valid absolute URLs
-        assert!(validate_url("https://example.com/path").is_ok());
-        assert!(validate_url("http://localhost:8080/api/v1").is_ok());
-        assert!(validate_url(
-            "https://example.com:443/path?query=value#fragment"
-        )
-        .is_ok());
-
-        // Test valid relative URLs
-        assert!(validate_url("/path/to/resource").is_ok());
-        assert!(validate_url("../relative/path").is_ok());
-        assert!(validate_url("?query=value").is_ok());
-        assert!(validate_url("#fragment").is_ok());
-
-        // Test invalid URLs (with control characters)
-        assert!(validate_url("invalid\x00url").is_err());
-        assert!(validate_url("").is_ok()); // Empty string is a valid relative reference
-    }
 
     #[test]
     fn test_resolve_url() {

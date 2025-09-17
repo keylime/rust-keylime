@@ -264,7 +264,11 @@ impl UriReference {
         // Special handling for dot-only relative references - should point to directories
         // This includes ".", "..", "../..", etc. but not paths like "../g"
         let is_dots_only = self.path.chars().all(|c| c == '.' || c == '/');
-        if is_dots_only && !self.path.is_empty() && !target.path.ends_with('/') && !target.path.is_empty() {
+        if is_dots_only
+            && !self.path.is_empty()
+            && !target.path.ends_with('/')
+            && !target.path.is_empty()
+        {
             target.path.push('/');
         }
 
@@ -478,19 +482,24 @@ mod tests {
     #[test]
     fn test_authority_parsing() {
         // URI with authority
-        let uri = UriReference::parse("https://user:pass@example.com:8080/path").unwrap();
+        let uri =
+            UriReference::parse("https://user:pass@example.com:8080/path")
+                .unwrap(); //#[allow_ci]
         assert_eq!(uri.scheme, Some("https".to_string()));
-        assert_eq!(uri.authority, Some("user:pass@example.com:8080".to_string()));
+        assert_eq!(
+            uri.authority,
+            Some("user:pass@example.com:8080".to_string())
+        );
         assert_eq!(uri.path, "/path");
 
         // Relative reference with authority
-        let rel = UriReference::parse("//example.com/path").unwrap();
+        let rel = UriReference::parse("//example.com/path").unwrap(); //#[allow_ci]
         assert_eq!(rel.scheme, None);
         assert_eq!(rel.authority, Some("example.com".to_string()));
         assert_eq!(rel.path, "/path");
 
         // Authority without path
-        let auth_only = UriReference::parse("//example.com").unwrap();
+        let auth_only = UriReference::parse("//example.com").unwrap(); //#[allow_ci]
         assert_eq!(auth_only.authority, Some("example.com".to_string()));
         assert_eq!(auth_only.path, "");
     }
@@ -498,22 +507,29 @@ mod tests {
     #[test]
     fn test_query_and_fragment_parsing() {
         // Query only
-        let query_uri = UriReference::parse("http://example.com?query=value&other=data").unwrap();
-        assert_eq!(query_uri.query, Some("query=value&other=data".to_string()));
+        let query_uri =
+            UriReference::parse("http://example.com?query=value&other=data")
+                .unwrap(); //#[allow_ci]
+        assert_eq!(
+            query_uri.query,
+            Some("query=value&other=data".to_string())
+        );
         assert_eq!(query_uri.fragment, None);
 
         // Fragment only
-        let frag_uri = UriReference::parse("http://example.com#section1").unwrap();
+        let frag_uri =
+            UriReference::parse("http://example.com#section1").unwrap(); //#[allow_ci]
         assert_eq!(frag_uri.query, None);
         assert_eq!(frag_uri.fragment, Some("section1".to_string()));
 
         // Both query and fragment
-        let both_uri = UriReference::parse("http://example.com/path?q=v#frag").unwrap();
+        let both_uri =
+            UriReference::parse("http://example.com/path?q=v#frag").unwrap(); //#[allow_ci]
         assert_eq!(both_uri.query, Some("q=v".to_string()));
         assert_eq!(both_uri.fragment, Some("frag".to_string()));
 
         // Empty query and fragment
-        let empty_uri = UriReference::parse("http://example.com?#").unwrap();
+        let empty_uri = UriReference::parse("http://example.com?#").unwrap(); //#[allow_ci]
         assert_eq!(empty_uri.query, Some("".to_string()));
         assert_eq!(empty_uri.fragment, Some("".to_string()));
     }
@@ -521,32 +537,34 @@ mod tests {
     #[test]
     fn test_path_variations() {
         // Absolute path
-        let abs_path = UriReference::parse("/absolute/path").unwrap();
+        let abs_path = UriReference::parse("/absolute/path").unwrap(); //#[allow_ci]
         assert_eq!(abs_path.path, "/absolute/path");
         assert!(abs_path.is_relative());
 
         // Relative path
-        let rel_path = UriReference::parse("relative/path").unwrap();
+        let rel_path = UriReference::parse("relative/path").unwrap(); //#[allow_ci]
         assert_eq!(rel_path.path, "relative/path");
         assert!(rel_path.is_relative());
 
         // Empty path
-        let empty_path = UriReference::parse("").unwrap();
+        let empty_path = UriReference::parse("").unwrap(); //#[allow_ci]
         assert_eq!(empty_path.path, "");
         assert!(empty_path.is_relative());
 
         // Root path
-        let root_path = UriReference::parse("/").unwrap();
+        let root_path = UriReference::parse("/").unwrap(); //#[allow_ci]
         assert_eq!(root_path.path, "/");
 
         // Path with encoded characters
-        let encoded_path = UriReference::parse("/path%20with%20spaces").unwrap();
+        let encoded_path =
+            UriReference::parse("/path%20with%20spaces").unwrap(); //#[allow_ci]
         assert_eq!(encoded_path.path, "/path%20with%20spaces");
     }
 
     #[test]
     fn test_complex_relative_resolution() {
-        let base = UriReference::parse("https://example.com/a/b/c/d").unwrap();
+        let base =
+            UriReference::parse("https://example.com/a/b/c/d").unwrap(); //#[allow_ci]
 
         // Test various relative references from RFC 3986 Section 5.4.1
         let test_cases = vec![
@@ -575,19 +593,24 @@ mod tests {
         ];
 
         for (relative, expected) in test_cases {
-            let rel_ref = UriReference::parse(relative).unwrap();
-            let resolved = rel_ref.resolve_against(&base).unwrap();
-            assert_eq!(resolved.to_string(), expected, "Failed for relative reference: {}", relative);
+            let rel_ref = UriReference::parse(relative).unwrap(); //#[allow_ci]
+            let resolved = rel_ref.resolve_against(&base).unwrap(); //#[allow_ci]
+            assert_eq!(
+                resolved.to_string(),
+                expected,
+                "Failed for relative reference: {}",
+                relative
+            );
         }
     }
 
     #[test]
     fn test_absolute_uri_resolution() {
-        let base = UriReference::parse("https://example.com/path").unwrap();
-        let absolute = UriReference::parse("http://other.com/other").unwrap();
+        let base = UriReference::parse("https://example.com/path").unwrap(); //#[allow_ci]
+        let absolute = UriReference::parse("http://other.com/other").unwrap(); //#[allow_ci]
 
         // Absolute URI should not be affected by base
-        let resolved = absolute.resolve_against(&base).unwrap();
+        let resolved = absolute.resolve_against(&base).unwrap(); //#[allow_ci]
         assert_eq!(resolved.to_string(), "http://other.com/other");
     }
 
@@ -606,7 +629,10 @@ mod tests {
         assert_eq!(UriReference::remove_dot_segments("/../"), "/");
         assert_eq!(UriReference::remove_dot_segments("a/b/../c"), "a/c");
         assert_eq!(UriReference::remove_dot_segments("a/b/../../c"), "c");
-        assert_eq!(UriReference::remove_dot_segments("a/b/../../../c"), "../c");
+        assert_eq!(
+            UriReference::remove_dot_segments("a/b/../../../c"),
+            "../c"
+        );
         assert_eq!(UriReference::remove_dot_segments("./a/b/c"), "a/b/c");
         assert_eq!(UriReference::remove_dot_segments("../a/b/c"), "../a/b/c");
     }
@@ -617,10 +643,22 @@ mod tests {
         assert_eq!(UriReference::merge_paths("", "relative"), "/relative");
         assert_eq!(UriReference::merge_paths("/", "relative"), "/relative");
         assert_eq!(UriReference::merge_paths("/a", "relative"), "/relative");
-        assert_eq!(UriReference::merge_paths("/a/", "relative"), "/a/relative");
-        assert_eq!(UriReference::merge_paths("/a/b", "relative"), "/a/relative");
-        assert_eq!(UriReference::merge_paths("/a/b/", "relative"), "/a/b/relative");
-        assert_eq!(UriReference::merge_paths("no-slash", "relative"), "relative");
+        assert_eq!(
+            UriReference::merge_paths("/a/", "relative"),
+            "/a/relative"
+        );
+        assert_eq!(
+            UriReference::merge_paths("/a/b", "relative"),
+            "/a/relative"
+        );
+        assert_eq!(
+            UriReference::merge_paths("/a/b/", "relative"),
+            "/a/b/relative"
+        );
+        assert_eq!(
+            UriReference::merge_paths("no-slash", "relative"),
+            "relative"
+        );
     }
 
     #[test]
@@ -659,9 +697,12 @@ mod tests {
     #[test]
     fn test_special_characters_in_components() {
         // Test special characters in different components
-        let uri = UriReference::parse("https://user%40domain:pass@example.com:8080/path%20with%20spaces?key=%20value%20&other=data#section%20name").unwrap();
+        let uri = UriReference::parse("https://user%40domain:pass@example.com:8080/path%20with%20spaces?key=%20value%20&other=data#section%20name").unwrap(); //#[allow_ci]
         assert_eq!(uri.scheme, Some("https".to_string()));
-        assert_eq!(uri.authority, Some("user%40domain:pass@example.com:8080".to_string()));
+        assert_eq!(
+            uri.authority,
+            Some("user%40domain:pass@example.com:8080".to_string())
+        );
         assert_eq!(uri.path, "/path%20with%20spaces");
         assert_eq!(uri.query, Some("key=%20value%20&other=data".to_string()));
         assert_eq!(uri.fragment, Some("section%20name".to_string()));
@@ -669,49 +710,68 @@ mod tests {
 
     #[test]
     fn test_rfc_compliance_error_display() {
-        let error = RfcComplianceError::InvalidUriReference("test".to_string());
-        assert_eq!(format!("{}", error), "Invalid URI reference syntax: test");
+        let error =
+            RfcComplianceError::InvalidUriReference("test".to_string());
+        assert_eq!(
+            format!("{}", error),
+            "Invalid URI reference syntax: test"
+        );
 
-        let error = RfcComplianceError::InvalidRelativeReference("test".to_string());
+        let error =
+            RfcComplianceError::InvalidRelativeReference("test".to_string());
         assert_eq!(format!("{}", error), "Invalid relative reference: test");
 
         let error = RfcComplianceError::MissingLocationHeader;
-        assert_eq!(format!("{}", error), "Missing Location header in 201 Created response");
+        assert_eq!(
+            format!("{}", error),
+            "Missing Location header in 201 Created response"
+        );
 
-        let error = RfcComplianceError::InvalidLocationHeader("test".to_string());
-        assert_eq!(format!("{}", error), "Invalid Location header value: test");
+        let error =
+            RfcComplianceError::InvalidLocationHeader("test".to_string());
+        assert_eq!(
+            format!("{}", error),
+            "Invalid Location header value: test"
+        );
     }
 
     #[test]
     fn test_uri_reference_clone_and_partial_eq() {
-        let uri1 = UriReference::parse("https://example.com/path").unwrap();
+        let uri1 = UriReference::parse("https://example.com/path").unwrap(); //#[allow_ci]
         let uri2 = uri1.clone();
         assert_eq!(uri1, uri2);
 
-        let uri3 = UriReference::parse("https://example.com/other").unwrap();
+        let uri3 = UriReference::parse("https://example.com/other").unwrap(); //#[allow_ci]
         assert_ne!(uri1, uri3);
     }
 
     #[test]
     fn test_relative_resolution_with_empty_base_path() {
-        let base = UriReference::parse("https://example.com").unwrap();
-        let relative = UriReference::parse("path").unwrap();
-        let resolved = relative.resolve_against(&base).unwrap();
+        let base = UriReference::parse("https://example.com").unwrap(); //#[allow_ci]
+        let relative = UriReference::parse("path").unwrap(); //#[allow_ci]
+        let resolved = relative.resolve_against(&base).unwrap(); //#[allow_ci]
         assert_eq!(resolved.to_string(), "https://example.com/path");
     }
 
     #[test]
     fn test_relative_resolution_query_inheritance() {
-        let base = UriReference::parse("https://example.com/path?base=query").unwrap();
+        let base = UriReference::parse("https://example.com/path?base=query")
+            .unwrap(); //#[allow_ci]
 
         // Empty relative reference should inherit base query
-        let empty_rel = UriReference::parse("").unwrap();
-        let resolved = empty_rel.resolve_against(&base).unwrap();
-        assert_eq!(resolved.to_string(), "https://example.com/path?base=query");
+        let empty_rel = UriReference::parse("").unwrap(); //#[allow_ci]
+        let resolved = empty_rel.resolve_against(&base).unwrap(); //#[allow_ci]
+        assert_eq!(
+            resolved.to_string(),
+            "https://example.com/path?base=query"
+        );
 
         // Relative with query should override base query
-        let query_rel = UriReference::parse("?new=query").unwrap();
-        let resolved = query_rel.resolve_against(&base).unwrap();
-        assert_eq!(resolved.to_string(), "https://example.com/path?new=query");
+        let query_rel = UriReference::parse("?new=query").unwrap(); //#[allow_ci]
+        let resolved = query_rel.resolve_against(&base).unwrap(); //#[allow_ci]
+        assert_eq!(
+            resolved.to_string(),
+            "https://example.com/path?new=query"
+        );
     }
 }
