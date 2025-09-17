@@ -323,4 +323,301 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    fn test_validate_url_rfc3986_valid_urls() {
+        // Test valid absolute URLs
+        let valid_absolute_urls = vec![
+            "https://example.com",
+            "http://localhost:8080",
+            "https://api.example.com/v1/endpoint",
+            "ftp://files.example.com/path",
+            "https://user:pass@example.com:443/path?query=value#fragment",
+        ];
+
+        for url in valid_absolute_urls {
+            assert!(
+                validate_url_rfc3986(url).is_ok(),
+                "Should accept valid absolute URL: {}",
+                url
+            );
+        }
+
+        // Test valid relative URLs
+        let valid_relative_urls = vec![
+            "/path/to/resource",
+            "../parent/resource",
+            "./current/resource",
+            "resource",
+            "?query=value",
+            "#fragment",
+            "/path?query=value#fragment",
+        ];
+
+        for url in valid_relative_urls {
+            assert!(
+                validate_url_rfc3986(url).is_ok(),
+                "Should accept valid relative URL: {}",
+                url
+            );
+        }
+    }
+
+    #[test]
+    fn test_validate_url_rfc3986_control_characters() {
+        // Test URLs with control characters (should be rejected)
+        let invalid_control_char_urls = vec![
+            "http://example.com\x00",      // NULL character
+            "http://example.com\x01",      // SOH character
+            "http://example.com\x1F",      // Unit separator
+            "http://example.com\x7F",      // DEL character
+            "http://example.com/path\x0A", // Line feed
+            "http://example.com/path\x0D", // Carriage return
+        ];
+
+        for url in invalid_control_char_urls {
+            assert!(
+                validate_url_rfc3986(url).is_err(),
+                "Should reject URL with control character: {:?}",
+                url
+            );
+        }
+
+        // Test that tab character is allowed (exception)
+        assert!(
+            validate_url_rfc3986("http://example.com\x09").is_ok(),
+            "Should allow tab character in URL"
+        );
+    }
+
+    #[test]
+    fn test_validate_url_rfc3986_edge_cases() {
+        // Test URLs that are valid relative URLs according to RFC 3986
+        let valid_relative_urls = vec![
+            "not a url at all",    // Valid relative path
+            "",                    // Empty string is valid relative URL
+            "://missing-scheme", // Valid relative URL (authority with empty scheme)
+            "ht tp://example.com", // Space character is allowed in relative URLs
+        ];
+
+        for url in valid_relative_urls {
+            assert!(
+                validate_url_rfc3986(url).is_ok(),
+                "According to RFC 3986, this should be valid as relative URL: {}",
+                url
+            );
+        }
+
+        // Test URLs that fail validation (both absolute and relative parsing fail)
+        let invalid_urls = vec![
+            "http://", // Incomplete URL that fails both absolute and relative parsing
+        ];
+
+        for url in invalid_urls {
+            assert!(
+                validate_url_rfc3986(url).is_err(),
+                "This URL should be invalid: {}",
+                url
+            );
+        }
+    }
+
+    #[test]
+    fn test_get_api_version() {
+        // Test with custom API version
+        let args_with_version = UrlArgs {
+            verifier_url: "https://example.com".to_string(),
+            agent_identifier: Some("test".to_string()),
+            api_version: Some("v2.0".to_string()),
+            location: None,
+        };
+        assert_eq!(get_api_version(&args_with_version), "v2.0");
+
+        // Test with None API version (should return default)
+        let args_without_version = UrlArgs {
+            verifier_url: "https://example.com".to_string(),
+            agent_identifier: Some("test".to_string()),
+            api_version: None,
+            location: None,
+        };
+        assert_eq!(
+            get_api_version(&args_without_version),
+            DEFAULT_API_VERSION
+        );
+    }
+
+    #[test]
+    fn test_get_negotiations_request_url_edge_cases() {
+        // Test with empty verifier URL
+        let url = get_negotiations_request_url(&UrlArgs {
+            verifier_url: "".to_string(),
+            agent_identifier: Some("test".to_string()),
+            api_version: None,
+            location: None,
+        });
+        assert_eq!(url, "ERROR: No verifier URL provided");
+
+        // Test with no agent identifier
+        let url = get_negotiations_request_url(&UrlArgs {
+            verifier_url: "https://example.com".to_string(),
+            agent_identifier: None,
+            api_version: None,
+            location: None,
+        });
+        assert_eq!(url, "ERROR: No agent identifier provided");
+
+        // Test with custom API version
+        let url = get_negotiations_request_url(&UrlArgs {
+            verifier_url: "https://example.com".to_string(),
+            agent_identifier: Some("test-agent".to_string()),
+            api_version: Some("v2.1".to_string()),
+            location: None,
+        });
+        assert_eq!(
+            url,
+            "https://example.com/v2.1/agents/test-agent/attestations"
+        );
+    }
+
+    #[test]
+    fn test_get_evidence_submission_request_url_edge_cases() {
+        // Test with empty verifier URL
+        let url = get_evidence_submission_request_url(&UrlArgs {
+            verifier_url: "".to_string(),
+            agent_identifier: None,
+            api_version: None,
+            location: Some("/path".to_string()),
+        });
+        assert_eq!(url, "ERROR: No verifier URL provided");
+
+        // Test with no location
+        let url = get_evidence_submission_request_url(&UrlArgs {
+            verifier_url: "https://example.com".to_string(),
+            agent_identifier: None,
+            api_version: None,
+            location: None,
+        });
+        assert_eq!(url, "ERROR: No location provided");
+
+        // Test with valid absolute location URL
+        let url = get_evidence_submission_request_url(&UrlArgs {
+            verifier_url: "https://example.com".to_string(),
+            agent_identifier: None,
+            api_version: None,
+            location: Some("https://other.com/path".to_string()),
+        });
+        assert_eq!(url, "https://other.com/path");
+    }
+
+    #[test]
+    fn test_url_resolution_error_handling() {
+        // Test URL resolution with malformed base URL that passes validation but fails resolution
+        // This tests the error handling in resolve_url
+        let url = get_negotiations_request_url(&UrlArgs {
+            verifier_url: "http://[invalid-ipv6".to_string(), // Invalid IPv6 format
+            agent_identifier: Some("test".to_string()),
+            api_version: None,
+            location: None,
+        });
+
+        // Should return an error message starting with "ERROR:"
+        assert!(
+            url.starts_with("ERROR:"),
+            "Should return error for malformed URL that fails resolution: {}",
+            url
+        );
+    }
+
+    #[test]
+    fn test_special_characters_in_agent_identifier() {
+        // Test with agent identifier containing special characters
+        let test_cases = vec![
+            "agent-with-dashes",
+            "agent_with_underscores",
+            "agent123",
+            "AGENT-UPPERCASE",
+            "agent.with.dots",
+        ];
+
+        for agent_id in test_cases {
+            let url = get_negotiations_request_url(&UrlArgs {
+                verifier_url: "https://example.com".to_string(),
+                agent_identifier: Some(agent_id.to_string()),
+                api_version: None,
+                location: None,
+            });
+
+            assert!(
+                !url.starts_with("ERROR:"),
+                "Should handle agent identifier with special characters: {}",
+                agent_id
+            );
+            assert!(
+                url.contains(agent_id),
+                "URL should contain the agent identifier: {}",
+                url
+            );
+        }
+    }
+
+    #[test]
+    fn test_url_schemes() {
+        // Test different URL schemes
+        let schemes = vec!["http://example.com", "https://example.com"];
+
+        for base_url in schemes {
+            let url = get_negotiations_request_url(&UrlArgs {
+                verifier_url: base_url.to_string(),
+                agent_identifier: Some("test".to_string()),
+                api_version: None,
+                location: None,
+            });
+
+            assert!(
+                !url.starts_with("ERROR:"),
+                "Should handle URL scheme: {}",
+                base_url
+            );
+            assert!(
+                url.starts_with(base_url),
+                "Generated URL should preserve scheme: {}",
+                url
+            );
+        }
+    }
+
+    #[test]
+    fn test_location_header_variations() {
+        let base_url = "https://example.com";
+
+        // Test various location header formats
+        let location_cases = vec![
+            ("/absolute/path", "https://example.com/absolute/path"),
+            ("relative/path", "https://example.com/relative/path"),
+            ("../parent/path", "https://example.com/parent/path"),
+            ("./current/path", "https://example.com/current/path"),
+            ("?query=only", "https://example.com/?query=only"), // URL resolution adds trailing slash
+            ("#fragment-only", "https://example.com/#fragment-only"), // URL resolution adds trailing slash
+        ];
+
+        for (location, expected) in location_cases {
+            let url = get_evidence_submission_request_url(&UrlArgs {
+                verifier_url: base_url.to_string(),
+                agent_identifier: None,
+                api_version: None,
+                location: Some(location.to_string()),
+            });
+
+            assert!(
+                !url.starts_with("ERROR:"),
+                "Should handle location header format: {}",
+                location
+            );
+            assert_eq!(
+                url, expected,
+                "Location resolution failed for: {}",
+                location
+            );
+        }
+    }
 }
