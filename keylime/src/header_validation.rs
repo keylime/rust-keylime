@@ -6,7 +6,7 @@
 //! This module provides header validation functionality according to:
 //! - RFC 9110 Section 10.2.2: 201 Created response handling
 
-use keylime::rfc3986_compliance::{RfcComplianceError, UriReference};
+use crate::rfc3986_compliance::{RfcComplianceError, UriReference};
 use log::debug;
 use reqwest::header::{HeaderMap, LOCATION};
 

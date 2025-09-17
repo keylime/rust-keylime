@@ -7,7 +7,6 @@ use log::{debug, error, info};
 mod attestation;
 mod auth;
 mod context_info_handler;
-mod header_validation;
 mod registration;
 mod response_handler;
 mod state_machine;
