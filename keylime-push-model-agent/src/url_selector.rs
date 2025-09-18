@@ -620,4 +620,238 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    fn test_negotiations_url_resolve_base_parse_error() {
+        // Test case where verifier URL passes RFC validation but fails URL parsing in resolve_url
+        // Create a URL that passes our RFC 3986 validation but fails Url::parse()
+        let url = get_negotiations_request_url(&UrlArgs {
+            verifier_url: "notavalidurl".to_string(), // This passes validate_url_rfc3986 as relative but fails Url::parse
+            agent_identifier: Some("test".to_string()),
+            api_version: None,
+            location: None,
+        });
+
+        assert!(
+            url.starts_with("ERROR: Failed to resolve URL:"),
+            "Should return error for URL that fails base parsing in resolve_url: {}",
+            url
+        );
+    }
+
+    #[test]
+    fn test_negotiations_url_resolve_join_error() {
+        // Test case where base URL is valid but joining with relative path fails
+        // Using a URL that parses but has issues with joining
+        let url = get_negotiations_request_url(&UrlArgs {
+            verifier_url: "http://user:@example.com".to_string(), // Valid base URL
+            agent_identifier: Some("../../../etc/passwd".to_string()), // Path that could cause join issues
+            api_version: None,
+            location: None,
+        });
+
+        // This should either succeed or fail with resolve error, not with validation error
+        if url.starts_with("ERROR:") {
+            assert!(
+                url.contains("Failed to resolve URL:")
+                    || url.contains("Invalid verifier URL:"),
+                "Error should be about URL resolution or validation: {}",
+                url
+            );
+        }
+    }
+
+    #[test]
+    fn test_evidence_submission_url_resolve_base_parse_error() {
+        // Test case where verifier URL passes RFC validation but fails URL parsing in resolve_url
+        let url = get_evidence_submission_request_url(&UrlArgs {
+            verifier_url: "relativeurlnotabsolute".to_string(), // Passes RFC validation as relative but fails Url::parse as base
+            agent_identifier: None,
+            api_version: None,
+            location: Some("/valid/path".to_string()),
+        });
+
+        assert!(
+            url.starts_with("ERROR: Failed to resolve evidence submission URL:"),
+            "Should return error for URL that fails base parsing in resolve_url: {}",
+            url
+        );
+    }
+
+    #[test]
+    fn test_evidence_submission_url_resolve_join_error() {
+        // Test case where both base and location are valid individually but joining fails
+        // Use a scenario that might cause URL joining to fail
+        let url = get_evidence_submission_request_url(&UrlArgs {
+            verifier_url: "data:text/plain,hello".to_string(), // Valid URL but non-HTTP scheme that might cause join issues
+            agent_identifier: None,
+            api_version: None,
+            location: Some("http://different.scheme".to_string()),
+        });
+
+        // This should either succeed or fail with resolve error
+        if url.starts_with("ERROR:") {
+            assert!(
+                url.contains("Failed to resolve evidence submission URL:")
+                    || url.contains("Invalid"),
+                "Error should be about URL resolution or validation: {}",
+                url
+            );
+        }
+    }
+
+    #[test]
+    fn test_extremely_malformed_urls_that_pass_validation() {
+        // Test URLs that pass our basic RFC validation but fail deeper parsing
+        let malformed_urls = vec![
+            "://",              // Empty scheme and authority
+            "scheme:",          // Scheme only
+            "//authority/path", // Authority without scheme
+        ];
+
+        for malformed_url in malformed_urls {
+            // Test negotiations URL
+            let negotiations_result =
+                get_negotiations_request_url(&UrlArgs {
+                    verifier_url: malformed_url.to_string(),
+                    agent_identifier: Some("test".to_string()),
+                    api_version: None,
+                    location: None,
+                });
+
+            if !negotiations_result.starts_with("ERROR:") {
+                // If it doesn't error, it should be a valid URL
+                assert!(
+                    negotiations_result.starts_with("http://")
+                        || negotiations_result.starts_with("https://"),
+                    "If no error, should produce valid URL: {}",
+                    negotiations_result
+                );
+            } else {
+                assert!(
+                    negotiations_result.contains("Invalid verifier URL:")
+                        || negotiations_result
+                            .contains("Failed to resolve URL:"),
+                    "Error should be about validation or resolution: {}",
+                    negotiations_result
+                );
+            }
+
+            // Test evidence submission URL
+            let evidence_result =
+                get_evidence_submission_request_url(&UrlArgs {
+                    verifier_url: malformed_url.to_string(),
+                    agent_identifier: None,
+                    api_version: None,
+                    location: Some("/test/path".to_string()),
+                });
+
+            if !evidence_result.starts_with("ERROR:") {
+                // If it doesn't error, it should be a valid URL
+                assert!(
+                    evidence_result.starts_with("http://")
+                        || evidence_result.starts_with("https://")
+                        || evidence_result.starts_with("//"),
+                    "If no error, should produce valid URL: {}",
+                    evidence_result
+                );
+            } else {
+                assert!(
+                    evidence_result.contains("Invalid verifier URL:")
+                        || evidence_result.contains(
+                            "Failed to resolve evidence submission URL:"
+                        ),
+                    "Error should be about validation or resolution: {}",
+                    evidence_result
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_get_evidence_submission_request_url_invalid_verifier_url() {
+        // Test specifically targeting lines 94-95 where validate_url_rfc3986 returns an error
+        // for the verifier URL in get_evidence_submission_request_url
+
+        // Test URLs with control characters that will fail RFC 3986 validation
+        let invalid_verifier_urls = vec![
+            "http://example.com\x00",      // NULL character
+            "http://example.com\x01",      // SOH character
+            "http://example.com\x1F",      // Unit separator
+            "http://example.com\x7F",      // DEL character
+            "http://example.com/path\x0A", // Line feed
+            "http://example.com/path\x0D", // Carriage return
+            "https://test.com\x02/path",   // STX character
+            "https://invalid\x03.com",     // ETX character
+        ];
+
+        for invalid_url in invalid_verifier_urls {
+            let result = get_evidence_submission_request_url(&UrlArgs {
+                verifier_url: invalid_url.to_string(),
+                agent_identifier: None,
+                api_version: None,
+                location: Some(
+                    "/v3.0/agents/test/attestations/1".to_string(),
+                ),
+            });
+
+            // Should return error due to invalid verifier URL (lines 94-95)
+            assert!(
+                result.starts_with("ERROR: Invalid verifier URL:"),
+                "Should return invalid verifier URL error for control character URL: {:?}, got: {}",
+                invalid_url,
+                result
+            );
+
+            // Error message should contain information about the control character
+            assert!(
+                result.contains("Control character")
+                    || result.contains("DEL character"),
+                "Error message should mention control character issue: {}",
+                result
+            );
+        }
+    }
+
+    #[test]
+    fn test_get_evidence_submission_request_url_invalid_verifier_url_edge_cases(
+    ) {
+        // Additional edge cases for verifier URL validation to ensure lines 94-95 coverage
+
+        // Test with various invalid URL patterns that should trigger RFC 3986 validation errors
+        let test_cases = vec![
+            (
+                "http://",
+                "Should reject incomplete URL that fails both absolute and relative parsing"
+            ),
+            (
+                "://incomplete",
+                "Should reject URL with missing scheme"
+            ),
+        ];
+
+        for (invalid_url, description) in test_cases {
+            let result = get_evidence_submission_request_url(&UrlArgs {
+                verifier_url: invalid_url.to_string(),
+                agent_identifier: None,
+                api_version: None,
+                location: Some("/valid/path".to_string()),
+            });
+
+            // Should return either validation error (lines 94-95) or resolution error
+            assert!(
+                result.starts_with("ERROR:"),
+                "{}: {}",
+                description,
+                result
+            );
+
+            // Should be either invalid verifier URL or failed resolution
+            assert!(
+                result.contains("Invalid verifier URL:") || result.contains("Failed to resolve"),
+                "Error should be about verifier URL validation or resolution: {}",
+                result
+            );
+        }
+    }
 }
