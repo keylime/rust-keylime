@@ -45,7 +45,16 @@ impl Middleware for LoggingMiddleware {
         for (key, value) in req.headers() {
             debug!("  {key}: {value:?}");
         }
-        next.run(req, extensions).await
+
+        let response = next.run(req, extensions).await?;
+
+        debug!("Response code: {}", response.status());
+        debug!("Response headers:");
+        for (key, value) in response.headers() {
+            debug!("  {key}: {value:?}");
+        }
+
+        Ok(response)
     }
 }
 

@@ -84,13 +84,16 @@ impl AttestationClient {
         config: &NegotiationConfig<'_>,
     ) -> Result<ResponseInformation> {
         info!("--- Phase 1: Sending Capabilities Negotiation ---");
+        info!("Capabilities negotiation URL (POST): {}", config.url);
         let mut context_info =
             context_info_handler::get_context_info(config.avoid_tpm)?;
         let mut filler =
             struct_filler::get_filler_request(context_info.as_mut());
 
         let req = filler.get_attestation_request();
-        debug!("Request body: {:?}", serde_json::to_string(&req));
+        if let Ok(json_str) = serde_json::to_string(&req) {
+            debug!("Request body: {}", json_str);
+        }
 
         let request_builder = self.client.get_json_request_from_struct(
             reqwest::Method::POST,
@@ -103,12 +106,10 @@ impl AttestationClient {
 
         let sc = response.status();
         let headers = response.headers().clone();
-        info!("Response code:{}", response.status());
-        info!("Response headers: {headers:?}");
 
         let response_body = response.text().await?;
         if !response_body.is_empty() {
-            info!("Response body: {response_body}");
+            debug!("Response body: {response_body}");
         }
 
         let rsp = ResponseInformation {
@@ -154,7 +155,7 @@ impl AttestationClient {
         }
 
         if !response_body.is_empty() {
-            info!("PATCH Response body: {response_body}");
+            debug!("PATCH Response body: {response_body}");
         }
 
         Ok(ResponseInformation {
@@ -194,9 +195,8 @@ impl AttestationClient {
             },
         );
 
-        info!("Config URL: {}", config.url);
-        info!("Location header: {location_header}");
-        info!("Sending evidence (PATCH) to: {patch_url}");
+        info!("Location header from 201 Created response: {location_header}");
+        info!("Evidence handling URL (PATCH): {patch_url}");
 
         // Use struct_filler to handle evidence collection and construction
         let mut context_info =
