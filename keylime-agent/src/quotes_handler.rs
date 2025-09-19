@@ -25,7 +25,7 @@ pub struct Ident {
 
 // This is a Quote request from the tenant, which does not check
 // integrity measurement. It should return this data:
-// { QuoteAIK(nonce, 16:H(NK_pub)), NK_pub }
+// { QuoteAIK(nonce, 16:H(payload_pub)), payload_pub }
 async fn identity(
     req: HttpRequest,
     param: web::Query<Ident>,
@@ -67,7 +67,7 @@ async fn identity(
     let tpm_quote = match context.quote(
         param.nonce.as_bytes(),
         0,
-        &data.pub_key,
+        &data.payload_pub_key,
         data.ak_handle,
         data.hash_alg,
         data.sign_alg,
@@ -92,7 +92,7 @@ async fn identity(
         ..Default::default()
     };
 
-    match crypto::pkey_pub_to_pem(&data.pub_key) {
+    match crypto::pkey_pub_to_pem(&data.payload_pub_key) {
         Ok(pubkey) => quote.pubkey = Some(pubkey),
         Err(e) => {
             debug!("Unable to retrieve public key for quote: {e:?}");
@@ -113,7 +113,7 @@ async fn identity(
 // This is a Quote request from the cloud verifier, which will check
 // integrity measurement. The PCRs included in the Quote will be specified
 // by the mask. It should return this data:
-// { QuoteAIK(nonce, 16:H(NK_pub), xi:yi), NK_pub}
+// { QuoteAIK(nonce, 16:H(payload_pub), xi:yi), payload_pub}
 // where xi:yi are additional PCRs to be included in the quote.
 async fn integrity(
     req: HttpRequest,
@@ -169,7 +169,8 @@ async fn integrity(
     // If partial="0", include the public key in the quote
     let pubkey = match &param.partial[..] {
         "0" => {
-            let pubkey = match crypto::pkey_pub_to_pem(&data.pub_key) {
+            let pubkey = match crypto::pkey_pub_to_pem(&data.payload_pub_key)
+            {
                 Ok(pubkey) => pubkey,
                 Err(e) => {
                     debug!("Unable to retrieve public key: {e:?}");
@@ -214,7 +215,7 @@ async fn integrity(
     let tpm_quote = match context.quote(
         param.nonce.as_bytes(),
         mask,
-        &data.pub_key,
+        &data.payload_pub_key,
         data.ak_handle,
         data.hash_alg,
         data.sign_alg,
@@ -389,7 +390,7 @@ mod tests {
         assert!(
             pkey_pub_from_pem(&result.results.pubkey.unwrap()) //#[allow_ci]
                 .unwrap() //#[allow_ci]
-                .public_eq(&quotedata.pub_key)
+                .public_eq(&quotedata.payload_pub_key)
         );
         assert!(result.results.quote.starts_with('r'));
 
@@ -435,7 +436,7 @@ mod tests {
         assert!(
             pkey_pub_from_pem(&result.results.pubkey.unwrap()) //#[allow_ci]
                 .unwrap() //#[allow_ci]
-                .public_eq(&quotedata.pub_key)
+                .public_eq(&quotedata.payload_pub_key)
         );
 
         if let Some(ima_mutex) = &quotedata.ima_ml_file {
