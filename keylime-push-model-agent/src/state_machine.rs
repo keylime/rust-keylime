@@ -179,7 +179,6 @@ impl<'a> StateMachine<'a> {
             Ok(res) => {
                 if res.status_code == reqwest::StatusCode::ACCEPTED {
                     info!("SUCCESS! Evidence accepted by the Verifier.");
-                    info!("Response body: {}", res.body);
 
                     // Extract seconds_to_next_attestation from verifier response.
                     let next_interval =
