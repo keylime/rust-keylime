@@ -114,6 +114,8 @@ pub struct QuoteData<'a> {
     )>,
     measuredboot_ml_file: Option<Mutex<fs::File>>,
     payload_tx: mpsc::Sender<payloads::PayloadMessage>,
+    payload_priv_key: PKey<Private>,
+    payload_pub_key: PKey<Public>,
     priv_key: PKey<Private>,
     pub_key: PKey<Public>,
     revocation_tx: mpsc::Sender<revocation::RevocationMessage>,
@@ -488,27 +490,28 @@ async fn main() -> Result<()> {
         (None, None)
     };
 
-    // Generate key pair for secure transmission of u, v keys. The u, v
-    // keys are two halves of the key used to decrypt the workload after
+    // Generate ephemeral RSA key pair for secure transmission of u, v keys.
+    // The u, v keys are two halves of the key used to decrypt the workload after
     // the Identity and Integrity Quotes sent by the agent are validated
     // by the Tenant and Cloud Verifier, respectively.
-    //
-    // Since we store the u key in memory, discarding this key, which
-    // safeguards u and v keys in transit, is not part of the threat model.
+    debug!("Generating ephemeral RSA key pair for payload mechanism");
+    let (payload_pub_key, payload_priv_key) =
+        crypto::rsa_generate_pair(2048)?;
 
-    let (nk_pub, nk_priv) = match config.server_key.as_ref() {
+    // Generate mTLS key pair (separate from payload keys)
+    let (mtls_pub, mtls_priv) = match config.server_key.as_ref() {
         "" => {
             debug!(
                 "The server_key option was not set in the configuration file"
             );
-            debug!("Generating new key pair");
+            debug!("Generating new mTLS key pair");
             crypto::rsa_generate_pair(2048)?
         }
         path => {
             let key_path = Path::new(&path);
             if key_path.exists() {
                 debug!(
-                    "Loading existing key pair from {}",
+                    "Loading existing mTLS key pair from {}",
                     key_path.display()
                 );
                 crypto::load_key_pair(
@@ -516,7 +519,7 @@ async fn main() -> Result<()> {
                     Some(config.server_key_password.as_ref()),
                 )?
             } else {
-                debug!("Generating new key pair");
+                debug!("Generating new mTLS key pair");
                 let (public, private) = crypto::rsa_generate_pair(2048)?;
                 // Write the generated key to the file
                 crypto::write_key_pair(
@@ -539,7 +542,7 @@ async fn main() -> Result<()> {
                 debug!("The server_cert option was not set in the configuration file");
 
                 crypto::x509::CertificateBuilder::new()
-                    .private_key(&nk_priv)
+                    .private_key(&mtls_priv)
                     .common_name(&agent_uuid)
                     .add_ips(contact_ips)
                     .build()?
@@ -555,7 +558,7 @@ async fn main() -> Result<()> {
                 } else {
                     debug!("Generating new mTLS certificate");
                     let cert = crypto::x509::CertificateBuilder::new()
-                        .private_key(&nk_priv)
+                        .private_key(&mtls_priv)
                         .common_name(&agent_uuid)
                         .add_ips(contact_ips)
                         .build()?;
@@ -598,7 +601,7 @@ async fn main() -> Result<()> {
         mtls_cert = Some(cert.clone());
         ssl_context = Some(crypto::generate_tls_context(
             &cert,
-            &nk_priv,
+            &mtls_priv,
             keylime_ca_certs,
         )?);
     } else {
@@ -694,8 +697,10 @@ async fn main() -> Result<()> {
         keys_tx: keys_tx.clone(),
         measuredboot_ml_file,
         payload_tx: payload_tx.clone(),
-        priv_key: nk_priv,
-        pub_key: nk_pub,
+        payload_priv_key,
+        payload_pub_key,
+        priv_key: mtls_priv,
+        pub_key: mtls_pub,
         revocation_tx: revocation_tx.clone(),
         secure_mount: PathBuf::from(&mount),
         secure_size,
@@ -992,8 +997,13 @@ mod testing {
                 .join("test-data")
                 .join("test-rsa.pem");
 
-            let (nk_pub, nk_priv) =
-                crypto::testing::rsa_import_pair(rsa_key_path)?;
+            let (mtls_pub, mtls_priv) =
+                crypto::testing::rsa_import_pair(rsa_key_path.clone())?;
+
+            // Generate separate ephemeral payload keys for testing
+            debug!("Generating ephemeral RSA key pair for payload mechanism");
+            let (payload_pub_key, payload_priv_key) =
+                crypto::rsa_generate_pair(2048)?;
 
             let (mut payload_tx, mut payload_rx) =
                 mpsc::channel::<payloads::PayloadMessage>(1);
@@ -1046,8 +1056,10 @@ mod testing {
                 QuoteData {
                     api_versions,
                     tpmcontext: Mutex::new(ctx),
-                    priv_key: nk_priv,
-                    pub_key: nk_pub,
+                    payload_priv_key,
+                    payload_pub_key,
+                    priv_key: mtls_priv,
+                    pub_key: mtls_pub,
                     ak_handle,
                     keys_tx,
                     payload_tx,

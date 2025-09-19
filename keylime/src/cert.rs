@@ -17,7 +17,7 @@ pub fn cert_from_server_key(
     config: &CertificateConfig,
 ) -> Result<(X509, PKey<Public>)> {
     let cert: X509;
-    let (nk_pub, nk_priv) = match config.server_key.as_ref() {
+    let (mtls_pub, mtls_priv) = match config.server_key.as_ref() {
         "" => {
             debug!(
                 "The server_key option was not set in the configuration file"
@@ -56,7 +56,7 @@ pub fn cert_from_server_key(
             debug!("The server_cert option was not set in the configuration file");
 
             crypto::x509::CertificateBuilder::new()
-                .private_key(&nk_priv)
+                .private_key(&mtls_priv)
                 .common_name(&config.agent_uuid)
                 .add_ips(contact_ips)
                 .build()?
@@ -72,7 +72,7 @@ pub fn cert_from_server_key(
             } else {
                 debug!("Generating new mTLS certificate");
                 let cert = crypto::x509::CertificateBuilder::new()
-                    .private_key(&nk_priv)
+                    .private_key(&mtls_priv)
                     .common_name(&config.agent_uuid)
                     .add_ips(contact_ips)
                     .build()?;
@@ -81,7 +81,7 @@ pub fn cert_from_server_key(
             }
         }
     };
-    Ok((cert, nk_pub))
+    Ok((cert, mtls_pub))
 }
 
 #[cfg(test)]

@@ -166,7 +166,7 @@ async fn u_key(
     // https://github.com/keylime/keylime/blob/f3c31b411dd3dd971fd9d614a39a150655c6797c/ \
     // keylime/crypto.py#L118
     let decrypted_key = match crypto::rsa_oaep_decrypt(
-        &quote_data.priv_key,
+        &quote_data.payload_priv_key,
         &encrypted_key,
     )
     .map_err(Error::from)
@@ -278,7 +278,7 @@ async fn v_key(
     // https://github.com/keylime/keylime/blob/f3c31b411dd3dd971fd9d614a39a150655c6797c/ \
     // keylime/crypto.py#L118
     let decrypted_key = match crypto::rsa_oaep_decrypt(
-        &quote_data.priv_key,
+        &quote_data.payload_priv_key,
         &encrypted_key,
     )
     .map_err(Error::from)
@@ -323,7 +323,7 @@ async fn pubkey(
     req: HttpRequest,
     data: web::Data<QuoteData<'_>>,
 ) -> impl Responder {
-    match crypto::pkey_pub_to_pem(&data.pub_key) {
+    match crypto::pkey_pub_to_pem(&data.payload_pub_key) {
         Ok(pubkey) => {
             let response = JsonWrapper::success(KeylimePubkey { pubkey });
             info!("GET pubkey returning 200 response.");
@@ -902,7 +902,7 @@ mod tests {
         fixture.keys_tx = keys_tx.clone();
 
         let quotedata = web::Data::new(fixture);
-        let pubkey = quotedata.pub_key.clone();
+        let pubkey = quotedata.payload_pub_key.clone();
 
         // Run server
         let mut app = test::init_service(
@@ -968,7 +968,7 @@ mod tests {
         })));
 
         let encrypted_key =
-            rsa_oaep_encrypt(&quotedata.pub_key, u.as_ref()).unwrap(); //#[allow_ci]
+            rsa_oaep_encrypt(&quotedata.payload_pub_key, u.as_ref()).unwrap(); //#[allow_ci]
 
         let ukey = KeylimeUKey {
             encrypted_key: general_purpose::STANDARD.encode(&encrypted_key),
@@ -985,7 +985,7 @@ mod tests {
         assert!(resp.status().is_success());
 
         let encrypted_key =
-            rsa_oaep_encrypt(&quotedata.pub_key, v.as_ref()).unwrap(); //#[allow_ci]
+            rsa_oaep_encrypt(&quotedata.payload_pub_key, v.as_ref()).unwrap(); //#[allow_ci]
 
         let vkey = KeylimeVKey {
             encrypted_key: general_purpose::STANDARD.encode(&encrypted_key),
@@ -1110,7 +1110,7 @@ mod tests {
             test::read_body_json(resp).await;
         assert!(pkey_pub_from_pem(&result.results.pubkey)
             .unwrap() //#[allow_ci]
-            .public_eq(&quotedata.pub_key));
+            .public_eq(&quotedata.payload_pub_key));
 
         // Explicitly drop QuoteData to cleanup keys
         drop(quotedata);
