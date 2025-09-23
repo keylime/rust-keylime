@@ -22,7 +22,6 @@ pub mod permissions;
 pub mod quote;
 pub mod registrar_client;
 pub mod resilient_client;
-pub mod rfc3986_compliance;
 pub mod secure_mount;
 pub mod serialization;
 pub mod structures;

@@ -6,9 +6,35 @@
 //! This module provides header validation functionality according to:
 //! - RFC 9110 Section 10.2.2: 201 Created response handling
 
-use crate::rfc3986_compliance::{RfcComplianceError, UriReference};
 use log::debug;
 use reqwest::header::{HeaderMap, LOCATION};
+use url::Url;
+
+/// Simple RFC compliance error for header validation
+#[derive(Debug)]
+pub enum HeaderValidationError {
+    MissingLocationHeader,
+    InvalidLocationHeader(String),
+    InvalidBaseUrl(String),
+}
+
+impl std::fmt::Display for HeaderValidationError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            HeaderValidationError::MissingLocationHeader => {
+                write!(f, "Missing Location header in 201 Created response")
+            }
+            HeaderValidationError::InvalidLocationHeader(msg) => {
+                write!(f, "Invalid Location header value: {}", msg)
+            }
+            HeaderValidationError::InvalidBaseUrl(msg) => {
+                write!(f, "Invalid base URL: {}", msg)
+            }
+        }
+    }
+}
+
+impl std::error::Error for HeaderValidationError {}
 
 /// Validates response headers according to RFC 9110 and RFC 3986
 pub struct HeaderValidator;
@@ -18,39 +44,62 @@ impl HeaderValidator {
     pub fn validate_location_header(
         headers: &HeaderMap,
         expected_base_url: Option<&str>,
-    ) -> Result<String, RfcComplianceError> {
+    ) -> Result<String, HeaderValidationError> {
         let location = headers
             .get(LOCATION)
-            .ok_or(RfcComplianceError::MissingLocationHeader)?;
+            .ok_or(HeaderValidationError::MissingLocationHeader)?;
 
         let location_str = location.to_str().map_err(|_| {
-            RfcComplianceError::InvalidLocationHeader(
+            HeaderValidationError::InvalidLocationHeader(
                 "Invalid UTF-8 encoding".to_string(),
             )
         })?;
 
-        // Validate the location header according to RFC 3986
-        let uri_ref = UriReference::parse(location_str)?;
+        debug!("Validating Location header: {}", location_str);
 
-        debug!("Validated Location header: {}", location_str);
-
-        // If we have a base URL, resolve relative references
+        // If we have a base URL, resolve relative references using the url crate
         if let Some(base_url) = expected_base_url {
-            if uri_ref.is_relative() {
-                let base = UriReference::parse(base_url)?;
-                let resolved = uri_ref.resolve_against(&base)?;
-                return Ok(resolved.to_string());
+            let base = Url::parse(base_url).map_err(|e| {
+                HeaderValidationError::InvalidBaseUrl(e.to_string())
+            })?;
+
+            // Try to resolve the location against the base URL
+            match base.join(location_str) {
+                Ok(resolved) => return Ok(resolved.to_string()),
+                Err(e) => {
+                    return Err(
+                        HeaderValidationError::InvalidLocationHeader(
+                            format!("Failed to resolve relative URL: {}", e),
+                        ),
+                    );
+                }
             }
         }
 
-        Ok(location_str.to_string())
+        // If no base URL provided, validate that the location is a valid URI
+        // Try parsing as absolute URL first
+        if Url::parse(location_str).is_ok() {
+            return Ok(location_str.to_string());
+        }
+
+        // If not absolute, check if it's a valid relative URL by testing against a dummy base
+        let dummy_base = "http://example.com";
+        if let Ok(base) = Url::parse(dummy_base) {
+            if base.join(location_str).is_ok() {
+                return Ok(location_str.to_string());
+            }
+        }
+
+        Err(HeaderValidationError::InvalidLocationHeader(
+            "Invalid URI reference".to_string(),
+        ))
     }
 
     /// Validate 201 Created response headers for RFC 9110 Section 10.2.2 compliance
     pub fn validate_201_created_response(
         headers: &HeaderMap,
         expected_base_url: Option<&str>,
-    ) -> Result<(), RfcComplianceError> {
+    ) -> Result<(), HeaderValidationError> {
         // RFC 9110 Section 10.2.2: 201 Created responses MUST include a Location header
         Self::validate_location_header(headers, expected_base_url)?;
         Ok(())
@@ -109,13 +158,13 @@ mod tests {
         assert!(result.is_err());
         assert!(matches!(
             result.unwrap_err(), //#[allow_ci]
-            RfcComplianceError::MissingLocationHeader
+            HeaderValidationError::MissingLocationHeader
         ));
     }
 
     #[test]
     fn test_validate_location_header_invalid_uri() {
-        let headers = create_test_headers_with_location("invalid\x00uri");
+        let headers = create_test_headers_with_location("http://");
         let result =
             HeaderValidator::validate_location_header(&headers, None);
         assert!(result.is_err());
@@ -156,7 +205,7 @@ mod tests {
             assert!(result.is_err());
             assert!(matches!(
                 result.unwrap_err(), //#[allow_ci]
-                RfcComplianceError::InvalidLocationHeader(_)
+                HeaderValidationError::InvalidLocationHeader(_)
             ));
         }
     }
@@ -255,7 +304,7 @@ mod tests {
     #[test]
     fn test_validate_location_header_invalid_base_url() {
         let headers = create_test_headers_with_location("/relative/path");
-        let invalid_base = "not\x00a\x01valid\x02url";
+        let invalid_base = "not a valid url";
         let result = HeaderValidator::validate_location_header(
             &headers,
             Some(invalid_base),
@@ -276,7 +325,7 @@ mod tests {
 
     #[test]
     fn test_validate_201_created_response_invalid_location_header() {
-        let headers = create_test_headers_with_location("invalid\x00uri");
+        let headers = create_test_headers_with_location("http://");
         let result =
             HeaderValidator::validate_201_created_response(&headers, None);
         assert!(result.is_err());
@@ -292,7 +341,7 @@ mod tests {
             Some(base_url),
         );
         assert!(result.is_ok());
-        // The RFC implementation should handle path normalization
+        // The url crate should handle path normalization
         let resolved = result.unwrap(); //#[allow_ci]
         assert!(resolved.starts_with("https://api.example.com/"));
     }
@@ -343,7 +392,7 @@ mod tests {
             Some(base_url),
         );
         assert!(result.is_ok());
-        // The RFC implementation should normalize dot segments
+        // The url crate should normalize dot segments
         let resolved = result.unwrap(); //#[allow_ci]
         assert!(resolved.contains("resource"));
     }
