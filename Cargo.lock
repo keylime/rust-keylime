@@ -1432,6 +1432,7 @@ dependencies = [
  "thiserror 2.0.16",
  "tokio",
  "tss-esapi",
+ "url",
  "uuid",
  "wiremock",
  "zip",
@@ -1517,6 +1518,7 @@ dependencies = [
  "static_assertions",
  "tempfile",
  "tokio",
+ "url",
  "wiremock",
 ]
 
