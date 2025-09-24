@@ -279,7 +279,7 @@ impl fmt::Display for EncryptionAlgorithm {
             EncryptionAlgorithm::Rsa4096 => "rsa4096",
             EncryptionAlgorithm::Ecc192 => "ecc192",
             EncryptionAlgorithm::Ecc224 => "ecc224",
-            EncryptionAlgorithm::Ecc256 => "ecc", /* for backwards compatibility */
+            EncryptionAlgorithm::Ecc256 => "ecc256",
             EncryptionAlgorithm::Ecc384 => "ecc384",
             EncryptionAlgorithm::Ecc521 => "ecc521",
             EncryptionAlgorithm::EccSm2 => "ecc_sm2",

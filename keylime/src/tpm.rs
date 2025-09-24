@@ -31,7 +31,7 @@ use tss_esapi::{
     abstraction::{
         ak, ek, nv,
         pcr::{read_all, PcrData},
-        DefaultKey,
+        AsymmetricAlgorithmSelection, DefaultKey,
     },
     attributes::{
         object::ObjectAttributesBuilder, session::SessionAttributesBuilder,
@@ -773,7 +773,7 @@ impl Context<'_> {
             &mut self.inner.lock().unwrap(), //#[allow_ci]
             handle,
             hash_alg.into(),
-            key_alg.into(),
+            Into::<AsymmetricAlgorithmSelection>::into(key_alg),
             sign_alg.into(),
             None,
             DefaultKey,
