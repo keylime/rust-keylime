@@ -6,9 +6,9 @@
 //! This module provides header validation functionality according to:
 //! - RFC 9110 Section 10.2.2: 201 Created response handling
 
+use crate::https_client::resolve_url;
 use log::debug;
 use reqwest::header::{HeaderMap, LOCATION};
-use url::Url;
 
 /// Simple RFC compliance error for header validation
 #[derive(Debug)]
@@ -57,42 +57,28 @@ impl HeaderValidator {
 
         debug!("Validating Location header: {}", location_str);
 
-        // If we have a base URL, resolve relative references using the url crate
+        // Use the existing resolve_url function for all URL validation and resolution
         if let Some(base_url) = expected_base_url {
-            let base = Url::parse(base_url).map_err(|e| {
-                HeaderValidationError::InvalidBaseUrl(e.to_string())
-            })?;
-
-            // Try to resolve the location against the base URL
-            match base.join(location_str) {
-                Ok(resolved) => return Ok(resolved.to_string()),
-                Err(e) => {
-                    return Err(
-                        HeaderValidationError::InvalidLocationHeader(
-                            format!("Failed to resolve relative URL: {}", e),
-                        ),
-                    );
+            // Resolve against the provided base URL
+            resolve_url(base_url, location_str).map_err(|e| {
+                if e.to_string().contains("Invalid base URL") {
+                    HeaderValidationError::InvalidBaseUrl(e.to_string())
+                } else {
+                    HeaderValidationError::InvalidLocationHeader(
+                        e.to_string(),
+                    )
                 }
+            })
+        } else {
+            // No base URL provided, validate using a dummy base to check if it's a valid URI reference
+            let dummy_base = "http://example.com";
+            match resolve_url(dummy_base, location_str) {
+                Ok(_) => Ok(location_str.to_string()), // Return original if valid
+                Err(_) => Err(HeaderValidationError::InvalidLocationHeader(
+                    "Invalid URI reference".to_string(),
+                )),
             }
         }
-
-        // If no base URL provided, validate that the location is a valid URI
-        // Try parsing as absolute URL first
-        if Url::parse(location_str).is_ok() {
-            return Ok(location_str.to_string());
-        }
-
-        // If not absolute, check if it's a valid relative URL by testing against a dummy base
-        let dummy_base = "http://example.com";
-        if let Ok(base) = Url::parse(dummy_base) {
-            if base.join(location_str).is_ok() {
-                return Ok(location_str.to_string());
-            }
-        }
-
-        Err(HeaderValidationError::InvalidLocationHeader(
-            "Invalid URI reference".to_string(),
-        ))
     }
 
     /// Validate 201 Created response headers for RFC 9110 Section 10.2.2 compliance

@@ -47,19 +47,6 @@ fn validate_and_resolve_url(
     resolve_url(base_url, relative_url).map_err(|e| e.to_string())
 }
 
-/// Simple RFC 9110 Section 10.2.2 compliance check for Location header in 201 responses
-pub fn validate_location_header_for_201(
-    status: u16,
-    location: Option<&str>,
-) -> Result<(), String> {
-    if status == 201 && location.is_none() {
-        return Err(
-            "201 Created response missing Location header".to_string()
-        );
-    }
-    Ok(())
-}
-
 pub const DEFAULT_API_VERSION: &str = "v3.0";
 
 pub struct UrlArgs {
@@ -717,18 +704,6 @@ mod tests {
                 url
             );
         }
-    }
-
-    #[test]
-    fn test_location_header_validation_for_201() {
-        // Test 201 response requires Location header
-        assert!(validate_location_header_for_201(201, None).is_err());
-        assert!(validate_location_header_for_201(201, Some("/path")).is_ok());
-
-        // Test other status codes don't require Location header
-        assert!(validate_location_header_for_201(200, None).is_ok());
-        assert!(validate_location_header_for_201(404, None).is_ok());
-        assert!(validate_location_header_for_201(500, None).is_ok());
     }
 
     #[test]
