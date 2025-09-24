@@ -11,7 +11,6 @@ pub mod device_id;
 pub mod error;
 pub mod file_ops;
 pub mod hash_ek;
-pub mod header_validation;
 pub mod hostname_parser;
 pub mod https_client;
 pub mod ima;

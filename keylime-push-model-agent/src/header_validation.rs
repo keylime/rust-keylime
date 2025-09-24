@@ -6,7 +6,7 @@
 //! This module provides header validation functionality according to:
 //! - RFC 9110 Section 10.2.2: 201 Created response handling
 
-use crate::https_client::resolve_url;
+use crate::url_selector::resolve_url;
 use log::debug;
 use reqwest::header::{HeaderMap, LOCATION};
 

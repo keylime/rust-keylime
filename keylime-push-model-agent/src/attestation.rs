@@ -1,6 +1,6 @@
+use crate::header_validation::HeaderValidator;
 use crate::{context_info_handler, struct_filler, url_selector};
 use anyhow::Result;
-use keylime::header_validation::HeaderValidator;
 use keylime::resilient_client::ResilientClient;
 use log::{debug, info, warn};
 use reqwest::header::HeaderMap;

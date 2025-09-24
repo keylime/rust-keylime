@@ -3,8 +3,69 @@
 
 //! URL selection and validation for Push Model agent using RFC compliance
 
-use keylime::https_client::resolve_url;
+use anyhow::Result;
 use log::warn;
+use url::Url;
+
+/// Resolve a relative URL against a base URL using the url crate
+pub fn resolve_url(base_url: &str, relative_url: &str) -> Result<String> {
+    let base = Url::parse(base_url)
+        .map_err(|e| anyhow::anyhow!("Invalid base URL: {}", e))?;
+
+    // Handle malformed URLs that start with // but aren't valid network-path references
+    // This is a workaround for verifiers that incorrectly send Location headers like //v3.0/agents/...
+    let processed_relative_url = if relative_url.starts_with("//")
+        && !relative_url.starts_with("//http")
+    {
+        // Check if this might be a malformed path that should be treated as /path instead of //authority/path
+        // Try to resolve it as-is first, and if it fails due to invalid authority, treat it as a single slash path
+        match base.join(relative_url) {
+            Ok(_) => relative_url.to_string(), // It's valid, use as-is
+            Err(_) => {
+                // Failed, likely due to invalid authority - treat as single slash path
+                format!("/{}", &relative_url[2..]) // Remove one slash, making it /v3.0/agents/...
+            }
+        }
+    } else {
+        relative_url.to_string()
+    };
+
+    let resolved = base
+        .join(&processed_relative_url)
+        .map_err(|e| anyhow::anyhow!("Failed to resolve URL: {}", e))?;
+
+    // Normalize the URL path to remove consecutive slashes while preserving scheme's double slash
+    let mut url_string = resolved.to_string();
+
+    // Find the position after "://" to avoid touching the scheme's double slash
+    if let Some(scheme_end) = url_string.find("://") {
+        let (scheme_part, remainder) = url_string.split_at(scheme_end + 3);
+
+        // Find where the path begins (after hostname and optional port)
+        // Look for the first '/' after the hostname to find the path part
+        if let Some(path_start) = remainder.find('/') {
+            let (host_part, path_part) = remainder.split_at(path_start);
+
+            // Normalize consecutive slashes in the path part only
+            let normalized_path =
+                path_part.chars().fold(String::new(), |mut acc, ch| {
+                    if ch == '/' && acc.ends_with('/') {
+                        // Skip consecutive slashes
+                        acc
+                    } else {
+                        acc.push(ch);
+                        acc
+                    }
+                });
+
+            url_string =
+                format!("{}{}{}", scheme_part, host_part, normalized_path);
+        }
+        // If there's no path part (no '/' after hostname), no normalization needed
+    }
+
+    Ok(url_string)
+}
 
 /// Validate and resolve URL according to RFC 3986 using the url crate
 /// This checks for RFC 3986 compliance and resolves the URL in one step
@@ -704,6 +765,133 @@ mod tests {
                 url
             );
         }
+    }
+
+    #[test]
+    fn test_resolve_url() {
+        let base = "https://example.com:8080/api/v1/resources";
+
+        // Test resolving relative paths
+        let resolved = resolve_url(base, "../v2/users").unwrap(); //#[allow_ci]
+        assert_eq!(resolved, "https://example.com:8080/api/v2/users");
+
+        let resolved = resolve_url(base, "/absolute/path").unwrap(); //#[allow_ci]
+        assert_eq!(resolved, "https://example.com:8080/absolute/path");
+
+        // Test with absolute URL (should return as-is)
+        let absolute = "https://other.com/path";
+        let resolved = resolve_url(base, absolute).unwrap(); //#[allow_ci]
+        assert_eq!(resolved, absolute);
+
+        // Test with query and fragment
+        let resolved = resolve_url(base, "?query=test").unwrap(); //#[allow_ci]
+        assert_eq!(
+            resolved,
+            "https://example.com:8080/api/v1/resources?query=test"
+        );
+    }
+
+    #[test]
+    fn test_dot_segment_resolution() {
+        let base = "https://example.com/a/b/c/d";
+
+        // Test removal of dot segments
+        let resolved = resolve_url(base, "../../../g").unwrap(); //#[allow_ci]
+        assert_eq!(resolved, "https://example.com/g");
+
+        let resolved = resolve_url(base, "./././g").unwrap(); //#[allow_ci]
+        assert_eq!(resolved, "https://example.com/a/b/c/g");
+    }
+
+    #[test]
+    fn test_double_slash_normalization() {
+        let base = "https://localhost:8881";
+
+        // Test multiple consecutive slashes in path
+        let resolved =
+            resolve_url(base, "/v3.0//agents//test//attestations").unwrap(); //#[allow_ci]
+        assert_eq!(
+            resolved,
+            "https://localhost:8881/v3.0/agents/test/attestations"
+        );
+
+        // Test that scheme's double slash is preserved when it's a valid scheme-relative URL
+        let resolved =
+            resolve_url("https://example.com", "//other.com/path").unwrap(); //#[allow_ci]
+        assert_eq!(resolved, "https://other.com/path");
+
+        // Test multiple consecutive slashes in path with different base
+        let resolved = resolve_url(base, "/api///v1////endpoint").unwrap(); //#[allow_ci]
+        assert_eq!(resolved, "https://localhost:8881/api/v1/endpoint");
+
+        // Test with query parameters and fragments
+        let resolved =
+            resolve_url(base, "/v3.0//agents?query=test#fragment").unwrap(); //#[allow_ci]
+        assert_eq!(
+            resolved,
+            "https://localhost:8881/v3.0/agents?query=test#fragment"
+        );
+
+        // Test the specific Keylime case where a single slash path becomes double slash
+        let resolved = resolve_url(
+            "https://localhost:8881/",
+            "/v3.0/agents/test/attestations",
+        )
+        .unwrap(); //#[allow_ci]
+        assert_eq!(
+            resolved,
+            "https://localhost:8881/v3.0/agents/test/attestations"
+        );
+
+        // Test the problematic case with relative path without leading slash
+        let resolved = resolve_url(
+            "https://localhost:8881/",
+            "v3.0/agents/d432fbb3-d2f1-4a97-9ef7-75bd81c00000/attestations/0",
+        )
+        .unwrap(); //#[allow_ci]
+        assert_eq!(resolved, "https://localhost:8881/v3.0/agents/d432fbb3-d2f1-4a97-9ef7-75bd81c00000/attestations/0");
+
+        // Test what happens when url.join() produces a double slash at the start
+        // This demonstrates potential issues with different path combinations
+        let test_cases = [
+            ("https://localhost:8881", "v3.0/agents/test"),
+            ("https://localhost:8881/", "v3.0/agents/test"),
+            ("https://localhost:8881", "/v3.0/agents/test"),
+            ("https://localhost:8881/", "/v3.0/agents/test"),
+        ];
+
+        for (base_url, relative_path) in test_cases {
+            let resolved = resolve_url(base_url, relative_path).unwrap(); //#[allow_ci]
+                                                                          // All these should resolve to the same normalized URL regardless of base/relative variations
+            assert_eq!(resolved, "https://localhost:8881/v3.0/agents/test");
+        }
+
+        // Test network-path reference (//host/path) - this is valid per RFC 3986
+        // When relative_url starts with //, it's a network-path reference that inherits the scheme
+        let resolved =
+            resolve_url("https://example.com", "//other.com/path").unwrap(); //#[allow_ci]
+                                                                             // This should resolve to https://other.com/path (inherits https scheme but replaces host)
+        assert_eq!(resolved, "https://other.com/path");
+
+        // Test the edge case with actual double slashes in path (consecutive slashes)
+        let resolved =
+            resolve_url("https://example.com", "/api//v1//test").unwrap(); //#[allow_ci]
+        assert_eq!(resolved, "https://example.com/api/v1/test");
+
+        // Test a realistic scenario that might produce consecutive slashes in a path
+        let resolved = resolve_url(
+            "https://localhost:8881/api/",
+            "//api.example.com/v3.0/agents",
+        )
+        .unwrap(); //#[allow_ci]
+                   // This should resolve to the new host per RFC 3986 network-path reference
+        assert_eq!(resolved, "https://api.example.com/v3.0/agents");
+
+        // Test the specific issue - verifier may be sending location headers with double slashes
+        // This reproduces the actual verifier crash scenario
+        let resolved = resolve_url("https://localhost:8881", "//v3.0/agents/d432fbb3-d2f1-4a97-9ef7-75bd81c00000/attestations/0").unwrap(); //#[allow_ci]
+                                                                                                                                            // This should now resolve correctly by treating //v3.0/... as /v3.0/...
+        assert_eq!(resolved, "https://localhost:8881/v3.0/agents/d432fbb3-d2f1-4a97-9ef7-75bd81c00000/attestations/0");
     }
 
     #[test]
