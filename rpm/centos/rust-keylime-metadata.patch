@@ -1,14 +1,14 @@
---- a/keylime/Cargo.toml	2025-09-03 13:40:50.312319072 +0200
-+++ b/keylime/Cargo.toml	2025-09-03 13:41:15.200337821 +0200
-@@ -43,7 +43,6 @@
- tokio.workspace = true
+--- a/keylime/Cargo.toml	2025-09-25 17:29:45.897621366 +0200
++++ b/keylime/Cargo.toml	2025-09-25 17:29:54.827404783 +0200
+@@ -44,7 +44,6 @@
+ url.workspace = true
  uuid.workspace = true
  zip.workspace = true
 -zmq = {version = "0.9.2", optional = true}
 
  [dev-dependencies]
  tempfile.workspace = true
-@@ -51,6 +50,5 @@
+@@ -52,6 +51,5 @@
  wiremock = {version = "0.6"}
 
  [features]
