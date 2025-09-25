@@ -274,7 +274,7 @@ impl fmt::Display for EncryptionAlgorithm {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let value = match self {
             EncryptionAlgorithm::Rsa1024 => "rsa1024",
-            EncryptionAlgorithm::Rsa2048 => "rsa", /* for backwards compatibility */
+            EncryptionAlgorithm::Rsa2048 => "rsa2048",
             EncryptionAlgorithm::Rsa3072 => "rsa3072",
             EncryptionAlgorithm::Rsa4096 => "rsa4096",
             EncryptionAlgorithm::Ecc192 => "ecc192",
