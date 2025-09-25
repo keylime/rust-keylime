@@ -15,11 +15,11 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - name: Check that Fedora patches apply
-        run: for p in rpm/fedora/*.patch; do patch -p1 < "$p"; done
+        run: for p in rpm/fedora/*.patch; do patch -p1 -s --fuzz=0 --no-backup-if-mismatch -f < "$p"; done
   centos:
     runs-on: ubuntu-latest
     name: Check that CentOS RPM patches still apply
     steps:
       - uses: actions/checkout@v5
       - name: Check that CentOS patches apply
-        run: for p in rpm/centos/*.patch; do patch -p1 < "$p"; done
+        run: for p in rpm/centos/*.patch; do patch -p1 -s --fuzz=0 --no-backup-if-mismatch -f < "$p"; done
