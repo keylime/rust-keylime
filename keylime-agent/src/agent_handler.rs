@@ -109,7 +109,7 @@ mod tests {
         let result: JsonWrapper<AgentInfo> = test::read_body_json(resp).await;
         assert_eq!(result.results.agent_uuid.as_str(), "DEADBEEF");
         assert_eq!(result.results.tpm_hash_alg.as_str(), "sha256");
-        assert_eq!(result.results.tpm_enc_alg.as_str(), "rsa");
+        assert_eq!(result.results.tpm_enc_alg.as_str(), "rsa2048");
         assert_eq!(result.results.tpm_sign_alg.as_str(), "rsassa");
 
         // Explicitly drop QuoteData to cleanup keys
