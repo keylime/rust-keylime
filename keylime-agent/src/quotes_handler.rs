@@ -385,7 +385,7 @@ mod tests {
         let result: JsonWrapper<KeylimeQuote> =
             test::read_body_json(resp).await;
         assert_eq!(result.results.hash_alg.as_str(), "sha256");
-        assert_eq!(result.results.enc_alg.as_str(), "rsa");
+        assert_eq!(result.results.enc_alg.as_str(), "rsa2048");
         assert_eq!(result.results.sign_alg.as_str(), "rsassa");
         assert!(
             pkey_pub_from_pem(&result.results.pubkey.unwrap()) //#[allow_ci]
@@ -431,7 +431,7 @@ mod tests {
         let result: JsonWrapper<KeylimeQuote> =
             test::read_body_json(resp).await;
         assert_eq!(result.results.hash_alg.as_str(), "sha256");
-        assert_eq!(result.results.enc_alg.as_str(), "rsa");
+        assert_eq!(result.results.enc_alg.as_str(), "rsa2048");
         assert_eq!(result.results.sign_alg.as_str(), "rsassa");
         assert!(
             pkey_pub_from_pem(&result.results.pubkey.unwrap()) //#[allow_ci]
@@ -493,7 +493,7 @@ mod tests {
         let result: JsonWrapper<KeylimeQuote> =
             test::read_body_json(resp).await;
         assert_eq!(result.results.hash_alg.as_str(), "sha256");
-        assert_eq!(result.results.enc_alg.as_str(), "rsa");
+        assert_eq!(result.results.enc_alg.as_str(), "rsa2048");
         assert_eq!(result.results.sign_alg.as_str(), "rsassa");
 
         if let Some(ima_mutex) = &quotedata.ima_ml_file {

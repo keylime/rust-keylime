@@ -631,7 +631,7 @@ mod tests {
         assert!(!context_info.get_public_key_as_base64().unwrap().is_empty()); //#[allow_ci]
         assert_eq!(context_info.get_key_class(), "asymmetric");
         assert_eq!(context_info.get_key_size(), 2048);
-        assert_eq!(context_info.get_key_algorithm(), "rsa");
+        assert_eq!(context_info.get_key_algorithm(), "rsa2048");
         let ek_handle = context_info.get_ek_handle();
         let ak_handle = context_info.get_ak_handle();
         assert!(context_info
@@ -740,7 +740,7 @@ mod tests {
         assert!(!context_info.get_public_key_as_base64().unwrap().is_empty()); //#[allow_ci]
         assert_eq!(context_info.get_key_class(), "asymmetric");
         assert_eq!(context_info.get_key_size(), 2048);
-        assert_eq!(context_info.get_key_algorithm(), "rsa");
+        assert_eq!(context_info.get_key_algorithm(), "rsa2048");
         assert!(!context_info.get_ak_key_class_str().is_empty());
         assert!(!context_info.get_ak_key_algorithm_str().is_empty());
         assert!(context_info.get_ak_key_size().is_ok());
