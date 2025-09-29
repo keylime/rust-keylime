@@ -67,11 +67,6 @@ fn apply_config_overrides(
             "ima_ml_path" => config.ima_ml_path = value,
             "agent_data_path" => config.agent_data_path = value,
             "api_versions" => config.api_versions = value,
-            "disabled_signing_algorithms" => {
-                // Parse as comma-separated list
-                config.disabled_signing_algorithms =
-                    value.split(',').map(|s| s.trim().to_string()).collect();
-            }
             "ek_handle" => config.ek_handle = value,
             "exponential_backoff_max_delay" => {
                 config.exponential_backoff_max_delay = value.parse().ok();
@@ -324,16 +319,11 @@ mod tests {
 
         overrides.insert("ip".to_string(), "192.168.1.1".to_string());
         overrides.insert("enable_iak_idevid".to_string(), "true".to_string());
-        overrides.insert(
-            "disabled_signing_algorithms".to_string(),
-            "rsa,ecdsa".to_string(),
-        );
 
         apply_config_overrides(&mut config, overrides);
 
         assert_eq!(config.ip, "192.168.1.1");
         assert!(config.enable_iak_idevid);
-        assert_eq!(config.disabled_signing_algorithms, vec!["rsa", "ecdsa"]);
     }
 
     #[test]
