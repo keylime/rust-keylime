@@ -19,8 +19,8 @@ use std::{env, path::Path, str::FromStr};
 use uuid::Uuid;
 
 pub static CONFIG_VERSION: &str = "2.0";
-pub static SUPPORTED_API_VERSIONS: &[&str] = &["2.1", "2.2"];
-pub static DEFAULT_REGISTRAR_API_VERSIONS: &[&str] = &["2.3"];
+pub static SUPPORTED_API_VERSIONS: &[&str] = &["2.1", "2.2", "2.4"];
+pub static DEFAULT_REGISTRAR_API_VERSIONS: &[&str] = &["2.4"];
 
 pub static DEFAULT_CONFIG: &str = "/etc/keylime/agent.conf";
 pub static DEFAULT_CONFIG_SNIPPETS_DIR: &str = "/etc/keylime/agent.conf.d";
