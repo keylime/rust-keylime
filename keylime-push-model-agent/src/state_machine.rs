@@ -412,7 +412,6 @@ mod tpm_tests {
                 tpm_hash_alg: keylime::algorithms::HashAlgorithm::Sha256,
                 tpm_signing_alg: keylime::algorithms::SignAlgorithm::RsaSsa,
                 agent_data_path: "".to_string(),
-                disabled_signing_algorithms: vec![],
             },
         ) {
             Ok(ctx) => ctx,
@@ -653,7 +652,6 @@ mod tpm_tests {
                 tpm_hash_alg: keylime::algorithms::HashAlgorithm::Sha256,
                 tpm_signing_alg: keylime::algorithms::SignAlgorithm::RsaSsa,
                 agent_data_path: "".to_string(),
-                disabled_signing_algorithms: vec![],
             })
             .expect("This test requires TPM access with proper permissions");
         let _ = registration::check_registration(Some(context_info.clone()))

@@ -26,11 +26,6 @@ pub fn init_context_info(avoid_tpm: bool) -> Result<()> {
                     tpm_hash_alg: config.tpm_hash_alg().to_string(),
                     tpm_signing_alg: config.tpm_signing_alg().to_string(),
                     agent_data_path: config.agent_data_path().to_string(),
-                    disabled_signing_algorithms: config
-                        .disabled_signing_algorithms()
-                        .iter()
-                        .map(|e| e.to_string())
-                        .collect(),
                 })
                 .map_err(|e| e.to_string())?;
 

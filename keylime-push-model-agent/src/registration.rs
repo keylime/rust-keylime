@@ -126,7 +126,6 @@ mod tests {
             tpm_hash_alg: "sha256".to_string(),
             tpm_signing_alg: "rsassa".to_string(),
             agent_data_path: "".to_string(),
-            disabled_signing_algorithms: vec![],
         };
         config.exponential_backoff_initial_delay = None;
         config.exponential_backoff_max_retries = None;

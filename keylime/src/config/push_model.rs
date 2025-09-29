@@ -36,7 +36,6 @@ pub struct PushModelConfig {
     certification_keys_server_identifier: String,
     contact_ip: String,
     contact_port: u32,
-    disabled_signing_algorithms: Vec<String>,
     exponential_backoff_max_delay: Option<u64>,
     exponential_backoff_max_retries: Option<u32>,
     exponential_backoff_initial_delay: Option<u64>,

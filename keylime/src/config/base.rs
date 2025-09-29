@@ -84,7 +84,6 @@ pub static DEFAULT_SERVER_KEY_PASSWORD: &str = "";
 pub static DEFAULT_TRUSTED_CLIENT_CA: &str = "cv_ca/cacert.crt";
 
 // Push attestation agent option defaults
-pub const DEFAULT_DISABLED_SIGNING_ALGORITHMS: &[&str] = &["ecschnorr"];
 pub const DEFAULT_IMA_ML_DIRECTORY_PATH: &str = "/sys/kernel/security/ima";
 pub const DEFAULT_IMA_ML_COUNT_FILE: &str =
     "/sys/kernel/security/ima/measurements";
@@ -108,7 +107,6 @@ pub static DEFAULT_VERIFIER_URL: &str = "https://localhost:8881";
 pub struct AgentConfig {
     pub agent_data_path: String,
     pub api_versions: String,
-    pub disabled_signing_algorithms: Vec<String>,
     pub ek_handle: String,
     pub exponential_backoff_max_delay: Option<u64>,
     pub exponential_backoff_max_retries: Option<u32>,
@@ -261,10 +259,6 @@ impl Default for AgentConfig {
             contact_ip: DEFAULT_CONTACT_IP.to_string(),
             contact_port: DEFAULT_CONTACT_PORT,
             dec_payload_file: DEFAULT_DEC_PAYLOAD_FILE.to_string(),
-            disabled_signing_algorithms: DEFAULT_DISABLED_SIGNING_ALGORITHMS
-                .iter()
-                .map(|s| s.to_string())
-                .collect(),
             ek_handle: DEFAULT_EK_HANDLE.to_string(),
             enable_agent_mtls: DEFAULT_ENABLE_AGENT_MTLS,
             enable_iak_idevid: DEFAULT_ENABLE_IAK_IDEVID,
