@@ -608,6 +608,12 @@ async fn main() -> Result<()> {
         registrar_port: config.registrar_port,
         enable_iak_idevid: config.enable_iak_idevid,
         ek_handle: config.ek_handle.clone(),
+        // Pull model agent does not use TLS for registrar communication
+        registrar_ca_cert: None,
+        registrar_client_cert: None,
+        registrar_client_key: None,
+        registrar_insecure: None,
+        registrar_timeout: None,
     };
 
     let aa = AgentRegistration {

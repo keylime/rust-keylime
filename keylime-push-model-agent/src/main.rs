@@ -196,11 +196,39 @@ async fn run(args: &Args) -> Result<()> {
     };
     let attestation_client =
         attestation::AttestationClient::new(&neg_config)?;
+
+    // Create Registrar TLS config from configuration
+    let registrar_tls_config = if config.registrar_tls_enabled() {
+        let ca_cert = config.registrar_tls_ca_cert();
+        let client_cert = config.registrar_tls_client_cert();
+        let client_key = config.registrar_tls_client_key();
+
+        // Only use TLS if all certificate paths are provided
+        if !ca_cert.is_empty()
+            && !client_cert.is_empty()
+            && !client_key.is_empty()
+        {
+            Some(registration::RegistrarTlsConfig {
+                ca_cert: Some(ca_cert.to_string()),
+                client_cert: Some(client_cert.to_string()),
+                client_key: Some(client_key.to_string()),
+                insecure: None,
+                timeout: Some(args.timeout),
+            })
+        } else {
+            warn!("Registrar TLS is enabled but certificate paths are not configured. Using plain HTTP.");
+            None
+        }
+    } else {
+        None
+    };
+
     let mut state_machine = state_machine::StateMachine::new(
         attestation_client,
         neg_config,
         ctx_info,
         config.attestation_interval_seconds(),
+        registrar_tls_config,
     );
     state_machine.run().await;
     Ok(())
