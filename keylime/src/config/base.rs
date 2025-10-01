@@ -80,6 +80,8 @@ pub static DEFAULT_SECURE_SIZE: &str = "1m";
 pub static DEFAULT_SERVER_CERT: &str = "server-cert.crt";
 pub static DEFAULT_SERVER_KEY: &str = "server-private.pem";
 pub static DEFAULT_SERVER_KEY_PASSWORD: &str = "";
+pub static DEFAULT_PAYLOAD_KEY: &str = "payload-private.pem";
+pub static DEFAULT_PAYLOAD_KEY_PASSWORD: &str = "";
 // The DEFAULT_TRUSTED_CLIENT_CA is relative from KEYLIME_DIR
 pub static DEFAULT_TRUSTED_CLIENT_CA: &str = "cv_ca/cacert.crt";
 
@@ -157,6 +159,8 @@ pub struct AgentConfig {
     pub server_cert: String,
     pub server_key: String,
     pub server_key_password: String,
+    pub payload_key: String,
+    pub payload_key_password: String,
 
     // Push attestation options
     pub certification_keys_server_identifier: String,
@@ -307,6 +311,8 @@ impl Default for AgentConfig {
             server_cert: "default".to_string(),
             server_key: "default".to_string(),
             server_key_password: DEFAULT_SERVER_KEY_PASSWORD.to_string(),
+            payload_key: "default".to_string(),
+            payload_key_password: DEFAULT_PAYLOAD_KEY_PASSWORD.to_string(),
             tpm_encryption_alg: DEFAULT_TPM_ENCRYPTION_ALG.to_string(),
             tpm_hash_alg: DEFAULT_TPM_HASH_ALG.to_string(),
             tpm_ownerpassword: DEFAULT_TPM_OWNERPASSWORD.to_string(),
@@ -412,6 +418,14 @@ pub(crate) fn config_translate_keywords(
         &config.server_cert,
         keylime_dir,
         DEFAULT_SERVER_CERT,
+        false,
+    );
+
+    let payload_key = config_get_file_path(
+        "payload_key",
+        &config.payload_key,
+        keylime_dir,
+        DEFAULT_PAYLOAD_KEY,
         false,
     );
 
@@ -612,6 +626,7 @@ pub(crate) fn config_translate_keywords(
         revocation_cert,
         server_cert,
         server_key,
+        payload_key,
         trusted_client_ca,
         uuid,
         ..config.clone()

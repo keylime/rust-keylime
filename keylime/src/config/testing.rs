@@ -150,6 +150,8 @@ fn apply_config_overrides(
             "server_cert" => config.server_cert = value,
             "server_key" => config.server_key = value,
             "server_key_password" => config.server_key_password = value,
+            "payload_key" => config.payload_key = value,
+            "payload_key_password" => config.payload_key_password = value,
             // Push attestation options
             "certification_keys_server_identifier" => {
                 config.certification_keys_server_identifier = value

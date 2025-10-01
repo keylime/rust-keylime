@@ -490,47 +490,38 @@ async fn main() -> Result<()> {
         (None, None)
     };
 
-    // Generate ephemeral RSA key pair for secure transmission of u, v keys.
+    // Load or generate RSA key pair for secure transmission of u, v keys.
     // The u, v keys are two halves of the key used to decrypt the workload after
     // the Identity and Integrity Quotes sent by the agent are validated
     // by the Tenant and Cloud Verifier, respectively.
-    debug!("Generating ephemeral RSA key pair for payload mechanism");
-    let (payload_pub_key, payload_priv_key) =
-        crypto::rsa_generate_pair(2048)?;
+    // The payload key is always persistent, stored at the configured path.
+    let key_path = Path::new(&config.payload_key);
+    let (payload_pub_key, payload_priv_key) = crypto::load_or_generate_key(
+        key_path,
+        Some(config.payload_key_password.as_ref()),
+        keylime::algorithms::EncryptionAlgorithm::Rsa2048,
+        true, // Validate that loaded keys are RSA 2048
+    )
+    .map_err(|e| {
+        error!(
+            "Failed to load or generate payload key from {}: {e}",
+            key_path.display()
+        );
+        Error::Configuration(config::KeylimeConfigError::Generic(format!(
+            "Failed to load or generate payload key from {}: {e}",
+            key_path.display()
+        )))
+    })?;
 
-    // Generate mTLS key pair (separate from payload keys)
-    let (mtls_pub, mtls_priv) = match config.server_key.as_ref() {
-        "" => {
-            debug!(
-                "The server_key option was not set in the configuration file"
-            );
-            debug!("Generating new mTLS key pair");
-            crypto::rsa_generate_pair(2048)?
-        }
-        path => {
-            let key_path = Path::new(&path);
-            if key_path.exists() {
-                debug!(
-                    "Loading existing mTLS key pair from {}",
-                    key_path.display()
-                );
-                crypto::load_key_pair(
-                    key_path,
-                    Some(config.server_key_password.as_ref()),
-                )?
-            } else {
-                debug!("Generating new mTLS key pair");
-                let (public, private) = crypto::rsa_generate_pair(2048)?;
-                // Write the generated key to the file
-                crypto::write_key_pair(
-                    &private,
-                    key_path,
-                    Some(config.server_key_password.as_ref()),
-                );
-                (public, private)
-            }
-        }
-    };
+    // Load or generate mTLS key pair (separate from payload keys)
+    // The mTLS key is always persistent, stored at the configured path.
+    let key_path = Path::new(&config.server_key);
+    let (mtls_pub, mtls_priv) = crypto::load_or_generate_key(
+        key_path,
+        Some(config.server_key_password.as_ref()),
+        keylime::algorithms::EncryptionAlgorithm::Rsa2048,
+        false, // Don't validate algorithm for mTLS keys (for backward compatibility)
+    )?;
 
     let cert: X509;
     let mtls_cert;
@@ -1000,7 +991,7 @@ mod testing {
             let (mtls_pub, mtls_priv) =
                 crypto::testing::rsa_import_pair(rsa_key_path.clone())?;
 
-            // Generate separate ephemeral payload keys for testing
+            // Generate ephemeral payload keys for testing
             debug!("Generating ephemeral RSA key pair for payload mechanism");
             let (payload_pub_key, payload_priv_key) =
                 crypto::rsa_generate_pair(2048)?;
