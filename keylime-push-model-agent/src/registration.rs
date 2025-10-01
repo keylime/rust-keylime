@@ -8,12 +8,24 @@ use keylime::{
     error::Result,
 };
 
+pub struct RegistrarTlsConfig {
+    pub ca_cert: Option<String>,
+    pub client_cert: Option<String>,
+    pub client_key: Option<String>,
+    pub insecure: Option<bool>,
+    pub timeout: Option<u64>,
+}
+
 pub async fn check_registration(
     context_info: Option<context_info::ContextInfo>,
+    tls_config: Option<RegistrarTlsConfig>,
 ) -> Result<()> {
     if context_info.is_some() {
-        crate::registration::register_agent(&mut context_info.unwrap())
-            .await?;
+        crate::registration::register_agent(
+            &mut context_info.unwrap(),
+            tls_config,
+        )
+        .await?;
     }
     Ok(())
 }
@@ -41,8 +53,22 @@ fn get_retry_config() -> Option<RetryConfig> {
 
 pub async fn register_agent(
     context_info: &mut context_info::ContextInfo,
+    tls_config: Option<RegistrarTlsConfig>,
 ) -> Result<()> {
     let config = keylime::config::get_config();
+
+    let (ca_cert, client_cert, client_key, insecure, timeout) =
+        if let Some(tls) = tls_config {
+            (
+                tls.ca_cert,
+                tls.client_cert,
+                tls.client_key,
+                tls.insecure,
+                tls.timeout,
+            )
+        } else {
+            (None, None, None, None, None)
+        };
 
     let ac = AgentRegistrationConfig {
         contact_ip: config.contact_ip().to_string(),
@@ -55,6 +81,11 @@ pub async fn register_agent(
             .ek_handle()
             .expect("failed to get ek_handle")
             .to_string(),
+        registrar_ca_cert: ca_cert,
+        registrar_client_cert: client_cert,
+        registrar_client_key: client_key,
+        registrar_insecure: insecure,
+        registrar_timeout: timeout,
     };
 
     let cert_config = cert::CertificateConfig {
@@ -111,7 +142,7 @@ mod tests {
 
         let tmpdir = tempfile::tempdir().expect("failed to create tempdir");
         let _config = get_testing_config(tmpdir.path(), None);
-        let result = check_registration(None).await;
+        let result = check_registration(None, None).await;
         assert!(result.is_ok());
     }
 
@@ -136,7 +167,7 @@ mod tests {
 
         let mut context_info = ContextInfo::new_from_str(alg_config)
             .expect("Failed to create context info from string");
-        let result = register_agent(&mut context_info).await;
+        let result = register_agent(&mut context_info, None).await;
         assert!(result.is_err());
         assert!(context_info.flush_context().is_ok());
     }

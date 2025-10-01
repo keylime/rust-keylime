@@ -6,6 +6,7 @@ use crate::attestation::{
 };
 #[cfg(not(all(test, feature = "testing")))]
 use crate::registration;
+use crate::registration::RegistrarTlsConfig;
 #[cfg(test)]
 use crate::DEFAULT_ATTESTATION_INTERVAL_SECONDS;
 use anyhow::anyhow;
@@ -31,6 +32,7 @@ pub struct StateMachine<'a> {
     negotiation_config: NegotiationConfig<'a>,
     context_info: Option<ContextInfo>,
     measurement_interval: Duration,
+    registrar_tls_config: Option<RegistrarTlsConfig>,
 }
 
 impl<'a> StateMachine<'a> {
@@ -39,6 +41,7 @@ impl<'a> StateMachine<'a> {
         negotiation_config: NegotiationConfig<'a>,
         context_info: Option<ContextInfo>,
         attestation_interval_seconds: u64,
+        registrar_tls_config: Option<RegistrarTlsConfig>,
     ) -> Self {
         let initial_state = State::Unregistered;
         let measurement_interval =
@@ -50,6 +53,7 @@ impl<'a> StateMachine<'a> {
             negotiation_config,
             context_info,
             measurement_interval,
+            registrar_tls_config,
         }
     }
 
@@ -104,8 +108,11 @@ impl<'a> StateMachine<'a> {
     }
 
     async fn register(&mut self) {
-        let res =
-            registration::check_registration(self.context_info.clone()).await;
+        let res = registration::check_registration(
+            self.context_info.clone(),
+            self.registrar_tls_config.take(),
+        )
+        .await;
 
         match res {
             Ok(()) => {
@@ -263,6 +270,8 @@ mod registration {
     use keylime::context_info::ContextInfo;
     use std::sync::{Arc, Mutex, OnceLock};
 
+    pub use crate::registration::RegistrarTlsConfig;
+
     static MOCK_RESULT: OnceLock<Arc<Mutex<Result<(), String>>>> =
         OnceLock::new();
 
@@ -272,6 +281,7 @@ mod registration {
 
     pub async fn check_registration(
         _context_info: Option<ContextInfo>,
+        _tls_config: Option<RegistrarTlsConfig>,
     ) -> anyhow::Result<()> {
         let result = get_mock_result().lock().unwrap().clone();
         result.map_err(|e| anyhow!(e))
@@ -425,6 +435,7 @@ mod tpm_tests {
                         neg_config.clone(),
                         None,
                         DEFAULT_ATTESTATION_INTERVAL_SECONDS,
+                        None,
                     ),
                     guard,
                 );
@@ -437,6 +448,7 @@ mod tpm_tests {
                 neg_config.clone(),
                 Some(context_info),
                 DEFAULT_ATTESTATION_INTERVAL_SECONDS,
+                None,
             ),
             guard,
         )
@@ -611,9 +623,11 @@ mod tpm_tests {
         let mut context_info = sm.context_info.clone().unwrap();
 
         registration::set_mock_result(Ok(()));
-        let res =
-            registration::check_registration(Some(context_info.clone()))
-                .await;
+        let res = registration::check_registration(
+            Some(context_info.clone()),
+            None,
+        )
+        .await;
 
         match res {
             Ok(()) => {
@@ -654,8 +668,11 @@ mod tpm_tests {
                 agent_data_path: "".to_string(),
             })
             .expect("This test requires TPM access with proper permissions");
-        let _ = registration::check_registration(Some(context_info.clone()))
-            .await;
+        let _ = registration::check_registration(
+            Some(context_info.clone()),
+            None,
+        )
+        .await;
 
         let mock_server = MockServer::start().await;
 
@@ -704,6 +721,7 @@ mod tpm_tests {
             neg_config,
             Some(context_info.clone()),
             DEFAULT_ATTESTATION_INTERVAL_SECONDS,
+            None,
         );
 
         // We can't easily test the full run() method since it loops indefinitely.
@@ -766,6 +784,7 @@ mod tests {
             test_config,
             None,
             DEFAULT_ATTESTATION_INTERVAL_SECONDS,
+            None,
         );
 
         // Should start in Unregistered state when no context info is provided.
@@ -793,6 +812,7 @@ mod tests {
             test_config,
             None,
             DEFAULT_ATTESTATION_INTERVAL_SECONDS,
+            None,
         );
 
         let debug_output = format!("{:?}", state_machine.get_current_state());
@@ -816,6 +836,7 @@ mod tests {
             test_config,
             None,
             DEFAULT_ATTESTATION_INTERVAL_SECONDS,
+            None,
         );
 
         // Start in Unregistered state.
@@ -852,6 +873,7 @@ mod tests {
             test_config,
             None,
             DEFAULT_ATTESTATION_INTERVAL_SECONDS,
+            None,
         );
 
         // Should start in Unregistered state.
@@ -878,6 +900,7 @@ mod tests {
             test_config,
             None,
             DEFAULT_ATTESTATION_INTERVAL_SECONDS,
+            None,
         );
 
         // Verify that context_info is None when not provided.
@@ -901,6 +924,7 @@ mod tests {
             test_config,
             None,
             DEFAULT_ATTESTATION_INTERVAL_SECONDS,
+            None,
         );
 
         // Test that the configuration references are stored correctly.
@@ -928,6 +952,7 @@ mod tests {
             test_config,
             None,
             DEFAULT_ATTESTATION_INTERVAL_SECONDS,
+            None,
         );
 
         // Manually set to Failed state to test error handling.
@@ -959,6 +984,7 @@ mod tests {
             test_config,
             None,
             DEFAULT_ATTESTATION_INTERVAL_SECONDS,
+            None,
         );
 
         // Manually set to Failed state to test error handling.
@@ -985,6 +1011,7 @@ mod tests {
             test_config1,
             None,
             DEFAULT_ATTESTATION_INTERVAL_SECONDS,
+            None,
         );
         assert!(matches!(
             state_machine1.get_current_state(),
@@ -1000,6 +1027,7 @@ mod tests {
             test_config2,
             None,
             DEFAULT_ATTESTATION_INTERVAL_SECONDS,
+            None,
         );
         assert!(matches!(
             state_machine2.get_current_state(),
@@ -1024,6 +1052,7 @@ mod tests {
             test_config,
             None,
             DEFAULT_ATTESTATION_INTERVAL_SECONDS,
+            None,
         );
 
         // Test that avoid_tpm is properly configured through the test config.
@@ -1051,6 +1080,7 @@ mod tests {
             test_config,
             None,
             DEFAULT_ATTESTATION_INTERVAL_SECONDS,
+            None,
         );
 
         // Set a test error and verify debug formatting works.
@@ -1083,6 +1113,7 @@ mod tests {
             test_config,
             None,
             DEFAULT_ATTESTATION_INTERVAL_SECONDS,
+            None,
         );
 
         // Test with valid seconds_to_next_attestation field in meta object.

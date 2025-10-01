@@ -23,6 +23,11 @@ pub struct AgentRegistrationConfig {
     pub enable_iak_idevid: bool,
     pub registrar_ip: String,
     pub registrar_port: u32,
+    pub registrar_ca_cert: Option<String>,
+    pub registrar_client_cert: Option<String>,
+    pub registrar_client_key: Option<String>,
+    pub registrar_insecure: Option<bool>,
+    pub registrar_timeout: Option<u64>,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -116,12 +121,29 @@ pub async fn register_agent(
 
     // Build the registrar client
     // Create a RegistrarClientBuilder and set the parameters
-    let mut registrar_client = RegistrarClientBuilder::new()
+    let mut builder = RegistrarClientBuilder::new()
         .registrar_address(ac.registrar_ip.clone())
         .registrar_port(ac.registrar_port)
-        .retry_config(aa.retry_config.clone())
-        .build()
-        .await?;
+        .retry_config(aa.retry_config.clone());
+
+    // Add TLS configuration if provided
+    if let Some(ca_cert) = &ac.registrar_ca_cert {
+        builder = builder.ca_certificate(ca_cert.clone());
+    }
+    if let Some(client_cert) = &ac.registrar_client_cert {
+        builder = builder.certificate(client_cert.clone());
+    }
+    if let Some(client_key) = &ac.registrar_client_key {
+        builder = builder.key(client_key.clone());
+    }
+    if let Some(insecure) = ac.registrar_insecure {
+        builder = builder.insecure(insecure);
+    }
+    if let Some(timeout) = ac.registrar_timeout {
+        builder = builder.timeout(timeout);
+    }
+
+    let mut registrar_client = builder.build().await?;
 
     // Request keyblob material
     let keyblob = registrar_client.register_agent(&ai).await?;
