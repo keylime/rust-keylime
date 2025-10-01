@@ -33,6 +33,8 @@ use std::{
 };
 use thiserror::Error;
 
+use crate::algorithms::EncryptionAlgorithm;
+
 pub const AES_128_KEY_LEN: usize = 16;
 pub const AES_256_KEY_LEN: usize = 32;
 pub const AES_BLOCK_SIZE: usize = 16;
@@ -55,6 +57,10 @@ pub enum CryptoError {
     /// Error obtaining EC private key from structure
     #[error("failed to get EC private key from structure")]
     ECGetPrivateKeyError(#[source] openssl::error::ErrorStack),
+
+    /// Error creating EcGroup from NID
+    #[error("failed to create EcGroup from NID")]
+    ECGroupFromNidError(#[source] openssl::error::ErrorStack),
 
     /// Error creating EcKey structure from public point
     #[error("failed to create EcKey structure from public point")]
@@ -584,6 +590,93 @@ pub fn write_key_pair(
     Ok(())
 }
 
+/// Load an existing key pair from a file or generate a new one if it doesn't exist
+///
+/// This function implements the load-or-generate pattern for asymmetric keys:
+/// - If the file exists, it loads the key and optionally validates the algorithm
+/// - If the file doesn't exist, it generates a new key with the specified algorithm and saves it
+///
+/// # Arguments
+///
+/// * `path` - Path to the key file
+/// * `password` - Optional password to encrypt/decrypt the key
+/// * `algorithm` - The encryption algorithm to use (e.g., RSA 2048, ECC 256)
+/// * `validate_algorithm` - Whether to validate that a loaded key matches the specified algorithm
+///
+/// # Returns
+///
+/// A tuple containing the public and private keys
+///
+/// # Errors
+///
+/// Returns an error if:
+/// - The file exists but cannot be loaded
+/// - The file exists and validation is enabled, but the key doesn't match the algorithm
+/// - A new key cannot be generated or saved
+pub fn load_or_generate_key(
+    path: &Path,
+    password: Option<&str>,
+    algorithm: EncryptionAlgorithm,
+    validate_algorithm: bool,
+) -> Result<(PKey<Public>, PKey<Private>), CryptoError> {
+    use openssl::ec::EcGroup;
+
+    if path.exists() {
+        // Load existing key
+        let (public, private) = load_key_pair(path, password)?;
+
+        // Validate algorithm if requested
+        if validate_algorithm {
+            validate_key_algorithm(&private, algorithm)?;
+        }
+
+        Ok((public, private))
+    } else {
+        // Generate new key with the specified algorithm
+        let (public, private) = match algorithm {
+            EncryptionAlgorithm::Rsa1024 => rsa_generate_pair(1024)?,
+            EncryptionAlgorithm::Rsa2048 => rsa_generate_pair(2048)?,
+            EncryptionAlgorithm::Rsa3072 => rsa_generate_pair(3072)?,
+            EncryptionAlgorithm::Rsa4096 => rsa_generate_pair(4096)?,
+            EncryptionAlgorithm::Ecc192 => {
+                let group = EcGroup::from_curve_name(Nid::X9_62_PRIME192V1)
+                    .map_err(CryptoError::ECGroupFromNidError)?;
+                ecc_generate_pair(&group)?
+            }
+            EncryptionAlgorithm::Ecc224 => {
+                let group = EcGroup::from_curve_name(Nid::SECP224R1)
+                    .map_err(CryptoError::ECGroupFromNidError)?;
+                ecc_generate_pair(&group)?
+            }
+            EncryptionAlgorithm::Ecc256 => {
+                let group = EcGroup::from_curve_name(Nid::X9_62_PRIME256V1)
+                    .map_err(CryptoError::ECGroupFromNidError)?;
+                ecc_generate_pair(&group)?
+            }
+            EncryptionAlgorithm::Ecc384 => {
+                let group = EcGroup::from_curve_name(Nid::SECP384R1)
+                    .map_err(CryptoError::ECGroupFromNidError)?;
+                ecc_generate_pair(&group)?
+            }
+            EncryptionAlgorithm::Ecc521 => {
+                let group = EcGroup::from_curve_name(Nid::SECP521R1)
+                    .map_err(CryptoError::ECGroupFromNidError)?;
+                ecc_generate_pair(&group)?
+            }
+            EncryptionAlgorithm::EccSm2 => {
+                let group = EcGroup::from_curve_name(Nid::SM2)
+                    .map_err(CryptoError::ECGroupFromNidError)?;
+                ecc_generate_pair(&group)?
+            }
+        };
+
+        // Save the key to the file
+        write_key_pair(&private, path, password)?;
+
+        Ok((public, private))
+    }
+}
+
 fn rsa_generate(key_size: u32) -> Result<PKey<Private>, CryptoError> {
     PKey::from_rsa(
         Rsa::generate(key_size).map_err(CryptoError::RSAGenerateError)?,
@@ -601,6 +694,57 @@ pub fn rsa_generate_pair(
     let public = pkey_pub_from_priv(&private)?;
 
     Ok((public, private))
+}
+
+/// Validate that a private key matches the specified encryption algorithm
+///
+/// Returns Ok(()) if the key matches the algorithm, otherwise returns an error
+pub fn validate_key_algorithm(
+    key: &PKey<Private>,
+    algorithm: EncryptionAlgorithm,
+) -> Result<(), CryptoError> {
+    use crate::algorithms::{get_key_class, get_key_size, KeyClass};
+
+    // Determine the expected key class and ID
+    let key_class = get_key_class(&algorithm);
+    let expected_key_id = match key_class {
+        KeyClass::Asymmetric => match algorithm {
+            EncryptionAlgorithm::Rsa1024
+            | EncryptionAlgorithm::Rsa2048
+            | EncryptionAlgorithm::Rsa3072
+            | EncryptionAlgorithm::Rsa4096 => Id::RSA,
+            EncryptionAlgorithm::Ecc192
+            | EncryptionAlgorithm::Ecc224
+            | EncryptionAlgorithm::Ecc256
+            | EncryptionAlgorithm::Ecc384
+            | EncryptionAlgorithm::Ecc521
+            | EncryptionAlgorithm::EccSm2 => Id::EC,
+        },
+        KeyClass::Symmetric => {
+            return Err(CryptoError::UnsupportedKeyAlgorithm {
+                id: "Symmetric algorithms not supported for key validation"
+                    .to_string(),
+            });
+        }
+    };
+
+    // Check if the key algorithm matches
+    if key.id() != expected_key_id {
+        return Err(CryptoError::UnsupportedKeyAlgorithm {
+            id: format!("{:?}", key.id()),
+        });
+    }
+
+    // Check if the key size matches
+    let key_bits = key.bits();
+    let expected_bits = get_key_size(&algorithm);
+    if key_bits as usize != expected_bits {
+        return Err(CryptoError::InvalidKeyLength {
+            length: key_bits as usize,
+        });
+    }
+
+    Ok(())
 }
 
 /// Generate a ECC key pair on given group
@@ -1501,5 +1645,300 @@ mod tests {
             let s = r.unwrap(); //#[allow_ci]
             assert_eq!(s, template);
         }
+    }
+
+    #[test]
+    fn test_validate_key_algorithm_rsa_2048() {
+        // Generate RSA 2048 key and validate it
+        let (_, private_key) = rsa_generate_pair(2048).unwrap(); //#[allow_ci]
+        let result = validate_key_algorithm(
+            &private_key,
+            EncryptionAlgorithm::Rsa2048,
+        );
+        assert!(result.is_ok(), "RSA 2048 key should validate successfully");
+    }
+
+    #[test]
+    fn test_validate_key_algorithm_rsa_3072() {
+        // Generate RSA 3072 key and validate it
+        let (_, private_key) = rsa_generate_pair(3072).unwrap(); //#[allow_ci]
+        let result = validate_key_algorithm(
+            &private_key,
+            EncryptionAlgorithm::Rsa3072,
+        );
+        assert!(result.is_ok(), "RSA 3072 key should validate successfully");
+    }
+
+    #[test]
+    fn test_validate_key_algorithm_rsa_4096() {
+        // Generate RSA 4096 key and validate it
+        let (_, private_key) = rsa_generate_pair(4096).unwrap(); //#[allow_ci]
+        let result = validate_key_algorithm(
+            &private_key,
+            EncryptionAlgorithm::Rsa4096,
+        );
+        assert!(result.is_ok(), "RSA 4096 key should validate successfully");
+    }
+
+    #[test]
+    fn test_validate_key_algorithm_wrong_size() {
+        // Generate RSA 2048 key but validate as RSA 4096
+        let (_, private_key) = rsa_generate_pair(2048).unwrap(); //#[allow_ci]
+        let result = validate_key_algorithm(
+            &private_key,
+            EncryptionAlgorithm::Rsa4096,
+        );
+        assert!(
+            result.is_err(),
+            "RSA 2048 key should fail RSA 4096 validation"
+        );
+
+        // Verify it's specifically an InvalidKeyLength error
+        match result {
+            Err(CryptoError::InvalidKeyLength { length }) => {
+                assert_eq!(length, 2048, "Error should report 2048 bit key");
+            }
+            _ => panic!("Expected InvalidKeyLength error"), //#[allow_ci]
+        }
+    }
+
+    #[test]
+    fn test_validate_key_algorithm_ecc_256() {
+        use openssl::ec::EcGroup;
+
+        // Generate ECC 256 key and validate it
+        let group = EcGroup::from_curve_name(Nid::X9_62_PRIME256V1).unwrap(); //#[allow_ci]
+        let (_, private_key) = ecc_generate_pair(&group).unwrap(); //#[allow_ci]
+        let result =
+            validate_key_algorithm(&private_key, EncryptionAlgorithm::Ecc256);
+        assert!(result.is_ok(), "ECC 256 key should validate successfully");
+    }
+
+    #[test]
+    fn test_validate_key_algorithm_ecc_384() {
+        use openssl::ec::EcGroup;
+
+        // Generate ECC 384 key and validate it
+        let group = EcGroup::from_curve_name(Nid::SECP384R1).unwrap(); //#[allow_ci]
+        let (_, private_key) = ecc_generate_pair(&group).unwrap(); //#[allow_ci]
+        let result =
+            validate_key_algorithm(&private_key, EncryptionAlgorithm::Ecc384);
+        assert!(result.is_ok(), "ECC 384 key should validate successfully");
+    }
+
+    #[test]
+    fn test_load_or_generate_key_creates_new() {
+        use tempfile::tempdir;
+
+        let dir = tempdir().unwrap(); //#[allow_ci]
+        let key_path = dir.path().join("test-key.pem");
+
+        // File doesn't exist, should generate new key
+        assert!(!key_path.exists());
+
+        let result = load_or_generate_key(
+            &key_path,
+            None,
+            EncryptionAlgorithm::Rsa2048,
+            false,
+        );
+
+        assert!(result.is_ok(), "Should generate new key successfully");
+        assert!(key_path.exists(), "Key file should be created");
+
+        // Verify the key is valid RSA 2048
+        let (_, private_key) = result.unwrap(); //#[allow_ci]
+        let validation = validate_key_algorithm(
+            &private_key,
+            EncryptionAlgorithm::Rsa2048,
+        );
+        assert!(validation.is_ok(), "Generated key should be RSA 2048");
+    }
+
+    #[test]
+    fn test_load_or_generate_key_loads_existing() {
+        use tempfile::tempdir;
+
+        let dir = tempdir().unwrap(); //#[allow_ci]
+        let key_path = dir.path().join("test-key.pem");
+
+        // First, generate and save a key
+        let (pub1, priv1) = rsa_generate_pair(2048).unwrap(); //#[allow_ci]
+        write_key_pair(&priv1, &key_path, None).unwrap(); //#[allow_ci]
+
+        // Now load it using load_or_generate_key
+        let result = load_or_generate_key(
+            &key_path,
+            None,
+            EncryptionAlgorithm::Rsa2048,
+            false,
+        );
+
+        assert!(result.is_ok(), "Should load existing key successfully");
+
+        let (pub2, _priv2) = result.unwrap(); //#[allow_ci]
+
+        // Verify it's the same key by comparing public keys
+        let pub1_der = pub1.public_key_to_der().unwrap(); //#[allow_ci]
+        let pub2_der = pub2.public_key_to_der().unwrap(); //#[allow_ci]
+        assert_eq!(
+            pub1_der, pub2_der,
+            "Loaded key should be the same as saved key"
+        );
+    }
+
+    #[test]
+    fn test_load_or_generate_key_with_password() {
+        use tempfile::tempdir;
+
+        let dir = tempdir().unwrap(); //#[allow_ci]
+        let key_path = dir.path().join("test-key-encrypted.pem");
+        let password = "test_password_123";
+
+        // Generate key with password
+        let result = load_or_generate_key(
+            &key_path,
+            Some(password),
+            EncryptionAlgorithm::Rsa2048,
+            false,
+        );
+
+        assert!(result.is_ok(), "Should generate encrypted key successfully");
+        assert!(key_path.exists(), "Encrypted key file should be created");
+
+        let (pub1, _) = result.unwrap(); //#[allow_ci]
+
+        // Load the same key with password
+        let result2 = load_or_generate_key(
+            &key_path,
+            Some(password),
+            EncryptionAlgorithm::Rsa2048,
+            false,
+        );
+
+        assert!(result2.is_ok(), "Should load encrypted key successfully");
+
+        let (pub2, _) = result2.unwrap(); //#[allow_ci]
+
+        // Verify it's the same key
+        let pub1_der = pub1.public_key_to_der().unwrap(); //#[allow_ci]
+        let pub2_der = pub2.public_key_to_der().unwrap(); //#[allow_ci]
+        assert_eq!(pub1_der, pub2_der, "Loaded key should be the same");
+    }
+
+    #[test]
+    fn test_load_or_generate_key_validates_algorithm() {
+        use tempfile::tempdir;
+
+        let dir = tempdir().unwrap(); //#[allow_ci]
+        let key_path = dir.path().join("test-key.pem");
+
+        // Generate and save an RSA 2048 key
+        let (_, priv_key) = rsa_generate_pair(2048).unwrap(); //#[allow_ci]
+        write_key_pair(&priv_key, &key_path, None).unwrap(); //#[allow_ci]
+
+        // Try to load it as RSA 4096 with validation enabled
+        let result = load_or_generate_key(
+            &key_path,
+            None,
+            EncryptionAlgorithm::Rsa4096,
+            true, // Enable validation
+        );
+
+        assert!(
+            result.is_err(),
+            "Should fail validation when key size doesn't match"
+        );
+
+        // Verify it's an InvalidKeyLength error
+        match result {
+            Err(CryptoError::InvalidKeyLength { length }) => {
+                assert_eq!(
+                    length, 2048,
+                    "Error should report actual key size"
+                );
+            }
+            _ => panic!("Expected InvalidKeyLength error"), //#[allow_ci]
+        }
+    }
+
+    #[test]
+    fn test_load_or_generate_key_without_validation() {
+        use tempfile::tempdir;
+
+        let dir = tempdir().unwrap(); //#[allow_ci]
+        let key_path = dir.path().join("test-key.pem");
+
+        // Generate and save an RSA 2048 key
+        let (pub1, priv1) = rsa_generate_pair(2048).unwrap(); //#[allow_ci]
+        write_key_pair(&priv1, &key_path, None).unwrap(); //#[allow_ci]
+
+        // Load it as RSA 4096 but with validation disabled
+        let result = load_or_generate_key(
+            &key_path,
+            None,
+            EncryptionAlgorithm::Rsa4096,
+            false, // Disable validation
+        );
+
+        assert!(
+            result.is_ok(),
+            "Should load successfully when validation is disabled"
+        );
+
+        let (pub2, _) = result.unwrap(); //#[allow_ci]
+
+        // Verify it loaded the existing key (not generated a new one)
+        let pub1_der = pub1.public_key_to_der().unwrap(); //#[allow_ci]
+        let pub2_der = pub2.public_key_to_der().unwrap(); //#[allow_ci]
+        assert_eq!(pub1_der, pub2_der, "Should load existing key");
+    }
+
+    #[test]
+    fn test_load_or_generate_key_rsa_3072() {
+        use tempfile::tempdir;
+
+        let dir = tempdir().unwrap(); //#[allow_ci]
+        let key_path = dir.path().join("test-key-3072.pem");
+
+        // Generate RSA 3072 key
+        let result = load_or_generate_key(
+            &key_path,
+            None,
+            EncryptionAlgorithm::Rsa3072,
+            true,
+        );
+
+        assert!(result.is_ok(), "Should generate RSA 3072 key successfully");
+
+        let (_, private_key) = result.unwrap(); //#[allow_ci]
+        let validation = validate_key_algorithm(
+            &private_key,
+            EncryptionAlgorithm::Rsa3072,
+        );
+        assert!(validation.is_ok(), "Generated key should be RSA 3072");
+    }
+
+    #[test]
+    fn test_load_or_generate_key_ecc_256() {
+        use tempfile::tempdir;
+
+        let dir = tempdir().unwrap(); //#[allow_ci]
+        let key_path = dir.path().join("test-ecc-256.pem");
+
+        // Generate ECC 256 key
+        let result = load_or_generate_key(
+            &key_path,
+            None,
+            EncryptionAlgorithm::Ecc256,
+            true,
+        );
+
+        assert!(result.is_ok(), "Should generate ECC 256 key successfully");
+
+        let (_, private_key) = result.unwrap(); //#[allow_ci]
+        let validation =
+            validate_key_algorithm(&private_key, EncryptionAlgorithm::Ecc256);
+        assert!(validation.is_ok(), "Generated key should be ECC 256");
     }
 }
