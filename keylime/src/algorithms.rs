@@ -185,6 +185,23 @@ pub fn get_key_size(tpm_encryption_alg: &EncryptionAlgorithm) -> usize {
     }
 }
 
+pub fn get_key_algorithm_family(
+    tpm_encryption_alg: &EncryptionAlgorithm,
+) -> &'static str {
+    match tpm_encryption_alg {
+        EncryptionAlgorithm::Rsa1024
+        | EncryptionAlgorithm::Rsa2048
+        | EncryptionAlgorithm::Rsa3072
+        | EncryptionAlgorithm::Rsa4096 => "rsa",
+        EncryptionAlgorithm::Ecc192
+        | EncryptionAlgorithm::Ecc224
+        | EncryptionAlgorithm::Ecc256
+        | EncryptionAlgorithm::Ecc384
+        | EncryptionAlgorithm::Ecc521
+        | EncryptionAlgorithm::EccSm2 => "ecc",
+    }
+}
+
 impl From<EncryptionAlgorithm> for AsymmetricAlgorithm {
     fn from(enc_alg: EncryptionAlgorithm) -> Self {
         match enc_alg {
@@ -484,6 +501,29 @@ mod tests {
             );
         }
     } // test_get_key_size
+
+    #[test]
+    fn test_get_key_algorithm_family() {
+        let algorithms = [
+            (EncryptionAlgorithm::Rsa1024, "rsa"),
+            (EncryptionAlgorithm::Rsa2048, "rsa"),
+            (EncryptionAlgorithm::Rsa3072, "rsa"),
+            (EncryptionAlgorithm::Rsa4096, "rsa"),
+            (EncryptionAlgorithm::Ecc192, "ecc"),
+            (EncryptionAlgorithm::Ecc224, "ecc"),
+            (EncryptionAlgorithm::Ecc256, "ecc"),
+            (EncryptionAlgorithm::Ecc384, "ecc"),
+            (EncryptionAlgorithm::Ecc521, "ecc"),
+            (EncryptionAlgorithm::EccSm2, "ecc"),
+        ];
+        for (alg, expected_family) in algorithms {
+            let family = get_key_algorithm_family(&alg);
+            assert_eq!(
+                family, expected_family,
+                "Algorithm family mismatch for {alg}"
+            );
+        }
+    } // test_get_key_algorithm_family
 
     #[test]
     fn test_get_ecc_curve_key_size() {
