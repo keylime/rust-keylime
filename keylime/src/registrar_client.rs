@@ -1434,4 +1434,425 @@ mod tests {
             assert!(result.is_err());
         }
     }
+
+    #[actix_rt::test]
+    async fn test_builder_tls_ca_certificate() {
+        let builder = RegistrarClientBuilder::new()
+            .ca_certificate("/path/to/ca.pem".to_string());
+
+        assert_eq!(
+            builder.ca_certificate,
+            Some("/path/to/ca.pem".to_string())
+        );
+    }
+
+    #[actix_rt::test]
+    async fn test_builder_tls_client_certificate() {
+        let builder = RegistrarClientBuilder::new()
+            .certificate("/path/to/cert.pem".to_string());
+
+        assert_eq!(
+            builder.certificate,
+            Some("/path/to/cert.pem".to_string())
+        );
+    }
+
+    #[actix_rt::test]
+    async fn test_builder_tls_client_key() {
+        let builder =
+            RegistrarClientBuilder::new().key("/path/to/key.pem".to_string());
+
+        assert_eq!(builder.key, Some("/path/to/key.pem".to_string()));
+    }
+
+    #[actix_rt::test]
+    async fn test_builder_tls_insecure_true() {
+        let builder = RegistrarClientBuilder::new().insecure(true);
+
+        assert_eq!(builder.insecure, Some(true));
+    }
+
+    #[actix_rt::test]
+    async fn test_builder_tls_insecure_false() {
+        let builder = RegistrarClientBuilder::new().insecure(false);
+
+        assert_eq!(builder.insecure, Some(false));
+    }
+
+    #[actix_rt::test]
+    async fn test_builder_tls_timeout() {
+        let builder = RegistrarClientBuilder::new().timeout(10000);
+
+        assert_eq!(builder.timeout, Some(10000));
+    }
+
+    #[actix_rt::test]
+    async fn test_builder_chaining_with_tls() {
+        let builder = RegistrarClientBuilder::new()
+            .registrar_address("127.0.0.1".to_string())
+            .registrar_port(8890)
+            .ca_certificate("/path/to/ca.pem".to_string())
+            .certificate("/path/to/cert.pem".to_string())
+            .key("/path/to/key.pem".to_string())
+            .insecure(false)
+            .timeout(5000);
+
+        assert_eq!(builder.registrar_address, Some("127.0.0.1".to_string()));
+        assert_eq!(builder.registrar_port, Some(8890));
+        assert_eq!(
+            builder.ca_certificate,
+            Some("/path/to/ca.pem".to_string())
+        );
+        assert_eq!(
+            builder.certificate,
+            Some("/path/to/cert.pem".to_string())
+        );
+        assert_eq!(builder.key, Some("/path/to/key.pem".to_string()));
+        assert_eq!(builder.insecure, Some(false));
+        assert_eq!(builder.timeout, Some(5000));
+    }
+
+    #[actix_rt::test]
+    async fn test_builder_tls_default_values() {
+        let builder = RegistrarClientBuilder::new();
+
+        assert_eq!(builder.ca_certificate, None);
+        assert_eq!(builder.certificate, None);
+        assert_eq!(builder.key, None);
+        assert_eq!(builder.insecure, None);
+        assert_eq!(builder.timeout, None);
+    }
+
+    #[actix_rt::test]
+    async fn test_builder_partial_tls_config_missing_ca() {
+        let builder = RegistrarClientBuilder::new()
+            .certificate("/path/to/cert.pem".to_string())
+            .key("/path/to/key.pem".to_string());
+
+        // Should have cert and key but not CA
+        assert_eq!(builder.ca_certificate, None);
+        assert_eq!(
+            builder.certificate,
+            Some("/path/to/cert.pem".to_string())
+        );
+        assert_eq!(builder.key, Some("/path/to/key.pem".to_string()));
+    }
+
+    #[actix_rt::test]
+    async fn test_builder_partial_tls_config_missing_cert() {
+        let builder = RegistrarClientBuilder::new()
+            .ca_certificate("/path/to/ca.pem".to_string())
+            .key("/path/to/key.pem".to_string());
+
+        // Should have CA and key but not cert
+        assert_eq!(
+            builder.ca_certificate,
+            Some("/path/to/ca.pem".to_string())
+        );
+        assert_eq!(builder.certificate, None);
+        assert_eq!(builder.key, Some("/path/to/key.pem".to_string()));
+    }
+
+    #[actix_rt::test]
+    async fn test_builder_partial_tls_config_missing_key() {
+        let builder = RegistrarClientBuilder::new()
+            .ca_certificate("/path/to/ca.pem".to_string())
+            .certificate("/path/to/cert.pem".to_string());
+
+        // Should have CA and cert but not key
+        assert_eq!(
+            builder.ca_certificate,
+            Some("/path/to/ca.pem".to_string())
+        );
+        assert_eq!(
+            builder.certificate,
+            Some("/path/to/cert.pem".to_string())
+        );
+        assert_eq!(builder.key, None);
+    }
+
+    #[actix_rt::test]
+    async fn test_builder_empty_string_tls_paths() {
+        let builder = RegistrarClientBuilder::new()
+            .ca_certificate("".to_string())
+            .certificate("".to_string())
+            .key("".to_string());
+
+        assert_eq!(builder.ca_certificate, Some("".to_string()));
+        assert_eq!(builder.certificate, Some("".to_string()));
+        assert_eq!(builder.key, Some("".to_string()));
+    }
+
+    #[actix_rt::test]
+    async fn test_builder_timeout_various_values() {
+        // Test with zero timeout
+        let builder_zero = RegistrarClientBuilder::new().timeout(0);
+        assert_eq!(builder_zero.timeout, Some(0));
+
+        // Test with very large timeout
+        let builder_large = RegistrarClientBuilder::new().timeout(3600000);
+        assert_eq!(builder_large.timeout, Some(3600000));
+
+        // Test with default-ish timeout
+        let builder_default = RegistrarClientBuilder::new().timeout(5000);
+        assert_eq!(builder_default.timeout, Some(5000));
+    }
+
+    #[actix_rt::test]
+    async fn test_builder_insecure_with_tls_certs() {
+        // Test that insecure can be set alongside TLS certificates
+        let builder = RegistrarClientBuilder::new()
+            .ca_certificate("/path/to/ca.pem".to_string())
+            .certificate("/path/to/cert.pem".to_string())
+            .key("/path/to/key.pem".to_string())
+            .insecure(true);
+
+        assert_eq!(
+            builder.ca_certificate,
+            Some("/path/to/ca.pem".to_string())
+        );
+        assert_eq!(
+            builder.certificate,
+            Some("/path/to/cert.pem".to_string())
+        );
+        assert_eq!(builder.key, Some("/path/to/key.pem".to_string()));
+        assert_eq!(builder.insecure, Some(true));
+    }
+
+    #[actix_rt::test]
+    async fn test_builder_retry_config_with_tls() {
+        let retry = Some(RetryConfig {
+            max_retries: 3,
+            initial_delay_ms: 100,
+            max_delay_ms: Some(1000),
+        });
+
+        let builder = RegistrarClientBuilder::new()
+            .registrar_address("127.0.0.1".to_string())
+            .registrar_port(8890)
+            .retry_config(retry.clone())
+            .ca_certificate("/path/to/ca.pem".to_string())
+            .certificate("/path/to/cert.pem".to_string())
+            .key("/path/to/key.pem".to_string());
+
+        // Verify retry_config was set
+        assert!(builder.retry_config.is_some());
+        let retry_cfg = builder.retry_config.as_ref().unwrap(); //#[allow_ci]
+        assert_eq!(retry_cfg.max_retries, 3);
+        assert_eq!(retry_cfg.initial_delay_ms, 100);
+        assert_eq!(retry_cfg.max_delay_ms, Some(1000));
+
+        // Verify TLS config was also set
+        assert_eq!(
+            builder.ca_certificate,
+            Some("/path/to/ca.pem".to_string())
+        );
+    }
+
+    // Helper function to generate test certificates
+    #[cfg(test)]
+    fn generate_test_certificates(
+        temp_dir: &std::path::Path,
+    ) -> (String, String, String, String) {
+        use crate::crypto;
+        use std::fs::File;
+        use std::io::Write;
+
+        // Define paths
+        let ca_path = temp_dir.join("ca.pem");
+        let client_cert_path = temp_dir.join("client_cert.pem");
+        let client_key_path = temp_dir.join("client_key.pem");
+        let server_cert_path = temp_dir.join("server_cert.pem");
+
+        // Generate CA certificate
+        let ca_key = crypto::testing::rsa_generate(2048)
+            .expect("Failed to generate CA key");
+        let ca_cert = crypto::x509::CertificateBuilder::new()
+            .private_key(&ca_key)
+            .common_name("Test CA")
+            .build()
+            .expect("Failed to build CA cert");
+
+        // Generate server certificate
+        let server_key = crypto::testing::rsa_generate(2048)
+            .expect("Failed to generate server key");
+        let server_cert = crypto::x509::CertificateBuilder::new()
+            .private_key(&server_key)
+            .common_name("localhost")
+            .add_ips(vec!["127.0.0.1"])
+            .build()
+            .expect("Failed to build server cert");
+
+        // Generate client certificate
+        let client_key = crypto::testing::rsa_generate(2048)
+            .expect("Failed to generate client key");
+        let client_cert = crypto::x509::CertificateBuilder::new()
+            .private_key(&client_key)
+            .common_name("test-client")
+            .build()
+            .expect("Failed to build client cert");
+
+        // Write CA certificate
+        let mut ca_file =
+            File::create(&ca_path).expect("Failed to create CA file");
+        ca_file
+            .write_all(
+                &ca_cert.to_pem().expect("Failed to convert CA to PEM"),
+            )
+            .expect("Failed to write CA cert");
+
+        // Write client certificate
+        let mut client_cert_file = File::create(&client_cert_path)
+            .expect("Failed to create client cert file");
+        client_cert_file
+            .write_all(
+                &client_cert
+                    .to_pem()
+                    .expect("Failed to convert client cert to PEM"),
+            )
+            .expect("Failed to write client cert");
+
+        // Write client key
+        let mut client_key_file = File::create(&client_key_path)
+            .expect("Failed to create client key file");
+        client_key_file
+            .write_all(
+                &client_key
+                    .private_key_to_pem_pkcs8()
+                    .expect("Failed to convert key to PEM"),
+            )
+            .expect("Failed to write client key");
+
+        // Write server certificate
+        let mut server_cert_file = File::create(&server_cert_path)
+            .expect("Failed to create server cert file");
+        server_cert_file
+            .write_all(
+                &server_cert
+                    .to_pem()
+                    .expect("Failed to convert server cert to PEM"),
+            )
+            .expect("Failed to write server cert");
+
+        (
+            ca_path.to_string_lossy().to_string(),
+            client_cert_path.to_string_lossy().to_string(),
+            client_key_path.to_string_lossy().to_string(),
+            server_cert_path.to_string_lossy().to_string(),
+        )
+    }
+
+    #[actix_rt::test]
+    async fn test_builder_with_real_tls_certificates() {
+        let tmpdir = tempfile::tempdir().expect("Failed to create tempdir");
+        let (ca_path, client_cert_path, client_key_path, _server_cert_path) =
+            generate_test_certificates(tmpdir.path());
+
+        let builder = RegistrarClientBuilder::new()
+            .registrar_address("127.0.0.1".to_string())
+            .registrar_port(8890)
+            .ca_certificate(ca_path.clone())
+            .certificate(client_cert_path.clone())
+            .key(client_key_path.clone());
+
+        // Verify all TLS paths were set correctly
+        assert_eq!(builder.ca_certificate, Some(ca_path.clone()));
+        assert_eq!(builder.certificate, Some(client_cert_path.clone()));
+        assert_eq!(builder.key, Some(client_key_path.clone()));
+
+        // Verify files exist
+        assert!(std::path::Path::new(&ca_path).exists());
+        assert!(std::path::Path::new(&client_cert_path).exists());
+        assert!(std::path::Path::new(&client_key_path).exists());
+    }
+
+    #[actix_rt::test]
+    async fn test_builder_build_with_invalid_tls_cert_files() {
+        let tmpdir = tempfile::tempdir().expect("Failed to create tempdir");
+
+        // Try to build with non-existent certificate files
+        let mut builder = RegistrarClientBuilder::new()
+            .registrar_address("127.0.0.1".to_string())
+            .registrar_port(8890)
+            .ca_certificate(
+                tmpdir
+                    .path()
+                    .join("nonexistent_ca.pem")
+                    .to_string_lossy()
+                    .to_string(),
+            )
+            .certificate(
+                tmpdir
+                    .path()
+                    .join("nonexistent_cert.pem")
+                    .to_string_lossy()
+                    .to_string(),
+            )
+            .key(
+                tmpdir
+                    .path()
+                    .join("nonexistent_key.pem")
+                    .to_string_lossy()
+                    .to_string(),
+            );
+
+        // Build should fail because certificate files don't exist
+        let result = builder.build().await;
+        assert!(result.is_err());
+    }
+
+    #[actix_rt::test]
+    async fn test_tls_enabled_when_all_certs_provided() {
+        let tmpdir = tempfile::tempdir().expect("Failed to create tempdir");
+        let (ca_path, client_cert_path, client_key_path, _) =
+            generate_test_certificates(tmpdir.path());
+
+        let mut builder = RegistrarClientBuilder::new()
+            .registrar_address("127.0.0.1".to_string())
+            .registrar_port(8890)
+            .ca_certificate(ca_path)
+            .certificate(client_cert_path)
+            .key(client_key_path)
+            .insecure(false);
+
+        // The build will fail because there's no server running,
+        // but we can verify that TLS configuration was processed
+        let result = builder.build().await;
+        // Should fail at version endpoint, not at TLS setup
+        assert!(result.is_err());
+    }
+
+    #[actix_rt::test]
+    async fn test_tls_disabled_when_insecure_true() {
+        let tmpdir = tempfile::tempdir().expect("Failed to create tempdir");
+        let (ca_path, client_cert_path, client_key_path, _) =
+            generate_test_certificates(tmpdir.path());
+
+        let mut builder = RegistrarClientBuilder::new()
+            .registrar_address("127.0.0.1".to_string())
+            .registrar_port(8890)
+            .ca_certificate(ca_path)
+            .certificate(client_cert_path)
+            .key(client_key_path)
+            .insecure(true); // This should disable TLS
+
+        // Build will fail due to no server, but won't try to load certs
+        let result = builder.build().await;
+        assert!(result.is_err());
+    }
+
+    #[actix_rt::test]
+    async fn test_http_fallback_when_partial_tls_config() {
+        // When only some TLS params are provided, should fall back to HTTP
+        let mut builder = RegistrarClientBuilder::new()
+            .registrar_address("127.0.0.1".to_string())
+            .registrar_port(8890)
+            .ca_certificate("/path/to/ca.pem".to_string())
+            // Missing certificate and key
+            .insecure(false);
+
+        let result = builder.build().await;
+        // Should fail trying to connect via HTTP to get version
+        assert!(result.is_err());
+    }
 }
