@@ -145,6 +145,11 @@ mod test {
                 "KEYLIME_AGENT_SERVER_KEY_PASSWORD",
                 "override_server_key_password",
             ),
+            ("KEYLIME_AGENT_PAYLOAD_KEY", "override_payload_key"),
+            (
+                "KEYLIME_AGENT_PAYLOAD_KEY_PASSWORD",
+                "override_payload_key_password",
+            ),
             (
                 "KEYLIME_AGENT_TPM_ENCRYPTION_ALG",
                 "override_tpm_encryption_alg",
