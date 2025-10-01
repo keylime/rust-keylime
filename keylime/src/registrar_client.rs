@@ -1,6 +1,8 @@
 use crate::resilient_client::ResilientClient;
 use crate::{
-    agent_identity::AgentIdentity, agent_registration::RetryConfig,
+    agent_identity::AgentIdentity,
+    agent_registration::RetryConfig,
+    https_client::{self, ClientArgs},
     serialization::*,
 };
 use log::*;
@@ -40,6 +42,10 @@ pub enum RegistrarClientBuilderError {
     /// Middleware error
     #[error("Middleware error: {0}")]
     Middleware(#[from] reqwest_middleware::Error),
+
+    /// HTTPS client creation error
+    #[error("HTTPS client creation error: {0}")]
+    HttpsClient(#[from] anyhow::Error),
 }
 
 #[derive(Debug, Default)]
@@ -49,6 +55,11 @@ pub struct RegistrarClientBuilder {
     registrar_address: Option<String>,
     registrar_port: Option<u32>,
     retry_config: Option<RetryConfig>,
+    ca_certificate: Option<String>,
+    certificate: Option<String>,
+    key: Option<String>,
+    insecure: Option<bool>,
+    timeout: Option<u64>,
 }
 
 impl RegistrarClientBuilder {
@@ -88,6 +99,56 @@ impl RegistrarClientBuilder {
         self
     }
 
+    /// Set the CA certificate file path for TLS communication
+    ///
+    /// # Arguments:
+    ///
+    /// * ca_certificate (String): Path to the CA certificate file
+    pub fn ca_certificate(mut self, ca_certificate: String) -> Self {
+        self.ca_certificate = Some(ca_certificate);
+        self
+    }
+
+    /// Set the client certificate file path for TLS communication
+    ///
+    /// # Arguments:
+    ///
+    /// * certificate (String): Path to the client certificate file
+    pub fn certificate(mut self, certificate: String) -> Self {
+        self.certificate = Some(certificate);
+        self
+    }
+
+    /// Set the client private key file path for TLS communication
+    ///
+    /// # Arguments:
+    ///
+    /// * key (String): Path to the client private key file
+    pub fn key(mut self, key: String) -> Self {
+        self.key = Some(key);
+        self
+    }
+
+    /// Set the insecure flag to disable TLS certificate validation
+    ///
+    /// # Arguments:
+    ///
+    /// * insecure (bool): If true, disable certificate validation
+    pub fn insecure(mut self, insecure: bool) -> Self {
+        self.insecure = Some(insecure);
+        self
+    }
+
+    /// Set the request timeout in milliseconds
+    ///
+    /// # Arguments:
+    ///
+    /// * timeout (u64): Request timeout in milliseconds
+    pub fn timeout(mut self, timeout: u64) -> Self {
+        self.timeout = Some(timeout);
+        self
+    }
+
     /// Parse the received address
     fn parse_registrar_address(address: String) -> String {
         // Parse the registrar IP or hostname
@@ -112,6 +173,8 @@ impl RegistrarClientBuilder {
     /// Get the registrar API version from the Registrar '/version' endpoint
     async fn get_registrar_api_version(
         &mut self,
+        resilient_client: &ResilientClient,
+        scheme: &str,
     ) -> Result<String, RegistrarClientBuilderError> {
         let Some(ref registrar_ip) = self.registrar_address else {
             return Err(RegistrarClientBuilderError::RegistrarIPNotSet);
@@ -122,34 +185,15 @@ impl RegistrarClientBuilder {
         };
 
         // Try to reach the registrar
-        let addr = format!("http://{registrar_ip}:{registrar_port}/version");
+        let addr =
+            format!("{scheme}://{registrar_ip}:{registrar_port}/version");
 
         info!("Requesting registrar API version to {addr}");
 
-        let resp = if let Some(retry_config) = &self.retry_config {
-            debug!(
-                "Using ResilientClient for version check with {} retries.",
-                retry_config.max_retries
-            );
-            let client = ResilientClient::new(
-                None,
-                Duration::from_millis(retry_config.initial_delay_ms),
-                retry_config.max_retries,
-                &[StatusCode::OK],
-                retry_config.max_delay_ms.map(Duration::from_millis),
-            );
-
-            client
-                .get_request(reqwest::Method::GET, &addr)
-                .send()
-                .await?
-        } else {
-            reqwest::Client::new()
-                .get(&addr)
-                .send()
-                .await
-                .map_err(RegistrarClientBuilderError::Reqwest)?
-        };
+        let resp = resilient_client
+            .get_request(reqwest::Method::GET, &addr)
+            .send()
+            .await?;
 
         if !resp.status().is_success() {
             info!("Registrar at '{addr}' does not support the '/version' endpoint");
@@ -178,31 +222,69 @@ impl RegistrarClientBuilder {
             return Err(RegistrarClientBuilderError::RegistrarPortNotSet);
         };
 
-        // Get the registrar API version. If it was caused by an error in the request, set the
-        // version as UNKNOWN_API_VERSION, otherwise abort the build process
-        let registrar_api_version =
-            match self.get_registrar_api_version().await {
-                Ok(version) => version,
-                Err(e) => match e {
-                    RegistrarClientBuilderError::RegistrarNoVersion => {
-                        UNKNOWN_API_VERSION.to_string()
-                    }
-                    _ => {
-                        return Err(e);
-                    }
-                },
-            };
+        // Determine if TLS should be used
+        // TLS is used if all TLS parameters are provided and insecure is not true
+        let use_tls = self.ca_certificate.is_some()
+            && self.certificate.is_some()
+            && self.key.is_some()
+            && !self.insecure.unwrap_or(false);
 
-        let resilient_client =
-            self.retry_config.as_ref().map(|retry_config| {
-                ResilientClient::new(
-                    None,
+        let scheme = if use_tls { "https" } else { "http" };
+
+        // Create the client (HTTPS or plain HTTP)
+        let client = if use_tls {
+            let args = ClientArgs {
+                ca_certificate: self
+                    .ca_certificate
+                    .clone()
+                    .unwrap_or_default(),
+                certificate: self.certificate.clone().unwrap_or_default(),
+                key: self.key.clone().unwrap_or_default(),
+                insecure: self.insecure,
+                timeout: self.timeout.unwrap_or(5000),
+            };
+            https_client::get_https_client(&args)?
+        } else {
+            reqwest::Client::new()
+        };
+
+        // Create ResilientClient once, using retry config if provided
+        let (initial_delay, max_retries, max_delay) =
+            if let Some(ref retry_config) = self.retry_config {
+                (
                     Duration::from_millis(retry_config.initial_delay_ms),
                     retry_config.max_retries,
-                    &[StatusCode::OK],
                     retry_config.max_delay_ms.map(Duration::from_millis),
                 )
-            });
+            } else {
+                // No retry config: use 0 retries
+                (Duration::from_millis(100), 0, None)
+            };
+
+        let resilient_client = ResilientClient::new(
+            Some(client),
+            initial_delay,
+            max_retries,
+            &[StatusCode::OK],
+            max_delay,
+        );
+
+        // Get the registrar API version. If it was caused by an error in the request, set the
+        // version as UNKNOWN_API_VERSION, otherwise abort the build process
+        let registrar_api_version = match self
+            .get_registrar_api_version(&resilient_client, scheme)
+            .await
+        {
+            Ok(version) => version,
+            Err(e) => match e {
+                RegistrarClientBuilderError::RegistrarNoVersion => {
+                    UNKNOWN_API_VERSION.to_string()
+                }
+                _ => {
+                    return Err(e);
+                }
+            },
+        };
 
         Ok(RegistrarClient {
             supported_api_versions: self
@@ -212,6 +294,7 @@ impl RegistrarClientBuilder {
             registrar_ip,
             registrar_port,
             resilient_client,
+            scheme: scheme.to_string(),
         })
     }
 }
@@ -262,13 +345,14 @@ pub enum RegistrarClientError {
     Middleware(#[from] reqwest_middleware::Error),
 }
 
-#[derive(Clone, Default, Debug)]
+#[derive(Clone, Debug)]
 pub struct RegistrarClient {
     api_version: String,
     supported_api_versions: Option<Vec<String>>,
     registrar_ip: String,
     registrar_port: u32,
-    resilient_client: Option<ResilientClient>,
+    resilient_client: ResilientClient,
+    scheme: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -359,9 +443,10 @@ impl RegistrarClient {
         let registrar_ip = &self.registrar_ip;
         let registrar_port = &self.registrar_port;
         let uuid = &ai.uuid;
+        let scheme = &self.scheme;
 
         let addr = format!(
-            "http://{registrar_ip}:{registrar_port}/v{api_version}/agents/{uuid}",
+            "{scheme}://{registrar_ip}:{registrar_port}/v{api_version}/agents/{uuid}",
         );
 
         info!(
@@ -369,26 +454,18 @@ impl RegistrarClient {
             &addr, &ai.uuid
         );
 
-        let resp = match self.resilient_client {
-            Some(ref client) => client
-                .get_json_request_from_struct(
-                    reqwest::Method::POST,
-                    &addr,
-                    &data,
-                    None,
-                )
-                .map_err(RegistrarClientError::Serde)?
-                .send()
-                .await
-                .map_err(RegistrarClientError::Middleware)?,
-            None => {
-                reqwest::Client::new()
-                    .post(&addr)
-                    .json(&data)
-                    .send()
-                    .await?
-            }
-        };
+        let resp = self
+            .resilient_client
+            .get_json_request_from_struct(
+                reqwest::Method::POST,
+                &addr,
+                &data,
+                None,
+            )
+            .map_err(RegistrarClientError::Serde)?
+            .send()
+            .await
+            .map_err(RegistrarClientError::Middleware)?;
 
         if !resp.status().is_success() {
             // Check if this is a 403 Forbidden - indicates security rejection
@@ -523,9 +600,10 @@ impl RegistrarClient {
         let registrar_ip = &self.registrar_ip;
         let registrar_port = &self.registrar_port;
         let uuid = &ai.uuid;
+        let scheme = &self.scheme;
 
         let addr = format!(
-            "http://{registrar_ip}:{registrar_port}/v{api_version}/agents/{uuid}",
+            "{scheme}://{registrar_ip}:{registrar_port}/v{api_version}/agents/{uuid}",
         );
 
         info!(
@@ -533,8 +611,18 @@ impl RegistrarClient {
             &addr, &ai.uuid
         );
 
-        let resp =
-            reqwest::Client::new().put(&addr).json(&data).send().await?;
+        let resp = self
+            .resilient_client
+            .get_json_request_from_struct(
+                reqwest::Method::PUT,
+                &addr,
+                &data,
+                None,
+            )
+            .map_err(RegistrarClientError::Serde)?
+            .send()
+            .await
+            .map_err(RegistrarClientError::Middleware)?;
 
         if !resp.status().is_success() {
             return Err(RegistrarClientError::Activation {
