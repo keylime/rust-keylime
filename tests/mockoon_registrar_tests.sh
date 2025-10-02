@@ -30,6 +30,98 @@ fi
 
 mkdir -p /var/lib/keylime
 
+# Function to log detailed information about port 3001 usage
+log_port_3001_info() {
+    echo "======== DETAILED PORT 3001 ANALYSIS ========"
+    echo "Timestamp: $(date)"
+    echo "Environment: CI=${CI:-false}, GITHUB_ACTIONS=${GITHUB_ACTIONS:-false}"
+    echo ""
+
+    echo "--- lsof output for port 3001 ---"
+    if command -v lsof >/dev/null 2>&1; then
+        lsof -i :3001 2>/dev/null || echo "No lsof results for port 3001"
+        echo ""
+        echo "--- lsof with process details ---"
+        lsof -i :3001 -P -n 2>/dev/null || echo "No detailed lsof results"
+    else
+        echo "lsof command not available"
+    fi
+    echo ""
+
+    echo "--- netstat output ---"
+    if command -v netstat >/dev/null 2>&1; then
+        netstat -tulpn 2>/dev/null | grep ':3001' || echo "No netstat results for port 3001"
+    else
+        echo "netstat command not available"
+    fi
+    echo ""
+
+    echo "--- ss (socket statistics) output ---"
+    if command -v ss >/dev/null 2>&1; then
+        ss -tulpn 2>/dev/null | grep ':3001' || echo "No ss results for port 3001"
+    else
+        echo "ss command not available"
+    fi
+    echo ""
+
+    echo "--- Process tree and details ---"
+    if lsof -i :3001 >/dev/null 2>&1; then
+        echo "Processes using port 3001:"
+        for pid in $(lsof -ti :3001 2>/dev/null); do
+            echo "  PID: $pid"
+            if [ -d "/proc/$pid" ]; then
+                echo "    Command: $(cat /proc/$pid/comm 2>/dev/null || echo 'N/A')"
+                echo "    Cmdline: $(cat /proc/$pid/cmdline 2>/dev/null | tr '\0' ' ' || echo 'N/A')"
+                echo "    User: $(stat -c '%U' /proc/$pid 2>/dev/null || echo 'N/A')"
+                echo "    Parent PID: $(cat /proc/$pid/stat 2>/dev/null | awk '{print $4}' || echo 'N/A')"
+                echo "    Start time: $(stat -c '%Y' /proc/$pid 2>/dev/null | xargs -I {} date -d @{} 2>/dev/null || echo 'N/A')"
+                echo "    Working directory: $(readlink /proc/$pid/cwd 2>/dev/null || echo 'N/A')"
+                echo "    Environment (filtered):"
+                grep -E "(MOCKOON|NODE|NPM|PATH|USER|HOME)" /proc/$pid/environ 2>/dev/null | tr '\0' '\n' | sed 's/^/      /' || echo "      N/A"
+            else
+                echo "    Process details not available (proc not mounted or process gone)"
+            fi
+            echo ""
+        done
+    fi
+
+    echo "--- Process list (mockoon related) ---"
+    ps aux 2>/dev/null | grep -i mockoon | grep -v grep || echo "No mockoon processes found"
+    echo ""
+
+    echo "--- Process list (node related on port 3001) ---"
+    ps aux 2>/dev/null | grep -E "(node|npm)" | grep -v grep || echo "No node/npm processes found"
+    echo ""
+
+    echo "--- Docker containers (if running in container) ---"
+    if command -v docker >/dev/null 2>&1 && docker ps >/dev/null 2>&1; then
+        docker ps | grep -E "(mockoon|3001)" || echo "No docker containers with mockoon or port 3001"
+    else
+        echo "Docker not available or not accessible"
+    fi
+    echo ""
+
+    echo "--- Systemd services (if available) ---"
+    if command -v systemctl >/dev/null 2>&1; then
+        systemctl list-units --type=service | grep -i mockoon || echo "No systemd mockoon services"
+    else
+        echo "systemctl not available"
+    fi
+    echo ""
+
+    echo "--- HTTP response test ---"
+    if curl -s --connect-timeout 2 http://localhost:3001 2>/dev/null; then
+        echo "HTTP response received from port 3001"
+        echo "Response headers:"
+        curl -sI --connect-timeout 2 http://localhost:3001 2>/dev/null || echo "Failed to get headers"
+    else
+        echo "No HTTP response from port 3001"
+    fi
+    echo ""
+
+    echo "======== END PORT 3001 ANALYSIS ========"
+}
+
 # Check if Mockoon is already running on port 3001 (e.g., in CI)
 # Try multiple methods to detect if port 3001 is in use
 PORT_IN_USE=false
@@ -45,6 +137,7 @@ fi
 
 if $PORT_IN_USE; then
     echo "-------- Mockoon already running on port 3001 (likely in CI)"
+    log_port_3001_info
     MOCKOON_PID=""
 else
     # Check if Mockoon is installed for local runs
@@ -106,11 +199,25 @@ if [ -n "$MOCKOON_PID" ]; then
     fi
 
     if $PORT_STILL_IN_USE; then
-        echo "Warning: Port 3001 still in use, forcing cleanup"
+        echo "Warning: Port 3001 still in use after stopping Mockoon, forcing cleanup"
+        echo "---- Port 3001 status before cleanup ----"
+        log_port_3001_info
+
+        echo "---- Performing cleanup ----"
         lsof -ti :3001 | xargs kill -9 2>/dev/null || true
         # Additional cleanup methods
         pkill -f "mockoon-cli.*3001" 2>/dev/null || true
         pkill -f "node.*mockoon.*3001" 2>/dev/null || true
+
+        # Wait a moment and check again
+        sleep 2
+        echo "---- Port 3001 status after cleanup ----"
+        if lsof -i :3001 >/dev/null 2>&1 || netstat -ln 2>/dev/null | grep -q ':3001 ' || ss -ln 2>/dev/null | grep -q ':3001 '; then
+            echo "WARNING: Port 3001 still in use after cleanup attempts"
+            log_port_3001_info
+        else
+            echo "Port 3001 successfully cleaned up"
+        fi
     fi
 else
     echo "-------- Mockoon was already running (CI), not stopping it"
