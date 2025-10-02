@@ -161,8 +161,25 @@ else
     MOCKOON_PID=$!
 
     # Wait for Mockoon to start
-    echo "Waiting for Mockoon server to start..."
-    sleep 3
+    echo "Waiting for Mockoon server on port 3001 to start..."
+    if ! command -v curl >/dev/null 2>&1; then
+        echo "curl not found, falling back to sleep"
+        sleep 3
+    else
+        for _ in $(seq 1 15); do
+            if curl -s --connect-timeout 1 http://localhost:3001 > /dev/null; then
+                echo "Mockoon server is up!"
+                MOCKOON_READY=true
+                break
+            fi
+            sleep 1
+        done
+        if [ -z "$MOCKOON_READY" ]; then
+            echo "Error: Timed out waiting for Mockoon server to start."
+            kill "$MOCKOON_PID" 2>/dev/null || true
+            exit 1
+        fi
+    fi
 
     # Check if Mockoon is running
     if ! kill -0 $MOCKOON_PID 2>/dev/null; then

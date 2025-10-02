@@ -1649,121 +1649,41 @@ mod tests {
         );
     }
 
-    // Helper function to generate test certificates
-    #[cfg(test)]
-    fn generate_test_certificates(
-        temp_dir: &std::path::Path,
-    ) -> (String, String, String, String) {
-        use crate::crypto;
-        use std::fs::File;
-        use std::io::Write;
-
-        // Define paths
-        let ca_path = temp_dir.join("ca.pem");
-        let client_cert_path = temp_dir.join("client_cert.pem");
-        let client_key_path = temp_dir.join("client_key.pem");
-        let server_cert_path = temp_dir.join("server_cert.pem");
-
-        // Generate CA certificate
-        let ca_key = crypto::testing::rsa_generate(2048)
-            .expect("Failed to generate CA key");
-        let ca_cert = crypto::x509::CertificateBuilder::new()
-            .private_key(&ca_key)
-            .common_name("Test CA")
-            .build()
-            .expect("Failed to build CA cert");
-
-        // Generate server certificate
-        let server_key = crypto::testing::rsa_generate(2048)
-            .expect("Failed to generate server key");
-        let server_cert = crypto::x509::CertificateBuilder::new()
-            .private_key(&server_key)
-            .common_name("localhost")
-            .add_ips(vec!["127.0.0.1"])
-            .build()
-            .expect("Failed to build server cert");
-
-        // Generate client certificate
-        let client_key = crypto::testing::rsa_generate(2048)
-            .expect("Failed to generate client key");
-        let client_cert = crypto::x509::CertificateBuilder::new()
-            .private_key(&client_key)
-            .common_name("test-client")
-            .build()
-            .expect("Failed to build client cert");
-
-        // Write CA certificate
-        let mut ca_file =
-            File::create(&ca_path).expect("Failed to create CA file");
-        ca_file
-            .write_all(
-                &ca_cert.to_pem().expect("Failed to convert CA to PEM"),
-            )
-            .expect("Failed to write CA cert");
-
-        // Write client certificate
-        let mut client_cert_file = File::create(&client_cert_path)
-            .expect("Failed to create client cert file");
-        client_cert_file
-            .write_all(
-                &client_cert
-                    .to_pem()
-                    .expect("Failed to convert client cert to PEM"),
-            )
-            .expect("Failed to write client cert");
-
-        // Write client key
-        let mut client_key_file = File::create(&client_key_path)
-            .expect("Failed to create client key file");
-        client_key_file
-            .write_all(
-                &client_key
-                    .private_key_to_pem_pkcs8()
-                    .expect("Failed to convert key to PEM"),
-            )
-            .expect("Failed to write client key");
-
-        // Write server certificate
-        let mut server_cert_file = File::create(&server_cert_path)
-            .expect("Failed to create server cert file");
-        server_cert_file
-            .write_all(
-                &server_cert
-                    .to_pem()
-                    .expect("Failed to convert server cert to PEM"),
-            )
-            .expect("Failed to write server cert");
-
-        (
-            ca_path.to_string_lossy().to_string(),
-            client_cert_path.to_string_lossy().to_string(),
-            client_key_path.to_string_lossy().to_string(),
-            server_cert_path.to_string_lossy().to_string(),
-        )
-    }
-
     #[actix_rt::test]
     async fn test_builder_with_real_tls_certificates() {
         let tmpdir = tempfile::tempdir().expect("Failed to create tempdir");
-        let (ca_path, client_cert_path, client_key_path, _server_cert_path) =
-            generate_test_certificates(tmpdir.path());
+        let (
+            ca_path,
+            _server_cert_path,
+            _server_key_path,
+            client_cert_path,
+            client_key_path,
+        ) = crate::crypto::testing::generate_tls_certs_for_test(
+            tmpdir.path(),
+        );
+
+        let ca_path_str = ca_path.to_string_lossy().to_string();
+        let client_cert_path_str =
+            client_cert_path.to_string_lossy().to_string();
+        let client_key_path_str =
+            client_key_path.to_string_lossy().to_string();
 
         let builder = RegistrarClientBuilder::new()
             .registrar_address("127.0.0.1".to_string())
             .registrar_port(8890)
-            .ca_certificate(ca_path.clone())
-            .certificate(client_cert_path.clone())
-            .key(client_key_path.clone());
+            .ca_certificate(ca_path_str.clone())
+            .certificate(client_cert_path_str.clone())
+            .key(client_key_path_str.clone());
 
         // Verify all TLS paths were set correctly
-        assert_eq!(builder.ca_certificate, Some(ca_path.clone()));
-        assert_eq!(builder.certificate, Some(client_cert_path.clone()));
-        assert_eq!(builder.key, Some(client_key_path.clone()));
+        assert_eq!(builder.ca_certificate, Some(ca_path_str.clone()));
+        assert_eq!(builder.certificate, Some(client_cert_path_str.clone()));
+        assert_eq!(builder.key, Some(client_key_path_str.clone()));
 
         // Verify files exist
-        assert!(std::path::Path::new(&ca_path).exists());
-        assert!(std::path::Path::new(&client_cert_path).exists());
-        assert!(std::path::Path::new(&client_key_path).exists());
+        assert!(ca_path.exists());
+        assert!(client_cert_path.exists());
+        assert!(client_key_path.exists());
     }
 
     #[actix_rt::test]
@@ -1804,15 +1724,22 @@ mod tests {
     #[actix_rt::test]
     async fn test_tls_enabled_when_all_certs_provided() {
         let tmpdir = tempfile::tempdir().expect("Failed to create tempdir");
-        let (ca_path, client_cert_path, client_key_path, _) =
-            generate_test_certificates(tmpdir.path());
+        let (
+            ca_path,
+            _server_cert_path,
+            _server_key_path,
+            client_cert_path,
+            client_key_path,
+        ) = crate::crypto::testing::generate_tls_certs_for_test(
+            tmpdir.path(),
+        );
 
         let mut builder = RegistrarClientBuilder::new()
             .registrar_address("127.0.0.1".to_string())
             .registrar_port(8890)
-            .ca_certificate(ca_path)
-            .certificate(client_cert_path)
-            .key(client_key_path)
+            .ca_certificate(ca_path.to_string_lossy().to_string())
+            .certificate(client_cert_path.to_string_lossy().to_string())
+            .key(client_key_path.to_string_lossy().to_string())
             .insecure(false);
 
         // The build will fail because there's no server running,
@@ -1825,15 +1752,22 @@ mod tests {
     #[actix_rt::test]
     async fn test_tls_disabled_when_insecure_true() {
         let tmpdir = tempfile::tempdir().expect("Failed to create tempdir");
-        let (ca_path, client_cert_path, client_key_path, _) =
-            generate_test_certificates(tmpdir.path());
+        let (
+            ca_path,
+            _server_cert_path,
+            _server_key_path,
+            client_cert_path,
+            client_key_path,
+        ) = crate::crypto::testing::generate_tls_certs_for_test(
+            tmpdir.path(),
+        );
 
         let mut builder = RegistrarClientBuilder::new()
             .registrar_address("127.0.0.1".to_string())
             .registrar_port(8890)
-            .ca_certificate(ca_path)
-            .certificate(client_cert_path)
-            .key(client_key_path)
+            .ca_certificate(ca_path.to_string_lossy().to_string())
+            .certificate(client_cert_path.to_string_lossy().to_string())
+            .key(client_key_path.to_string_lossy().to_string())
             .insecure(true); // This should disable TLS
 
         // Build will fail due to no server, but won't try to load certs
@@ -1950,8 +1884,15 @@ mod tests {
         }
 
         let tmpdir = tempfile::tempdir().expect("Failed to create tempdir");
-        let (ca_path, client_cert_path, client_key_path, _) =
-            generate_test_certificates(tmpdir.path());
+        let (
+            ca_path,
+            _server_cert_path,
+            _server_key_path,
+            client_cert_path,
+            client_key_path,
+        ) = crate::crypto::testing::generate_tls_certs_for_test(
+            tmpdir.path(),
+        );
 
         let mock_data = [0u8; 1];
         let priv_key = crypto::testing::rsa_generate(2048).unwrap(); //#[allow_ci]
@@ -1979,9 +1920,9 @@ mod tests {
         let mut builder = RegistrarClientBuilder::new()
             .registrar_address("127.0.0.1".to_string())
             .registrar_port(3001)
-            .ca_certificate(ca_path)
-            .certificate(client_cert_path)
-            .key(client_key_path)
+            .ca_certificate(ca_path.to_string_lossy().to_string())
+            .certificate(client_cert_path.to_string_lossy().to_string())
+            .key(client_key_path.to_string_lossy().to_string())
             .insecure(false);
 
         // Build will attempt to connect to get version
@@ -1991,7 +1932,7 @@ mod tests {
         // With Mockoon not configured for TLS, this will fail at connection
         // In a real TLS-enabled Mockoon setup, this would succeed
         // This test verifies the TLS code path is executed
-        assert!(result.is_err() || result.is_ok());
+        assert!(result.is_err());
     }
 
     #[actix_rt::test]
