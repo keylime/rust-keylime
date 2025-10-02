@@ -31,7 +31,19 @@ fi
 mkdir -p /var/lib/keylime
 
 # Check if Mockoon is already running on port 3001 (e.g., in CI)
+# Try multiple methods to detect if port 3001 is in use
+PORT_IN_USE=false
 if lsof -i :3001 > /dev/null 2>&1; then
+    PORT_IN_USE=true
+elif netstat -ln 2>/dev/null | grep -q ':3001 '; then
+    PORT_IN_USE=true
+elif ss -ln 2>/dev/null | grep -q ':3001 '; then
+    PORT_IN_USE=true
+elif curl -s --connect-timeout 2 http://localhost:3001 > /dev/null 2>&1; then
+    PORT_IN_USE=true
+fi
+
+if $PORT_IN_USE; then
     echo "-------- Mockoon already running on port 3001 (likely in CI)"
     MOCKOON_PID=""
 else
@@ -84,9 +96,21 @@ if [ -n "$MOCKOON_PID" ]; then
     wait $MOCKOON_PID 2>/dev/null || true
 
     # Check if port 3001 is still in use and force cleanup if needed
+    PORT_STILL_IN_USE=false
     if lsof -i :3001 > /dev/null 2>&1; then
+        PORT_STILL_IN_USE=true
+    elif netstat -ln 2>/dev/null | grep -q ':3001 '; then
+        PORT_STILL_IN_USE=true
+    elif ss -ln 2>/dev/null | grep -q ':3001 '; then
+        PORT_STILL_IN_USE=true
+    fi
+
+    if $PORT_STILL_IN_USE; then
         echo "Warning: Port 3001 still in use, forcing cleanup"
         lsof -ti :3001 | xargs kill -9 2>/dev/null || true
+        # Additional cleanup methods
+        pkill -f "mockoon-cli.*3001" 2>/dev/null || true
+        pkill -f "node.*mockoon.*3001" 2>/dev/null || true
     fi
 else
     echo "-------- Mockoon was already running (CI), not stopping it"
