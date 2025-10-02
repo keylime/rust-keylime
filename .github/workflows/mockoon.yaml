@@ -39,11 +39,16 @@ jobs:
         run: |
           echo "======== PRE-MOCKOON SYSTEM STATE ========"
           echo "Available system tools:"
-          command -v lsof && echo "✓ lsof available" || echo "✗ lsof not available"
-          command -v netstat && echo "✓ netstat available" || echo "✗ netstat not available"
-          command -v ss && echo "✓ ss available" || echo "✗ ss available"
-          command -v curl && echo "✓ curl available" || echo "✗ curl not available"
-          command -v docker && echo "✓ docker available" || echo "✗ docker not available"
+          command -v lsof && echo "✓ lsof available" ||
+            echo "✗ lsof not available"
+          command -v netstat && echo "✓ netstat available" ||
+            echo "✗ netstat not available"
+          command -v ss && echo "✓ ss available" ||
+            echo "✗ ss available"
+          command -v curl && echo "✓ curl available" ||
+            echo "✗ curl not available"
+          command -v docker && echo "✓ docker available" ||
+            echo "✗ docker not available"
 
           echo ""
           echo "Current processes using port 3001 (should be none):"
@@ -51,7 +56,9 @@ jobs:
 
           echo ""
           echo "All listening ports:"
-          netstat -tulpn 2>/dev/null | head -20 || ss -tulpn 2>/dev/null | head -20 || echo "Cannot list ports"
+          netstat -tulpn 2>/dev/null | head -20 ||
+            ss -tulpn 2>/dev/null | head -20 ||
+            echo "Cannot list ports"
 
           echo ""
           echo "Current user and environment:"
@@ -79,23 +86,29 @@ jobs:
         run: |
           echo "======== POST-MOCKOON SYSTEM STATE ========"
           echo "Processes using port 3001 after Mockoon start:"
-          lsof -i :3001 2>/dev/null || echo "No processes using port 3001 (unexpected!)"
+          lsof -i :3001 2>/dev/null ||
+            echo "No processes using port 3001 (unexpected!)"
 
           echo ""
           echo "Mockoon-related processes:"
-          ps aux | grep -i mockoon | grep -v grep || echo "No mockoon processes found"
+          ps aux | grep -i mockoon | grep -v grep ||
+            echo "No mockoon processes found"
 
           echo ""
           echo "Node.js processes:"
-          ps aux | grep -E "(node|npm)" | grep -v grep || echo "No node/npm processes found"
+          ps aux | grep -E "(node|npm)" | grep -v grep ||
+            echo "No node/npm processes found"
 
           echo ""
           echo "Test HTTP connectivity to port 3001:"
-          curl -sI --connect-timeout 5 http://localhost:3001 2>/dev/null || echo "Failed to connect to port 3001"
+          curl -sI --connect-timeout 5 http://localhost:3001 2>/dev/null ||
+            echo "Failed to connect to port 3001"
 
           echo ""
           echo "Network connections:"
-          netstat -tulpn 2>/dev/null | grep ':3001' || ss -tulpn 2>/dev/null | grep ':3001' || echo "No port 3001 connections found"
+          netstat -tulpn 2>/dev/null | grep ':3001' ||
+            ss -tulpn 2>/dev/null | grep ':3001' ||
+            echo "No port 3001 connections found"
           echo "======== END POST-MOCKOON SYSTEM STATE ========"
       - name: Set git safe.directory for the working directory
         run: git config --system --add safe.directory "$PWD"
