@@ -8,7 +8,7 @@ name: "Mockoon Tests"
     branches: [master]
 
 jobs:
-  mockoon-tests:
+  mockoon-verifier-tests:
     runs-on: ubuntu-latest
     container:
       image: quay.io/keylime/keylime-ci:latest
@@ -24,5 +24,24 @@ jobs:
           port: 3000
       - name: Set git safe.directory for the working directory
         run: git config --system --add safe.directory "$PWD"
-      - name: Mockoon tests custom script execution
+      - name: Mockoon verifier tests custom script execution
         run: bash tests/mockoon_tests.sh
+
+  mockoon-registrar-tests:
+    runs-on: ubuntu-latest
+    container:
+      image: quay.io/keylime/keylime-ci:latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: NPM installation
+        run: dnf install -y npm
+      - name: Run Mockoon CLI
+        uses: mockoon/cli-action@v2
+        with:
+          version: latest
+          data-file: keylime-push-model-agent/test-data/registrar.json
+          port: 3001
+      - name: Set git safe.directory for the working directory
+        run: git config --system --add safe.directory "$PWD"
+      - name: Mockoon registrar tests custom script execution
+        run: bash tests/mockoon_registrar_tests.sh
