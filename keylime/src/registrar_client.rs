@@ -1863,7 +1863,10 @@ mod tests {
 
         // Verify we got a blob back
         let blob = result.unwrap(); //#[allow_ci]
-        assert!(!blob.is_empty(), "Expected non-empty blob from registration");
+        assert!(
+            !blob.is_empty(),
+            "Expected non-empty blob from registration"
+        );
     }
 
     #[actix_rt::test]
@@ -1901,9 +1904,8 @@ mod tests {
         let mut registrar_client =
             builder.build().await.expect("Failed to build client");
 
-        let result = registrar_client
-            .activate_agent(&ai, "test-auth-tag")
-            .await;
+        let result =
+            registrar_client.activate_agent(&ai, "test-auth-tag").await;
         assert!(result.is_ok(), "HTTP activation failed: {result:?}");
     }
 
@@ -1926,7 +1928,7 @@ mod tests {
             .build()
             .unwrap(); //#[allow_ci]
 
-        let ai = AgentIdentityBuilder::new()
+        let _ = AgentIdentityBuilder::new()
             .ak_pub(&mock_data)
             .ek_pub(&mock_data)
             .enabled_api_versions(vec!["1.2"])
@@ -1976,7 +1978,7 @@ mod tests {
         );
 
         let client = result.unwrap(); //#[allow_ci]
-        // Verify the API version was retrieved
+                                      // Verify the API version was retrieved
         assert_eq!(client.api_version, "1.2");
         assert!(client.supported_api_versions.is_some());
 
