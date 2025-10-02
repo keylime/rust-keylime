@@ -16,14 +16,19 @@ pub struct CertificateConfig {
 pub fn cert_from_server_key(
     config: &CertificateConfig,
 ) -> Result<(X509, PKey<Public>)> {
+    use openssl::ec::EcGroup;
+    use openssl::nid::Nid;
+
     let cert: X509;
     let (mtls_pub, mtls_priv) = match config.server_key.as_ref() {
         "" => {
             debug!(
                 "The server_key option was not set in the configuration file"
             );
-            debug!("Generating new key pair");
-            crypto::rsa_generate_pair(2048)?
+            debug!("Generating new ECC P-256 key pair");
+            let group = EcGroup::from_curve_name(Nid::X9_62_PRIME256V1)
+                .map_err(crypto::CryptoError::ECGroupFromNidError)?;
+            crypto::ecc_generate_pair(&group)?
         }
         path => {
             let key_path = Path::new(&path);
@@ -37,8 +42,11 @@ pub fn cert_from_server_key(
                     Some(&config.server_key_password),
                 )?
             } else {
-                debug!("Generating new key pair");
-                let (public, private) = crypto::rsa_generate_pair(2048)?;
+                debug!("Generating new ECC P-256 key pair");
+                let group =
+                    EcGroup::from_curve_name(Nid::X9_62_PRIME256V1)
+                        .map_err(crypto::CryptoError::ECGroupFromNidError)?;
+                let (public, private) = crypto::ecc_generate_pair(&group)?;
                 // Write the generated key to the file
                 crypto::write_key_pair(
                     &private,
