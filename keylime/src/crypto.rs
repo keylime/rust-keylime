@@ -1130,7 +1130,7 @@ pub fn decrypt_aead(key: &[u8], data: &[u8]) -> Result<Vec<u8>, CryptoError> {
 pub mod testing {
     use super::*;
     use openssl::encrypt::Encrypter;
-    use std::path::Path;
+    use std::path::{Path, PathBuf};
 
     #[derive(Error, Debug)]
     pub enum CryptoTestError {
@@ -1248,6 +1248,112 @@ pub mod testing {
             .write(&cert.to_der().map_err(CryptoError::X509ToDERError)?)
             .map_err(CryptoError::IOWriteError)?;
         Ok(())
+    }
+
+    /// Generates a full set of TLS certificates (CA, server, client) for testing purposes.
+    ///
+    /// # Arguments
+    /// * `temp_dir` - The temporary directory to write the certificate files into.
+    ///
+    /// # Returns
+    /// A tuple containing the paths to the generated files:
+    /// (ca_cert, server_cert, server_key, client_cert, client_key)
+    pub fn generate_tls_certs_for_test(
+        temp_dir: &Path,
+    ) -> (PathBuf, PathBuf, PathBuf, PathBuf, PathBuf) {
+        use std::fs::File;
+        use std::io::Write;
+
+        // Define paths
+        let ca_path = temp_dir.join("ca.pem");
+        let server_cert_path = temp_dir.join("server_cert.pem");
+        let server_key_path = temp_dir.join("server_key.pem");
+        let client_cert_path = temp_dir.join("client_cert.pem");
+        let client_key_path = temp_dir.join("client_key.pem");
+
+        // Generate CA
+        let ca_key = rsa_generate(2048).expect("Failed to generate CA key");
+        let ca_cert = x509::CertificateBuilder::new()
+            .private_key(&ca_key)
+            .common_name("Test CA")
+            .build()
+            .expect("Failed to build CA cert");
+
+        // Generate server certificate
+        let server_key =
+            rsa_generate(2048).expect("Failed to generate server key");
+        let server_cert = x509::CertificateBuilder::new()
+            .private_key(&server_key)
+            .common_name("localhost")
+            .add_ips(vec!["127.0.0.1"])
+            .build()
+            .expect("Failed to build server cert");
+
+        // Generate client certificate
+        let client_key =
+            rsa_generate(2048).expect("Failed to generate client key");
+        let client_cert = x509::CertificateBuilder::new()
+            .private_key(&client_key)
+            .common_name("test-client")
+            .build()
+            .expect("Failed to build client cert");
+
+        // Write files
+        let mut ca_file =
+            File::create(&ca_path).expect("Failed to create CA file");
+        ca_file
+            .write_all(
+                &ca_cert.to_pem().expect("Failed to convert CA to PEM"),
+            )
+            .expect("Failed to write CA cert");
+
+        let mut server_cert_file = File::create(&server_cert_path)
+            .expect("Failed to create server cert file");
+        server_cert_file
+            .write_all(
+                &server_cert
+                    .to_pem()
+                    .expect("Failed to convert server cert to PEM"),
+            )
+            .expect("Failed to write server cert");
+
+        let mut server_key_file = File::create(&server_key_path)
+            .expect("Failed to create server key file");
+        server_key_file
+            .write_all(
+                &server_key
+                    .private_key_to_pem_pkcs8()
+                    .expect("Failed to convert key to PEM"),
+            )
+            .expect("Failed to write server key");
+
+        let mut client_cert_file = File::create(&client_cert_path)
+            .expect("Failed to create client cert file");
+        client_cert_file
+            .write_all(
+                &client_cert
+                    .to_pem()
+                    .expect("Failed to convert client cert to PEM"),
+            )
+            .expect("Failed to write client cert");
+
+        let mut client_key_file = File::create(&client_key_path)
+            .expect("Failed to create client key file");
+        client_key_file
+            .write_all(
+                &client_key
+                    .private_key_to_pem_pkcs8()
+                    .expect("Failed to convert key to PEM"),
+            )
+            .expect("Failed to write client key");
+
+        (
+            ca_path,
+            server_cert_path,
+            server_key_path,
+            client_cert_path,
+            client_key_path,
+        )
     }
 }
 

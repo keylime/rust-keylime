@@ -69,81 +69,20 @@ pub fn get_https_client(args: &ClientArgs) -> Result<reqwest::Client> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::crypto;
     use std::io::Write;
-
-    // Helper to generate test certificates
-    fn generate_test_certificates(
-        temp_dir: &std::path::Path,
-    ) -> (String, String, String) {
-        let ca_path = temp_dir.join("ca.pem");
-        let cert_path = temp_dir.join("cert.pem");
-        let key_path = temp_dir.join("key.pem");
-
-        // Generate CA certificate
-        let ca_key = crypto::testing::rsa_generate(2048)
-            .expect("Failed to generate CA key");
-        let ca_cert = crypto::x509::CertificateBuilder::new()
-            .private_key(&ca_key)
-            .common_name("Test HTTPS CA")
-            .build()
-            .expect("Failed to build CA cert");
-
-        // Generate client certificate
-        let client_key = crypto::testing::rsa_generate(2048)
-            .expect("Failed to generate client key");
-        let client_cert = crypto::x509::CertificateBuilder::new()
-            .private_key(&client_key)
-            .common_name("test-https-client")
-            .build()
-            .expect("Failed to build client cert");
-
-        // Write CA certificate
-        let mut ca_file =
-            File::create(&ca_path).expect("Failed to create CA file");
-        ca_file
-            .write_all(
-                &ca_cert.to_pem().expect("Failed to convert CA to PEM"),
-            )
-            .expect("Failed to write CA cert");
-
-        // Write client certificate
-        let mut cert_file =
-            File::create(&cert_path).expect("Failed to create cert file");
-        cert_file
-            .write_all(
-                &client_cert.to_pem().expect("Failed to convert cert to PEM"),
-            )
-            .expect("Failed to write cert");
-
-        // Write client key
-        let mut key_file =
-            File::create(&key_path).expect("Failed to create key file");
-        key_file
-            .write_all(
-                &client_key
-                    .private_key_to_pem_pkcs8()
-                    .expect("Failed to convert key to PEM"),
-            )
-            .expect("Failed to write key");
-
-        (
-            ca_path.to_string_lossy().to_string(),
-            cert_path.to_string_lossy().to_string(),
-            key_path.to_string_lossy().to_string(),
-        )
-    }
 
     #[test]
     fn test_get_https_client_with_valid_certs() {
         let tmpdir = tempfile::tempdir().expect("Failed to create tempdir");
-        let (ca_path, cert_path, key_path) =
-            generate_test_certificates(tmpdir.path());
+        let (ca_path, _server_cert, _server_key, cert_path, key_path) =
+            crate::crypto::testing::generate_tls_certs_for_test(
+                tmpdir.path(),
+            );
 
         let args = ClientArgs {
-            ca_certificate: ca_path,
-            certificate: cert_path,
-            key: key_path,
+            ca_certificate: ca_path.to_string_lossy().to_string(),
+            certificate: cert_path.to_string_lossy().to_string(),
+            key: key_path.to_string_lossy().to_string(),
             insecure: Some(false),
             timeout: 5000,
         };
@@ -158,13 +97,15 @@ mod tests {
     #[test]
     fn test_get_https_client_insecure_mode() {
         let tmpdir = tempfile::tempdir().expect("Failed to create tempdir");
-        let (ca_path, cert_path, key_path) =
-            generate_test_certificates(tmpdir.path());
+        let (ca_path, _server_cert, _server_key, cert_path, key_path) =
+            crate::crypto::testing::generate_tls_certs_for_test(
+                tmpdir.path(),
+            );
 
         let args = ClientArgs {
-            ca_certificate: ca_path,
-            certificate: cert_path,
-            key: key_path,
+            ca_certificate: ca_path.to_string_lossy().to_string(),
+            certificate: cert_path.to_string_lossy().to_string(),
+            key: key_path.to_string_lossy().to_string(),
             insecure: Some(true),
             timeout: 5000,
         };
@@ -209,10 +150,13 @@ mod tests {
     #[test]
     fn test_get_https_client_missing_client_cert() {
         let tmpdir = tempfile::tempdir().expect("Failed to create tempdir");
-        let (ca_path, _, _) = generate_test_certificates(tmpdir.path());
+        let (ca_path, _server_cert, _server_key, _cert_path, _key_path) =
+            crate::crypto::testing::generate_tls_certs_for_test(
+                tmpdir.path(),
+            );
 
         let args = ClientArgs {
-            ca_certificate: ca_path,
+            ca_certificate: ca_path.to_string_lossy().to_string(),
             certificate: tmpdir
                 .path()
                 .join("nonexistent_cert.pem")
@@ -239,12 +183,14 @@ mod tests {
     #[test]
     fn test_get_https_client_missing_client_key() {
         let tmpdir = tempfile::tempdir().expect("Failed to create tempdir");
-        let (ca_path, cert_path, _) =
-            generate_test_certificates(tmpdir.path());
+        let (ca_path, _server_cert, _server_key, cert_path, _key_path) =
+            crate::crypto::testing::generate_tls_certs_for_test(
+                tmpdir.path(),
+            );
 
         let args = ClientArgs {
-            ca_certificate: ca_path,
-            certificate: cert_path,
+            ca_certificate: ca_path.to_string_lossy().to_string(),
+            certificate: cert_path.to_string_lossy().to_string(),
             key: tmpdir
                 .path()
                 .join("nonexistent_key.pem")
@@ -267,8 +213,10 @@ mod tests {
     #[test]
     fn test_get_https_client_invalid_ca_cert() {
         let tmpdir = tempfile::tempdir().expect("Failed to create tempdir");
-        let (_, cert_path, key_path) =
-            generate_test_certificates(tmpdir.path());
+        let (_ca_path, _server_cert, _server_key, cert_path, key_path) =
+            crate::crypto::testing::generate_tls_certs_for_test(
+                tmpdir.path(),
+            );
 
         // Create invalid CA cert file
         let invalid_ca_path = tmpdir.path().join("invalid_ca.pem");
@@ -280,8 +228,8 @@ mod tests {
 
         let args = ClientArgs {
             ca_certificate: invalid_ca_path.to_string_lossy().to_string(),
-            certificate: cert_path,
-            key: key_path,
+            certificate: cert_path.to_string_lossy().to_string(),
+            key: key_path.to_string_lossy().to_string(),
             insecure: Some(false),
             timeout: 5000,
         };
@@ -298,7 +246,10 @@ mod tests {
     #[test]
     fn test_get_https_client_invalid_client_identity() {
         let tmpdir = tempfile::tempdir().expect("Failed to create tempdir");
-        let (ca_path, _, _) = generate_test_certificates(tmpdir.path());
+        let (ca_path, _server_cert, _server_key, _cert_path, _key_path) =
+            crate::crypto::testing::generate_tls_certs_for_test(
+                tmpdir.path(),
+            );
 
         // Create invalid cert/key files
         let invalid_cert_path = tmpdir.path().join("invalid_cert.pem");
@@ -317,7 +268,7 @@ mod tests {
             .expect("Failed to write");
 
         let args = ClientArgs {
-            ca_certificate: ca_path,
+            ca_certificate: ca_path.to_string_lossy().to_string(),
             certificate: invalid_cert_path.to_string_lossy().to_string(),
             key: invalid_key_path.to_string_lossy().to_string(),
             insecure: Some(false),
@@ -336,15 +287,17 @@ mod tests {
     #[test]
     fn test_get_https_client_with_different_timeouts() {
         let tmpdir = tempfile::tempdir().expect("Failed to create tempdir");
-        let (ca_path, cert_path, key_path) =
-            generate_test_certificates(tmpdir.path());
+        let (ca_path, _server_cert, _server_key, cert_path, key_path) =
+            crate::crypto::testing::generate_tls_certs_for_test(
+                tmpdir.path(),
+            );
 
         // Test with various timeout values
         for timeout in [0, 1000, 5000, 30000, 300000] {
             let args = ClientArgs {
-                ca_certificate: ca_path.clone(),
-                certificate: cert_path.clone(),
-                key: key_path.clone(),
+                ca_certificate: ca_path.to_string_lossy().to_string(),
+                certificate: cert_path.to_string_lossy().to_string(),
+                key: key_path.to_string_lossy().to_string(),
                 insecure: Some(false),
                 timeout,
             };
@@ -361,14 +314,16 @@ mod tests {
     #[test]
     fn test_get_https_client_insecure_default() {
         let tmpdir = tempfile::tempdir().expect("Failed to create tempdir");
-        let (ca_path, cert_path, key_path) =
-            generate_test_certificates(tmpdir.path());
+        let (ca_path, _server_cert, _server_key, cert_path, key_path) =
+            crate::crypto::testing::generate_tls_certs_for_test(
+                tmpdir.path(),
+            );
 
         // Test with insecure = None (should default to false)
         let args = ClientArgs {
-            ca_certificate: ca_path,
-            certificate: cert_path,
-            key: key_path,
+            ca_certificate: ca_path.to_string_lossy().to_string(),
+            certificate: cert_path.to_string_lossy().to_string(),
+            key: key_path.to_string_lossy().to_string(),
             insecure: None,
             timeout: 5000,
         };

@@ -540,83 +540,20 @@ mod tests {
         assert_eq!(timeout, None);
     }
 
-    // Helper function to generate test certificates
-    #[cfg(test)]
-    fn generate_test_tls_certificates(
-        temp_dir: &std::path::Path,
-    ) -> (String, String, String) {
-        use keylime::crypto;
-        use std::fs::File;
-        use std::io::Write;
-
-        let ca_path = temp_dir.join("ca.pem");
-        let cert_path = temp_dir.join("cert.pem");
-        let key_path = temp_dir.join("key.pem");
-
-        // Generate CA certificate
-        let ca_key = crypto::testing::rsa_generate(2048)
-            .expect("Failed to generate CA key");
-        let ca_cert = crypto::x509::CertificateBuilder::new()
-            .private_key(&ca_key)
-            .common_name("Test Registrar CA")
-            .build()
-            .expect("Failed to build CA cert");
-
-        // Generate client certificate
-        let client_key = crypto::testing::rsa_generate(2048)
-            .expect("Failed to generate client key");
-        let client_cert = crypto::x509::CertificateBuilder::new()
-            .private_key(&client_key)
-            .common_name("test-agent")
-            .build()
-            .expect("Failed to build client cert");
-
-        // Write certificates to files
-        let mut ca_file =
-            File::create(&ca_path).expect("Failed to create CA file");
-        ca_file
-            .write_all(
-                &ca_cert.to_pem().expect("Failed to convert CA to PEM"),
-            )
-            .expect("Failed to write CA cert");
-
-        let mut cert_file =
-            File::create(&cert_path).expect("Failed to create cert file");
-        cert_file
-            .write_all(
-                &client_cert.to_pem().expect("Failed to convert cert to PEM"),
-            )
-            .expect("Failed to write cert");
-
-        let mut key_file =
-            File::create(&key_path).expect("Failed to create key file");
-        key_file
-            .write_all(
-                &client_key
-                    .private_key_to_pem_pkcs8()
-                    .expect("Failed to convert key to PEM"),
-            )
-            .expect("Failed to write key");
-
-        (
-            ca_path.to_string_lossy().to_string(),
-            cert_path.to_string_lossy().to_string(),
-            key_path.to_string_lossy().to_string(),
-        )
-    }
-
     #[tokio::test]
     async fn test_register_agent_with_real_tls_certs() {
         let _mutex = testing::lock_tests().await;
 
         let tmpdir = tempfile::tempdir().expect("failed to create tmpdir");
-        let (ca_path, cert_path, key_path) =
-            generate_test_tls_certificates(tmpdir.path());
+        let (ca_path, _server_cert, _server_key, cert_path, key_path) =
+            keylime::crypto::testing::generate_tls_certs_for_test(
+                tmpdir.path(),
+            );
 
         // Verify files were created
-        assert!(std::path::Path::new(&ca_path).exists());
-        assert!(std::path::Path::new(&cert_path).exists());
-        assert!(std::path::Path::new(&key_path).exists());
+        assert!(ca_path.exists());
+        assert!(cert_path.exists());
+        assert!(key_path.exists());
 
         let mut config = get_testing_config(tmpdir.path(), None);
         let alg_config = AlgorithmConfigurationString {
@@ -638,9 +575,9 @@ mod tests {
             .expect("Failed to create context info from string");
 
         let tls_config = RegistrarTlsConfig {
-            ca_cert: Some(ca_path),
-            client_cert: Some(cert_path),
-            client_key: Some(key_path),
+            ca_cert: Some(ca_path.to_string_lossy().to_string()),
+            client_cert: Some(cert_path.to_string_lossy().to_string()),
+            client_key: Some(key_path.to_string_lossy().to_string()),
             insecure: Some(false),
             timeout: Some(5000),
         };
@@ -695,21 +632,32 @@ mod tests {
     #[actix_rt::test]
     async fn test_tls_config_all_fields_set() {
         let tmpdir = tempfile::tempdir().expect("failed to create tmpdir");
-        let (ca_path, cert_path, key_path) =
-            generate_test_tls_certificates(tmpdir.path());
+        let (ca_path, _server_cert, _server_key, cert_path, key_path) =
+            keylime::crypto::testing::generate_tls_certs_for_test(
+                tmpdir.path(),
+            );
 
         let tls_config = RegistrarTlsConfig {
-            ca_cert: Some(ca_path.clone()),
-            client_cert: Some(cert_path.clone()),
-            client_key: Some(key_path.clone()),
+            ca_cert: Some(ca_path.to_string_lossy().to_string()),
+            client_cert: Some(cert_path.to_string_lossy().to_string()),
+            client_key: Some(key_path.to_string_lossy().to_string()),
             insecure: Some(false),
             timeout: Some(10000),
         };
 
         // Verify all fields are set correctly
-        assert_eq!(tls_config.ca_cert, Some(ca_path));
-        assert_eq!(tls_config.client_cert, Some(cert_path));
-        assert_eq!(tls_config.client_key, Some(key_path));
+        assert_eq!(
+            tls_config.ca_cert,
+            Some(ca_path.to_string_lossy().to_string())
+        );
+        assert_eq!(
+            tls_config.client_cert,
+            Some(cert_path.to_string_lossy().to_string())
+        );
+        assert_eq!(
+            tls_config.client_key,
+            Some(key_path.to_string_lossy().to_string())
+        );
         assert_eq!(tls_config.insecure, Some(false));
         assert_eq!(tls_config.timeout, Some(10000));
     }
