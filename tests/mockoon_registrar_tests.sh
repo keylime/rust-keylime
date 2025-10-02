@@ -70,14 +70,14 @@ log_port_3001_info() {
         for pid in $(lsof -ti :3001 2>/dev/null); do
             echo "  PID: $pid"
             if [ -d "/proc/$pid" ]; then
-                echo "    Command: $(cat /proc/$pid/comm 2>/dev/null || echo 'N/A')"
-                echo "    Cmdline: $(cat /proc/$pid/cmdline 2>/dev/null | tr '\0' ' ' || echo 'N/A')"
-                echo "    User: $(stat -c '%U' /proc/$pid 2>/dev/null || echo 'N/A')"
-                echo "    Parent PID: $(cat /proc/$pid/stat 2>/dev/null | awk '{print $4}' || echo 'N/A')"
-                echo "    Start time: $(stat -c '%Y' /proc/$pid 2>/dev/null | xargs -I {} date -d @{} 2>/dev/null || echo 'N/A')"
-                echo "    Working directory: $(readlink /proc/$pid/cwd 2>/dev/null || echo 'N/A')"
+                echo "    Command: $(cat "/proc/$pid/comm" 2>/dev/null || echo 'N/A')"
+                echo "    Cmdline: $(tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null || echo 'N/A')"
+                echo "    User: $(stat -c '%U' "/proc/$pid" 2>/dev/null || echo 'N/A')"
+                echo "    Parent PID: $(awk '{print $4}' < "/proc/$pid/stat" 2>/dev/null || echo 'N/A')"
+                echo "    Start time: $(stat -c '%Y' "/proc/$pid" 2>/dev/null | xargs -I {} date -d @{} 2>/dev/null || echo 'N/A')"
+                echo "    Working directory: $(readlink "/proc/$pid/cwd" 2>/dev/null || echo 'N/A')"
                 echo "    Environment (filtered):"
-                grep -E "(MOCKOON|NODE|NPM|PATH|USER|HOME)" /proc/$pid/environ 2>/dev/null | tr '\0' '\n' | sed 's/^/      /' || echo "      N/A"
+                grep -E "(MOCKOON|NODE|NPM|PATH|USER|HOME)" "/proc/$pid/environ" 2>/dev/null | tr '\0' '\n' | sed 's/^/      /' || echo "      N/A"
             else
                 echo "    Process details not available (proc not mounted or process gone)"
             fi
@@ -86,11 +86,11 @@ log_port_3001_info() {
     fi
 
     echo "--- Process list (mockoon related) ---"
-    ps aux 2>/dev/null | grep -i mockoon | grep -v grep || echo "No mockoon processes found"
+    pgrep -f -l mockoon 2>/dev/null || echo "No mockoon processes found"
     echo ""
 
     echo "--- Process list (node related on port 3001) ---"
-    ps aux 2>/dev/null | grep -E "(node|npm)" | grep -v grep || echo "No node/npm processes found"
+    { pgrep -f -l node 2>/dev/null; pgrep -f -l npm 2>/dev/null; } | sort -u || echo "No node/npm processes found"
     echo ""
 
     echo "--- Docker containers (if running in container) ---"
