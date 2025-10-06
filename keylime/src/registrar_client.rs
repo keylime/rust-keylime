@@ -231,6 +231,21 @@ impl RegistrarClientBuilder {
 
         let scheme = if use_tls { "https" } else { "http" };
 
+        info!(
+            "Building Registrar client: scheme={}, registrar={}:{}, TLS={}",
+            scheme, registrar_ip, registrar_port, use_tls
+        );
+
+        if use_tls {
+            debug!(
+                "TLS configuration: ca_cert={:?}, client_cert={:?}, client_key={:?}, insecure={:?}",
+                self.ca_certificate,
+                self.certificate,
+                self.key,
+                self.insecure
+            );
+        }
+
         // Create the client (HTTPS or plain HTTP)
         let client = if use_tls {
             let args = ClientArgs {
