@@ -65,7 +65,7 @@ impl AttestationClient {
             None
         };
 
-        debug!("ResilientClient: initial delay: {} ms, max retries: {}, max delay: {:?} ms", 
+        debug!("ResilientClient: initial delay: {} ms, max retries: {}, max delay: {:?} ms",
             config.initial_delay_ms, config.max_retries, config.max_delay_ms);
         let client = ResilientClient::new(
             base_client,

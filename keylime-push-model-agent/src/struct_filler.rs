@@ -664,7 +664,6 @@ mod tests {
 
             let filler = FillerFromHardware::new(&mut ctx);
             assert!(filler.uefi_log_handler.is_none());
-
             assert!(ctx.flush_context().is_ok());
         }
     }
