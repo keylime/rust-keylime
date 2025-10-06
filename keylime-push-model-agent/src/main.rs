@@ -203,11 +203,17 @@ async fn run(args: &Args) -> Result<()> {
         let client_cert = config.registrar_tls_client_cert();
         let client_key = config.registrar_tls_client_key();
 
+        info!("Registrar TLS enabled: true");
+        debug!("Registrar CA certificate: {}", ca_cert);
+        debug!("Registrar client certificate: {}", client_cert);
+        debug!("Registrar client key: {}", client_key);
+
         // Only use TLS if all certificate paths are provided
         if !ca_cert.is_empty()
             && !client_cert.is_empty()
             && !client_key.is_empty()
         {
+            info!("Registrar TLS configuration complete - using HTTPS");
             Some(registration::RegistrarTlsConfig {
                 ca_cert: Some(ca_cert.to_string()),
                 client_cert: Some(client_cert.to_string()),
@@ -220,6 +226,7 @@ async fn run(args: &Args) -> Result<()> {
             None
         }
     } else {
+        info!("Registrar TLS enabled: false - using plain HTTP");
         None
     };
 
