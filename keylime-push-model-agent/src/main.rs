@@ -5,7 +5,6 @@ use clap::Parser;
 use keylime::config::PushModelConfigTrait;
 use log::{debug, error, info};
 mod attestation;
-mod auth;
 mod context_info_handler;
 mod header_validation;
 mod registration;
