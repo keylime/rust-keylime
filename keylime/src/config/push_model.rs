@@ -33,6 +33,7 @@ pub struct PushModelConfig {
     agent_data_path: String,
     #[transform(using = override_default_api_versions, error = OverrideError)]
     api_versions: Vec<&str>,
+    attestation_interval_seconds: u64,
     certification_keys_server_identifier: String,
     contact_ip: String,
     contact_port: u32,
@@ -132,5 +133,26 @@ mod tests {
         );
         assert_eq!(config.uuid(), DEFAULT_UUID);
         assert_eq!(config.verifier_url(), DEFAULT_VERIFIER_URL);
+        assert_eq!(
+            config.attestation_interval_seconds(),
+            DEFAULT_ATTESTATION_INTERVAL_SECONDS
+        );
     } // create_default_config_test
+
+    #[test]
+    fn test_attestation_interval_seconds_custom() {
+        let tmpdir = tempfile::tempdir().expect("failed to create tmpdir");
+        let mut config = get_testing_config(tmpdir.path(), None);
+
+        // Modify to use a custom attestation interval
+        config.attestation_interval_seconds = 5;
+
+        assert_eq!(config.attestation_interval_seconds(), 5);
+
+        // Verify it's different from default
+        assert_ne!(
+            config.attestation_interval_seconds(),
+            DEFAULT_ATTESTATION_INTERVAL_SECONDS
+        );
+    }
 }

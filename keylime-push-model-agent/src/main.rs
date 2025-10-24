@@ -179,7 +179,7 @@ async fn run(args: &Args) -> Result<()> {
         attestation_client,
         neg_config,
         ctx_info,
-        args.attestation_interval_seconds,
+        config.attestation_interval_seconds(),
     );
     state_machine.run().await;
     Ok(())
