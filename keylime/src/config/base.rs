@@ -98,6 +98,9 @@ pub const DEFAULT_EXP_BACKOFF_INITIAL_DELAY: u32 = 10000; // 10 seconds
 pub const DEFAULT_EXP_BACKOFF_MAX_RETRIES: u32 = 5;
 pub const DEFAULT_EXP_BACKOFF_MAX_DELAY: u32 = 300000; // 300 seconds
 
+// Default attestation interval for push model (in seconds)
+pub const DEFAULT_ATTESTATION_INTERVAL_SECONDS: u64 = 60;
+
 // TODO These should be temporary
 pub const DEFAULT_CERTIFICATION_KEYS_SERVER_IDENTIFIER: &str = "ak";
 pub static DEFAULT_PUSH_API_VERSIONS: &[&str] = &["3.0"];
@@ -163,6 +166,7 @@ pub struct AgentConfig {
     pub payload_key_password: String,
 
     // Push attestation options
+    pub attestation_interval_seconds: u64,
     pub certification_keys_server_identifier: String,
     pub ima_ml_count_file: String,
     pub registrar_api_versions: String,
@@ -320,6 +324,8 @@ impl Default for AgentConfig {
             trusted_client_ca: "default".to_string(),
             uuid: DEFAULT_UUID.to_string(),
             version: CONFIG_VERSION.to_string(),
+            attestation_interval_seconds:
+                DEFAULT_ATTESTATION_INTERVAL_SECONDS,
             certification_keys_server_identifier:
                 DEFAULT_CERTIFICATION_KEYS_SERVER_IDENTIFIER.to_string(),
             ima_ml_count_file: DEFAULT_IMA_ML_COUNT_FILE.to_string(),
@@ -1171,5 +1177,84 @@ mod tests {
         let translated =
             config_get_file_path("test", "", workdir, "default", false);
         assert_eq!("/workdir/default", translated);
+    }
+
+    #[test]
+    fn test_attestation_interval_seconds_default() {
+        let config = AgentConfig::default();
+        assert_eq!(
+            config.attestation_interval_seconds,
+            DEFAULT_ATTESTATION_INTERVAL_SECONDS
+        );
+        assert_eq!(config.attestation_interval_seconds, 60);
+    }
+
+    #[test]
+    fn test_attestation_interval_seconds_custom() {
+        let tempdir = tempfile::tempdir()
+            .expect("failed to create temporary directory");
+
+        let config = AgentConfig {
+            keylime_dir: tempdir.path().display().to_string(),
+            attestation_interval_seconds: 5,
+            ..AgentConfig::default()
+        };
+
+        assert_eq!(config.attestation_interval_seconds, 5);
+
+        // Verify that config_translate_keywords preserves the custom value
+        let result = config_translate_keywords(&config);
+        assert!(result.is_ok());
+        let translated = result.unwrap(); //#[allow_ci]
+        assert_eq!(translated.attestation_interval_seconds, 5);
+    }
+
+    #[test]
+    fn test_attestation_interval_seconds_constant_value() {
+        // Ensure the constant has the expected value
+        assert_eq!(DEFAULT_ATTESTATION_INTERVAL_SECONDS, 60);
+    }
+
+    #[test]
+    fn test_attestation_interval_from_toml() {
+        use std::fs;
+        use std::io::Write;
+
+        let tempdir = tempfile::tempdir()
+            .expect("failed to create temporary directory");
+
+        // Create a temporary config file with custom attestation_interval_seconds
+        let config_path = tempdir.path().join("agent.toml");
+        let mut file = fs::File::create(&config_path)
+            .expect("failed to create config file");
+
+        writeln!(file, "[agent]").expect("failed to write to config file");
+        writeln!(file, "attestation_interval_seconds = 10")
+            .expect("failed to write to config file");
+
+        // Load the configuration
+        use config::{Config, File, FileFormat};
+        let default_config = AgentConfig {
+            keylime_dir: tempdir.path().display().to_string(),
+            ..AgentConfig::default()
+        };
+
+        let settings = Config::builder()
+            .add_source(default_config)
+            .add_source(File::from(config_path).format(FileFormat::Toml))
+            .build()
+            .expect("failed to build config");
+
+        #[derive(serde::Deserialize)]
+        struct Wrapper {
+            agent: AgentConfig,
+        }
+
+        let wrapper: Wrapper = settings
+            .try_deserialize()
+            .expect("failed to deserialize config");
+
+        // Verify the value was loaded correctly from TOML (overriding default of 60)
+        assert_eq!(wrapper.agent.attestation_interval_seconds, 10);
     }
 }
