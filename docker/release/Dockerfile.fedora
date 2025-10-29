@@ -48,6 +48,7 @@ RUN microdnf makecache && \
 
 # now copy the agent from the builder
 COPY --from=builder /src/rust-keylime/target/release/keylime_agent /bin/keylime_agent
+COPY --from=builder /src/rust-keylime/target/release/keylime_push_model_agent /bin/keylime_push_model_agent
 COPY --from=builder /src/rust-keylime/keylime-agent.conf /etc/keylime/agent.conf
 ENTRYPOINT ["/bin/keylime_agent"]
 
