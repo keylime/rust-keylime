@@ -319,15 +319,41 @@ impl AuthenticationMiddleware {
     fn is_auth_endpoint(&self, req: &reqwest::Request) -> bool {
         let path = req.url().path();
         // Skip authentication for auth endpoints to prevent infinite loops
-        // Match patterns like /v*/sessions or /v*/sessions/*
+        //
+        // Auth endpoints match these patterns:
+        // 1. /[prefix/]sessions           (e.g., /sessions, /v3.0/sessions, /api/sessions)
+        // 2. /[prefix/]sessions/{id}      (e.g., /sessions/1, /v3.0/sessions/42, /api/sessions/123)
+        //
+        // The key insight: "sessions" must be the final segment or second-to-last segment
+        //
+        // We use segment-based matching to avoid false positives on URLs like:
+        // - /users/sessions_count           (segment is "sessions_count", not "sessions")
+        // - /data/sessions-backup           (segment is "sessions-backup", not "sessions")
+        // - /api/admin/sessions/report      ("sessions" is third-to-last, has more after ID)
+        //
+        // But we do match:
+        // - /sessions                       ("sessions" is last segment)
+        // - /v3.0/sessions                  ("sessions" is last segment)
+        // - /api/sessions/123               ("sessions" is second-to-last, followed by ID)
         let segments: Vec<&str> =
             path.split('/').filter(|s| !s.is_empty()).collect();
 
-        for i in 0..segments.len().saturating_sub(1) {
-            if segments[i].starts_with('v') && segments[i + 1] == "sessions" {
-                return true;
-            }
+        let len = segments.len();
+        if len == 0 {
+            return false;
         }
+
+        // Check if "sessions" is the last segment (e.g., /v3.0/sessions)
+        if segments[len - 1] == "sessions" {
+            return true;
+        }
+
+        // Check if "sessions" is second-to-last segment followed by a single segment (the ID)
+        // (e.g., /v3.0/sessions/42)
+        if len >= 2 && segments[len - 2] == "sessions" {
+            return true;
+        }
+
         false
     }
 }
@@ -1282,8 +1308,8 @@ mod tests {
             let test_cases = vec![
                 ("https://verifier.example.com/v3.0/sessions", true),
                 ("https://verifier.example.com/v2.5/sessions/42", true),
-                ("https://verifier.example.com/sessions", false),
-                ("https://verifier.example.com/api/sessions/123", false),
+                ("https://verifier.example.com/sessions", true),
+                ("https://verifier.example.com/api/sessions/123", true),
                 ("https://verifier.example.com/agents", false),
                 ("https://verifier.example.com/attestations", false),
                 ("https://verifier.example.com/keys", false),
