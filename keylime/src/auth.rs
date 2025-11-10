@@ -107,9 +107,57 @@ impl SessionToken {
     }
 }
 
-/// Mock TPM operations for testing
+/// TPM operations abstraction for authentication proof-of-possession
+///
+/// This trait provides an async interface for generating TPM-based cryptographic
+/// proofs during the authentication protocol. Implementations handle the details
+/// of interacting with TPM hardware or providing mock proofs for testing.
+///
+/// ## Async Design
+///
+/// The trait is async (`#[async_trait]`) even though underlying TPM operations
+/// are synchronous. This design allows:
+///
+/// 1. **Non-blocking execution**: TPM operations can run on blocking thread pools
+///    via `tokio::task::spawn_blocking` without blocking the async runtime
+/// 2. **Consistent API**: All authentication operations use async/await patterns
+/// 3. **Future extensibility**: Support for truly async TPM drivers if available
+///
+/// ## Runtime Requirements
+///
+/// Implementations that use real TPM hardware (like `RealTpmOperations`) require:
+/// - An active tokio runtime (checked via `tokio::runtime::Handle::try_current()`)
+/// - Available threads in the runtime's blocking thread pool
+///
+/// Mock implementations (like `MockTpmOperations`) don't have these requirements
+/// since they don't perform actual TPM operations.
+///
+/// ## Thread Safety
+///
+/// The `Send + Sync` bounds ensure implementations can be safely shared across
+/// threads, which is necessary for use in the async `AuthenticationClient`.
 #[async_trait::async_trait]
 pub trait TpmOperations: Send + Sync {
+    /// Generate a cryptographic proof of possession for the given challenge
+    ///
+    /// This method uses TPM2_Certify to prove possession of the Attestation Key (AK)
+    /// by certifying it with itself and including the challenge as qualifying data.
+    ///
+    /// # Arguments
+    ///
+    /// * `challenge` - Challenge string from the verifier (typically base64-encoded)
+    ///
+    /// # Returns
+    ///
+    /// A `ProofOfPossession` containing the signed attestation message and signature
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - TPM operations fail (hardware/driver issues)
+    /// - Challenge encoding is invalid
+    /// - Cryptographic operations fail
+    /// - Runtime requirements are not met (for real TPM operations)
     async fn generate_proof(
         &self,
         challenge: &str,
