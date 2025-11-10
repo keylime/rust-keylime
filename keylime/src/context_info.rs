@@ -445,6 +445,25 @@ impl ContextInfo {
         let mut tpm_context = self.get_mutable_tpm_context().clone();
 
         // Use TPM2_Certify to certify the AK with itself
+        //
+        // ## Async Runtime Bridge
+        //
+        // TPM operations are synchronous (blocking I/O) but we're in an async context.
+        // We use `task::spawn_blocking` to run the TPM operation on a dedicated blocking
+        // thread pool, preventing it from blocking the async executor.
+        //
+        // This is necessary because:
+        // 1. TPM hardware operations involve blocking system calls
+        // 2. The tss-esapi library provides a synchronous API
+        // 3. Blocking the async runtime would prevent other tasks from making progress
+        //
+        // Requirements:
+        // - A tokio runtime must be active when this function is called
+        // - The runtime's blocking thread pool must have available threads
+        //
+        // Error handling:
+        // - First `?` handles JoinError (if the spawned task panics)
+        // - Second `?` handles TpmError from the TPM operation itself
         let (attest, signature) = task::spawn_blocking(move || {
             tpm_context.certify_credential(
                 challenge_bytes.try_into().map_err(|_| {
