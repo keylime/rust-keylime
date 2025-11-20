@@ -85,6 +85,7 @@ mod tests {
             key: key_path.to_string_lossy().to_string(),
             insecure: Some(false),
             timeout: 5000,
+            accept_invalid_hostnames: true,
         };
 
         let result = get_https_client(&args);
@@ -108,6 +109,7 @@ mod tests {
             key: key_path.to_string_lossy().to_string(),
             insecure: Some(true),
             timeout: 5000,
+            accept_invalid_hostnames: true,
         };
 
         let result = get_https_client(&args);
@@ -135,6 +137,7 @@ mod tests {
             key: tmpdir.path().join("key.pem").to_string_lossy().to_string(),
             insecure: Some(false),
             timeout: 5000,
+            accept_invalid_hostnames: true,
         };
 
         let result = get_https_client(&args);
@@ -165,6 +168,7 @@ mod tests {
             key: tmpdir.path().join("key.pem").to_string_lossy().to_string(),
             insecure: Some(false),
             timeout: 5000,
+            accept_invalid_hostnames: true,
         };
 
         let result = get_https_client(&args);
@@ -198,6 +202,7 @@ mod tests {
                 .to_string(),
             insecure: Some(false),
             timeout: 5000,
+            accept_invalid_hostnames: true,
         };
 
         let result = get_https_client(&args);
@@ -232,6 +237,7 @@ mod tests {
             key: key_path.to_string_lossy().to_string(),
             insecure: Some(false),
             timeout: 5000,
+            accept_invalid_hostnames: true,
         };
 
         let result = get_https_client(&args);
@@ -273,6 +279,7 @@ mod tests {
             key: invalid_key_path.to_string_lossy().to_string(),
             insecure: Some(false),
             timeout: 5000,
+            accept_invalid_hostnames: true,
         };
 
         let result = get_https_client(&args);
@@ -300,6 +307,7 @@ mod tests {
                 key: key_path.to_string_lossy().to_string(),
                 insecure: Some(false),
                 timeout,
+                accept_invalid_hostnames: true,
             };
 
             let result = get_https_client(&args);
@@ -326,6 +334,7 @@ mod tests {
             key: key_path.to_string_lossy().to_string(),
             insecure: None,
             timeout: 5000,
+            accept_invalid_hostnames: true,
         };
 
         let result = get_https_client(&args);
@@ -343,6 +352,7 @@ mod tests {
             key: "key.pem".to_string(),
             insecure: Some(false),
             timeout: 5000,
+            accept_invalid_hostnames: true,
         };
 
         let result = get_https_client(&args);

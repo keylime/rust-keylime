@@ -257,6 +257,7 @@ impl RegistrarClientBuilder {
                 key: self.key.clone().unwrap_or_default(),
                 insecure: self.insecure,
                 timeout: self.timeout.unwrap_or(5000),
+                accept_invalid_hostnames: false,
             };
             https_client::get_https_client(&args)?
         } else {
