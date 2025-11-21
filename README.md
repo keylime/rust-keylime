@@ -52,7 +52,7 @@ For runtime, the following packages are required:
 
 #### Debian and Ubuntu
 
-For Debian and Ubuntu, use the following packages are required:
+For Debian and Ubuntu, the following packages are required:
 
 * `libclang-dev`
 * `libssl-dev`
