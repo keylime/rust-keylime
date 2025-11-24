@@ -45,8 +45,11 @@ Source0:        rust-keylime-v%{version}.tar.gz
 #       --exclude-crate-path "libloading#tests"
 #   tar jcf rust-keylime-%%{version}-vendor.tar.xz vendor
 Source1:        rust-keylime-vendor.tar.xz
+## (0-99) General patches
 # Drop deprecated features and workaround unavailable components
 Patch0:         rust-keylime-metadata.patch
+## (100-199) Patches for building from system Rust libraries (Fedora)
+## (200+) Patches for building from vendored Rust libraries (RHEL)
 
 ExclusiveArch:  %{rust_arches}
 
@@ -65,17 +68,44 @@ BuildRequires:  tpm2-tss-devel
 BuildRequires:  clang
 BuildRequires:  rust-toolset
 
-# Virtual Provides to support swapping between different agent implementations
-Provides:       keylime-agent
-Conflicts:      keylime-agent
+# Requires common files from exact same release
+Requires: keylime-agent-rust-common = %{version}-%{release}
+# Require the IMA emulator
+Requires: keylime-agent-rust-ima-emulator%{?_isa} = %{version}-%{release}
+
+# Virtual Provides to support swapping between pull and push model agents
+Provides: keylime-agent = %{version}-%{release}
 
 %description
-Rust agent for Keylime
+The Keylime agent
+
+#===============================================================================
+
+%package common
+Summary:   Common files for Keylime agent
+License:   (Apache-2.0 OR MIT) AND BSD-3-Clause AND (MIT OR Apache-2.0) AND Unicode-DFS-2016 AND (Apache-2.0 OR Apache-2.0 WITH LLVM-exception OR MIT) AND (Apache-2.0 OR BSL-1.0) AND (Apache-2.0 OR MIT) AND (Apache-2.0 OR MIT OR Zlib) AND Apache-2.0 WITH LLVM-exception AND ISC AND MIT AND (MIT OR Unlicense)
+BuildArch: noarch
+
+# This is necessary to provide a clean upgrade path from the previous
+# keylime-agent-rust which shipped the IMA emulator
+Obsoletes: keylime-agent-rust-pull < %{version}-%{release}
+Obsoletes: keylime-agent-rust < %{version}-%{release}
+
+%description common
+Common files for the Keylime agent in both push and pull models
+
+#===============================================================================
 
 %package push
-Summary:        Rust push-model agent for Keylime
+Summary:        The Keylime agent for push model deployment
+License: (Apache-2.0 OR MIT) AND BSD-3-Clause AND (MIT OR Apache-2.0) AND Unicode-DFS-2016 AND (Apache-2.0 OR Apache-2.0 WITH LLVM-exception OR MIT) AND (Apache-2.0 OR BSL-1.0) AND (Apache-2.0 OR MIT) AND (Apache-2.0 OR MIT OR Zlib) AND Apache-2.0 WITH LLVM-exception AND ISC AND MIT AND (MIT OR Unlicense)
 Requires:       tpm2-tss
 Requires:       util-linux-core
+
+# Requires common files from exact same release
+Requires: keylime-agent-rust-common = %{version}-%{release}
+# Require the IMA emulator
+Requires: keylime-agent-rust-ima-emulator%{?_isa} = %{version}-%{release}
 
 # The keylime-base package provides the keylime user creation. It is available
 # from Fedora 36
@@ -84,23 +114,60 @@ Requires:       keylime-base
 %endif
 
 # Virtual Provides to support swapping between pull and push model agents
-Provides:       keylime-agent
-Conflicts:      keylime-agent
+Provides:       keylime-agent = %{version}-%{release}
 
 %description push
-Rust push-model agent for Keylime
+The Keylime agent for push model deployment
+
+#===============================================================================
+
+%package ima-emulator
+Summary:        The Keylime IMA emulator
+License: (Apache-2.0 OR MIT) AND BSD-3-Clause AND (MIT OR Apache-2.0) AND Unicode-DFS-2016 AND (Apache-2.0 OR Apache-2.0 WITH LLVM-exception OR MIT) AND (Apache-2.0 OR BSL-1.0) AND (Apache-2.0 OR MIT) AND (Apache-2.0 OR MIT OR Zlib) AND Apache-2.0 WITH LLVM-exception AND ISC AND MIT AND (MIT OR Unlicense)
+Requires:       tpm2-tss
+
+# Requires common files from exact same release
+Requires:       keylime-agent-rust-common = %{version}-%{release}
+
+# The keylime-base package provides the keylime user creation. It is available
+# from Fedora 36
+%if 0%{?fedora} >= 36 || 0%{?rhel} >= 9
+Requires:       keylime-base
+%endif
+
+Provides:       keylime-ima-emulator = %{version}-%{release}
+
+%description ima-emulator
+The Keylime IMA emulator for testing with emulated TPM
+
+#===============================================================================
 
 %prep
-%autosetup -n rust-keylime-%{version} -N
-%autopatch -p1
+%autosetup -n rust-keylime-%{version} -N %{?bundled_rust_deps:-a1}
+%autopatch -M 99 -p1
+%if 0%{?bundled_rust_deps}
 # Source1 is vendored dependencies
-%cargo_prep -V 1
+%cargo_prep -v vendor
+# Add back if any patch added to the range, do not forget the %
+# autopatch -m 200 -p1
+%else
+# Add back if any patch added to the range, do not forget the %
+# autopatch -m 100 -M 199 -p1
+%cargo_prep
+%generate_buildrequires
+%cargo_generate_buildrequires
+%endif
 
 %build
 %if 0%{?rhel} >= 10
 %cargo_build -ftesting
 %else
 %cargo_build --features=testing
+%endif
+%cargo_license_summary
+%{cargo_license} > LICENSE.dependencies
+%if 0%{?bundled_rust_deps}
+%cargo_vendor_manifest
 %endif
 
 %install
@@ -146,33 +213,49 @@ chmod 500 %{_sysconfdir}/keylime
 chown -R keylime:keylime %{_sysconfdir}/keylime
 
 %preun
+%systemd_preun keylime_push_model_agent.service
 %systemd_preun keylime_agent.service
 %systemd_preun var-lib-keylime-secure.mount
 
 %postun
+%systemd_postun_with_restart keylime_push_model_agent.service
 %systemd_postun_with_restart keylime_agent.service
 %systemd_postun_with_restart var-lib-keylime-secure.mount
 
-%files
+%files common
 %license LICENSE
 %doc README.md
 %attr(500,keylime,keylime) %dir %{_sysconfdir}/keylime
 %attr(500,keylime,keylime) %dir %{_sysconfdir}/keylime/agent.conf.d
 %config(noreplace) %attr(400,keylime,keylime) %{_sysconfdir}/keylime/agent.conf.d/001-run_as.conf
 %config(noreplace) %attr(400,keylime,keylime) %{_sysconfdir}/keylime/agent.conf
-%{_unitdir}/keylime_agent.service
-%{_unitdir}/var-lib-keylime-secure.mount
 %attr(700,keylime,keylime) %dir %{_rundir}/keylime
 %attr(700,keylime,keylime) %{_sharedstatedir}/keylime
 %attr(700,keylime,keylime) %{_libexecdir}/keylime
+
+%files
+%license LICENSE.dependencies
+%if 0%{?bundled_rust_deps}
+%license cargo-vendor.txt
+%endif
+%{_unitdir}/keylime_agent.service
+%{_unitdir}/var-lib-keylime-secure.mount
 %{_bindir}/keylime_agent
-%{_bindir}/keylime_ima_emulator
 
 %files push
-%license LICENSE
-%doc README.md
-%{_bindir}/keylime_push_model_agent
+%license LICENSE.dependencies
+%if 0%{?bundled_rust_deps}
+%license cargo-vendor.txt
+%endif
 %{_unitdir}/keylime_push_model_agent.service
+%{_bindir}/keylime_push_model_agent
+
+%files ima-emulator
+%license LICENSE.dependencies
+%if 0%{?bundled_rust_deps}
+%license cargo-vendor.txt
+%endif
+%{_bindir}/keylime_ima_emulator
 
 %if %{with check}
 %check
