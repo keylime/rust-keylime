@@ -23,6 +23,9 @@ pub struct Ident {
     nonce: String,
 }
 
+use serde_json::json;
+use std::collections::HashMap;
+use keylime::cmw::{build_cmw, build_event_log, get_keylime_metadata};
 // This is a Quote request from the tenant, which does not check
 // integrity measurement. It should return this data:
 // { QuoteAIK(nonce, 16:H(payload_pub)), payload_pub }
@@ -110,6 +113,47 @@ async fn identity(
     HttpResponse::Ok().json(response)
 }
 
+pub fn extract_api_version(req: &HttpRequest) -> String {
+    // Get path like "/v3.0/quotes/integrity"
+    let path = req.path();
+
+    for segment in path.split('/') {
+        if segment.starts_with('v') {
+            return segment.to_string();
+        }
+    }
+
+    // default fallback to v2.2
+    "v2.2".to_string()
+}
+
+/// parse the quote string and returns TPMS_ATTEST, TPMT_SIGNATURE, PCRs as byte arrays
+pub fn parse_quote_fields(quote_str: &str) -> HashMap<&'static str, Vec<u8>> {
+    let mut result = HashMap::new();
+
+    let cleaned = quote_str.strip_prefix('r').unwrap_or(quote_str);
+
+    let parts: Vec<&str> = cleaned.splitn(3, ':').collect();
+    if parts.len() != 3 {
+        return result;
+    }
+
+    _ = result.insert(
+        "TPMS_ATTEST",
+        general_purpose::STANDARD.decode(parts[0]).unwrap_or_default(),
+    );
+    _ = result.insert(
+        "TPMT_SIGNATURE",
+        general_purpose::STANDARD.decode(parts[1]).unwrap_or_default(),
+    );
+    _ = result.insert(
+        "PCRs",
+        general_purpose::STANDARD.decode(parts[2]).unwrap_or_default(),
+    );
+
+    result
+}
+
 // This is a Quote request from the cloud verifier, which will check
 // integrity measurement. The PCRs included in the Quote will be specified
 // by the mask. It should return this data:
@@ -120,6 +164,9 @@ async fn integrity(
     param: web::Query<Integ>,
     data: web::Data<QuoteData<'_>>,
 ) -> impl Responder {
+
+    let api_version = extract_api_version(&req);
+
     // nonce, mask can only be in alphanumerical format
     if !param.nonce.chars().all(char::is_alphanumeric) {
         warn!("Get quote returning 400 response. Parameters should be strictly alphanumeric: {}", param.nonce);
@@ -301,6 +348,32 @@ async fn integrity(
         } else {
             (None, None, None)
         };
+
+    if api_version == "v2.4" {
+        let parsed_quote = parse_quote_fields(&id_quote.quote);
+        let event_log = build_event_log(
+            ima_measurement_list.as_deref().unwrap_or(""),
+            mb_measurement_list.as_deref(),
+        );
+        let metadata = get_keylime_metadata(
+            pubkey.clone(),
+            Some("123".to_string()), // where to get boottime?
+            &id_quote.hash_alg,
+            &id_quote.sign_alg,
+        );
+        let cmw = build_cmw(
+            &parsed_quote["TPMS_ATTEST"],
+            &parsed_quote["TPMT_SIGNATURE"],
+            &parsed_quote["PCRs"],
+            &event_log,
+            &metadata,
+        );
+        return HttpResponse::Ok().json(json!({
+            "status": "Success",
+            "code": 200,
+            "results": cmw
+        }));
+    }
 
     // Generate the final quote based on the ID quote
     let quote = KeylimeQuote {

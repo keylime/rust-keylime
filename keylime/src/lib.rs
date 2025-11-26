@@ -28,6 +28,7 @@ pub mod structures;
 pub mod tpm;
 pub mod uefi;
 pub mod version;
+pub mod cmw;
 
 #[macro_use]
 extern crate static_assertions;
