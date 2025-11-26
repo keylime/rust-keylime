@@ -15,7 +15,7 @@ async-trait.workspace = true
 base64.workspace = true
 chrono.workspace = true
 clap.workspace = true
-keylime.workspace = true
+keylime = { workspace = true, features = [] }
 log.workspace = true
 predicates.workspace = true
 pretty_env_logger.workspace = true
