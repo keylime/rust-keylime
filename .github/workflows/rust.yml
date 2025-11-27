@@ -15,7 +15,7 @@ jobs:
     name: Static code checks
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v5
+    - uses: actions/checkout@v6
     - name: Check formatting
       run: cargo fmt --all -- --check
     - name: Check for panics
@@ -27,7 +27,7 @@ jobs:
     container:
       image: quay.io/keylime/keylime-ci:latest
     steps:
-    - uses: actions/checkout@v5
+    - uses: actions/checkout@v6
     - name: Set git safe.directory for the working directory
       run : git config --system --add safe.directory "$PWD"
     - name: Run tests
