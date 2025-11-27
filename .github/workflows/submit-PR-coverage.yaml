@@ -11,7 +11,7 @@ jobs:
       run:
         working-directory: scripts
     steps:
-    - uses: actions/checkout@v5
+    - uses: actions/checkout@v6
     - name: Wait for Packit tests to finish and download e2e_coverage.txt and upstream_coverage.xml files.
       run: ./download_packit_coverage.sh
       env:
