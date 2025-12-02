@@ -245,6 +245,10 @@ pub enum RegistrarClientError {
     #[error("Failed to register agent: received {code} from {addr}")]
     Registration { addr: String, code: u16 },
 
+    /// Registration forbidden - TPM identity mismatch or security rejection
+    #[error("Registration forbidden: {message}. This may indicate a TPM identity change or UUID spoofing attempt. The existing agent record must be deleted before re-registering with a different TPM.")]
+    RegistrationForbidden { message: String },
+
     /// Reqwest error
     #[error("Reqwest error: {0}")]
     Reqwest(#[from] reqwest::Error),
@@ -387,6 +391,16 @@ impl RegistrarClient {
         };
 
         if !resp.status().is_success() {
+            // Check if this is a 403 Forbidden - indicates security rejection
+            if resp.status() == StatusCode::FORBIDDEN {
+                let error_message = resp
+                    .text()
+                    .await
+                    .unwrap_or_else(|_| "Unknown error".to_string());
+                return Err(RegistrarClientError::RegistrationForbidden {
+                    message: error_message,
+                });
+            }
             return Err(RegistrarClientError::Registration {
                 addr,
                 code: resp.status().as_u16(),
@@ -438,6 +452,15 @@ impl RegistrarClient {
                 info!("Trying to register agent using API version {api_version}");
                 let r = self.try_register_agent(ai, api_version).await;
 
+                // Check if this is a security rejection (403 Forbidden)
+                // If so, return immediately - don't try other API versions
+                if let Err(RegistrarClientError::RegistrationForbidden {
+                    ..
+                }) = r
+                {
+                    return r;
+                }
+
                 // If successful, cache the API version for future requests
                 if r.is_ok() {
                     self.api_version = api_version.to_string();
@@ -457,6 +480,17 @@ impl RegistrarClient {
                         // Found a compatible API version, it should work
                         let r =
                             self.try_register_agent(ai, api_version).await;
+
+                        // Check if this is a security rejection (403 Forbidden)
+                        // If so, return immediately - don't try other API versions
+                        if let Err(
+                            RegistrarClientError::RegistrationForbidden {
+                                ..
+                            },
+                        ) = r
+                        {
+                            return r;
+                        }
 
                         // If successful, cache the API version for future requests
                         if r.is_ok() {

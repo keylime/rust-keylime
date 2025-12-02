@@ -256,6 +256,10 @@ impl Drop for TestConfigGuard {
 mod tests {
     use super::*;
     use std::collections::HashMap;
+    use std::sync::Mutex;
+
+    // Mutex to ensure tests that modify global TESTING_CONFIG_OVERRIDE run serially
+    static TEST_MUTEX: Mutex<()> = Mutex::new(());
 
     #[test]
     fn test_get_testing_config() {
@@ -288,6 +292,9 @@ mod tests {
 
     #[test]
     fn test_testing_config_override() {
+        // Acquire mutex to prevent concurrent access to global state
+        let _lock = TEST_MUTEX.lock().unwrap(); //#[allow_ci]
+
         // Clear any existing override
         clear_testing_config_override();
 
@@ -330,6 +337,9 @@ mod tests {
 
     #[test]
     fn test_testconfig_guard_automatic_cleanup() {
+        // Acquire mutex to prevent concurrent access to global state
+        let _lock = TEST_MUTEX.lock().unwrap(); //#[allow_ci]
+
         // Clear any existing override
         clear_testing_config_override();
 

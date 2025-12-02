@@ -623,10 +623,24 @@ async fn main() -> Result<()> {
         ak_handle,
         retry_config: None,
     };
+    use keylime::error::Error;
+    use keylime::registrar_client::RegistrarClientError;
+
     match keylime::agent_registration::register_agent(aa, &mut ctx).await {
         Ok(()) => (),
+        Err(Error::RegistrarClient(
+            RegistrarClientError::RegistrationForbidden { message },
+        )) => {
+            error!("Failed to register agent: Registration forbidden - {message}");
+            error!("This indicates a security rejection (403 Forbidden), likely due to TPM identity mismatch or UUID spoofing attempt.");
+            error!("The existing agent record must be deleted before re-registering with a different TPM.");
+            return Err(Error::RegistrarClient(
+                RegistrarClientError::RegistrationForbidden { message },
+            ));
+        }
         Err(e) => {
             error!("Failed to register agent: {e:?}");
+            error!("Registration failed with a non-security error. The agent will continue but may have degraded functionality.");
         }
     }
 
