@@ -1,0 +1,319 @@
+{
+  "uuid": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+  "lastMigration": 33,
+  "name": "Registrar",
+  "endpointPrefix": "",
+  "latency": 0,
+  "port": 3001,
+  "hostname": "",
+  "folders": [],
+  "routes": [
+    {
+      "uuid": "ver-endpoint-uuid-001",
+      "type": "http",
+      "documentation": "Registrar API version endpoint",
+      "method": "get",
+      "endpoint": "version",
+      "responses": [
+        {
+          "uuid": "ver-response-uuid-001",
+          "body": "{\n  \"code\": 200,\n  \"status\": \"Success\",\n  \"results\": {\n    \"current_version\": \"1.2\",\n    \"supported_versions\": [\"1.0\", \"1.1\", \"1.2\"]\n  }\n}",
+          "latency": 0,
+          "statusCode": 200,
+          "label": "API version response",
+          "headers": [
+            {
+              "key": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "key": "Access-Control-Allow-Origin",
+              "value": "*"
+            }
+          ],
+          "bodyType": "INLINE",
+          "filePath": "",
+          "databucketID": "",
+          "sendFileAsBody": false,
+          "rules": [],
+          "rulesOperator": "OR",
+          "disableTemplating": false,
+          "fallbackTo404": false,
+          "default": true,
+          "crudKey": "id",
+          "callbacks": []
+        }
+      ],
+      "responseMode": null,
+      "streamingMode": null,
+      "streamingInterval": 0
+    },
+    {
+      "uuid": "reg-endpoint-uuid-001",
+      "type": "http",
+      "documentation": "Agent registration endpoint - POST /v1.2/agents/{uuid}",
+      "method": "post",
+      "endpoint": "v1.2/agents/:uuid",
+      "responses": [
+        {
+          "uuid": "reg-response-uuid-001",
+          "body": "{\n  \"code\": 200,\n  \"status\": \"Success\",\n  \"results\": {\n    \"blob\": \"dGVzdC1ibG9iLWRhdGE=\"\n  }\n}",
+          "latency": 0,
+          "statusCode": 200,
+          "label": "Successful registration",
+          "headers": [
+            {
+              "key": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "key": "Access-Control-Allow-Origin",
+              "value": "*"
+            }
+          ],
+          "bodyType": "INLINE",
+          "filePath": "",
+          "databucketID": "",
+          "sendFileAsBody": false,
+          "rules": [],
+          "rulesOperator": "OR",
+          "disableTemplating": false,
+          "fallbackTo404": false,
+          "default": true,
+          "crudKey": "id",
+          "callbacks": []
+        }
+      ],
+      "responseMode": null,
+      "streamingMode": null,
+      "streamingInterval": 0
+    },
+    {
+      "uuid": "act-endpoint-uuid-001",
+      "type": "http",
+      "documentation": "Agent activation endpoint - PUT /v1.2/agents/{uuid}",
+      "method": "put",
+      "endpoint": "v1.2/agents/:uuid",
+      "responses": [
+        {
+          "uuid": "act-response-uuid-001",
+          "body": "{\n  \"code\": 200,\n  \"status\": \"Success\",\n  \"results\": {}\n}",
+          "latency": 0,
+          "statusCode": 200,
+          "label": "Successful activation",
+          "headers": [
+            {
+              "key": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "key": "Access-Control-Allow-Origin",
+              "value": "*"
+            }
+          ],
+          "bodyType": "INLINE",
+          "filePath": "",
+          "databucketID": "",
+          "sendFileAsBody": false,
+          "rules": [],
+          "rulesOperator": "OR",
+          "disableTemplating": false,
+          "fallbackTo404": false,
+          "default": true,
+          "crudKey": "id",
+          "callbacks": []
+        }
+      ],
+      "responseMode": null,
+      "streamingMode": null,
+      "streamingInterval": 0
+    },
+    {
+      "uuid": "reg-tls-endpoint-uuid-001",
+      "type": "http",
+      "documentation": "TLS-secured agent registration endpoint - POST /v1.2/agents/{uuid}",
+      "method": "post",
+      "endpoint": "tls/v1.2/agents/:uuid",
+      "responses": [
+        {
+          "uuid": "reg-tls-response-uuid-001",
+          "body": "{\n  \"code\": 200,\n  \"status\": \"Success\",\n  \"results\": {\n    \"blob\": \"dGxzLWJsb2ItZGF0YQ==\"\n  }\n}",
+          "latency": 0,
+          "statusCode": 200,
+          "label": "Successful TLS registration",
+          "headers": [
+            {
+              "key": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "key": "Access-Control-Allow-Origin",
+              "value": "*"
+            }
+          ],
+          "bodyType": "INLINE",
+          "filePath": "",
+          "databucketID": "",
+          "sendFileAsBody": false,
+          "rules": [],
+          "rulesOperator": "OR",
+          "disableTemplating": false,
+          "fallbackTo404": false,
+          "default": true,
+          "crudKey": "id",
+          "callbacks": []
+        }
+      ],
+      "responseMode": null,
+      "streamingMode": null,
+      "streamingInterval": 0
+    },
+    {
+      "uuid": "act-tls-endpoint-uuid-001",
+      "type": "http",
+      "documentation": "TLS-secured agent activation endpoint - PUT /v1.2/agents/{uuid}",
+      "method": "put",
+      "endpoint": "tls/v1.2/agents/:uuid",
+      "responses": [
+        {
+          "uuid": "act-tls-response-uuid-001",
+          "body": "{\n  \"code\": 200,\n  \"status\": \"Success\",\n  \"results\": {}\n}",
+          "latency": 0,
+          "statusCode": 200,
+          "label": "Successful TLS activation",
+          "headers": [
+            {
+              "key": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "key": "Access-Control-Allow-Origin",
+              "value": "*"
+            }
+          ],
+          "bodyType": "INLINE",
+          "filePath": "",
+          "databucketID": "",
+          "sendFileAsBody": false,
+          "rules": [],
+          "rulesOperator": "OR",
+          "disableTemplating": false,
+          "fallbackTo404": false,
+          "default": true,
+          "crudKey": "id",
+          "callbacks": []
+        }
+      ],
+      "responseMode": null,
+      "streamingMode": null,
+      "streamingInterval": 0
+    },
+    {
+      "uuid": "ver-tls-endpoint-uuid-001",
+      "type": "http",
+      "documentation": "TLS-secured Registrar API version endpoint",
+      "method": "get",
+      "endpoint": "tls/version",
+      "responses": [
+        {
+          "uuid": "ver-tls-response-uuid-001",
+          "body": "{\n  \"code\": 200,\n  \"status\": \"Success\",\n  \"results\": {\n    \"current_version\": \"1.2\",\n    \"supported_versions\": [\"1.0\", \"1.1\", \"1.2\"]\n  }\n}",
+          "latency": 0,
+          "statusCode": 200,
+          "label": "TLS API version response",
+          "headers": [
+            {
+              "key": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "key": "Access-Control-Allow-Origin",
+              "value": "*"
+            }
+          ],
+          "bodyType": "INLINE",
+          "filePath": "",
+          "databucketID": "",
+          "sendFileAsBody": false,
+          "rules": [],
+          "rulesOperator": "OR",
+          "disableTemplating": false,
+          "fallbackTo404": false,
+          "default": true,
+          "crudKey": "id",
+          "callbacks": []
+        }
+      ],
+      "responseMode": null,
+      "streamingMode": null,
+      "streamingInterval": 0
+    }
+  ],
+  "rootChildren": [
+    {
+      "type": "route",
+      "uuid": "ver-endpoint-uuid-001"
+    },
+    {
+      "type": "route",
+      "uuid": "reg-endpoint-uuid-001"
+    },
+    {
+      "type": "route",
+      "uuid": "act-endpoint-uuid-001"
+    },
+    {
+      "type": "route",
+      "uuid": "reg-tls-endpoint-uuid-001"
+    },
+    {
+      "type": "route",
+      "uuid": "act-tls-endpoint-uuid-001"
+    },
+    {
+      "type": "route",
+      "uuid": "ver-tls-endpoint-uuid-001"
+    }
+  ],
+  "proxyMode": false,
+  "proxyHost": "",
+  "proxyRemovePrefix": false,
+  "tlsOptions": {
+    "enabled": false,
+    "type": "CERT",
+    "pfxPath": "",
+    "certPath": "",
+    "keyPath": "",
+    "caPath": "",
+    "passphrase": ""
+  },
+  "cors": true,
+  "headers": [
+    {
+      "key": "Access-Control-Allow-Origin",
+      "value": "*"
+    },
+    {
+      "key": "Access-Control-Allow-Methods",
+      "value": "GET,POST,PUT,PATCH,DELETE,HEAD,OPTIONS"
+    },
+    {
+      "key": "Access-Control-Allow-Headers",
+      "value": "Content-Type, Origin, Accept, Authorization, Content-Length, X-Requested-With"
+    }
+  ],
+  "proxyReqHeaders": [
+    {
+      "key": "",
+      "value": ""
+    }
+  ],
+  "proxyResHeaders": [
+    {
+      "key": "",
+      "value": ""
+    }
+  ],
+  "data": [],
+  "callbacks": []
+}

@@ -515,11 +515,12 @@ async fn main() -> Result<()> {
 
     // Load or generate mTLS key pair (separate from payload keys)
     // The mTLS key is always persistent, stored at the configured path.
+    // Uses ECC P-256 by default for better security and performance
     let key_path = Path::new(&config.server_key);
     let (mtls_pub, mtls_priv) = crypto::load_or_generate_key(
         key_path,
         Some(config.server_key_password.as_ref()),
-        keylime::algorithms::EncryptionAlgorithm::Rsa2048,
+        keylime::algorithms::EncryptionAlgorithm::Ecc256,
         false, // Don't validate algorithm for mTLS keys (for backward compatibility)
     )?;
 
@@ -608,6 +609,12 @@ async fn main() -> Result<()> {
         registrar_port: config.registrar_port,
         enable_iak_idevid: config.enable_iak_idevid,
         ek_handle: config.ek_handle.clone(),
+        // Pull model agent does not use TLS for registrar communication
+        registrar_ca_cert: None,
+        registrar_client_cert: None,
+        registrar_client_key: None,
+        registrar_insecure: None,
+        registrar_timeout: None,
     };
 
     let aa = AgentRegistration {

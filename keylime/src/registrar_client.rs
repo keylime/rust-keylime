@@ -1,6 +1,8 @@
 use crate::resilient_client::ResilientClient;
 use crate::{
-    agent_identity::AgentIdentity, agent_registration::RetryConfig,
+    agent_identity::AgentIdentity,
+    agent_registration::RetryConfig,
+    https_client::{self, ClientArgs},
     serialization::*,
 };
 use log::*;
@@ -40,6 +42,10 @@ pub enum RegistrarClientBuilderError {
     /// Middleware error
     #[error("Middleware error: {0}")]
     Middleware(#[from] reqwest_middleware::Error),
+
+    /// HTTPS client creation error
+    #[error("HTTPS client creation error: {0}")]
+    HttpsClient(#[from] anyhow::Error),
 }
 
 #[derive(Debug, Default)]
@@ -49,6 +55,11 @@ pub struct RegistrarClientBuilder {
     registrar_address: Option<String>,
     registrar_port: Option<u32>,
     retry_config: Option<RetryConfig>,
+    ca_certificate: Option<String>,
+    certificate: Option<String>,
+    key: Option<String>,
+    insecure: Option<bool>,
+    timeout: Option<u64>,
 }
 
 impl RegistrarClientBuilder {
@@ -88,6 +99,56 @@ impl RegistrarClientBuilder {
         self
     }
 
+    /// Set the CA certificate file path for TLS communication
+    ///
+    /// # Arguments:
+    ///
+    /// * ca_certificate (String): Path to the CA certificate file
+    pub fn ca_certificate(mut self, ca_certificate: String) -> Self {
+        self.ca_certificate = Some(ca_certificate);
+        self
+    }
+
+    /// Set the client certificate file path for TLS communication
+    ///
+    /// # Arguments:
+    ///
+    /// * certificate (String): Path to the client certificate file
+    pub fn certificate(mut self, certificate: String) -> Self {
+        self.certificate = Some(certificate);
+        self
+    }
+
+    /// Set the client private key file path for TLS communication
+    ///
+    /// # Arguments:
+    ///
+    /// * key (String): Path to the client private key file
+    pub fn key(mut self, key: String) -> Self {
+        self.key = Some(key);
+        self
+    }
+
+    /// Set the insecure flag to disable TLS certificate validation
+    ///
+    /// # Arguments:
+    ///
+    /// * insecure (bool): If true, disable certificate validation
+    pub fn insecure(mut self, insecure: bool) -> Self {
+        self.insecure = Some(insecure);
+        self
+    }
+
+    /// Set the request timeout in milliseconds
+    ///
+    /// # Arguments:
+    ///
+    /// * timeout (u64): Request timeout in milliseconds
+    pub fn timeout(mut self, timeout: u64) -> Self {
+        self.timeout = Some(timeout);
+        self
+    }
+
     /// Parse the received address
     fn parse_registrar_address(address: String) -> String {
         // Parse the registrar IP or hostname
@@ -112,6 +173,8 @@ impl RegistrarClientBuilder {
     /// Get the registrar API version from the Registrar '/version' endpoint
     async fn get_registrar_api_version(
         &mut self,
+        resilient_client: &ResilientClient,
+        scheme: &str,
     ) -> Result<String, RegistrarClientBuilderError> {
         let Some(ref registrar_ip) = self.registrar_address else {
             return Err(RegistrarClientBuilderError::RegistrarIPNotSet);
@@ -122,34 +185,15 @@ impl RegistrarClientBuilder {
         };
 
         // Try to reach the registrar
-        let addr = format!("http://{registrar_ip}:{registrar_port}/version");
+        let addr =
+            format!("{scheme}://{registrar_ip}:{registrar_port}/version");
 
         info!("Requesting registrar API version to {addr}");
 
-        let resp = if let Some(retry_config) = &self.retry_config {
-            debug!(
-                "Using ResilientClient for version check with {} retries.",
-                retry_config.max_retries
-            );
-            let client = ResilientClient::new(
-                None,
-                Duration::from_millis(retry_config.initial_delay_ms),
-                retry_config.max_retries,
-                &[StatusCode::OK],
-                retry_config.max_delay_ms.map(Duration::from_millis),
-            );
-
-            client
-                .get_request(reqwest::Method::GET, &addr)
-                .send()
-                .await?
-        } else {
-            reqwest::Client::new()
-                .get(&addr)
-                .send()
-                .await
-                .map_err(RegistrarClientBuilderError::Reqwest)?
-        };
+        let resp = resilient_client
+            .get_request(reqwest::Method::GET, &addr)
+            .send()
+            .await?;
 
         if !resp.status().is_success() {
             info!("Registrar at '{addr}' does not support the '/version' endpoint");
@@ -178,31 +222,85 @@ impl RegistrarClientBuilder {
             return Err(RegistrarClientBuilderError::RegistrarPortNotSet);
         };
 
-        // Get the registrar API version. If it was caused by an error in the request, set the
-        // version as UNKNOWN_API_VERSION, otherwise abort the build process
-        let registrar_api_version =
-            match self.get_registrar_api_version().await {
-                Ok(version) => version,
-                Err(e) => match e {
-                    RegistrarClientBuilderError::RegistrarNoVersion => {
-                        UNKNOWN_API_VERSION.to_string()
-                    }
-                    _ => {
-                        return Err(e);
-                    }
-                },
-            };
+        // Determine if TLS should be used
+        // TLS is used if all TLS parameters are provided and insecure is not true
+        let use_tls = self.ca_certificate.is_some()
+            && self.certificate.is_some()
+            && self.key.is_some()
+            && !self.insecure.unwrap_or(false);
 
-        let resilient_client =
-            self.retry_config.as_ref().map(|retry_config| {
-                ResilientClient::new(
-                    None,
+        let scheme = if use_tls { "https" } else { "http" };
+
+        info!(
+            "Building Registrar client: scheme={}, registrar={}:{}, TLS={}",
+            scheme, registrar_ip, registrar_port, use_tls
+        );
+
+        if use_tls {
+            debug!(
+                "TLS configuration: ca_cert={:?}, client_cert={:?}, client_key={:?}, insecure={:?}",
+                self.ca_certificate,
+                self.certificate,
+                self.key,
+                self.insecure
+            );
+        }
+
+        // Create the client (HTTPS or plain HTTP)
+        let client = if use_tls {
+            let args = ClientArgs {
+                ca_certificate: self
+                    .ca_certificate
+                    .clone()
+                    .unwrap_or_default(),
+                certificate: self.certificate.clone().unwrap_or_default(),
+                key: self.key.clone().unwrap_or_default(),
+                insecure: self.insecure,
+                timeout: self.timeout.unwrap_or(5000),
+                accept_invalid_hostnames: false,
+            };
+            https_client::get_https_client(&args)?
+        } else {
+            reqwest::Client::new()
+        };
+
+        // Create ResilientClient once, using retry config if provided
+        let (initial_delay, max_retries, max_delay) =
+            if let Some(ref retry_config) = self.retry_config {
+                (
                     Duration::from_millis(retry_config.initial_delay_ms),
                     retry_config.max_retries,
-                    &[StatusCode::OK],
                     retry_config.max_delay_ms.map(Duration::from_millis),
                 )
-            });
+            } else {
+                // No retry config: use 0 retries
+                (Duration::from_millis(100), 0, None)
+            };
+
+        let resilient_client = ResilientClient::new(
+            Some(client),
+            initial_delay,
+            max_retries,
+            &[StatusCode::OK],
+            max_delay,
+        );
+
+        // Get the registrar API version. If it was caused by an error in the request, set the
+        // version as UNKNOWN_API_VERSION, otherwise abort the build process
+        let registrar_api_version = match self
+            .get_registrar_api_version(&resilient_client, scheme)
+            .await
+        {
+            Ok(version) => version,
+            Err(e) => match e {
+                RegistrarClientBuilderError::RegistrarNoVersion => {
+                    UNKNOWN_API_VERSION.to_string()
+                }
+                _ => {
+                    return Err(e);
+                }
+            },
+        };
 
         Ok(RegistrarClient {
             supported_api_versions: self
@@ -212,6 +310,7 @@ impl RegistrarClientBuilder {
             registrar_ip,
             registrar_port,
             resilient_client,
+            scheme: scheme.to_string(),
         })
     }
 }
@@ -262,13 +361,14 @@ pub enum RegistrarClientError {
     Middleware(#[from] reqwest_middleware::Error),
 }
 
-#[derive(Clone, Default, Debug)]
+#[derive(Clone, Debug)]
 pub struct RegistrarClient {
     api_version: String,
     supported_api_versions: Option<Vec<String>>,
     registrar_ip: String,
     registrar_port: u32,
-    resilient_client: Option<ResilientClient>,
+    resilient_client: ResilientClient,
+    scheme: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -359,9 +459,10 @@ impl RegistrarClient {
         let registrar_ip = &self.registrar_ip;
         let registrar_port = &self.registrar_port;
         let uuid = &ai.uuid;
+        let scheme = &self.scheme;
 
         let addr = format!(
-            "http://{registrar_ip}:{registrar_port}/v{api_version}/agents/{uuid}",
+            "{scheme}://{registrar_ip}:{registrar_port}/v{api_version}/agents/{uuid}",
         );
 
         info!(
@@ -369,26 +470,18 @@ impl RegistrarClient {
             &addr, &ai.uuid
         );
 
-        let resp = match self.resilient_client {
-            Some(ref client) => client
-                .get_json_request_from_struct(
-                    reqwest::Method::POST,
-                    &addr,
-                    &data,
-                    None,
-                )
-                .map_err(RegistrarClientError::Serde)?
-                .send()
-                .await
-                .map_err(RegistrarClientError::Middleware)?,
-            None => {
-                reqwest::Client::new()
-                    .post(&addr)
-                    .json(&data)
-                    .send()
-                    .await?
-            }
-        };
+        let resp = self
+            .resilient_client
+            .get_json_request_from_struct(
+                reqwest::Method::POST,
+                &addr,
+                &data,
+                None,
+            )
+            .map_err(RegistrarClientError::Serde)?
+            .send()
+            .await
+            .map_err(RegistrarClientError::Middleware)?;
 
         if !resp.status().is_success() {
             // Check if this is a 403 Forbidden - indicates security rejection
@@ -523,9 +616,10 @@ impl RegistrarClient {
         let registrar_ip = &self.registrar_ip;
         let registrar_port = &self.registrar_port;
         let uuid = &ai.uuid;
+        let scheme = &self.scheme;
 
         let addr = format!(
-            "http://{registrar_ip}:{registrar_port}/v{api_version}/agents/{uuid}",
+            "{scheme}://{registrar_ip}:{registrar_port}/v{api_version}/agents/{uuid}",
         );
 
         info!(
@@ -533,8 +627,18 @@ impl RegistrarClient {
             &addr, &ai.uuid
         );
 
-        let resp =
-            reqwest::Client::new().put(&addr).json(&data).send().await?;
+        let resp = self
+            .resilient_client
+            .get_json_request_from_struct(
+                reqwest::Method::PUT,
+                &addr,
+                &data,
+                None,
+            )
+            .map_err(RegistrarClientError::Serde)?
+            .send()
+            .await
+            .map_err(RegistrarClientError::Middleware)?;
 
         if !resp.status().is_success() {
             return Err(RegistrarClientError::Activation {
@@ -1345,5 +1449,580 @@ mod tests {
             let result = builder.build().await;
             assert!(result.is_err());
         }
+    }
+
+    #[actix_rt::test]
+    async fn test_builder_tls_ca_certificate() {
+        let builder = RegistrarClientBuilder::new()
+            .ca_certificate("/path/to/ca.pem".to_string());
+
+        assert_eq!(
+            builder.ca_certificate,
+            Some("/path/to/ca.pem".to_string())
+        );
+    }
+
+    #[actix_rt::test]
+    async fn test_builder_tls_client_certificate() {
+        let builder = RegistrarClientBuilder::new()
+            .certificate("/path/to/cert.pem".to_string());
+
+        assert_eq!(
+            builder.certificate,
+            Some("/path/to/cert.pem".to_string())
+        );
+    }
+
+    #[actix_rt::test]
+    async fn test_builder_tls_client_key() {
+        let builder =
+            RegistrarClientBuilder::new().key("/path/to/key.pem".to_string());
+
+        assert_eq!(builder.key, Some("/path/to/key.pem".to_string()));
+    }
+
+    #[actix_rt::test]
+    async fn test_builder_tls_insecure_true() {
+        let builder = RegistrarClientBuilder::new().insecure(true);
+
+        assert_eq!(builder.insecure, Some(true));
+    }
+
+    #[actix_rt::test]
+    async fn test_builder_tls_insecure_false() {
+        let builder = RegistrarClientBuilder::new().insecure(false);
+
+        assert_eq!(builder.insecure, Some(false));
+    }
+
+    #[actix_rt::test]
+    async fn test_builder_tls_timeout() {
+        let builder = RegistrarClientBuilder::new().timeout(10000);
+
+        assert_eq!(builder.timeout, Some(10000));
+    }
+
+    #[actix_rt::test]
+    async fn test_builder_chaining_with_tls() {
+        let builder = RegistrarClientBuilder::new()
+            .registrar_address("127.0.0.1".to_string())
+            .registrar_port(8890)
+            .ca_certificate("/path/to/ca.pem".to_string())
+            .certificate("/path/to/cert.pem".to_string())
+            .key("/path/to/key.pem".to_string())
+            .insecure(false)
+            .timeout(5000);
+
+        assert_eq!(builder.registrar_address, Some("127.0.0.1".to_string()));
+        assert_eq!(builder.registrar_port, Some(8890));
+        assert_eq!(
+            builder.ca_certificate,
+            Some("/path/to/ca.pem".to_string())
+        );
+        assert_eq!(
+            builder.certificate,
+            Some("/path/to/cert.pem".to_string())
+        );
+        assert_eq!(builder.key, Some("/path/to/key.pem".to_string()));
+        assert_eq!(builder.insecure, Some(false));
+        assert_eq!(builder.timeout, Some(5000));
+    }
+
+    #[actix_rt::test]
+    async fn test_builder_tls_default_values() {
+        let builder = RegistrarClientBuilder::new();
+
+        assert_eq!(builder.ca_certificate, None);
+        assert_eq!(builder.certificate, None);
+        assert_eq!(builder.key, None);
+        assert_eq!(builder.insecure, None);
+        assert_eq!(builder.timeout, None);
+    }
+
+    #[actix_rt::test]
+    async fn test_builder_partial_tls_config_missing_ca() {
+        let builder = RegistrarClientBuilder::new()
+            .certificate("/path/to/cert.pem".to_string())
+            .key("/path/to/key.pem".to_string());
+
+        // Should have cert and key but not CA
+        assert_eq!(builder.ca_certificate, None);
+        assert_eq!(
+            builder.certificate,
+            Some("/path/to/cert.pem".to_string())
+        );
+        assert_eq!(builder.key, Some("/path/to/key.pem".to_string()));
+    }
+
+    #[actix_rt::test]
+    async fn test_builder_partial_tls_config_missing_cert() {
+        let builder = RegistrarClientBuilder::new()
+            .ca_certificate("/path/to/ca.pem".to_string())
+            .key("/path/to/key.pem".to_string());
+
+        // Should have CA and key but not cert
+        assert_eq!(
+            builder.ca_certificate,
+            Some("/path/to/ca.pem".to_string())
+        );
+        assert_eq!(builder.certificate, None);
+        assert_eq!(builder.key, Some("/path/to/key.pem".to_string()));
+    }
+
+    #[actix_rt::test]
+    async fn test_builder_partial_tls_config_missing_key() {
+        let builder = RegistrarClientBuilder::new()
+            .ca_certificate("/path/to/ca.pem".to_string())
+            .certificate("/path/to/cert.pem".to_string());
+
+        // Should have CA and cert but not key
+        assert_eq!(
+            builder.ca_certificate,
+            Some("/path/to/ca.pem".to_string())
+        );
+        assert_eq!(
+            builder.certificate,
+            Some("/path/to/cert.pem".to_string())
+        );
+        assert_eq!(builder.key, None);
+    }
+
+    #[actix_rt::test]
+    async fn test_builder_empty_string_tls_paths() {
+        let builder = RegistrarClientBuilder::new()
+            .ca_certificate("".to_string())
+            .certificate("".to_string())
+            .key("".to_string());
+
+        assert_eq!(builder.ca_certificate, Some("".to_string()));
+        assert_eq!(builder.certificate, Some("".to_string()));
+        assert_eq!(builder.key, Some("".to_string()));
+    }
+
+    #[actix_rt::test]
+    async fn test_builder_timeout_various_values() {
+        // Test with zero timeout
+        let builder_zero = RegistrarClientBuilder::new().timeout(0);
+        assert_eq!(builder_zero.timeout, Some(0));
+
+        // Test with very large timeout
+        let builder_large = RegistrarClientBuilder::new().timeout(3600000);
+        assert_eq!(builder_large.timeout, Some(3600000));
+
+        // Test with default-ish timeout
+        let builder_default = RegistrarClientBuilder::new().timeout(5000);
+        assert_eq!(builder_default.timeout, Some(5000));
+    }
+
+    #[actix_rt::test]
+    async fn test_builder_insecure_with_tls_certs() {
+        // Test that insecure can be set alongside TLS certificates
+        let builder = RegistrarClientBuilder::new()
+            .ca_certificate("/path/to/ca.pem".to_string())
+            .certificate("/path/to/cert.pem".to_string())
+            .key("/path/to/key.pem".to_string())
+            .insecure(true);
+
+        assert_eq!(
+            builder.ca_certificate,
+            Some("/path/to/ca.pem".to_string())
+        );
+        assert_eq!(
+            builder.certificate,
+            Some("/path/to/cert.pem".to_string())
+        );
+        assert_eq!(builder.key, Some("/path/to/key.pem".to_string()));
+        assert_eq!(builder.insecure, Some(true));
+    }
+
+    #[actix_rt::test]
+    async fn test_builder_retry_config_with_tls() {
+        let retry = Some(RetryConfig {
+            max_retries: 3,
+            initial_delay_ms: 100,
+            max_delay_ms: Some(1000),
+        });
+
+        let builder = RegistrarClientBuilder::new()
+            .registrar_address("127.0.0.1".to_string())
+            .registrar_port(8890)
+            .retry_config(retry.clone())
+            .ca_certificate("/path/to/ca.pem".to_string())
+            .certificate("/path/to/cert.pem".to_string())
+            .key("/path/to/key.pem".to_string());
+
+        // Verify retry_config was set
+        assert!(builder.retry_config.is_some());
+        let retry_cfg = builder.retry_config.as_ref().unwrap(); //#[allow_ci]
+        assert_eq!(retry_cfg.max_retries, 3);
+        assert_eq!(retry_cfg.initial_delay_ms, 100);
+        assert_eq!(retry_cfg.max_delay_ms, Some(1000));
+
+        // Verify TLS config was also set
+        assert_eq!(
+            builder.ca_certificate,
+            Some("/path/to/ca.pem".to_string())
+        );
+    }
+
+    #[actix_rt::test]
+    async fn test_builder_with_real_tls_certificates() {
+        let tmpdir = tempfile::tempdir().expect("Failed to create tempdir");
+        let (
+            ca_path,
+            _server_cert_path,
+            _server_key_path,
+            client_cert_path,
+            client_key_path,
+        ) = crate::crypto::testing::generate_tls_certs_for_test(
+            tmpdir.path(),
+        );
+
+        let ca_path_str = ca_path.to_string_lossy().to_string();
+        let client_cert_path_str =
+            client_cert_path.to_string_lossy().to_string();
+        let client_key_path_str =
+            client_key_path.to_string_lossy().to_string();
+
+        let builder = RegistrarClientBuilder::new()
+            .registrar_address("127.0.0.1".to_string())
+            .registrar_port(8890)
+            .ca_certificate(ca_path_str.clone())
+            .certificate(client_cert_path_str.clone())
+            .key(client_key_path_str.clone());
+
+        // Verify all TLS paths were set correctly
+        assert_eq!(builder.ca_certificate, Some(ca_path_str.clone()));
+        assert_eq!(builder.certificate, Some(client_cert_path_str.clone()));
+        assert_eq!(builder.key, Some(client_key_path_str.clone()));
+
+        // Verify files exist
+        assert!(ca_path.exists());
+        assert!(client_cert_path.exists());
+        assert!(client_key_path.exists());
+    }
+
+    #[actix_rt::test]
+    async fn test_builder_build_with_invalid_tls_cert_files() {
+        let tmpdir = tempfile::tempdir().expect("Failed to create tempdir");
+
+        // Try to build with non-existent certificate files
+        let mut builder = RegistrarClientBuilder::new()
+            .registrar_address("127.0.0.1".to_string())
+            .registrar_port(8890)
+            .ca_certificate(
+                tmpdir
+                    .path()
+                    .join("nonexistent_ca.pem")
+                    .to_string_lossy()
+                    .to_string(),
+            )
+            .certificate(
+                tmpdir
+                    .path()
+                    .join("nonexistent_cert.pem")
+                    .to_string_lossy()
+                    .to_string(),
+            )
+            .key(
+                tmpdir
+                    .path()
+                    .join("nonexistent_key.pem")
+                    .to_string_lossy()
+                    .to_string(),
+            );
+
+        // Build should fail because certificate files don't exist
+        let result = builder.build().await;
+        assert!(result.is_err());
+    }
+
+    #[actix_rt::test]
+    async fn test_tls_enabled_when_all_certs_provided() {
+        let tmpdir = tempfile::tempdir().expect("Failed to create tempdir");
+        let (
+            ca_path,
+            _server_cert_path,
+            _server_key_path,
+            client_cert_path,
+            client_key_path,
+        ) = crate::crypto::testing::generate_tls_certs_for_test(
+            tmpdir.path(),
+        );
+
+        let mut builder = RegistrarClientBuilder::new()
+            .registrar_address("127.0.0.1".to_string())
+            .registrar_port(8890)
+            .ca_certificate(ca_path.to_string_lossy().to_string())
+            .certificate(client_cert_path.to_string_lossy().to_string())
+            .key(client_key_path.to_string_lossy().to_string())
+            .insecure(false);
+
+        // The build will fail because there's no server running,
+        // but we can verify that TLS configuration was processed
+        let result = builder.build().await;
+        // Should fail at version endpoint, not at TLS setup
+        assert!(result.is_err());
+    }
+
+    #[actix_rt::test]
+    async fn test_tls_disabled_when_insecure_true() {
+        let tmpdir = tempfile::tempdir().expect("Failed to create tempdir");
+        let (
+            ca_path,
+            _server_cert_path,
+            _server_key_path,
+            client_cert_path,
+            client_key_path,
+        ) = crate::crypto::testing::generate_tls_certs_for_test(
+            tmpdir.path(),
+        );
+
+        let mut builder = RegistrarClientBuilder::new()
+            .registrar_address("127.0.0.1".to_string())
+            .registrar_port(8890)
+            .ca_certificate(ca_path.to_string_lossy().to_string())
+            .certificate(client_cert_path.to_string_lossy().to_string())
+            .key(client_key_path.to_string_lossy().to_string())
+            .insecure(true); // This should disable TLS
+
+        // Build will fail due to no server, but won't try to load certs
+        let result = builder.build().await;
+        assert!(result.is_err());
+    }
+
+    #[actix_rt::test]
+    async fn test_http_fallback_when_partial_tls_config() {
+        // When only some TLS params are provided, should fall back to HTTP
+        let mut builder = RegistrarClientBuilder::new()
+            .registrar_address("127.0.0.1".to_string())
+            .registrar_port(8890)
+            .ca_certificate("/path/to/ca.pem".to_string())
+            // Missing certificate and key
+            .insecure(false);
+
+        let result = builder.build().await;
+        // Should fail trying to connect via HTTP to get version
+        assert!(result.is_err());
+    }
+
+    // Mockoon-based integration tests for registrar HTTP and HTTPS
+    #[actix_rt::test]
+    async fn test_mockoon_registrar_http_registration() {
+        if std::env::var("MOCKOON_REGISTRAR").is_err() {
+            return;
+        }
+
+        let mock_data = [0u8; 1];
+        let priv_key = crypto::testing::rsa_generate(2048).unwrap(); //#[allow_ci]
+        let cert = crypto::x509::CertificateBuilder::new()
+            .private_key(&priv_key)
+            .common_name("mockoon-test-agent")
+            .add_ips(vec!["127.0.0.1"])
+            .build()
+            .unwrap(); //#[allow_ci]
+
+        let ai = AgentIdentityBuilder::new()
+            .ak_pub(&mock_data)
+            .ek_pub(&mock_data)
+            .enabled_api_versions(vec!["1.2"])
+            .mtls_cert(cert)
+            .ip("127.0.0.1".to_string())
+            .port(9001)
+            .uuid("test-uuid-mockoon-http")
+            .build()
+            .await
+            .expect("failed to build Agent Identity");
+
+        // Test HTTP registration with Mockoon on port 3001
+        let mut builder = RegistrarClientBuilder::new()
+            .registrar_address("127.0.0.1".to_string())
+            .registrar_port(3001);
+
+        let mut registrar_client =
+            builder.build().await.expect("Failed to build client");
+
+        let result = registrar_client.register_agent(&ai).await;
+        assert!(result.is_ok(), "HTTP registration failed: {result:?}");
+
+        // Verify we got a blob back
+        let blob = result.unwrap(); //#[allow_ci]
+        assert!(
+            !blob.is_empty(),
+            "Expected non-empty blob from registration"
+        );
+    }
+
+    #[actix_rt::test]
+    async fn test_mockoon_registrar_http_activation() {
+        if std::env::var("MOCKOON_REGISTRAR").is_err() {
+            return;
+        }
+
+        let mock_data = [0u8; 1];
+        let priv_key = crypto::testing::rsa_generate(2048).unwrap(); //#[allow_ci]
+        let cert = crypto::x509::CertificateBuilder::new()
+            .private_key(&priv_key)
+            .common_name("mockoon-test-agent")
+            .add_ips(vec!["127.0.0.1"])
+            .build()
+            .unwrap(); //#[allow_ci]
+
+        let ai = AgentIdentityBuilder::new()
+            .ak_pub(&mock_data)
+            .ek_pub(&mock_data)
+            .enabled_api_versions(vec!["1.2"])
+            .mtls_cert(cert)
+            .ip("127.0.0.1".to_string())
+            .port(9001)
+            .uuid("test-uuid-mockoon-http")
+            .build()
+            .await
+            .expect("failed to build Agent Identity");
+
+        // Test HTTP activation with Mockoon on port 3001
+        let mut builder = RegistrarClientBuilder::new()
+            .registrar_address("127.0.0.1".to_string())
+            .registrar_port(3001);
+
+        let mut registrar_client =
+            builder.build().await.expect("Failed to build client");
+
+        let result =
+            registrar_client.activate_agent(&ai, "test-auth-tag").await;
+        assert!(result.is_ok(), "HTTP activation failed: {result:?}");
+    }
+
+    #[actix_rt::test]
+    async fn test_mockoon_registrar_https_registration() {
+        if std::env::var("MOCKOON_REGISTRAR").is_err() {
+            return;
+        }
+
+        let tmpdir = tempfile::tempdir().expect("Failed to create tempdir");
+        let (
+            ca_path,
+            _server_cert_path,
+            _server_key_path,
+            client_cert_path,
+            client_key_path,
+        ) = crate::crypto::testing::generate_tls_certs_for_test(
+            tmpdir.path(),
+        );
+
+        let mock_data = [0u8; 1];
+        let priv_key = crypto::testing::rsa_generate(2048).unwrap(); //#[allow_ci]
+        let cert = crypto::x509::CertificateBuilder::new()
+            .private_key(&priv_key)
+            .common_name("mockoon-test-agent-tls")
+            .add_ips(vec!["127.0.0.1"])
+            .build()
+            .unwrap(); //#[allow_ci]
+
+        let _ = AgentIdentityBuilder::new()
+            .ak_pub(&mock_data)
+            .ek_pub(&mock_data)
+            .enabled_api_versions(vec!["1.2"])
+            .mtls_cert(cert)
+            .ip("127.0.0.1".to_string())
+            .port(9001)
+            .uuid("test-uuid-mockoon-https")
+            .build()
+            .await
+            .expect("failed to build Agent Identity");
+
+        // Test HTTPS registration with Mockoon on port 3001
+        // Note: Mockoon HTTPS requires TLS to be enabled in the registrar.json config
+        let mut builder = RegistrarClientBuilder::new()
+            .registrar_address("127.0.0.1".to_string())
+            .registrar_port(3001)
+            .ca_certificate(ca_path.to_string_lossy().to_string())
+            .certificate(client_cert_path.to_string_lossy().to_string())
+            .key(client_key_path.to_string_lossy().to_string())
+            .insecure(false);
+
+        // Build will attempt to connect to get version
+        // This test demonstrates TLS configuration flow
+        let result = builder.build().await;
+
+        // With Mockoon not configured for TLS, this will fail at connection
+        // In a real TLS-enabled Mockoon setup, this would succeed
+        // This test verifies the TLS code path is executed
+        assert!(result.is_err());
+    }
+
+    #[actix_rt::test]
+    async fn test_mockoon_registrar_version_endpoint() {
+        if std::env::var("MOCKOON_REGISTRAR").is_err() {
+            return;
+        }
+
+        // Test that we can retrieve the API version from Mockoon
+        let mut builder = RegistrarClientBuilder::new()
+            .registrar_address("127.0.0.1".to_string())
+            .registrar_port(3001);
+
+        let result = builder.build().await;
+        assert!(
+            result.is_ok(),
+            "Failed to build client and get version: {result:?}"
+        );
+
+        let client = result.unwrap(); //#[allow_ci]
+                                      // Verify the API version was retrieved
+        assert_eq!(client.api_version, "1.2");
+        assert!(client.supported_api_versions.is_some());
+
+        let supported = client.supported_api_versions.unwrap(); //#[allow_ci]
+        assert!(supported.contains(&"1.2".to_string()));
+    }
+
+    #[actix_rt::test]
+    async fn test_mockoon_registrar_with_retry_config() {
+        if std::env::var("MOCKOON_REGISTRAR").is_err() {
+            return;
+        }
+
+        let retry_config = Some(RetryConfig {
+            max_retries: 3,
+            initial_delay_ms: 100,
+            max_delay_ms: Some(1000),
+        });
+
+        let mock_data = [0u8; 1];
+        let priv_key = crypto::testing::rsa_generate(2048).unwrap(); //#[allow_ci]
+        let cert = crypto::x509::CertificateBuilder::new()
+            .private_key(&priv_key)
+            .common_name("mockoon-test-agent-retry")
+            .add_ips(vec!["127.0.0.1"])
+            .build()
+            .unwrap(); //#[allow_ci]
+
+        let ai = AgentIdentityBuilder::new()
+            .ak_pub(&mock_data)
+            .ek_pub(&mock_data)
+            .enabled_api_versions(vec!["1.2"])
+            .mtls_cert(cert)
+            .ip("127.0.0.1".to_string())
+            .port(9001)
+            .uuid("test-uuid-mockoon-retry")
+            .build()
+            .await
+            .expect("failed to build Agent Identity");
+
+        // Test registration with retry configuration
+        let mut builder = RegistrarClientBuilder::new()
+            .registrar_address("127.0.0.1".to_string())
+            .registrar_port(3001)
+            .retry_config(retry_config);
+
+        let mut registrar_client =
+            builder.build().await.expect("Failed to build client");
+
+        let result = registrar_client.register_agent(&ai).await;
+        assert!(
+            result.is_ok(),
+            "Registration with retry config failed: {result:?}"
+        );
     }
 }

@@ -8,7 +8,7 @@ name: "Mockoon Tests"
     branches: [master]
 
 jobs:
-  mockoon-tests:
+  mockoon-verifier-tests:
     runs-on: ubuntu-latest
     container:
       image: quay.io/keylime/keylime-ci:latest
@@ -24,5 +24,93 @@ jobs:
           port: 3000
       - name: Set git safe.directory for the working directory
         run: git config --system --add safe.directory "$PWD"
-      - name: Mockoon tests custom script execution
+      - name: Mockoon verifier tests custom script execution
         run: bash tests/mockoon_tests.sh
+
+  mockoon-registrar-tests:
+    runs-on: ubuntu-latest
+    container:
+      image: quay.io/keylime/keylime-ci:latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: NPM installation
+        run: dnf install -y npm
+      - name: Pre-Mockoon system debugging
+        run: |
+          echo "======== PRE-MOCKOON SYSTEM STATE ========"
+          echo "Available system tools:"
+          command -v lsof && echo "✓ lsof available" ||
+            echo "✗ lsof not available"
+          command -v netstat && echo "✓ netstat available" ||
+            echo "✗ netstat not available"
+          command -v ss && echo "✓ ss available" ||
+            echo "✗ ss available"
+          command -v curl && echo "✓ curl available" ||
+            echo "✗ curl not available"
+          command -v docker && echo "✓ docker available" ||
+            echo "✗ docker not available"
+
+          echo ""
+          echo "Current processes using port 3001 (should be none):"
+          lsof -i :3001 2>/dev/null || echo "No processes using port 3001"
+
+          echo ""
+          echo "All listening ports:"
+          netstat -tulpn 2>/dev/null | head -20 ||
+            ss -tulpn 2>/dev/null | head -20 ||
+            echo "Cannot list ports"
+
+          echo ""
+          echo "Current user and environment:"
+          echo "User: $(whoami)"
+          echo "UID: $(id -u)"
+          echo "Groups: $(id -G)"
+          echo "HOME: $HOME"
+          echo "PWD: $PWD"
+          echo "CI: ${CI:-not_set}"
+          echo "GITHUB_ACTIONS: ${GITHUB_ACTIONS:-not_set}"
+
+          echo ""
+          echo "Container/system info:"
+          echo "Hostname: $(hostname)"
+          uname -a
+          cat /etc/os-release | head -5
+          echo "======== END PRE-MOCKOON SYSTEM STATE ========"
+      - name: Run Mockoon CLI
+        uses: mockoon/cli-action@v2
+        with:
+          version: latest
+          data-file: keylime-push-model-agent/test-data/registrar.json
+          port: 3001
+      - name: Post-Mockoon system debugging
+        run: |
+          echo "======== POST-MOCKOON SYSTEM STATE ========"
+          echo "Processes using port 3001 after Mockoon start:"
+          lsof -i :3001 2>/dev/null ||
+            echo "No processes using port 3001 (unexpected!)"
+
+          echo ""
+          echo "Mockoon-related processes:"
+          ps aux | grep -i mockoon | grep -v grep ||
+            echo "No mockoon processes found"
+
+          echo ""
+          echo "Node.js processes:"
+          ps aux | grep -E "(node|npm)" | grep -v grep ||
+            echo "No node/npm processes found"
+
+          echo ""
+          echo "Test HTTP connectivity to port 3001:"
+          curl -sI --connect-timeout 5 http://localhost:3001 2>/dev/null ||
+            echo "Failed to connect to port 3001"
+
+          echo ""
+          echo "Network connections:"
+          netstat -tulpn 2>/dev/null | grep ':3001' ||
+            ss -tulpn 2>/dev/null | grep ':3001' ||
+            echo "No port 3001 connections found"
+          echo "======== END POST-MOCKOON SYSTEM STATE ========"
+      - name: Set git safe.directory for the working directory
+        run: git config --system --add safe.directory "$PWD"
+      - name: Mockoon registrar tests custom script execution
+        run: bash tests/mockoon_registrar_tests.sh
