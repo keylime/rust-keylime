@@ -66,6 +66,56 @@ impl UefiLogHandler {
         Self::from_bytes(&log_bytes)
     }
 
+    /// Create a UefiLogHandler from an already-opened file handle
+    ///
+    /// This method is used when the file has been opened with elevated privileges
+    /// before dropping to an unprivileged user. The file handle is protected by
+    /// a Mutex to allow safe concurrent access.
+    ///
+    /// Unlike IMA logs which grow over time, UEFI logs are static boot-time
+    /// measurements, so they can be safely read multiple times without issues.
+    ///
+    /// # Arguments
+    ///
+    /// * `file` - A reference to a Mutex-protected File handle
+    ///
+    /// # Returns
+    ///
+    /// Returns a UefiLogHandler instance or an error if the file cannot be read
+    /// or does not contain a valid UEFI event log.
+    pub fn from_file(file: &std::sync::Mutex<std::fs::File>) -> Result<Self> {
+        let mut log_bytes = Vec::new();
+
+        // Lock the mutex and read the file
+        let mut file_guard = file.lock().map_err(|e| {
+            log::error!("CRITICAL: UEFI log file mutex poisoned - this indicates a serious bug");
+            KeylimeError::Other(format!(
+                "UEFI log file mutex poisoned: {e:?}"
+            ))
+        })?;
+
+        // Reset file position to beginning before reading.
+        // The UEFI log is a kernel virtual filesystem (securityfs) that contains the
+        // boot-time measurements. Reading from the start ensures we capture the complete
+        // current state of the log.
+        use std::io::Seek;
+        file_guard.seek(std::io::SeekFrom::Start(0)).map_err(|e| {
+            KeylimeError::Other(format!(
+                "Unable to seek UEFI log file: {e:?}"
+            ))
+        })?;
+
+        // Read the entire file
+        file_guard.read_to_end(&mut log_bytes).map_err(|e| {
+            KeylimeError::Other(format!(
+                "Unable to read UEFI log file: {e:?}"
+            ))
+        })?;
+
+        // Parse the log bytes
+        Self::from_bytes(&log_bytes)
+    }
+
     pub fn from_bytes(log_bytes: &[u8]) -> Result<Self> {
         if log_bytes.is_empty() {
             return Err(KeylimeError::UEFILog(

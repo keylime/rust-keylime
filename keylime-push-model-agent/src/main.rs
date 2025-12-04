@@ -183,7 +183,7 @@ fn create_registrar_tls_config<T: PushModelConfigTrait>(
 
 async fn run(
     args: &Args,
-    _privileged_resources: privileged_resources::PrivilegedResources,
+    privileged_resources: privileged_resources::PrivilegedResources,
 ) -> Result<()> {
     let config = keylime::config::get_config();
 
@@ -269,6 +269,7 @@ async fn run(
         ctx_info,
         config.attestation_interval_seconds(),
         registrar_tls_config,
+        privileged_resources,
     );
     state_machine.run().await;
     Ok(())
@@ -646,13 +647,14 @@ mod tests {
             attestation_interval_seconds:
                 DEFAULT_ATTESTATION_INTERVAL_SECONDS,
         };
-
-        // Create mock privileged resources with missing files (None for both handles)
-        let config = keylime::config::get_config();
         let privileged_resources =
-            privileged_resources::PrivilegedResources::new(config)
-                .expect("Failed to create privileged resources");
-
+            privileged_resources::PrivilegedResources {
+                ima_ml_file: None,
+                ima_ml: std::sync::Mutex::new(
+                    keylime::ima::MeasurementList::new(),
+                ),
+                measuredboot_ml_file: None,
+            };
         let res = run(&args, privileged_resources);
         assert!(res.await.is_err());
     }

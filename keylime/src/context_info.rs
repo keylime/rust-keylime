@@ -614,8 +614,40 @@ impl ContextInfo {
         _format: Option<&str>,
         starting_offset: Option<usize>,
         entry_count: Option<usize>,
+        ima_ml: Option<&std::sync::Mutex<crate::ima::MeasurementList>>,
+        ima_file: Option<&std::sync::Mutex<std::fs::File>>,
     ) -> Result<EvidenceData, ContextInfoError> {
-        let entries = if let Some(ima_log_path) = log_path {
+        let entries = if let (Some(ml), Some(file)) = (ima_ml, ima_file) {
+            // Use the privileged file handle and MeasurementList
+            let mut ima_ml_guard = ml.lock().map_err(|e| {
+                ContextInfoError::Keylime(format!(
+                    "IMA MeasurementList mutex poisoned: {e:?}"
+                ))
+            })?;
+            let mut file_guard = file.lock().map_err(|e| {
+                ContextInfoError::Keylime(format!(
+                    "IMA file mutex poisoned: {e:?}"
+                ))
+            })?;
+
+            // Read from the specified starting offset (or 0 if not specified)
+            let nth_entry = starting_offset.unwrap_or(0) as u64;
+            let (ml_string, _nth_entry, _num_entries) = ima_ml_guard
+                .read(&mut file_guard, nth_entry)
+                .map_err(|e| {
+                    ContextInfoError::Keylime(format!(
+                        "Failed to read IMA log: {e:?}"
+                    ))
+                })?;
+
+            // Apply entry_count limit if specified
+            if let Some(count) = entry_count {
+                ml_string.lines().take(count).collect::<Vec<_>>().join("\n")
+            } else {
+                ml_string
+            }
+        } else if let Some(ima_log_path) = log_path {
+            // Fallback to path-based reading (for compatibility)
             let ima_log = ImaLog::new(ima_log_path).map_err(|e| {
                 ContextInfoError::Keylime(format!(
                     "Failed to read IMA log: {e:?}",
@@ -669,6 +701,8 @@ impl ContextInfo {
     pub async fn collect_evidences(
         &mut self,
         evidence_requests: &[EvidenceRequest],
+        ima_ml: Option<&std::sync::Mutex<crate::ima::MeasurementList>>,
+        ima_file: Option<&std::sync::Mutex<std::fs::File>>,
     ) -> Result<Vec<EvidenceData>, ContextInfoError> {
         let mut evidence_results = Vec::new();
 
@@ -702,6 +736,8 @@ impl ContextInfo {
                             format.as_deref(),
                             *starting_offset,
                             *entry_count,
+                            ima_ml,
+                            ima_file,
                         )
                         .await?;
                     evidence_results.push(evidence);
@@ -980,7 +1016,9 @@ mod tests {
             },
         ];
         let mut context_info = context_result.unwrap(); //#[allow_ci]
-        let result = context_info.collect_evidences(&evidence_requests).await;
+        let result = context_info
+            .collect_evidences(&evidence_requests, None, None)
+            .await;
         assert!(result.is_ok());
         let evidence_results = result.unwrap(); //#[allow_ci]
         assert_eq!(evidence_results.len(), 3);
@@ -1023,7 +1061,9 @@ mod tests {
             selected_subjects: subjects,
         }];
 
-        let result = context_info.collect_evidences(&evidence_requests).await;
+        let result = context_info
+            .collect_evidences(&evidence_requests, None, None)
+            .await;
         assert!(result.is_err());
         assert!(matches!(
             result.unwrap_err(),
@@ -1058,7 +1098,9 @@ mod tests {
             selected_subjects: subjects,
         }];
 
-        let result = context_info.collect_evidences(&evidence_requests).await;
+        let result = context_info
+            .collect_evidences(&evidence_requests, None, None)
+            .await;
         assert!(result.is_err());
         assert!(matches!(
             result.unwrap_err(),
@@ -1113,7 +1155,9 @@ mod tests {
                 log_path: Some("test-data/uefi_log.bin".to_string()),
             },
         ];
-        let result = context_info.collect_evidences(&evidence_requests).await;
+        let result = context_info
+            .collect_evidences(&evidence_requests, None, None)
+            .await;
         assert!(result.is_ok());
         context_info.flush_context().unwrap(); //#[allow_ci]
     }

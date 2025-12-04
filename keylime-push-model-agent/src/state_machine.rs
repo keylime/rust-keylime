@@ -4,6 +4,7 @@
 use crate::attestation::{
     AttestationClient, NegotiationConfig, ResponseInformation,
 };
+use crate::privileged_resources::PrivilegedResources;
 #[cfg(not(all(test, feature = "testing")))]
 use crate::registration;
 use crate::registration::RegistrarTlsConfig;
@@ -33,6 +34,10 @@ pub struct StateMachine<'a> {
     context_info: Option<ContextInfo>,
     measurement_interval: Duration,
     registrar_tls_config: Option<RegistrarTlsConfig>,
+    /// File handles opened with root privileges before privilege dropping.
+    /// These handles remain valid after dropping privileges, enabling continued
+    /// access to /sys/kernel/security/ resources.
+    privileged_resources: PrivilegedResources,
 }
 
 impl<'a> StateMachine<'a> {
@@ -42,6 +47,7 @@ impl<'a> StateMachine<'a> {
         context_info: Option<ContextInfo>,
         attestation_interval_seconds: u64,
         registrar_tls_config: Option<RegistrarTlsConfig>,
+        privileged_resources: PrivilegedResources,
     ) -> Self {
         let initial_state = State::Unregistered;
         let measurement_interval =
@@ -54,6 +60,7 @@ impl<'a> StateMachine<'a> {
             context_info,
             measurement_interval,
             registrar_tls_config,
+            privileged_resources,
         }
     }
 
@@ -138,7 +145,10 @@ impl<'a> StateMachine<'a> {
     async fn handle_negotiation(&mut self, ctx_info: ContextInfo) {
         let neg_response = self
             .attestation_client
-            .send_negotiation(&self.negotiation_config)
+            .send_negotiation(
+                &self.negotiation_config,
+                &self.privileged_resources,
+            )
             .await;
 
         debug!("Negotiation response: {neg_response:?}");
@@ -185,6 +195,7 @@ impl<'a> StateMachine<'a> {
             .handle_evidence_submission(
                 neg_response.clone(),
                 &self.negotiation_config,
+                &self.privileged_resources,
             )
             .await;
 
@@ -339,6 +350,7 @@ mod tpm_tests {
         async fn send_negotiation(
             &self,
             _config: &NegotiationConfig<'_>,
+            _privileged_resources: &PrivilegedResources,
         ) -> anyhow::Result<ResponseInformation> {
             self.negotiation_response
                 .lock()
@@ -359,6 +371,7 @@ mod tpm_tests {
             &self,
             _neg_response: ResponseInformation,
             _config: &NegotiationConfig<'_>,
+            _privileged_resources: &PrivilegedResources,
         ) -> anyhow::Result<ResponseInformation> {
             self.evidence_response
                 .lock()
@@ -418,6 +431,18 @@ mod tpm_tests {
         }
     }
 
+    /// Helper function to create empty PrivilegedResources for testing
+    fn create_test_privileged_resources() -> PrivilegedResources {
+        use keylime::ima::MeasurementList;
+        use std::sync::Mutex;
+
+        PrivilegedResources {
+            ima_ml_file: None,
+            ima_ml: Mutex::new(MeasurementList::new()),
+            measuredboot_ml_file: None,
+        }
+    }
+
     #[cfg(feature = "testing")]
     fn create_test_state_machine<'a>(
         neg_config: &'a NegotiationConfig<'a>,
@@ -452,6 +477,7 @@ mod tpm_tests {
                         None,
                         DEFAULT_ATTESTATION_INTERVAL_SECONDS,
                         None,
+                        create_test_privileged_resources(),
                     ),
                     guard,
                 );
@@ -465,6 +491,7 @@ mod tpm_tests {
                 Some(context_info),
                 DEFAULT_ATTESTATION_INTERVAL_SECONDS,
                 None,
+                create_test_privileged_resources(),
             ),
             guard,
         )
@@ -485,8 +512,10 @@ mod tpm_tests {
         sm.state = State::Registered(context_info.clone());
 
         let mock_client = MockAttestationClient::default();
-        let neg_response =
-            mock_client.send_negotiation(&sm.negotiation_config).await;
+        let privileged_resources = create_test_privileged_resources();
+        let neg_response = mock_client
+            .send_negotiation(&sm.negotiation_config, &privileged_resources)
+            .await;
 
         match neg_response {
             Ok(neg) if neg.status_code == reqwest::StatusCode::CREATED => {
@@ -523,8 +552,10 @@ mod tpm_tests {
             ..Default::default()
         }));
 
-        let neg_response =
-            mock_client.send_negotiation(&sm.negotiation_config).await;
+        let privileged_resources = create_test_privileged_resources();
+        let neg_response = mock_client
+            .send_negotiation(&sm.negotiation_config, &privileged_resources)
+            .await;
         match neg_response {
             Ok(neg) if neg.status_code == StatusCode::CREATED => {
                 sm.state = State::Attesting(context_info.clone(), neg);
@@ -559,10 +590,12 @@ mod tpm_tests {
 
         // Test that a successful attestation response would transition back to Negotiating
         let mock_client = MockAttestationClient::default(); // Default is ACCEPTED
+        let privileged_resources = create_test_privileged_resources();
         let evidence_response = mock_client
             .handle_evidence_submission(
                 ResponseInformation::default(),
                 &sm.negotiation_config,
+                &privileged_resources,
             )
             .await;
 
@@ -602,10 +635,12 @@ mod tpm_tests {
             ..Default::default()
         }));
 
+        let privileged_resources = create_test_privileged_resources();
         let evidence_response = mock_client
             .handle_evidence_submission(
                 ResponseInformation::default(),
                 &sm.negotiation_config,
+                &privileged_resources,
             )
             .await;
 
@@ -738,6 +773,7 @@ mod tpm_tests {
             Some(context_info.clone()),
             DEFAULT_ATTESTATION_INTERVAL_SECONDS,
             None,
+            create_test_privileged_resources(),
         );
 
         // We can't easily test the full run() method since it loops indefinitely.
@@ -755,6 +791,19 @@ mod tpm_tests {
 
 #[cfg(test)]
 mod tests {
+
+    /// Helper function to create empty PrivilegedResources for testing
+    fn create_test_privileged_resources() -> PrivilegedResources {
+        use keylime::ima::MeasurementList;
+        use std::sync::Mutex;
+
+        PrivilegedResources {
+            ima_ml_file: None,
+            ima_ml: Mutex::new(MeasurementList::new()),
+            measuredboot_ml_file: None,
+        }
+    }
+
     use super::*;
     use crate::attestation::{AttestationClient, NegotiationConfig};
 
@@ -805,6 +854,7 @@ mod tests {
             None,
             DEFAULT_ATTESTATION_INTERVAL_SECONDS,
             None,
+            create_test_privileged_resources(),
         );
 
         // Should start in Unregistered state when no context info is provided.
@@ -833,6 +883,7 @@ mod tests {
             None,
             DEFAULT_ATTESTATION_INTERVAL_SECONDS,
             None,
+            create_test_privileged_resources(),
         );
 
         let debug_output = format!("{:?}", state_machine.get_current_state());
@@ -857,6 +908,7 @@ mod tests {
             None,
             DEFAULT_ATTESTATION_INTERVAL_SECONDS,
             None,
+            create_test_privileged_resources(),
         );
 
         // Start in Unregistered state.
@@ -894,6 +946,7 @@ mod tests {
             None,
             DEFAULT_ATTESTATION_INTERVAL_SECONDS,
             None,
+            create_test_privileged_resources(),
         );
 
         // Should start in Unregistered state.
@@ -921,6 +974,7 @@ mod tests {
             None,
             DEFAULT_ATTESTATION_INTERVAL_SECONDS,
             None,
+            create_test_privileged_resources(),
         );
 
         // Verify that context_info is None when not provided.
@@ -945,6 +999,7 @@ mod tests {
             None,
             DEFAULT_ATTESTATION_INTERVAL_SECONDS,
             None,
+            create_test_privileged_resources(),
         );
 
         // Test that the configuration references are stored correctly.
@@ -973,6 +1028,7 @@ mod tests {
             None,
             DEFAULT_ATTESTATION_INTERVAL_SECONDS,
             None,
+            create_test_privileged_resources(),
         );
 
         // Manually set to Failed state to test error handling.
@@ -1005,6 +1061,7 @@ mod tests {
             None,
             DEFAULT_ATTESTATION_INTERVAL_SECONDS,
             None,
+            create_test_privileged_resources(),
         );
 
         // Manually set to Failed state to test error handling.
@@ -1032,6 +1089,7 @@ mod tests {
             None,
             DEFAULT_ATTESTATION_INTERVAL_SECONDS,
             None,
+            create_test_privileged_resources(),
         );
         assert!(matches!(
             state_machine1.get_current_state(),
@@ -1048,6 +1106,7 @@ mod tests {
             None,
             DEFAULT_ATTESTATION_INTERVAL_SECONDS,
             None,
+            create_test_privileged_resources(),
         );
         assert!(matches!(
             state_machine2.get_current_state(),
@@ -1073,6 +1132,7 @@ mod tests {
             None,
             DEFAULT_ATTESTATION_INTERVAL_SECONDS,
             None,
+            create_test_privileged_resources(),
         );
 
         // Test that avoid_tpm is properly configured through the test config.
@@ -1101,6 +1161,7 @@ mod tests {
             None,
             DEFAULT_ATTESTATION_INTERVAL_SECONDS,
             None,
+            create_test_privileged_resources(),
         );
 
         // Set a test error and verify debug formatting works.
@@ -1134,6 +1195,7 @@ mod tests {
             None,
             DEFAULT_ATTESTATION_INTERVAL_SECONDS,
             None,
+            create_test_privileged_resources(),
         );
 
         // Test with valid seconds_to_next_attestation field in meta object.

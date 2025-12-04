@@ -1,8 +1,15 @@
 use anyhow::Result;
 use keylime::config::PushModelConfigTrait;
 use keylime::context_info::{AlgorithmConfigurationString, ContextInfo};
-use log::debug;
+use log::{debug, error};
 use std::sync::{Mutex, OnceLock};
+
+/// Helper function to log mutex poisoning recovery messages for TPM context
+fn log_tpm_mutex_poisoning_recovery() {
+    error!("This typically occurs when a thread panicked while holding the mutex.");
+    error!("RECOVERY: The Keylime agent must be restarted to restore functionality.");
+    error!("MONITORING: This event should trigger an alert for immediate attention.");
+}
 
 static GLOBAL_CONTEXT: OnceLock<Mutex<Result<ContextInfo, String>>> =
     OnceLock::new();
@@ -60,7 +67,11 @@ pub fn get_context_info(avoid_tpm: bool) -> Result<Option<ContextInfo>> {
     })?;
     let guard = mutex
         .lock()
-        .map_err(|e| anyhow::anyhow!("TPM context mutex poisoned: {}", e))?;
+        .map_err(|e| {
+            error!("CRITICAL: TPM context mutex poisoned - this indicates a serious bug");
+            log_tpm_mutex_poisoning_recovery();
+            anyhow::anyhow!("TPM context mutex poisoned: {}", e)
+        })?;
     match &*guard {
         Ok(context_info) => Ok(Some(context_info.clone())),
         Err(e) => {

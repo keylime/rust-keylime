@@ -1,13 +1,55 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2025 Keylime Authors
+
+//! # Structure Filler Module
+//!
+//! This module handles concurrent access to privileged resources (IMA logs, UEFI logs)
+//! that were opened with root privileges before the agent dropped privileges.
+//!
+//! ## Threading Model and Mutex Usage
+//!
+//! - **Privileged Resources**: Opened as root, accessed after privilege drop via mutexes
+//! - **Concurrency**: Multiple attestation requests may access resources simultaneously
+//! - **Mutex Poisoning**: If a thread panics while holding a mutex, the mutex becomes "poisoned"
+//!   and all future lock attempts will fail. This is a permanent failure requiring restart.
+//!
+//! ## Error Recovery Strategy
+//!
+//! - **Mutex poisoning is NOT recoverable** - the agent must be restarted
+//! - Monitoring systems should alert on mutex poisoning events
+//! - The error messages provide clear guidance for operators
+//!
+//! ## Security Considerations
+//!
+//! - File handles remain valid after privilege drop due to descriptor inheritance
+//! - Mutexes ensure thread-safe access to shared file descriptors
+//! - MeasurementList state is preserved across multiple reads for incremental updates
+
 use async_trait::async_trait;
 use keylime::algorithms::HashAlgorithm;
 use keylime::config::PushModelConfigTrait;
 use keylime::context_info::ContextInfo;
-use keylime::ima::ImaLog;
 use keylime::structures;
 use keylime::uefi::uefi_log_handler;
 use log::{error, warn};
+use std::fs::File;
+use std::sync::Mutex;
+
+use crate::privileged_resources::PrivilegedResources;
+
+/// Standard error messages for mutex poisoning recovery
+const MUTEX_POISONED_RECOVERY_MESSAGES: &[&str] = &[
+    "This typically occurs when a thread panicked while holding the mutex.",
+    "RECOVERY: The Keylime agent must be restarted to restore functionality.",
+    "MONITORING: This event should trigger an alert for immediate attention.",
+];
+
+/// Helper function to log mutex poisoning recovery messages
+fn log_mutex_poisoning_recovery() {
+    for msg in MUTEX_POISONED_RECOVERY_MESSAGES {
+        error!("{}", msg);
+    }
+}
 
 #[async_trait]
 pub trait StructureFiller {
@@ -23,9 +65,12 @@ pub trait StructureFiller {
 
 pub fn get_filler_request<'a>(
     tpm_context_info: Option<&'a mut ContextInfo>,
+    privileged_resources: &'a PrivilegedResources,
 ) -> Box<dyn StructureFiller + 'a> {
     match tpm_context_info {
-        Some(info) => Box::new(FillerFromHardware::new(info)),
+        Some(info) => {
+            Box::new(FillerFromHardware::new(info, privileged_resources))
+        }
         None => Box::new(TestingFiller::new()),
     }
 }
@@ -61,26 +106,69 @@ fn boot_time() -> chrono::DateTime<chrono::Utc> {
 pub struct FillerFromHardware<'a> {
     pub tpm_context_info: &'a mut ContextInfo,
     pub uefi_log_handler: Option<uefi_log_handler::UefiLogHandler>,
+    pub privileged_resources: &'a PrivilegedResources,
 }
 
 impl<'a> FillerFromHardware<'a> {
-    pub fn new(tpm_context_info: &'a mut ContextInfo) -> Self {
-        let config = keylime::config::get_config();
-        let ml_path = config.measuredboot_ml_path();
-        let uefi_log_handler = uefi_log_handler::UefiLogHandler::new(ml_path);
-        match uefi_log_handler {
-            Ok(handler) => FillerFromHardware {
-                tpm_context_info,
-                uefi_log_handler: Some(handler),
-            },
-            Err(e) => {
-                error!("Failed to create UEFI log handler: {e:?}");
-                FillerFromHardware {
-                    tpm_context_info,
-                    uefi_log_handler: None,
+    pub fn new(
+        tpm_context_info: &'a mut ContextInfo,
+        privileged_resources: &'a PrivilegedResources,
+    ) -> Self {
+        // Try to create UEFI log handler from privileged file handle
+        let uefi_log_handler = match &privileged_resources
+            .measuredboot_ml_file
+        {
+            Some(file) => {
+                match uefi_log_handler::UefiLogHandler::from_file(file) {
+                    Ok(handler) => Some(handler),
+                    Err(e) => {
+                        error!("Failed to create UEFI log handler from file handle: {e:?}");
+                        None
+                    }
                 }
             }
+            None => {
+                warn!("No measured boot log file available");
+                None
+            }
+        };
+
+        FillerFromHardware {
+            tpm_context_info,
+            uefi_log_handler,
+            privileged_resources,
         }
+    }
+
+    /// Read IMA log count from privileged file handle
+    ///
+    /// Returns the number of entries in the IMA log, or an error if reading fails.
+    /// This method properly handles mutex locking without panicking.
+    fn read_ima_log_count(
+        &self,
+        file_mutex: &Mutex<File>,
+    ) -> Result<usize, String> {
+        let mut ima_ml = self
+            .privileged_resources
+            .ima_ml
+            .lock()
+            .map_err(|e| {
+                error!("CRITICAL: IMA MeasurementList mutex poisoned - this indicates a serious bug");
+                log_mutex_poisoning_recovery();
+                format!("IMA MeasurementList mutex poisoned: {e:?}")
+            })?;
+
+        let mut file = file_mutex.lock().map_err(|e| {
+            error!("CRITICAL: IMA file mutex poisoned - this indicates a serious bug");
+            log_mutex_poisoning_recovery();
+            format!("IMA file mutex poisoned: {e:?}")
+        })?;
+
+        let (_, _, num_entries) = ima_ml
+            .read(&mut file, 0)
+            .map_err(|e| format!("Failed to read IMA log: {e:?}"))?;
+
+        Ok(num_entries as usize)
     }
 
     fn get_attestation_request_final(
@@ -127,11 +215,18 @@ impl<'a> FillerFromHardware<'a> {
             }
         }
 
-        let ima_log_parser = ImaLog::new(config.ima_ml_path.as_str());
-        let ima_log_count = match ima_log_parser {
-            Ok(ima_log) => ima_log.entry_count(),
-            Err(e) => {
-                error!("Failed to read IMA log: {e:?}");
+        // Read IMA log using MeasurementList for stateful, incremental reading
+        // This approach maintains state between reads and only processes new entries
+        let ima_log_count = match &self.privileged_resources.ima_ml_file {
+            Some(file_mutex) => match self.read_ima_log_count(file_mutex) {
+                Ok(count) => count,
+                Err(e) => {
+                    error!("Failed to read IMA log count: {e}");
+                    0
+                }
+            },
+            None => {
+                warn!("No IMA log file available");
                 0
             }
         };
@@ -238,7 +333,11 @@ impl<'a> FillerFromHardware<'a> {
 
         let evidence_results = match self
             .tpm_context_info
-            .collect_evidences(&evidence_requests)
+            .collect_evidences(
+                &evidence_requests,
+                Some(&self.privileged_resources.ima_ml),
+                self.privileged_resources.ima_ml_file.as_ref(),
+            )
             .await
         {
             Ok(evidence) => evidence,
@@ -332,6 +431,18 @@ mod tests {
 
     use keylime::{context_info, tpm::testing};
 
+    /// Helper function to create empty PrivilegedResources for testing
+    fn create_test_privileged_resources() -> PrivilegedResources {
+        use keylime::ima::MeasurementList;
+        use std::sync::Mutex;
+
+        PrivilegedResources {
+            ima_ml_file: None,
+            ima_ml: Mutex::new(MeasurementList::new()),
+            measuredboot_ml_file: None,
+        }
+    }
+
     #[tokio::test]
     async fn test_attestation_request_final() {
         let _mutex = testing::lock_tests().await;
@@ -353,7 +464,9 @@ mod tests {
             }
         };
 
-        let mut filler = FillerFromHardware::new(&mut context_info);
+        let privileged_resources = create_test_privileged_resources();
+        let mut filler =
+            FillerFromHardware::new(&mut context_info, &privileged_resources);
         let attestation_request = filler.get_attestation_request_final();
         assert_eq!(attestation_request.data.type_, "attestation");
         let serialized = serde_json::to_string(&attestation_request).unwrap();
@@ -381,7 +494,9 @@ mod tests {
             }
         };
 
-        let mut filler = FillerFromHardware::new(&mut context_info);
+        let privileged_resources = create_test_privileged_resources();
+        let mut filler =
+            FillerFromHardware::new(&mut context_info, &privileged_resources);
 
         let request = filler.get_attestation_request();
 
@@ -419,7 +534,7 @@ mod tests {
                 "AK certification key should be present"
             );
         } else {
-            panic!("Expected Certification evidence for tpm_quote");
+            panic!("Expected Certification evidence for tpm_quote"); //#[allow_ci]
         }
 
         let _ = attributes.evidence_supported.iter().find(|e| {
@@ -454,7 +569,9 @@ mod tests {
             }
         };
 
-        let mut filler = FillerFromHardware::new(&mut context_info);
+        let privileged_resources = create_test_privileged_resources();
+        let mut filler =
+            FillerFromHardware::new(&mut context_info, &privileged_resources);
         let session_request = filler.get_session_request_final();
         assert_eq!(session_request.data.data_type, "session");
         let serialized = serde_json::to_string(&session_request).unwrap();
@@ -484,7 +601,9 @@ mod tests {
             }
         };
 
-        let mut filler = FillerFromHardware::new(&mut context_info);
+        let privileged_resources = create_test_privileged_resources();
+        let mut filler =
+            FillerFromHardware::new(&mut context_info, &privileged_resources);
         let mut subjects = HashMap::new();
         subjects.insert("sha256".to_string(), vec![10]);
 
@@ -570,7 +689,9 @@ mod tests {
 
         if let Ok(mut ctx) = context_info_result {
             {
-                let mut filler = get_filler_request(Some(&mut ctx));
+                let privileged_resources = create_test_privileged_resources();
+                let mut filler =
+                    get_filler_request(Some(&mut ctx), &privileged_resources);
                 // To check the type, we can't directly compare types of Box<dyn Trait>.
                 // A simple way is to check the output of a method.
                 let req = filler.get_session_request();
@@ -583,7 +704,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_filler_request_without_tpm() {
-        let mut filler = get_filler_request(None);
+        let privileged_resources = create_test_privileged_resources();
+        let mut filler = get_filler_request(None, &privileged_resources);
         // TestingFiller returns an empty auth_supported vector
         let req = filler.get_session_request();
         assert!(req.data.attributes.auth_supported.is_empty());
@@ -670,7 +792,9 @@ mod tests {
             // Create guard that will automatically clear override when dropped
             let _guard = TestConfigGuard::new(test_config);
 
-            let filler = FillerFromHardware::new(&mut ctx);
+            let privileged_resources = create_test_privileged_resources();
+            let filler =
+                FillerFromHardware::new(&mut ctx, &privileged_resources);
             assert!(filler.uefi_log_handler.is_none());
 
             assert!(ctx.flush_context().is_ok());
@@ -690,7 +814,9 @@ mod tests {
         );
 
         if let Ok(mut ctx) = context_info_result {
-            let mut filler = FillerFromHardware::new(&mut ctx);
+            let privileged_resources = create_test_privileged_resources();
+            let mut filler =
+                FillerFromHardware::new(&mut ctx, &privileged_resources);
             let malformed_response =
                 crate::attestation::ResponseInformation {
                     status_code: reqwest::StatusCode::CREATED,
@@ -750,7 +876,9 @@ mod tests {
             }
         };
 
-        let mut filler = FillerFromHardware::new(&mut context_info);
+        let privileged_resources = create_test_privileged_resources();
+        let mut filler =
+            FillerFromHardware::new(&mut context_info, &privileged_resources);
         let request = filler.get_attestation_request();
 
         let uefi_log_evidence = request.data.attributes.evidence_supported.iter().find(|e| {
