@@ -150,19 +150,58 @@ impl TryFrom<&str> for UserIds {
     }
 }
 
-// Drop the process privileges and run under the provided user and group.  The correct order of
-// operations are: drop supplementary groups, set gid, then set uid.
-// See: POS36-C and CWE-696
+/// Drop process privileges to run as the specified user and group
+///
+/// This function performs a secure privilege drop following POSIX standards
+/// and security best practices (POS36-C, CWE-696). The operations MUST be
+/// performed in this exact order:
+/// 1. Get supplementary groups (before dropping privileges)
+/// 2. Set supplementary groups (before setgid)
+/// 3. Set GID (before setuid)
+/// 4. Set UID (last - irreversible)
+///
+/// # Arguments
+///
+/// * `user_group` - User and group in "user:group" format (e.g., "keylime:keylime")
+///
+/// # Returns
+///
+/// * `Ok(())` if privileges were successfully dropped
+/// * `Err(PermissionError)` if any step fails
+///
+/// # Errors
+///
+/// This function will return an error if:
+/// - The user or group name cannot be found (`GetPWNam`, `GetGrNam`)
+/// - The supplementary groups cannot be retrieved (`GetGroupList`)
+/// - Setting supplementary groups fails (`SetGroups`)
+/// - Setting GID fails (`SetGID`)
+/// - Setting UID fails (`SetUID`)
+///
+/// # Security
+///
+/// This function is security-critical. The calling process must have root
+/// privileges (UID 0) for this to succeed. After `setuid()`, the privilege
+/// drop is irreversible - the process cannot regain root privileges.
+///
+/// The order of operations is critical to prevent privilege retention on error.
+/// See CERT C Coding Standard POS36-C and CWE-696 for details.
+///
+/// # Example
+///
+/// ```no_run
+/// use keylime::permissions::run_as;
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// // Must be running as root (UID 0)
+/// run_as("keylime:keylime")?;
+/// // Process is now running as keylime:keylime
+/// # Ok(())
+/// # }
+/// ```
 pub fn run_as(user_group: &str) -> Result<(), PermissionError> {
     let ids: UserIds = user_group.try_into()?;
 
-    // Set gid
-    if unsafe { libc::setgid(ids.group.gr_gid) } != 0 {
-        let e = io::Error::last_os_error();
-        return Err(PermissionError::SetGID(e));
-    }
-
-    // Get list of supplementary groups
+    // Get list of supplementary groups (must be done before dropping privileges)
     let mut sup_groups: [gid_t; 32] = [0u32; 32];
     let mut ngroups: c_int = 32;
     if unsafe {
@@ -188,19 +227,67 @@ pub fn run_as(user_group: &str) -> Result<(), PermissionError> {
             let e = io::Error::last_os_error();
             return Err(PermissionError::GetGroupList(e));
         }
+
+        // Sanity check: Verify group count is reasonable
+        // A very large number of groups could indicate a system issue or attack
+        const MAX_REASONABLE_GROUPS: c_int = 1024;
+        if !(0..=MAX_REASONABLE_GROUPS).contains(&ngroups) {
+            let e = io::Error::other(format!(
+                "getgrouplist returned unreasonable group count: {}. \
+                 Valid range is 0-{}. This indicates a system issue or potential attack.",
+                ngroups,
+                MAX_REASONABLE_GROUPS
+            ));
+            return Err(PermissionError::GetGroupList(e));
+        }
+
+        // Verify the buffer was large enough
+        // getgrouplist may update ngroups even on success
+        if ngroups as usize > sup_groups.capacity() {
+            let e = io::Error::other(format!(
+                "getgrouplist buffer overflow: returned {} groups but capacity is {}. \
+                 This indicates a serious system issue.",
+                ngroups,
+                sup_groups.capacity()
+            ));
+            return Err(PermissionError::GetGroupList(e));
+        }
     }
 
-    // Set supplementary groups
+    // Set supplementary groups (must be done before setgid)
     if unsafe { libc::setgroups(ngroups as usize, sup_groups.as_ptr()) } != 0
     {
         let e = io::Error::last_os_error();
         return Err(PermissionError::SetGroups(e));
     }
 
-    // Set uid
+    // Set gid (must be done before setuid)
+    if unsafe { libc::setgid(ids.group.gr_gid) } != 0 {
+        let e = io::Error::last_os_error();
+        return Err(PermissionError::SetGID(e));
+    }
+
+    // Set uid (must be done last, as it's irreversible)
     if unsafe { libc::setuid(ids.passwd.pw_uid) } != 0 {
         let e = io::Error::last_os_error();
         return Err(PermissionError::SetUID(e));
+    }
+
+    // CRITICAL: Verify privilege drop was successful and irreversible
+    let current_uid = unsafe { libc::getuid() };
+    let current_euid = unsafe { libc::geteuid() };
+    if current_uid != ids.passwd.pw_uid || current_euid != ids.passwd.pw_uid {
+        return Err(PermissionError::SetUID(io::Error::other(
+            format!("Privilege drop verification failed: uid={}, euid={}, expected={}",
+                    current_uid, current_euid, ids.passwd.pw_uid)
+        )));
+    }
+
+    // Verify we cannot regain root privileges
+    if unsafe { libc::setuid(0) } == 0 {
+        return Err(PermissionError::SetUID(io::Error::other(
+            "CRITICAL: Process can still regain root privileges after dropping"
+        )));
     }
 
     info!("Dropped privileges to run as {user_group}");
