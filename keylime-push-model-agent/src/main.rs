@@ -7,6 +7,7 @@ use log::{debug, error, info, warn};
 mod attestation;
 mod context_info_handler;
 mod header_validation;
+mod privileged_resources;
 mod registration;
 mod response_handler;
 mod state_machine;
@@ -180,7 +181,10 @@ fn create_registrar_tls_config<T: PushModelConfigTrait>(
     None
 }
 
-async fn run(args: &Args) -> Result<()> {
+async fn run(
+    args: &Args,
+    _privileged_resources: privileged_resources::PrivilegedResources,
+) -> Result<()> {
     let config = keylime::config::get_config();
 
     // Warn if insecure TLS settings are enabled
@@ -273,7 +277,95 @@ async fn run(args: &Args) -> Result<()> {
 #[actix_web::main]
 async fn main() -> Result<()> {
     pretty_env_logger::init();
-    run(&Args::parse()).await
+
+    // Load config
+    let config = keylime::config::get_config();
+
+    // === EARLY SECURITY VALIDATION (before opening privileged resources) ===
+    // Validate run_as setting before doing any privileged operations
+    let run_as = if keylime::permissions::get_euid() == 0 {
+        if config.run_as.is_empty() {
+            error!("CRITICAL SECURITY WARNING: Running as root without 'run_as' configured!");
+            error!("This is a significant security risk and should be avoided in production.");
+            error!("Set 'run_as = \"keylime:keylime\"' in the config file to drop privileges.");
+            error!("The agent will continue running as root, but this is NOT recommended.");
+            None
+        } else {
+            // Early validation: Verify user/group exist before opening privileged resources
+            if let Err(e) = keylime::permissions::UserIds::try_from(
+                config.run_as.as_str(),
+            ) {
+                error!(
+                    "Failed to validate run_as setting '{}': {}",
+                    config.run_as, e
+                );
+                error!("This must be fixed before starting the agent to ensure secure privilege dropping.");
+                return Err(anyhow::anyhow!(
+                    "Failed to validate run_as setting: {}",
+                    e
+                ));
+            }
+            Some(&config.run_as)
+        }
+    } else {
+        if !config.run_as.is_empty() {
+            warn!("Ignoring 'run_as' option because Keylime agent has not been started as root.");
+        }
+        None
+    };
+
+    // === PRIVILEGED INITIALIZATION (as root) ===
+    // Open resources that require root privileges (IMA/measured boot logs)
+    // This happens after validating security settings to prevent exploitation
+    let privileged_resources =
+        privileged_resources::PrivilegedResources::new(config)?;
+
+    if let Some(user_group) = run_as {
+        if let Err(e) = keylime::permissions::run_as(user_group) {
+            error!("Failed to drop privileges to {}: {}", user_group, e);
+            error!("Troubleshooting steps:");
+
+            // Provide error-specific guidance based on the error type
+            let error_str = e.to_string();
+            if error_str.contains("GetPWNam") {
+                error!(
+                    "  ERROR: User '{}' not found",
+                    user_group.split(':').next().unwrap_or("unknown")
+                );
+                error!("    Solution: Create user with: useradd -r -s /bin/false keylime");
+            } else if error_str.contains("GetGrNam") {
+                error!(
+                    "  ERROR: Group '{}' not found",
+                    user_group.split(':').nth(1).unwrap_or("unknown")
+                );
+                error!("    Solution: Create group with: groupadd keylime");
+            } else if error_str.contains("SetGroups") {
+                error!("  ERROR: Failed to set supplementary groups");
+                error!("    This may indicate insufficient privileges or a system issue");
+            } else if error_str.contains("SetGID") {
+                error!("  ERROR: Failed to set GID");
+                error!("    This may indicate the group doesn't exist or insufficient privileges");
+            } else if error_str.contains("SetUID") {
+                error!("  ERROR: Failed to set UID");
+                error!("    This may indicate the user doesn't exist or insufficient privileges");
+            }
+
+            error!("  General troubleshooting:");
+            error!("    1. Verify user and group exist: getent passwd keylime && getent group keylime");
+            error!("    2. Verify user is in tss group: groups keylime | grep tss");
+            error!("    3. If missing, run: usermod -a -G tss keylime");
+            error!("    4. Ensure proper permissions on /sys/kernel/security (root access required at startup)");
+            return Err(anyhow::anyhow!(
+                "Privilege dropping failed. See error messages above for troubleshooting."
+            ));
+        }
+        info!("Running the service as {}...", user_group);
+    }
+
+    // === CONTINUE AS UNPRIVILEGED USER ===
+    // All subsequent operations run as unprivileged user
+    // TPM access is provided via group membership (typically 'tss' group)
+    run(&Args::parse(), privileged_resources).await
 }
 
 #[cfg(feature = "testing")]
@@ -554,7 +646,14 @@ mod tests {
             attestation_interval_seconds:
                 DEFAULT_ATTESTATION_INTERVAL_SECONDS,
         };
-        let res = run(&args);
+
+        // Create mock privileged resources with missing files (None for both handles)
+        let config = keylime::config::get_config();
+        let privileged_resources =
+            privileged_resources::PrivilegedResources::new(config)
+                .expect("Failed to create privileged resources");
+
+        let res = run(&args, privileged_resources);
         assert!(res.await.is_err());
     }
 
