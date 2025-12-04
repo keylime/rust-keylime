@@ -1,4 +1,5 @@
 use crate::header_validation::HeaderValidator;
+use crate::privileged_resources::PrivilegedResources;
 use crate::{context_info_handler, struct_filler, url_selector};
 use anyhow::Result;
 use keylime::resilient_client::ResilientClient;
@@ -111,13 +112,16 @@ impl AttestationClient {
     pub async fn send_negotiation(
         &self,
         config: &NegotiationConfig<'_>,
+        privileged_resources: &PrivilegedResources,
     ) -> Result<ResponseInformation> {
         info!("--- Phase 1: Sending Capabilities Negotiation ---");
         info!("Capabilities negotiation URL (POST): {}", config.url);
         let mut context_info =
             context_info_handler::get_context_info(config.avoid_tpm)?;
-        let mut filler =
-            struct_filler::get_filler_request(context_info.as_mut());
+        let mut filler = struct_filler::get_filler_request(
+            context_info.as_mut(),
+            privileged_resources,
+        );
 
         let req = filler.get_attestation_request();
         if let Ok(json_str) = serde_json::to_string(&req) {
@@ -198,6 +202,7 @@ impl AttestationClient {
         &self,
         neg_response: ResponseInformation,
         config: &NegotiationConfig<'_>,
+        privileged_resources: &PrivilegedResources,
     ) -> Result<ResponseInformation> {
         info!("--- Phase 2: Preparing and Sending Evidence ---");
 
@@ -230,8 +235,10 @@ impl AttestationClient {
         // Use struct_filler to handle evidence collection and construction
         let mut context_info =
             context_info_handler::get_context_info(config.avoid_tpm)?;
-        let mut filler =
-            struct_filler::get_filler_request(context_info.as_mut());
+        let mut filler = struct_filler::get_filler_request(
+            context_info.as_mut(),
+            privileged_resources,
+        );
 
         let evidence_request_struct = filler
             .get_evidence_handling_request(&neg_response, config)
@@ -262,6 +269,19 @@ mod tests {
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     const TEST_TIMEOUT_MILLIS: u64 = 1000;
+
+    /// Helper function to create empty PrivilegedResources for testing
+    fn create_test_privileged_resources(
+    ) -> crate::privileged_resources::PrivilegedResources {
+        use keylime::ima::MeasurementList;
+        use std::sync::Mutex;
+
+        crate::privileged_resources::PrivilegedResources {
+            ima_ml_file: None,
+            ima_ml: Mutex::new(MeasurementList::new()),
+            measuredboot_ml_file: None,
+        }
+    }
 
     fn create_test_config<'a>(
         url: &'a str,
@@ -313,7 +333,9 @@ mod tests {
         config.max_retries = 3; // Allow up to 3 retries
 
         let client = AttestationClient::new(&config).unwrap();
-        let result = client.send_negotiation(&config).await;
+        let result = client
+            .send_negotiation(&config, &create_test_privileged_resources())
+            .await;
 
         // The final request should be successful
         assert!(result.is_ok());
@@ -332,8 +354,12 @@ mod tests {
             create_test_config("http://127.0.0.1:9999/test", "", "", "");
 
         let client = AttestationClient::new(&negotiation_config).unwrap();
-        let result =
-            client.send_negotiation(&negotiation_config.clone()).await;
+        let result = client
+            .send_negotiation(
+                &negotiation_config.clone(),
+                &create_test_privileged_resources(),
+            )
+            .await;
 
         assert!(result.is_err());
         let err_msg = result.unwrap_err().to_string();
@@ -393,7 +419,9 @@ mod tests {
         );
 
         let client = AttestationClient::new(&config).unwrap();
-        let result = client.send_negotiation(&config).await;
+        let result = client
+            .send_negotiation(&config, &create_test_privileged_resources())
+            .await;
 
         assert!(
             result.is_ok(),
@@ -422,7 +450,9 @@ mod tests {
         );
 
         let client = AttestationClient::new(&config).unwrap();
-        let result = client.send_negotiation(&config).await;
+        let result = client
+            .send_negotiation(&config, &create_test_privileged_resources())
+            .await;
 
         assert!(
             result.is_ok(),
@@ -487,7 +517,11 @@ mod tests {
 
         if has_location {
             let evidence_result = client
-                .handle_evidence_submission(response_info, &config)
+                .handle_evidence_submission(
+                    response_info,
+                    &config,
+                    &create_test_privileged_resources(),
+                )
                 .await;
 
             // The evidence submission may fail due to mock data, but header validation should succeed
@@ -547,7 +581,11 @@ mod tests {
         };
 
         let result = client
-            .handle_evidence_submission(neg_response, &config)
+            .handle_evidence_submission(
+                neg_response,
+                &config,
+                &create_test_privileged_resources(),
+            )
             .await;
 
         assert!(result.is_err());

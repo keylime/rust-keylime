@@ -16,6 +16,7 @@
 //! must be a member of the `tss` group to access TPM devices.
 
 use anyhow::Result;
+use keylime::ima::MeasurementList;
 use log::{info, warn};
 use std::fs::File;
 use std::path::Path;
@@ -35,6 +36,12 @@ pub struct PrivilegedResources {
     /// If the file doesn't exist or can't be opened, this will be None
     /// and IMA attestation will be unavailable.
     pub ima_ml_file: Option<Mutex<File>>,
+
+    /// IMA measurement list state tracker
+    ///
+    /// This maintains state between IMA log reads, tracking which entries
+    /// have been read to enable efficient incremental updates.
+    pub ima_ml: Mutex<MeasurementList>,
 
     /// Measured boot (UEFI) log file handle (if available)
     ///
@@ -130,6 +137,7 @@ impl PrivilegedResources {
 
         Ok(PrivilegedResources {
             ima_ml_file,
+            ima_ml: Mutex::new(MeasurementList::new()),
             measuredboot_ml_file,
         })
     }
@@ -156,6 +164,8 @@ mod tests {
 
         assert!(resources.ima_ml_file.is_none());
         assert!(resources.measuredboot_ml_file.is_none());
+        // IMA MeasurementList should always be initialized
+        assert!(resources.ima_ml.lock().is_ok());
     }
 
     #[test]
@@ -188,6 +198,7 @@ mod tests {
 
         assert!(resources.ima_ml_file.is_some());
         assert!(resources.measuredboot_ml_file.is_some());
+        assert!(resources.ima_ml.lock().is_ok());
     }
 
     #[test]
@@ -210,5 +221,6 @@ mod tests {
 
         assert!(resources.ima_ml_file.is_some());
         assert!(resources.measuredboot_ml_file.is_none());
+        assert!(resources.ima_ml.lock().is_ok());
     }
 }
