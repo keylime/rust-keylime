@@ -181,22 +181,6 @@ fn create_registrar_tls_config<T: PushModelConfigTrait>(
 }
 
 async fn run(args: &Args) -> Result<()> {
-    match args.verifier_url {
-        Some(ref url) if url.is_empty() => {
-            info!("Verifier URL: {url}");
-        }
-        _ => {}
-    };
-    info!("Registrar URL: {}", args.registrar_url);
-    debug!("Timeout: {}", args.timeout);
-    debug!("CA certificate file: {}", args.ca_certificate);
-    debug!(
-        "Method: {}",
-        args.method.clone().unwrap_or(DEFAULT_METHOD.to_string())
-    );
-    debug!("Certificate file: {}", args.certificate);
-    debug!("Key file: {}", args.key);
-    debug!("Insecure: {}", args.insecure.unwrap_or(false));
     let config = keylime::config::get_config();
 
     // Warn if insecure TLS settings are enabled
