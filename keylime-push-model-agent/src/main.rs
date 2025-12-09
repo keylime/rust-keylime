@@ -44,22 +44,17 @@ struct Args {
     #[arg(long, default_value = url_selector::DEFAULT_API_VERSION)]
     api_version: Option<String>,
     /// CA certificate file
-    #[arg(long, default_value = "/var/lib/keylime/cv_ca/cacert.crt")]
-    ca_certificate: String,
+    /// If not provided, uses verifier_tls_ca_cert from config (default: $KEYLIME_DIR/cv_ca/cacert.crt)
+    #[arg(long)]
+    ca_certificate: Option<String>,
     /// Client certificate file
-    #[arg(
-        short,
-        long,
-        default_value = "/var/lib/keylime/cv_ca/client-cert.crt"
-    )]
-    certificate: String,
+    /// If not provided, uses verifier_tls_client_cert from config (default: $KEYLIME_DIR/cv_ca/client-cert.crt)
+    #[arg(short, long)]
+    certificate: Option<String>,
     /// Client private key file
-    #[arg(
-        short,
-        long,
-        default_value = "/var/lib/keylime/cv_ca/client-private.pem"
-    )]
-    key: String,
+    /// If not provided, uses verifier_tls_client_key from config (default: $KEYLIME_DIR/cv_ca/client-private.pem)
+    #[arg(short, long)]
+    key: Option<String>,
     /// json file
     #[arg(short, long, default_missing_value = "")]
     json_file: Option<String>,
@@ -237,8 +232,14 @@ async fn run(
     debug!("Negotiations request URL: {negotiations_request_url}");
     let neg_config = attestation::NegotiationConfig {
         avoid_tpm,
-        ca_certificate: &args.ca_certificate,
-        client_certificate: &args.certificate,
+        ca_certificate: args
+            .ca_certificate
+            .as_deref()
+            .unwrap_or(config.verifier_tls_ca_cert()),
+        client_certificate: args
+            .certificate
+            .as_deref()
+            .unwrap_or(config.verifier_tls_client_cert()),
         enable_authentication: config.enable_authentication(),
         agent_id: &agent_identifier,
         ima_log_path: Some(config.ima_ml_path.as_str()),
@@ -246,7 +247,10 @@ async fn run(
             .exponential_backoff_initial_delay
             .unwrap_or(1000),
         insecure: args.insecure,
-        key: &args.key,
+        key: args
+            .key
+            .as_deref()
+            .unwrap_or(config.verifier_tls_client_key()),
         max_delay_ms: config.exponential_backoff_max_delay,
         max_retries: config.exponential_backoff_max_retries.unwrap_or(5),
         timeout: args.timeout,
@@ -399,6 +403,18 @@ mod tests {
         }
 
         fn registrar_tls_client_key(&self) -> &str {
+            &self.client_key
+        }
+
+        fn verifier_tls_ca_cert(&self) -> &str {
+            &self.ca_cert
+        }
+
+        fn verifier_tls_client_cert(&self) -> &str {
+            &self.client_cert
+        }
+
+        fn verifier_tls_client_key(&self) -> &str {
             &self.client_key
         }
 
@@ -634,9 +650,9 @@ mod tests {
             registrar_url: "".to_string(),
             verifier_url: Some("".to_string()),
             timeout: 0,
-            ca_certificate: "".to_string(),
-            certificate: "".to_string(),
-            key: "".to_string(),
+            ca_certificate: Some("".to_string()),
+            certificate: Some("".to_string()),
+            key: Some("".to_string()),
             insecure: None,
             agent_identifier: None,
             json_file: None,
@@ -669,9 +685,9 @@ mod tests {
             registrar_url: "".to_string(),
             verifier_url: Some("".to_string()),
             timeout: 0,
-            ca_certificate: "".to_string(),
-            certificate: "".to_string(),
-            key: "".to_string(),
+            ca_certificate: Some("".to_string()),
+            certificate: Some("".to_string()),
+            key: Some("".to_string()),
             insecure: None,
             agent_identifier: None,
             json_file: None,

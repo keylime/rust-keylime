@@ -119,6 +119,12 @@ pub static DEFAULT_PUSH_EK_HANDLE: &str = "";
 pub static DEFAULT_VERIFIER_URL: &str = "https://localhost:8881";
 pub static DEFAULT_REGISTRAR_URL: &str = "http://localhost:8888";
 
+// Verifier client TLS certificate defaults (Push Model)
+// These are relative to KEYLIME_DIR, just like DEFAULT_TRUSTED_CLIENT_CA
+pub static DEFAULT_VERIFIER_TLS_CA_CERT: &str = "cv_ca/cacert.crt";
+pub static DEFAULT_VERIFIER_TLS_CLIENT_CERT: &str = "cv_ca/client-cert.crt";
+pub static DEFAULT_VERIFIER_TLS_CLIENT_KEY: &str = "cv_ca/client-private.pem";
+
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 pub struct AgentConfig {
     pub agent_data_path: String,
@@ -188,6 +194,9 @@ pub struct AgentConfig {
     pub registrar_api_versions: String,
     pub uefi_logs_evidence_version: String,
     pub verifier_url: String,
+    pub verifier_tls_ca_cert: String,
+    pub verifier_tls_client_cert: String,
+    pub verifier_tls_client_key: String,
 
     // TLS security options
     /// Accept invalid TLS certificates (INSECURE - for testing only)
@@ -362,6 +371,9 @@ impl Default for AgentConfig {
             uefi_logs_evidence_version: DEFAULT_UEFI_LOGS_EVIDENCE_VERSION
                 .to_string(),
             verifier_url: DEFAULT_VERIFIER_URL.to_string(),
+            verifier_tls_ca_cert: "default".to_string(),
+            verifier_tls_client_cert: "default".to_string(),
+            verifier_tls_client_key: "default".to_string(),
 
             // TLS security defaults - SECURE by default
             tls_accept_invalid_certs: false,
@@ -496,6 +508,30 @@ pub(crate) fn config_translate_keywords(
         keylime_dir,
         DEFAULT_IDEVID_CERT,
         true,
+    );
+
+    let verifier_tls_ca_cert = config_get_file_path(
+        "verifier_tls_ca_cert",
+        &config.verifier_tls_ca_cert,
+        keylime_dir,
+        DEFAULT_VERIFIER_TLS_CA_CERT,
+        false,
+    );
+
+    let verifier_tls_client_cert = config_get_file_path(
+        "verifier_tls_client_cert",
+        &config.verifier_tls_client_cert,
+        keylime_dir,
+        DEFAULT_VERIFIER_TLS_CLIENT_CERT,
+        false,
+    );
+
+    let verifier_tls_client_key = config_get_file_path(
+        "verifier_tls_client_key",
+        &config.verifier_tls_client_key,
+        keylime_dir,
+        DEFAULT_VERIFIER_TLS_CLIENT_KEY,
+        false,
     );
 
     let ek_handle = match config.ek_handle.as_ref() {
@@ -668,6 +704,9 @@ pub(crate) fn config_translate_keywords(
         payload_key,
         trusted_client_ca,
         uuid,
+        verifier_tls_ca_cert,
+        verifier_tls_client_cert,
+        verifier_tls_client_key,
         ..config.clone()
     })
 }
