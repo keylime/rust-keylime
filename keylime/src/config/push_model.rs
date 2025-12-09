@@ -63,6 +63,9 @@ pub struct PushModelConfig {
     uefi_logs_evidence_version: String,
     uuid: String,
     verifier_url: String,
+    verifier_tls_ca_cert: String,
+    verifier_tls_client_cert: String,
+    verifier_tls_client_key: String,
 }
 
 #[cfg(feature = "testing")]
@@ -188,6 +191,38 @@ mod tests {
         assert_ne!(
             config.enable_authentication(),
             DEFAULT_ENABLE_AUTHENTICATION
+        );
+    }
+
+    #[test]
+    fn test_verifier_tls_cert_paths_default() {
+        let tmpdir = tempfile::tempdir().expect("failed to create tmpdir");
+        let config = get_testing_config(tmpdir.path(), None);
+
+        // Verify default paths are resolved correctly relative to keylime_dir
+        assert_eq!(
+            config.verifier_tls_ca_cert(),
+            tmpdir
+                .path()
+                .join(DEFAULT_VERIFIER_TLS_CA_CERT)
+                .display()
+                .to_string()
+        );
+        assert_eq!(
+            config.verifier_tls_client_cert(),
+            tmpdir
+                .path()
+                .join(DEFAULT_VERIFIER_TLS_CLIENT_CERT)
+                .display()
+                .to_string()
+        );
+        assert_eq!(
+            config.verifier_tls_client_key(),
+            tmpdir
+                .path()
+                .join(DEFAULT_VERIFIER_TLS_CLIENT_KEY)
+                .display()
+                .to_string()
         );
     }
 }
