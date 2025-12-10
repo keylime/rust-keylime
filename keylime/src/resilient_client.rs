@@ -156,7 +156,7 @@ impl RetryableStrategy for StopOnSuccessStrategy {
                     .headers()
                     .contains_key(RESPONSE_RETRY_AFTER_HEADER)
                 {
-                    debug!("{:?} header found; deferring to RetryAfterMiddleware.", RESPONSE_RETRY_AFTER_HEADER);
+                    debug!("{RESPONSE_RETRY_AFTER_HEADER:?} header found; deferring to RetryAfterMiddleware.");
                     None
                 } else {
                     // For any other status, let the default strategy decide if it's a transient error.
@@ -225,7 +225,7 @@ impl TokenState {
     ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         // Create a raw authentication client to avoid middleware loops
         let auth_client = AuthenticationClient::new_raw(auth_config)
-            .map_err(|e| format!("Failed to create auth client: {}", e))?;
+            .map_err(|e| format!("Failed to create auth client: {e}"))?;
 
         Ok(Self {
             token: RwLock::new(None),
@@ -286,8 +286,8 @@ impl TokenState {
                 Ok(token_string)
             }
             Err(e) => {
-                warn!("Token refresh failed: {}", e);
-                Err(format!("Authentication failed: {}", e).into())
+                warn!("Token refresh failed: {e}");
+                Err(format!("Authentication failed: {e}").into())
             }
         }
     }
@@ -382,7 +382,7 @@ impl Middleware for AuthenticationMiddleware {
                     debug!("Adding authentication token to request");
                     req.headers_mut().insert(
                         "Authorization",
-                        format!("Bearer {}", token).parse().map_err(|e| {
+                        format!("Bearer {token}").parse().map_err(|e| {
                             Error::Middleware(anyhow::anyhow!(
                                 "Invalid token format: {}",
                                 e
@@ -391,7 +391,7 @@ impl Middleware for AuthenticationMiddleware {
                     );
                 }
                 Err(e) => {
-                    warn!("Failed to get auth token: {}", e);
+                    warn!("Failed to get auth token: {e}");
                     return Err(Error::Middleware(anyhow::anyhow!(
                         "Authentication failed: {}",
                         e
@@ -928,8 +928,7 @@ mod tests {
 
         assert!(
             elapsed > Duration::from_secs(0),
-            "The client waited for {:?}, which is less than the expected",
-            elapsed
+            "The client waited for {elapsed:?}, which is less than the expected"
         );
         assert!(elapsed < Duration::from_secs(2));
         assert_eq!(response.status(), StatusCode::OK);
@@ -1254,8 +1253,7 @@ mod tests {
             let error_msg = result.unwrap_err().to_string(); //#[allow_ci]
             assert!(
                 error_msg.contains("Authentication failed"),
-                "Error: {}",
-                error_msg
+                "Error: {error_msg}"
             );
 
             // Test clear token when no token exists (should not panic)
@@ -1323,9 +1321,7 @@ mod tests {
                 assert_eq!(
                     middleware.is_auth_endpoint(&mock_request),
                     expected_is_auth,
-                    "URL {} should be auth endpoint: {}",
-                    url,
-                    expected_is_auth
+                    "URL {url} should be auth endpoint: {expected_is_auth}"
                 );
             }
         }

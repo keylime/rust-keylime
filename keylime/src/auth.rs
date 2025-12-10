@@ -540,7 +540,7 @@ impl AuthenticationClient {
 
         if !status.is_success() {
             let error_body = response.text().await.unwrap_or_else(|e| {
-                format!("(failed to read response body: {})", e)
+                format!("(failed to read response body: {e})")
             });
             let error_msg = if error_body.is_empty() {
                 "(empty response body)".to_string()
@@ -627,7 +627,7 @@ impl AuthenticationClient {
 
         if !status.is_success() {
             let error_body = response.text().await.unwrap_or_else(|e| {
-                format!("(failed to read response body: {})", e)
+                format!("(failed to read response body: {e})")
             });
             let error_msg = if error_body.is_empty() {
                 "(empty response body)".to_string()
@@ -735,7 +735,7 @@ mod tests {
 
         // Mock challenge request (POST /sessions)
         Mock::given(method("POST"))
-            .and(path(format!("/{}/sessions", DEFAULT_PUSH_API_VERSION)))
+            .and(path(format!("/{DEFAULT_PUSH_API_VERSION}/sessions")))
             .and(header("Content-Type", "application/vnd.api+json"))
             .respond_with(ResponseTemplate::new(201).set_body_json(
                 serde_json::json!({
@@ -762,7 +762,7 @@ mod tests {
 
         // Mock proof submission (PATCH /sessions/1)
         Mock::given(method("PATCH"))
-            .and(path(format!("/{}/sessions/1", DEFAULT_PUSH_API_VERSION)))
+            .and(path(format!("/{DEFAULT_PUSH_API_VERSION}/sessions/1")))
             .and(header("Content-Type", "application/vnd.api+json"))
             .respond_with(ResponseTemplate::new(200).set_body_json(
                 serde_json::json!({
@@ -815,7 +815,7 @@ mod tests {
 
         // Mock challenge request
         Mock::given(method("POST"))
-            .and(path(format!("/{}/sessions", DEFAULT_PUSH_API_VERSION)))
+            .and(path(format!("/{DEFAULT_PUSH_API_VERSION}/sessions")))
             .respond_with(ResponseTemplate::new(201).set_body_json(
                 serde_json::json!({
                     "data": {
@@ -841,7 +841,7 @@ mod tests {
 
         // Mock proof submission failure
         Mock::given(method("PATCH"))
-            .and(path(format!("/{}/sessions/1", DEFAULT_PUSH_API_VERSION)))
+            .and(path(format!("/{DEFAULT_PUSH_API_VERSION}/sessions/1")))
             .respond_with(ResponseTemplate::new(200).set_body_json(
                 serde_json::json!({
                     "data": {
@@ -887,7 +887,7 @@ mod tests {
 
         // Mock challenge request
         Mock::given(method("POST"))
-            .and(path(format!("/{}/sessions", DEFAULT_PUSH_API_VERSION)))
+            .and(path(format!("/{DEFAULT_PUSH_API_VERSION}/sessions")))
             .respond_with(ResponseTemplate::new(201).set_body_json(
                 serde_json::json!({
                     "data": {
@@ -914,7 +914,7 @@ mod tests {
 
         // Mock proof submission with short expiration
         Mock::given(method("PATCH"))
-            .and(path(format!("/{}/sessions/1", DEFAULT_PUSH_API_VERSION)))
+            .and(path(format!("/{DEFAULT_PUSH_API_VERSION}/sessions/1")))
             .respond_with(ResponseTemplate::new(200).set_body_json(
                 serde_json::json!({
                     "data": {
@@ -1170,7 +1170,7 @@ mod tests {
 
         // Mock challenge request
         Mock::given(method("POST"))
-            .and(path(format!("/{}/sessions", DEFAULT_PUSH_API_VERSION)))
+            .and(path(format!("/{DEFAULT_PUSH_API_VERSION}/sessions")))
             .and(header("Content-Type", "application/vnd.api+json"))
             .respond_with(ResponseTemplate::new(201).set_body_json(
                 serde_json::json!({
@@ -1197,7 +1197,7 @@ mod tests {
 
         // Mock successful proof submission
         Mock::given(method("PATCH"))
-            .and(path(format!("/{}/sessions/42", DEFAULT_PUSH_API_VERSION)))
+            .and(path(format!("/{DEFAULT_PUSH_API_VERSION}/sessions/42")))
             .and(header("Content-Type", "application/vnd.api+json"))
             .respond_with(ResponseTemplate::new(200).set_body_json(
                 serde_json::json!({
@@ -1263,7 +1263,7 @@ mod tests {
 
         // Mock challenge request
         Mock::given(method("POST"))
-            .and(path(format!("/{}/sessions", DEFAULT_PUSH_API_VERSION)))
+            .and(path(format!("/{DEFAULT_PUSH_API_VERSION}/sessions")))
             .and(header("Content-Type", "application/vnd.api+json"))
             .respond_with(ResponseTemplate::new(201).set_body_json(
                 serde_json::json!({
@@ -1331,7 +1331,7 @@ mod tests {
         ];
 
         for (i, op) in ops.iter().enumerate() {
-            let challenge = format!("trait-test-{}", i);
+            let challenge = format!("trait-test-{i}");
             let proof = op.generate_proof(&challenge).await.unwrap(); //#[allow_ci]
 
             assert!(!proof.message.is_empty());

@@ -173,7 +173,7 @@ pub fn log_tls_error_hints<E: std::fmt::Debug + std::fmt::Display>(
 ) {
     use log::warn;
 
-    let error_str = format!("{:?}", error);
+    let error_str = format!("{error:?}");
 
     // Check for hostname mismatch first (most specific)
     if error_str.contains("hostname mismatch") {

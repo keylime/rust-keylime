@@ -25,10 +25,10 @@ impl std::fmt::Display for HeaderValidationError {
                 write!(f, "Missing Location header in 201 Created response")
             }
             HeaderValidationError::InvalidLocationHeader(msg) => {
-                write!(f, "Invalid Location header value: {}", msg)
+                write!(f, "Invalid Location header value: {msg}")
             }
             HeaderValidationError::InvalidBaseUrl(msg) => {
-                write!(f, "Invalid base URL: {}", msg)
+                write!(f, "Invalid base URL: {msg}")
             }
         }
     }
@@ -55,7 +55,7 @@ impl HeaderValidator {
             )
         })?;
 
-        debug!("Validating Location header: {}", location_str);
+        debug!("Validating Location header: {location_str}");
 
         // Use the existing resolve_url function for all URL validation and resolution
         if let Some(base_url) = expected_base_url {

@@ -233,10 +233,8 @@ pub fn run_as(user_group: &str) -> Result<(), PermissionError> {
         const MAX_REASONABLE_GROUPS: c_int = 1024;
         if !(0..=MAX_REASONABLE_GROUPS).contains(&ngroups) {
             let e = io::Error::other(format!(
-                "getgrouplist returned unreasonable group count: {}. \
-                 Valid range is 0-{}. This indicates a system issue or potential attack.",
-                ngroups,
-                MAX_REASONABLE_GROUPS
+                "getgrouplist returned unreasonable group count: {ngroups}. \
+                 Valid range is 0-{MAX_REASONABLE_GROUPS}. This indicates a system issue or potential attack."
             ));
             return Err(PermissionError::GetGroupList(e));
         }
