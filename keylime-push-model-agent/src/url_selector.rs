@@ -59,8 +59,7 @@ pub fn resolve_url(base_url: &str, relative_url: &str) -> Result<String> {
                     }
                 });
 
-            url_string =
-                format!("{}{}{}", scheme_part, host_part, normalized_path);
+            url_string = format!("{scheme_part}{host_part}{normalized_path}");
         }
         // If there's no path part (no '/' after hostname), no normalization needed
     }
@@ -78,29 +77,23 @@ fn validate_and_resolve_url(
     for (i, &byte) in base_url.as_bytes().iter().enumerate() {
         if byte < 0x20 && byte != 0x09 {
             return Err(format!(
-                "Control character in base URL at position {}",
-                i
+                "Control character in base URL at position {i}"
             ));
         }
         if byte == 0x7F {
-            return Err(format!(
-                "DEL character in base URL at position {}",
-                i
-            ));
+            return Err(format!("DEL character in base URL at position {i}"));
         }
     }
 
     for (i, &byte) in relative_url.as_bytes().iter().enumerate() {
         if byte < 0x20 && byte != 0x09 {
             return Err(format!(
-                "Control character in relative URL at position {}",
-                i
+                "Control character in relative URL at position {i}"
             ));
         }
         if byte == 0x7F {
             return Err(format!(
-                "DEL character in relative URL at position {}",
-                i
+                "DEL character in relative URL at position {i}"
             ));
         }
     }
@@ -130,17 +123,16 @@ pub fn get_negotiations_request_url(args: &UrlArgs) -> String {
     };
 
     let api_version = get_push_api_version(args.api_version.as_ref());
-    let relative_path = format!("{}/agents/{}/attestations", api_version, id);
+    let relative_path = format!("{api_version}/agents/{id}/attestations");
 
     // Validate and resolve URL according to RFC 3986 in one step
     match validate_and_resolve_url(&args.verifier_url, &relative_path) {
         Ok(resolved_url) => resolved_url,
         Err(e) => {
             warn!(
-                "Failed to validate/resolve URL according to RFC 3986: {}",
-                e
+                "Failed to validate/resolve URL according to RFC 3986: {e}"
             );
-            format!("ERROR: Invalid verifier URL: {}", e)
+            format!("ERROR: Invalid verifier URL: {e}")
         }
     }
 }
@@ -160,8 +152,8 @@ pub fn get_evidence_submission_request_url(args: &UrlArgs) -> String {
     match validate_and_resolve_url(&args.verifier_url, &location) {
         Ok(resolved_url) => resolved_url,
         Err(e) => {
-            warn!("Failed to validate/resolve evidence submission URL according to RFC 3986: {}", e);
-            format!("ERROR: Invalid location header: {}", e)
+            warn!("Failed to validate/resolve evidence submission URL according to RFC 3986: {e}");
+            format!("ERROR: Invalid location header: {e}")
         }
     }
 }
@@ -237,13 +229,12 @@ mod tests {
         // Should not return an error
         assert!(
             !url.starts_with("ERROR:"),
-            "URL generation should not fail: {}",
-            url
+            "URL generation should not fail: {url}"
         );
 
         // Should generate a properly formatted URL
         let expected =
-            format!("{}/v3.0/agents/{}/attestations", mockoon_base, agent_id);
+            format!("{mockoon_base}/v3.0/agents/{agent_id}/attestations");
         assert_eq!(
             url, expected,
             "Generated URL should match expected format"
@@ -252,7 +243,7 @@ mod tests {
         // Test with trailing slash on base URL
         let url_with_slash = get_negotiations_request_url(&UrlArgs {
             api_version: Some("v3.0".to_string()),
-            verifier_url: format!("{}/", mockoon_base),
+            verifier_url: format!("{mockoon_base}/"),
             agent_identifier: Some(agent_id.to_string()),
             location: None,
         });
@@ -278,12 +269,10 @@ mod tests {
 
         assert!(
             !evidence_url.starts_with("ERROR:"),
-            "Evidence URL generation should not fail: {}",
-            evidence_url
+            "Evidence URL generation should not fail: {evidence_url}"
         );
 
-        let expected_evidence =
-            format!("{}{}", mockoon_base, location_header);
+        let expected_evidence = format!("{mockoon_base}{location_header}");
         assert_eq!(
             evidence_url, expected_evidence,
             "Evidence URL should correctly combine base and location"
@@ -299,8 +288,7 @@ mod tests {
 
         assert!(
             invalid_url.starts_with("ERROR:"),
-            "Invalid URL should return error: {}",
-            invalid_url
+            "Invalid URL should return error: {invalid_url}"
         );
         assert!(
             invalid_url.contains("Invalid verifier URL"),
@@ -318,8 +306,7 @@ mod tests {
 
         assert!(
             invalid_location.starts_with("ERROR:"),
-            "Invalid location should return error: {}",
-            invalid_location
+            "Invalid location should return error: {invalid_location}"
         );
         assert!(
             invalid_location.contains("Invalid location header"),
@@ -361,14 +348,11 @@ mod tests {
 
             assert!(
                 !url.starts_with("ERROR:"),
-                "URL resolution should not fail for {}: {}",
-                relative_path,
-                url
+                "URL resolution should not fail for {relative_path}: {url}"
             );
             assert_eq!(
                 url, expected,
-                "Relative URL resolution failed for {}",
-                relative_path
+                "Relative URL resolution failed for {relative_path}"
             );
         }
     }
@@ -388,8 +372,7 @@ mod tests {
         for url in valid_absolute_urls {
             assert!(
                 validate_and_resolve_url(base_url, url).is_ok(),
-                "Should accept valid absolute URL: {}",
-                url
+                "Should accept valid absolute URL: {url}"
             );
         }
 
@@ -407,8 +390,7 @@ mod tests {
         for url in valid_relative_urls {
             assert!(
                 validate_and_resolve_url(base_url, url).is_ok(),
-                "Should accept valid relative URL: {}",
-                url
+                "Should accept valid relative URL: {url}"
             );
         }
     }
@@ -430,8 +412,7 @@ mod tests {
         for url in invalid_control_char_urls {
             assert!(
                 validate_and_resolve_url(base_url, url).is_err(),
-                "Should reject URL with control character: {:?}",
-                url
+                "Should reject URL with control character: {url:?}"
             );
         }
 
@@ -464,8 +445,7 @@ mod tests {
         for url in valid_relative_urls {
             assert!(
                 validate_and_resolve_url(base_url, url).is_ok(),
-                "According to RFC 3986, this should be valid as relative URL: {}",
-                url
+                "According to RFC 3986, this should be valid as relative URL: {url}"
             );
         }
 
@@ -570,8 +550,7 @@ mod tests {
         // Should return an error message starting with "ERROR:"
         assert!(
             url.starts_with("ERROR:"),
-            "Should return error for malformed URL that fails resolution: {}",
-            url
+            "Should return error for malformed URL that fails resolution: {url}"
         );
     }
 
@@ -596,13 +575,11 @@ mod tests {
 
             assert!(
                 !url.starts_with("ERROR:"),
-                "Should handle agent identifier with special characters: {}",
-                agent_id
+                "Should handle agent identifier with special characters: {agent_id}"
             );
             assert!(
                 url.contains(agent_id),
-                "URL should contain the agent identifier: {}",
-                url
+                "URL should contain the agent identifier: {url}"
             );
         }
     }
@@ -622,13 +599,11 @@ mod tests {
 
             assert!(
                 !url.starts_with("ERROR:"),
-                "Should handle URL scheme: {}",
-                base_url
+                "Should handle URL scheme: {base_url}"
             );
             assert!(
                 url.starts_with(base_url),
-                "Generated URL should preserve scheme: {}",
-                url
+                "Generated URL should preserve scheme: {url}"
             );
         }
     }
@@ -657,13 +632,11 @@ mod tests {
 
             assert!(
                 !url.starts_with("ERROR:"),
-                "Should handle location header format: {}",
-                location
+                "Should handle location header format: {location}"
             );
             assert_eq!(
                 url, expected,
-                "Location resolution failed for: {}",
-                location
+                "Location resolution failed for: {location}"
             );
         }
     }
@@ -681,8 +654,7 @@ mod tests {
 
         assert!(
             url.starts_with("ERROR: Invalid verifier URL:"),
-            "Should return error for URL that fails base parsing in resolve_url: {}",
-            url
+            "Should return error for URL that fails base parsing in resolve_url: {url}"
         );
     }
 
@@ -702,8 +674,7 @@ mod tests {
             assert!(
                 url.contains("Failed to resolve URL:")
                     || url.contains("Invalid verifier URL:"),
-                "Error should be about URL resolution or validation: {}",
-                url
+                "Error should be about URL resolution or validation: {url}"
             );
         }
     }
@@ -720,8 +691,7 @@ mod tests {
 
         assert!(
             url.starts_with("ERROR: Invalid location header:"),
-            "Should return error for URL that fails base parsing in resolve_url: {}",
-            url
+            "Should return error for URL that fails base parsing in resolve_url: {url}"
         );
     }
 
@@ -741,8 +711,7 @@ mod tests {
             assert!(
                 url.contains("Failed to resolve evidence submission URL:")
                     || url.contains("Invalid"),
-                "Error should be about URL resolution or validation: {}",
-                url
+                "Error should be about URL resolution or validation: {url}"
             );
         }
     }
@@ -898,16 +867,14 @@ mod tests {
                 assert!(
                     negotiations_result.starts_with("http://")
                         || negotiations_result.starts_with("https://"),
-                    "If no error, should produce valid URL: {}",
-                    negotiations_result
+                    "If no error, should produce valid URL: {negotiations_result}"
                 );
             } else {
                 assert!(
                     negotiations_result.contains("Invalid verifier URL:")
                         || negotiations_result
                             .contains("Failed to resolve URL:"),
-                    "Error should be about validation or resolution: {}",
-                    negotiations_result
+                    "Error should be about validation or resolution: {negotiations_result}"
                 );
             }
 
@@ -926,15 +893,13 @@ mod tests {
                     evidence_result.starts_with("http://")
                         || evidence_result.starts_with("https://")
                         || evidence_result.starts_with("//"),
-                    "If no error, should produce valid URL: {}",
-                    evidence_result
+                    "If no error, should produce valid URL: {evidence_result}"
                 );
             } else {
                 assert!(
                     evidence_result.contains("Invalid")
                         || evidence_result.contains("Failed to resolve"),
-                    "Error should be about validation or resolution: {}",
-                    evidence_result
+                    "Error should be about validation or resolution: {evidence_result}"
                 );
             }
         }
@@ -970,17 +935,14 @@ mod tests {
             // Should return error due to invalid verifier URL
             assert!(
                 result.starts_with("ERROR: Invalid"),
-                "Should return invalid verifier URL error for control character URL: {:?}, got: {}",
-                invalid_url,
-                result
+                "Should return invalid verifier URL error for control character URL: {invalid_url:?}, got: {result}"
             );
 
             // Error message should contain information about the control character
             assert!(
                 result.contains("Control character")
                     || result.contains("DEL character"),
-                "Error message should mention control character issue: {}",
-                result
+                "Error message should mention control character issue: {result}"
             );
         }
     }
@@ -1011,18 +973,12 @@ mod tests {
             });
 
             // Should return either validation error or resolution error
-            assert!(
-                result.starts_with("ERROR:"),
-                "{}: {}",
-                description,
-                result
-            );
+            assert!(result.starts_with("ERROR:"), "{description}: {result}");
 
             // Should be either invalid verifier URL or failed resolution
             assert!(
                 result.contains("Invalid") || result.contains("Failed to resolve"),
-                "Error should be about verifier URL validation or resolution: {}",
-                result
+                "Error should be about verifier URL validation or resolution: {result}"
             );
         }
     }

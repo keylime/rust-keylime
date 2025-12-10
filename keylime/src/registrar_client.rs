@@ -232,8 +232,7 @@ impl RegistrarClientBuilder {
         let scheme = if use_tls { "https" } else { "http" };
 
         info!(
-            "Building Registrar client: scheme={}, registrar={}:{}, TLS={}",
-            scheme, registrar_ip, registrar_port, use_tls
+            "Building Registrar client: scheme={scheme}, registrar={registrar_ip}:{registrar_port}, TLS={use_tls}"
         );
 
         if use_tls {

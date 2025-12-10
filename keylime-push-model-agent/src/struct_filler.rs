@@ -47,7 +47,7 @@ const MUTEX_POISONED_RECOVERY_MESSAGES: &[&str] = &[
 /// Helper function to log mutex poisoning recovery messages
 fn log_mutex_poisoning_recovery() {
     for msg in MUTEX_POISONED_RECOVERY_MESSAGES {
-        error!("{}", msg);
+        error!("{msg}");
     }
 }
 

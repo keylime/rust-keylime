@@ -481,14 +481,12 @@ impl ContextInfo {
         // Encode the attestation and signature as base64
         let attest_bytes = attest.marshall().map_err(|e| {
             ContextInfoError::Keylime(format!(
-                "Failed to marshall attestation: {}",
-                e
+                "Failed to marshall attestation: {e}"
             ))
         })?;
         let sig_bytes = signature.marshall().map_err(|e| {
             ContextInfoError::Keylime(format!(
-                "Failed to marshall signature: {}",
-                e
+                "Failed to marshall signature: {e}"
             ))
         })?;
 

@@ -116,9 +116,9 @@ fn create_registrar_tls_config<T: PushModelConfigTrait>(
     let client_key = config.registrar_tls_client_key();
 
     info!("Registrar TLS enabled: true");
-    debug!("Registrar CA certificate: {}", ca_cert);
-    debug!("Registrar client certificate: {}", client_cert);
-    debug!("Registrar client key: {}", client_key);
+    debug!("Registrar CA certificate: {ca_cert}");
+    debug!("Registrar client certificate: {client_cert}");
+    debug!("Registrar client key: {client_key}");
 
     // Only use TLS if all certificate paths are provided
     if !ca_cert.is_empty()
@@ -147,8 +147,7 @@ fn create_registrar_tls_config<T: PushModelConfigTrait>(
 
     if provided_count > 0 {
         warn!(
-            "Registrar TLS is enabled but only {} out of 3 certificate paths are configured.",
-            provided_count
+            "Registrar TLS is enabled but only {provided_count} out of 3 certificate paths are configured."
         );
         warn!("This may indicate a configuration mistake.");
         warn!(
@@ -327,7 +326,7 @@ async fn main() -> Result<()> {
 
     if let Some(user_group) = run_as {
         if let Err(e) = keylime::permissions::run_as(user_group) {
-            error!("Failed to drop privileges to {}: {}", user_group, e);
+            error!("Failed to drop privileges to {user_group}: {e}");
             error!("Troubleshooting steps:");
 
             // Provide error-specific guidance based on the error type
@@ -364,7 +363,7 @@ async fn main() -> Result<()> {
                 "Privilege dropping failed. See error messages above for troubleshooting."
             ));
         }
-        info!("Running the service as {}...", user_group);
+        info!("Running the service as {user_group}...");
     }
 
     // === CONTINUE AS UNPRIVILEGED USER ===

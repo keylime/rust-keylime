@@ -125,7 +125,7 @@ impl AttestationClient {
 
         let req = filler.get_attestation_request();
         if let Ok(json_str) = serde_json::to_string(&req) {
-            debug!("Request body: {}", json_str);
+            debug!("Request body: {json_str}");
         }
 
         let request_builder = self.client.get_json_request_from_struct(
@@ -182,7 +182,7 @@ impl AttestationClient {
                 &headers,
                 Some(config.url),
             ) {
-                warn!("201 Created response validation failed: {}", e);
+                warn!("201 Created response validation failed: {e}");
                 // Don't fail the request, just log the warning for now
             }
         }
@@ -505,8 +505,7 @@ mod tests {
             location.starts_with("http://")
                 || location.starts_with("https://")
                 || location.starts_with("/"),
-            "Location header should be a valid URI reference: {}",
-            location
+            "Location header should be a valid URI reference: {location}"
         );
 
         // Test evidence submission with RFC-compliant Location header
@@ -554,8 +553,7 @@ mod tests {
                     // Evidence submission failure is acceptable for this test
                     // We're primarily testing RFC compliance validation
                     info!(
-                        "Evidence submission failed (expected with mock): {}",
-                        e
+                        "Evidence submission failed (expected with mock): {e}"
                     );
                 }
             }
