@@ -32,7 +32,7 @@ jobs:
       run : git config --system --add safe.directory "$PWD"
     - name: Run tests
       run: bash tests/run.sh
-    - uses: actions/upload-artifact@v4
+    - uses: actions/upload-artifact@v6
       with:
         name: tarpaulin-report
         path: |
