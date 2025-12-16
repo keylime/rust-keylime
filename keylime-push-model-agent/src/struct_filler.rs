@@ -318,6 +318,47 @@ impl<'a> FillerFromHardware<'a> {
             Ok(evidence) => evidence,
             Err(e) => {
                 error!("Failed to perform attestation: {e}");
+
+                // Check if this is a fatal mutex poisoning error
+                if let keylime::context_info::ContextInfoError::Tpm(
+                    keylime::tpm::TpmError::MutexPoisonedDuringOperation {
+                        operation,
+                    },
+                ) = &e
+                {
+                    error!("FATAL: TPM mutex poisoned during {operation} - terminating agent");
+                    error!("The agent will now exit to allow systemd/supervisors to restart it with a clean state");
+
+                    // Mutex poisoning indicates a thread panicked while holding the TPM lock,
+                    // which represents an unrecoverable state for the following reasons:
+                    //
+                    // 1. TPM HARDWARE STATE: The TPM is a hardware security device with exclusive
+                    //    access requirements. If a panic occurred mid-operation, the TPM may be
+                    //    in an inconsistent state that cannot be safely recovered within the
+                    //    current process.
+                    //
+                    // 2. SECURITY CONSIDERATIONS: For a remote attestation agent, any indication
+                    //    of internal corruption (which mutex poisoning signals) should be treated
+                    //    as a critical security event. Continuing operation could compromise the
+                    //    integrity of attestation measurements.
+                    //
+                    // 3. CLEAN RESTART REQUIRED: The only safe recovery is a complete process
+                    //    restart that reinitializes all TPM contexts from a known-good state.
+                    //    systemd/supervisors should be configured with appropriate restart
+                    //    policies to handle this scenario.
+                    //
+                    // 4. IMMEDIATE EXIT JUSTIFICATION: While std::process::exit(1) bypasses
+                    //    normal Rust cleanup (Drop implementations, thread joins), this is
+                    //    acceptable here because:
+                    //    - The TPM state is already compromised and cleanup may fail
+                    //    - Attempting graceful shutdown could trigger additional panics
+                    //    - The supervisor will perform any necessary system-level cleanup
+                    //
+                    // DEPLOYMENT NOTE: Ensure systemd unit or supervisor is configured with
+                    // Restart=on-failure and appropriate RestartSec to handle this exit.
+                    std::process::exit(1);
+                }
+
                 return structures::EvidenceHandlingRequest {
                     data: structures::EvidenceHandlingRequestData {
                         data_type: "error".to_string(),

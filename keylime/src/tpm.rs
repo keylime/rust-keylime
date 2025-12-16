@@ -490,6 +490,10 @@ pub enum TpmError {
     /// Error extracting scheme and hash algorithm from AK handle
     #[error("Error extracting scheme and hash algorithm from AK handle")]
     TSSExtractAkSchemeAndHashError { source: tss_esapi::Error },
+
+    /// TPM context mutex was poisoned during an operation
+    #[error("TPM context mutex was poisoned during '{operation}' operation. This indicates a critical bug where a thread panicked while holding the TPM lock. The agent must be restarted.")]
+    MutexPoisonedDuringOperation { operation: &'static str },
 }
 
 impl From<tss_esapi::Error> for TpmError {
@@ -674,7 +678,11 @@ impl Context<'_> {
         alg: EncryptionAlgorithm,
         handle: Option<&str>,
     ) -> Result<EKResult> {
-        let mut ctx = self.inner.lock().unwrap(); //#[allow_ci]
+        let mut ctx = self.inner.lock().map_err(|_| {
+            TpmError::MutexPoisonedDuringOperation {
+                operation: "create_ek",
+            }
+        })?;
 
         // Retrieve EK handle, EK pub cert, and TPM pub object
         let key_handle: KeyHandle = match handle {
@@ -769,8 +777,13 @@ impl Context<'_> {
         key_alg: EncryptionAlgorithm,
         sign_alg: SignAlgorithm,
     ) -> Result<AKResult> {
+        let mut ctx = self.inner.lock().map_err(|_| {
+            TpmError::MutexPoisonedDuringOperation {
+                operation: "create_ak",
+            }
+        })?;
         let ak = ak::create_ak_2(
-            &mut self.inner.lock().unwrap(), //#[allow_ci]
+            &mut ctx,
             handle,
             hash_alg.into(),
             Into::<AsymmetricAlgorithmSelection>::into(key_alg),
@@ -800,8 +813,13 @@ impl Context<'_> {
         handle: KeyHandle,
         ak: &AKResult,
     ) -> Result<KeyHandle> {
+        let mut ctx = self.inner.lock().map_err(|_| {
+            TpmError::MutexPoisonedDuringOperation {
+                operation: "load_ak",
+            }
+        })?;
         let ak_handle = ak::load_ak(
-            &mut self.inner.lock().unwrap(), //#[allow_ci]
+            &mut ctx,
             handle,
             None,
             ak.private.clone(),
@@ -825,7 +843,11 @@ impl Context<'_> {
         handle: &str,
         password: &str,
     ) -> Result<KeyHandle> {
-        let mut ctx = self.inner.lock().unwrap(); //#[allow_ci]
+        let mut ctx = self.inner.lock().map_err(|_| {
+            TpmError::MutexPoisonedDuringOperation {
+                operation: "get_key_handle",
+            }
+        })?;
         let handle = u32::from_str_radix(handle.trim_start_matches("0x"), 16)
             .map_err(|source| TpmError::NumParse {
                 origin: handle.to_string(),
@@ -1367,7 +1389,11 @@ impl Context<'_> {
         ak: KeyHandle,
         ek: KeyHandle,
     ) -> Result<Digest> {
-        let mut ctx = self.inner.lock().unwrap(); //#[allow_ci]
+        let mut ctx = self.inner.lock().map_err(|_| {
+            TpmError::MutexPoisonedDuringOperation {
+                operation: "activate_credential",
+            }
+        })?;
 
         let (credential, secret) = parse_cred_and_secret(keyblob)?;
         let mut policy_digests = DigestList::new();
@@ -1458,7 +1484,11 @@ impl Context<'_> {
         object_handle: KeyHandle,
         signing_key_handle: KeyHandle,
     ) -> Result<(Attest, Signature)> {
-        let mut ctx = self.inner.lock().unwrap(); //#[allow_ci]
+        let mut ctx = self.inner.lock().map_err(|_| {
+            TpmError::MutexPoisonedDuringOperation {
+                operation: "certify_credential",
+            }
+        })?;
 
         let result = ctx
             .execute_with_sessions(
@@ -1548,7 +1578,9 @@ impl Context<'_> {
         let pcrlist =
             self.build_pcr_list(nk_digest, mask, hash_alg.into())?;
 
-        let mut ctx = self.inner.lock().unwrap(); //#[allow_ci]
+        let mut ctx = self.inner.lock().map_err(|_| {
+            TpmError::MutexPoisonedDuringOperation { operation: "quote" }
+        })?;
 
         let (attestation, sig, pcrs_read, pcr_data) = ctx
             .execute_with_nullauth_session(|ctx| {
@@ -1736,7 +1768,11 @@ impl Context<'_> {
     pub fn get_supported_hash_algorithms(
         &mut self,
     ) -> Result<Vec<KeylimeInternalHashAlgorithm>> {
-        let mut ctx = self.inner.lock().unwrap(); //#[allow_ci]
+        let mut ctx = self.inner.lock().map_err(|_| {
+            TpmError::MutexPoisonedDuringOperation {
+                operation: "get_supported_hash_algorithms",
+            }
+        })?;
         const MAX_ALGS_TO_QUERY: u32 = 128;
         let (capability_data_algs, _) = ctx
             .get_capability(CapabilityType::Algorithms, 0, MAX_ALGS_TO_QUERY)
@@ -1789,7 +1825,11 @@ impl Context<'_> {
     pub fn get_supported_signing_algorithms(
         &mut self,
     ) -> Result<Vec<KeylimeInternalSignAlgorithm>> {
-        let mut ctx = self.inner.lock().unwrap(); //#[allow_ci]
+        let mut ctx = self.inner.lock().map_err(|_| {
+            TpmError::MutexPoisonedDuringOperation {
+                operation: "get_supported_signing_algorithms",
+            }
+        })?;
 
         const MAX_ALGS_TO_QUERY: u32 = 128;
         let (capability_data, _more) = ctx
@@ -1917,7 +1957,11 @@ impl Context<'_> {
         &mut self,
         ak_handle: KeyHandle,
     ) -> Result<(String, String)> {
-        let mut ctx = self.inner.lock().unwrap(); //#[allow_ci]
+        let mut ctx = self.inner.lock().map_err(|_| {
+            TpmError::MutexPoisonedDuringOperation {
+                operation: "extract_ak_scheme_and_hash",
+            }
+        })?;
 
         // Read the public area of the AK
         let (public, _, _) = ctx
