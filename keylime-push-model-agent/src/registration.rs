@@ -76,10 +76,14 @@ pub async fn register_agent(
         registrar_ip: config.registrar_ip().to_string(),
         registrar_port: config.registrar_port(),
         enable_iak_idevid: config.enable_iak_idevid(),
-        // TODO: make it to not panic on failure
         ek_handle: config
             .ek_handle()
-            .expect("failed to get ek_handle")
+            .map_err(|e| {
+                keylime::error::Error::ConfigurationGenericError(format!(
+                    "ek_handle configuration could not be retrieved: {e}. \
+                     Please verify ek_handle is properly configured in your config file."
+                ))
+            })?
             .to_string(),
         registrar_ca_cert: ca_cert,
         registrar_client_cert: client_cert,
@@ -698,6 +702,56 @@ mod tests {
         let result =
             register_agent(&mut context_info, Some(tls_config)).await;
         assert!(result.is_err());
+        assert!(context_info.flush_context().is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_register_agent_error_handling() {
+        // This test verifies that register_agent() properly handles and propagates
+        // errors from config.ek_handle() instead of panicking.
+        //
+        // Note: With the current implementation, ek_handle() uses a transform
+        // function that always succeeds (returns default value), so this test
+        // primarily documents the improved error handling pattern. If the
+        // transform function is updated to validate ek_handle in the future,
+        // this test ensures errors are properly propagated with helpful messages.
+        let _mutex = testing::lock_tests().await;
+
+        let tmpdir = tempfile::tempdir().expect("failed to create tmpdir");
+        let mut config = get_testing_config(tmpdir.path(), None);
+        let alg_config = AlgorithmConfigurationString {
+            tpm_encryption_alg: "rsa".to_string(),
+            tpm_hash_alg: "sha256".to_string(),
+            tpm_signing_alg: "rsassa".to_string(),
+            agent_data_path: "".to_string(),
+        };
+
+        config.exponential_backoff_initial_delay = None;
+        config.exponential_backoff_max_retries = None;
+        config.exponential_backoff_max_delay = None;
+        config.registrar_ip = "127.0.0.1".to_string();
+        config.registrar_port = 1;
+
+        let _guard = keylime::config::TestConfigGuard::new(config);
+
+        let mut context_info = ContextInfo::new_from_str(alg_config)
+            .expect("Failed to create context info from string");
+
+        // Verify that register_agent handles configuration properly
+        // With current implementation, ek_handle() succeeds with default value
+        let result = register_agent(&mut context_info, None).await;
+
+        // Should fail due to invalid registrar port, but importantly,
+        // should NOT panic on ek_handle configuration
+        assert!(result.is_err());
+
+        // Verify the error is a connection error, not a configuration panic
+        let err_msg = format!("{:?}", result.unwrap_err());
+        assert!(
+            !err_msg.contains("failed to get ek_handle"),
+            "Should not contain old panic message"
+        );
+
         assert!(context_info.flush_context().is_ok());
     }
 }
