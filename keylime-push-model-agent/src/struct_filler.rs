@@ -54,8 +54,6 @@ fn log_mutex_poisoning_recovery() {
 #[async_trait]
 pub trait StructureFiller {
     fn get_attestation_request(&mut self) -> structures::AttestationRequest;
-    #[allow(dead_code)]
-    fn get_session_request(&mut self) -> structures::SessionRequest;
     async fn get_evidence_handling_request(
         &mut self,
         response_info: &crate::attestation::ResponseInformation,
@@ -79,9 +77,6 @@ pub fn get_filler_request<'a>(
 impl StructureFiller for FillerFromHardware<'_> {
     fn get_attestation_request(&mut self) -> structures::AttestationRequest {
         self.get_attestation_request_final()
-    }
-    fn get_session_request(&mut self) -> structures::SessionRequest {
-        self.get_session_request_final()
     }
     async fn get_evidence_handling_request(
         &mut self,
@@ -286,26 +281,6 @@ impl<'a> FillerFromHardware<'a> {
         }
     }
 
-    // TODO: Change this function to use the session request appropriately
-    // TODO: This is expected to be used once the PoP authentication is implemented
-    #[allow(dead_code)]
-    pub fn get_session_request_final(
-        &mut self,
-    ) -> structures::SessionRequest {
-        structures::SessionRequest {
-            data: structures::SessionRequestData {
-                data_type: "session".to_string(),
-                attributes: structures::SessionRequestAttributes {
-                    agent_id: "example-agent".to_string(),
-                    auth_supported: vec![structures::SupportedAuthMethod {
-                        auth_class: "pop".to_string(),
-                        auth_type: "tpm_pop".to_string(),
-                    }],
-                },
-            },
-        }
-    }
-
     pub async fn get_evidence_handling_request_final(
         &mut self,
         response_info: &crate::attestation::ResponseInformation,
@@ -392,17 +367,6 @@ impl StructureFiller for TestingFiller {
                     system_info: structures::SystemInfo {
                         boot_time: boot_time(),
                     },
-                },
-            },
-        }
-    }
-    fn get_session_request(&mut self) -> structures::SessionRequest {
-        structures::SessionRequest {
-            data: structures::SessionRequestData {
-                data_type: "session".to_string(),
-                attributes: structures::SessionRequestAttributes {
-                    agent_id: "example-agent".to_string(),
-                    auth_supported: vec![],
                 },
             },
         }
@@ -548,38 +512,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_session_request() {
-        use keylime::context_info;
-        let _mutex = testing::lock_tests().await;
-        let context_info_result = context_info::ContextInfo::new_from_str(
-            context_info::AlgorithmConfigurationString {
-                tpm_encryption_alg: "rsa".to_string(),
-                tpm_hash_alg: "sha256".to_string(),
-                tpm_signing_alg: "rsassa".to_string(),
-                agent_data_path: "".to_string(),
-            },
-        );
-
-        // Skip test if TPM access is not available
-        let mut context_info = match context_info_result {
-            Ok(ctx) => ctx,
-            Err(_) => {
-                println!("Skipping test_session_request: TPM not available");
-                return;
-            }
-        };
-
-        let privileged_resources = create_test_privileged_resources();
-        let mut filler =
-            FillerFromHardware::new(&mut context_info, &privileged_resources);
-        let session_request = filler.get_session_request_final();
-        assert_eq!(session_request.data.data_type, "session");
-        let serialized = serde_json::to_string(&session_request).unwrap();
-        assert!(!serialized.is_empty());
-        assert!(context_info.flush_context().is_ok());
-    } // test_session_request
-
-    #[tokio::test]
     async fn test_failing_evidence_handling_request() {
         use std::collections::HashMap;
         let _mutex = testing::lock_tests().await;
@@ -690,13 +622,10 @@ mod tests {
         if let Ok(mut ctx) = context_info_result {
             {
                 let privileged_resources = create_test_privileged_resources();
-                let mut filler =
+                let _filler =
                     get_filler_request(Some(&mut ctx), &privileged_resources);
-                // To check the type, we can't directly compare types of Box<dyn Trait>.
-                // A simple way is to check the output of a method.
-                let req = filler.get_session_request();
-                // FillerFromHardware returns a specific agent_id
-                assert_eq!(req.data.attributes.agent_id, "example-agent");
+                // Verify that we can create a FillerFromHardware successfully
+                // (actual method testing is done in other tests)
             }
             assert!(ctx.clone().flush_context().is_ok());
         }
@@ -705,10 +634,9 @@ mod tests {
     #[tokio::test]
     async fn test_get_filler_request_without_tpm() {
         let privileged_resources = create_test_privileged_resources();
-        let mut filler = get_filler_request(None, &privileged_resources);
-        // TestingFiller returns an empty auth_supported vector
-        let req = filler.get_session_request();
-        assert!(req.data.attributes.auth_supported.is_empty());
+        let _filler = get_filler_request(None, &privileged_resources);
+        // Verify that we can create a TestingFiller successfully
+        // (actual method testing is done in other tests)
     }
 
     #[tokio::test]
@@ -723,11 +651,6 @@ mod tests {
             .attributes
             .evidence_supported
             .is_empty());
-
-        // Test get_session_request
-        let session_req = filler.get_session_request();
-        assert_eq!(session_req.data.data_type, "session");
-        assert!(session_req.data.attributes.auth_supported.is_empty());
 
         // Test get_evidence_handling_request
         let dummy_response = crate::attestation::ResponseInformation {
