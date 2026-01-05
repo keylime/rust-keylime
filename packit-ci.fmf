@@ -84,8 +84,8 @@
       - how: shell
         script:
          - yum -y install https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm
-     # disable code coverage measurement everywhere except F41 and CS9
-   - when: distro != fedora-41
+     # disable code coverage measurement everywhere except F43 and CS9
+   - when: distro != fedora-43
      environment+:
         KEYLIME_RUST_CODE_COVERAGE: 0
      discover+:
