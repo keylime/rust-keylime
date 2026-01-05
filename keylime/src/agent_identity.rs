@@ -1,4 +1,3 @@
-use log::*;
 use openssl::x509::X509;
 use thiserror::Error;
 
