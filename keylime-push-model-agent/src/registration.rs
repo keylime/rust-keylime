@@ -17,15 +17,11 @@ pub struct RegistrarTlsConfig {
 }
 
 pub async fn check_registration(
-    context_info: Option<context_info::ContextInfo>,
+    mut context_info: Option<context_info::ContextInfo>,
     tls_config: Option<RegistrarTlsConfig>,
 ) -> Result<()> {
-    if context_info.is_some() {
-        crate::registration::register_agent(
-            &mut context_info.unwrap(),
-            tls_config,
-        )
-        .await?;
+    if let Some(ref mut ctx) = context_info {
+        crate::registration::register_agent(ctx, tls_config).await?;
     }
     Ok(())
 }

@@ -5,8 +5,6 @@ use keylime::algorithms::HashAlgorithm;
 use keylime::ima;
 use openssl::hash::{hash, MessageDigest};
 
-use log::*;
-
 use clap::Parser;
 use signal_hook::consts::SIGINT;
 use signal_hook::consts::SIGTERM;
