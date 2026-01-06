@@ -76,10 +76,57 @@ impl Default for AuthConfig {
     }
 }
 
+/// A wrapper around authentication tokens that prevents accidental leakage
+/// through logging or string formatting. The token is automatically hashed
+/// when displayed or debugged. Use `reveal()` to access the actual token.
+#[derive(Clone)]
+pub struct SecretToken {
+    token: String,
+    hash_prefix: String, // Cached hash, calculated once
+}
+
+impl SecretToken {
+    /// Create a new SecretToken
+    pub fn new(token: String) -> Self {
+        use openssl::hash::MessageDigest;
+
+        let hash_prefix = match crate::crypto::hash(
+            token.as_bytes(),
+            MessageDigest::sha256(),
+        ) {
+            Ok(hash) => {
+                let hex = hex::encode(hash);
+                hex[..8].to_string()
+            }
+            Err(_) => "<hash-error>".to_string(),
+        };
+
+        SecretToken { token, hash_prefix }
+    }
+
+    /// Reveal the actual token value. Use this only when the actual
+    /// token is needed (e.g., for Authorization headers).
+    pub fn reveal(&self) -> &str {
+        &self.token
+    }
+}
+
+impl std::fmt::Debug for SecretToken {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "SecretToken(<hash:{}>)", self.hash_prefix)
+    }
+}
+
+impl std::fmt::Display for SecretToken {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "<hash:{}>", self.hash_prefix)
+    }
+}
+
 /// Session token with expiration information
 #[derive(Debug, Clone)]
 pub struct SessionToken {
-    pub token: String,
+    pub token: SecretToken,
     pub created_at: DateTime<Utc>,
     pub expires_at: DateTime<Utc>,
     pub session_id: String, // JSON:API requires IDs to be strings
@@ -403,7 +450,7 @@ impl AuthenticationClient {
                 token.session_id, token.expires_at
             );
             return Ok((
-                token.token.clone(),
+                token.token.reveal().to_string(),
                 token.created_at,
                 token.expires_at,
                 token.session_id.clone(),
@@ -420,7 +467,7 @@ impl AuthenticationClient {
         let token_guard = self.session_token.lock().await;
         if let Some(ref token) = *token_guard {
             Ok((
-                token.token.clone(),
+                token.token.reveal().to_string(),
                 token.created_at,
                 token.expires_at,
                 token.session_id.clone(),
@@ -678,7 +725,7 @@ impl AuthenticationClient {
         });
 
         let session_token = SessionToken {
-            token: token.clone(),
+            token: SecretToken::new(token.clone()),
             created_at,
             expires_at,
             session_id: auth_response.data.id,
