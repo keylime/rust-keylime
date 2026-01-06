@@ -1,4 +1,6 @@
-use crate::auth::{AuthConfig, AuthenticationClient, SessionToken};
+use crate::auth::{
+    AuthConfig, AuthenticationClient, SecretToken, SessionToken,
+};
 use anyhow;
 use async_trait::async_trait;
 use chrono::Utc;
@@ -47,7 +49,21 @@ impl Middleware for LoggingMiddleware {
             req.url()
         );
         for (key, value) in req.headers() {
-            debug!("  {key}: {value:?}");
+            if key == "Authorization" {
+                if let Ok(auth_str) = value.to_str() {
+                    if let Some(token) = auth_str.strip_prefix("Bearer ") {
+                        // Wrap in SecretToken to use its Display trait for hashing
+                        let secret = SecretToken::new(token.to_string());
+                        debug!("  {key}: \"Bearer {}\"", secret);
+                    } else {
+                        debug!("  {key}: \"<redacted>\"");
+                    }
+                } else {
+                    debug!("  {key}: \"<redacted>\"");
+                }
+            } else {
+                debug!("  {key}: {value:?}");
+            }
         }
 
         let response = next.run(req, extensions).await?;
@@ -55,7 +71,21 @@ impl Middleware for LoggingMiddleware {
         debug!("Response code: {}", response.status());
         debug!("Response headers:");
         for (key, value) in response.headers() {
-            debug!("  {key}: {value:?}");
+            if key == "Authorization" {
+                if let Ok(auth_str) = value.to_str() {
+                    if let Some(token) = auth_str.strip_prefix("Bearer ") {
+                        // Wrap in SecretToken to use its Display trait for hashing
+                        let secret = SecretToken::new(token.to_string());
+                        debug!("  {key}: \"Bearer {}\"", secret);
+                    } else {
+                        debug!("  {key}: \"<redacted>\"");
+                    }
+                } else {
+                    debug!("  {key}: \"<redacted>\"");
+                }
+            } else {
+                debug!("  {key}: {value:?}");
+            }
         }
 
         Ok(response)
@@ -236,7 +266,7 @@ impl TokenState {
 
     async fn get_valid_token(
         &self,
-    ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+    ) -> Result<SecretToken, Box<dyn std::error::Error + Send + Sync>> {
         // Fast path: try to read existing token
         {
             let token_guard = self.token.read().await;
@@ -252,7 +282,7 @@ impl TokenState {
 
     async fn refresh_token(
         &self,
-    ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+    ) -> Result<SecretToken, Box<dyn std::error::Error + Send + Sync>> {
         // Acquire refresh lock to ensure only one refresh at a time
         let _refresh_guard = self.refresh_lock.lock().await;
 
@@ -270,7 +300,7 @@ impl TokenState {
         match self.auth_client.get_auth_token_with_metadata().await {
             Ok((token_string, created_at, expires_at, session_id)) => {
                 let new_token = SessionToken {
-                    token: token_string.clone(),
+                    token: SecretToken::new(token_string.clone()),
                     created_at,
                     expires_at,
                     session_id,
@@ -283,7 +313,7 @@ impl TokenState {
                 }
 
                 debug!("Token refresh completed successfully");
-                Ok(token_string)
+                Ok(SecretToken::new(token_string))
             }
             Err(e) => {
                 warn!("Token refresh failed: {e}");
@@ -382,12 +412,14 @@ impl Middleware for AuthenticationMiddleware {
                     debug!("Adding authentication token to request");
                     req.headers_mut().insert(
                         "Authorization",
-                        format!("Bearer {token}").parse().map_err(|e| {
-                            Error::Middleware(anyhow::anyhow!(
-                                "Invalid token format: {}",
-                                e
-                            ))
-                        })?,
+                        format!("Bearer {}", token.reveal())
+                            .parse()
+                            .map_err(|e| {
+                                Error::Middleware(anyhow::anyhow!(
+                                    "Invalid token format: {}",
+                                    e
+                                ))
+                            })?,
                     );
                 }
                 Err(e) => {
@@ -1264,7 +1296,7 @@ mod tests {
                 let mut token_guard = token_state.token.write().await;
                 let now = Utc::now();
                 *token_guard = Some(SessionToken {
-                    token: "test-token-123".to_string(),
+                    token: SecretToken::new("test-token-123".to_string()),
                     created_at: now,
                     expires_at: now + Duration::hours(1), // Valid for 1 hour
                     session_id: "42".to_string(),
@@ -1274,7 +1306,7 @@ mod tests {
             // Test get valid token with valid token - should succeed now
             let result = token_state.get_valid_token().await;
             assert!(result.is_ok(), "Should succeed with valid token");
-            assert_eq!(result.unwrap(), "test-token-123"); //#[allow_ci]
+            assert_eq!(result.unwrap().reveal(), "test-token-123"); //#[allow_ci]
 
             // Test clear token
             token_state.clear_token().await;
