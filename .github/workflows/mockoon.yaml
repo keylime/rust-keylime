@@ -32,7 +32,7 @@ jobs:
     container:
       image: quay.io/keylime/keylime-ci:latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - name: NPM installation
         run: dnf install -y npm
       - name: Pre-Mockoon system debugging
