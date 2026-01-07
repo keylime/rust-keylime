@@ -672,20 +672,13 @@ impl ContextInfo {
         log_path: Option<&str>,
     ) -> Result<EvidenceData, ContextInfoError> {
         let content = if let Some(uefi_log_path) = log_path {
-            let uefi_log_handler = UefiLogHandler::new(uefi_log_path)
-                .map_err(|e| {
-                    ContextInfoError::Keylime(format!(
-                        "Failed to create UEFI log handler: {e:?}",
-                    ))
-                })?;
-            match uefi_log_handler.base_64() {
-                Ok(content) => content,
-                Err(e) => {
-                    return Err(ContextInfoError::Keylime(format!(
-                        "Failed to read UEFI log: {e:?}",
-                    )));
-                }
-            }
+            // Read raw bytes directly without parsing/reconstructing
+            // to match pull-model agent behavior
+            UefiLogHandler::read_raw_base64(uefi_log_path).map_err(|e| {
+                ContextInfoError::Keylime(format!(
+                    "Failed to read UEFI log: {e:?}",
+                ))
+            })?
         } else {
             String::new()
         };

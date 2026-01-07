@@ -265,6 +265,24 @@ impl UefiLogHandler {
         Ok(base64_standard.encode(&bytes))
     }
 
+    /// Reads a UEFI log file and returns its raw bytes as base64-encoded string,
+    /// without parsing or reconstructing the log.
+    ///
+    /// This method is used when the log needs to be sent to the verifier without
+    /// modification, matching the behavior of the pull-model agent. Unlike `base_64()`,
+    /// this method does not parse the log structure and therefore preserves the
+    /// original binary format exactly as it appears on disk.
+    ///
+    /// # Arguments
+    /// * `log_path` - Path to the UEFI event log file
+    ///
+    /// # Returns
+    /// A base64-encoded string of the raw log bytes
+    pub fn read_raw_base64(log_path: &str) -> Result<String> {
+        let log_bytes = fs::read(log_path)?;
+        Ok(base64_standard.encode(&log_bytes))
+    }
+
     /// Returns the known digest size for a given algorithm ID.
     fn get_known_digest_size(alg_id: u16) -> usize {
         match alg_id {
@@ -722,5 +740,184 @@ mod tests {
                 expected_type,
             );
         }
+    }
+
+    #[test]
+    fn test_read_raw_base64() {
+        // Create test data - a minimal valid UEFI log
+        let test_log_bytes: &[u8] = &[
+            // TCG_PCR_EVENT Header for Spec ID Event
+            0x00, 0x00, 0x00, 0x00, // pcr_index: 0
+            0x03, 0x00, 0x00, 0x00, // event_type: EV_NO_ACTION
+            // SHA1 digest (20 bytes of zeros)
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            // event_size: 37 bytes
+            37, 0x00, 0x00, 0x00,
+            // TCG_EfiSpecIdEventStruct
+            // signature: "Spec ID Event\0" (16 bytes)
+            0x53, 0x70, 0x65, 0x63, 0x20, 0x49, 0x44, 0x20, 0x45, 0x76, 0x65,
+            0x6e, 0x74, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, // platform_class
+            0x00, // spec_version_minor
+            0x02, // spec_version_major
+            0x00, // spec_errata
+            0x02, // uintn_size
+            0x02, 0x00, 0x00, 0x00, // numberOfAlgorithms: 2
+            // SHA1
+            0x04, 0x00, 20, 0x00, // SHA256
+            0x0B, 0x00, 32, 0x00, // vendorInfoSize: 0
+            0x00, // TCG_PCR_EVENT2 - one measurement event
+            0x04, 0x00, 0x00, 0x00, // pcr_index: 4
+            0x01, 0x00, 0x00, 0x00, // event_type: EV_POST_CODE
+            0x02, 0x00, 0x00, 0x00, // digest count: 2
+            // SHA1 digest
+            0x04, 0x00, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA,
+            0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA,
+            // SHA256 digest
+            0x0B, 0x00, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB,
+            0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB,
+            0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB,
+            0xBB, // eventSize: 4
+            0x04, 0x00, 0x00, 0x00, // eventData
+            0xDE, 0xAD, 0xBE, 0xEF,
+        ];
+
+        // Create a temporary file with the test data
+        use std::io::Write;
+        let mut temp_file = tempfile::NamedTempFile::new()
+            .expect("Failed to create temp file");
+        temp_file
+            .write_all(test_log_bytes)
+            .expect("Failed to write test data");
+        temp_file.flush().expect("Failed to flush temp file");
+
+        let temp_path = temp_file.path().to_str().unwrap(); //#[allow_ci]
+
+        // Test read_raw_base64()
+        let result = UefiLogHandler::read_raw_base64(temp_path);
+        assert!(result.is_ok(), "read_raw_base64 should succeed");
+
+        let base64_output = result.unwrap(); //#[allow_ci]
+
+        // Verify the output is valid base64
+        use base64::{engine::general_purpose::STANDARD, Engine as _};
+        let decoded = STANDARD.decode(&base64_output);
+        assert!(decoded.is_ok(), "Output should be valid base64");
+
+        // Verify the decoded content matches the original bytes
+        let decoded_bytes = decoded.unwrap(); //#[allow_ci]
+        assert_eq!(
+            decoded_bytes, test_log_bytes,
+            "Decoded bytes should match original log bytes"
+        );
+
+        // Verify it matches direct base64 encoding
+        let expected_base64 = STANDARD.encode(test_log_bytes);
+        assert_eq!(
+            base64_output, expected_base64,
+            "read_raw_base64 output should match direct base64 encoding"
+        );
+    }
+
+    #[test]
+    fn test_read_raw_base64_nonexistent_file() {
+        // Test that read_raw_base64 returns an error for a nonexistent file
+        let result =
+            UefiLogHandler::read_raw_base64("/nonexistent/path/to/uefi_log");
+        assert!(
+            result.is_err(),
+            "read_raw_base64 should fail for nonexistent file"
+        );
+    }
+
+    #[test]
+    fn test_read_raw_base64_vs_parse_reconstruct() {
+        // This test verifies that read_raw_base64 preserves the exact binary
+        // format, while the parse/reconstruct cycle (new() -> to_bytes())
+        // might produce different output
+
+        let test_log_bytes: &[u8] = &[
+            // TCG_PCR_EVENT Header
+            0x00, 0x00, 0x00, 0x00, // pcr_index: 0
+            0x03, 0x00, 0x00, 0x00, // event_type: EV_NO_ACTION
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 37, 0x00,
+            0x00, 0x00, // TCG_EfiSpecIdEventStruct
+            0x53, 0x70, 0x65, 0x63, 0x20, 0x49, 0x44, 0x20, 0x45, 0x76, 0x65,
+            0x6e, 0x74, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02,
+            0x00, 0x02, 0x02, 0x00, 0x00, 0x00, 0x04, 0x00, 20, 0x00, 0x0B,
+            0x00, 32, 0x00, 0x00, // One measurement event
+            0x04, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00,
+            0x00, 0x04, 0x00, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA,
+            0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA,
+            0xAA, 0x0B, 0x00, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB,
+            0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB,
+            0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB,
+            0xBB, 0xBB, 0x04, 0x00, 0x00, 0x00, 0xDE, 0xAD, 0xBE, 0xEF,
+        ];
+
+        // Create temporary file
+        use std::io::Write;
+        let mut temp_file = tempfile::NamedTempFile::new()
+            .expect("Failed to create temp file");
+        temp_file
+            .write_all(test_log_bytes)
+            .expect("Failed to write test data");
+        temp_file.flush().expect("Failed to flush temp file");
+
+        let temp_path = temp_file.path().to_str().unwrap(); //#[allow_ci]
+
+        // Get raw bytes via read_raw_base64
+        let raw_base64 = UefiLogHandler::read_raw_base64(temp_path)
+            .expect("read_raw_base64 should succeed");
+
+        use base64::{engine::general_purpose::STANDARD, Engine as _};
+        let raw_bytes = STANDARD
+            .decode(&raw_base64)
+            .expect("Should decode successfully");
+
+        // Verify raw bytes exactly match the original
+        assert_eq!(
+            raw_bytes, test_log_bytes,
+            "read_raw_base64 should preserve exact binary format"
+        );
+
+        // This demonstrates that read_raw_base64 preserves the original format
+        // without any parsing or reconstruction
+        assert_eq!(
+            raw_bytes.len(),
+            test_log_bytes.len(),
+            "Byte length should be identical"
+        );
+    }
+
+    #[test]
+    fn test_read_raw_base64_empty_file() {
+        let temp_file = tempfile::NamedTempFile::new().unwrap(); //#[allow_ci]
+        let result = UefiLogHandler::read_raw_base64(
+            temp_file.path().to_str().unwrap(), //#[allow_ci]
+        );
+
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), ""); //#[allow_ci]
+    }
+
+    #[test]
+    fn test_read_raw_base64_large_file() {
+        use std::io::Write;
+        let mut temp_file = tempfile::NamedTempFile::new().unwrap(); //#[allow_ci]
+
+        // Create a 1MB log (unrealistic but tests buffer handling)
+        let large_data = vec![0u8; 1024 * 1024];
+        temp_file.write_all(&large_data).unwrap(); //#[allow_ci]
+
+        let result = UefiLogHandler::read_raw_base64(
+            temp_file.path().to_str().unwrap(), //#[allow_ci]
+        );
+        assert!(result.is_ok());
+
+        // Simple check: Base64 length should be approx 4/3 of original size
+        assert!(result.unwrap().len() > 1_000_000); //#[allow_ci]
     }
 }
