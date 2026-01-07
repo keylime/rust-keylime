@@ -776,6 +776,102 @@ mod tests {
         );
     }
 
+    #[test]
+    fn test_secret_token_display_shows_hash() {
+        let token = SecretToken::new("my-secret-token-123".to_string());
+        let display_output = format!("{}", token);
+
+        // Should show hash prefix format, not the actual token
+        assert!(display_output.starts_with("<hash:"));
+        assert!(display_output.ends_with(">"));
+        assert!(!display_output.contains("my-secret-token-123"));
+
+        // Hash prefix should be 8 characters (plus the wrapper)
+        assert_eq!(display_output.len(), 15); // "<hash:" (6) + 8 chars + ">" (1) = 15
+    }
+
+    #[test]
+    fn test_secret_token_debug_shows_hash() {
+        let token = SecretToken::new("my-secret-token-456".to_string());
+        let debug_output = format!("{:?}", token);
+
+        // Should show SecretToken with hash, not the actual token
+        assert!(debug_output.starts_with("SecretToken(<hash:"));
+        assert!(debug_output.ends_with(">)"));
+        assert!(!debug_output.contains("my-secret-token-456"));
+    }
+
+    #[test]
+    fn test_secret_token_reveal() {
+        let original_token = "test-token-secret-value";
+        let token = SecretToken::new(original_token.to_string());
+
+        // reveal() should return the actual token
+        assert_eq!(token.reveal(), original_token);
+    }
+
+    #[test]
+    fn test_secret_token_hash_is_correct_sha256() {
+        let token_value = "test-token";
+        let token = SecretToken::new(token_value.to_string());
+
+        // Calculate expected hash manually
+        use openssl::hash::MessageDigest;
+        let expected_hash = crate::crypto::hash(
+            token_value.as_bytes(),
+            MessageDigest::sha256(),
+        )
+        .unwrap(); //#[allow_ci]
+        let expected_hex = hex::encode(expected_hash);
+        let expected_prefix = &expected_hex[..8];
+
+        // Check that Display shows the correct hash prefix
+        let display_output = format!("{}", token);
+        assert_eq!(display_output, format!("<hash:{}>", expected_prefix));
+    }
+
+    #[test]
+    fn test_secret_token_hash_is_cached() {
+        let token = SecretToken::new("cached-test-token".to_string());
+
+        // Get hash multiple times - should be the same cached value
+        let hash1 = format!("{}", token);
+        let hash2 = format!("{}", token);
+        let hash3 = format!("{:?}", token);
+
+        assert_eq!(hash1, hash2);
+        assert!(hash3.contains(&hash1[6..14])); // Extract hash from debug output
+    }
+
+    #[test]
+    fn test_secret_token_clone() {
+        let original = SecretToken::new("clone-test-token".to_string());
+        let cloned = original.clone();
+
+        // Both should have same reveal value and hash
+        assert_eq!(original.reveal(), cloned.reveal());
+        assert_eq!(format!("{}", original), format!("{}", cloned));
+    }
+
+    #[test]
+    fn test_session_token_debug_does_not_leak() {
+        use chrono::Utc;
+
+        let token = SessionToken {
+            token: SecretToken::new("super-secret-token".to_string()),
+            created_at: Utc::now(),
+            expires_at: Utc::now() + chrono::Duration::hours(1),
+            session_id: "session-123".to_string(),
+        };
+
+        let debug_output = format!("{:?}", token);
+
+        // Should not contain the actual token
+        assert!(!debug_output.contains("super-secret-token"));
+        // Should contain hash prefix indicator
+        assert!(debug_output.contains("<hash:"));
+    }
+
     #[tokio::test]
     async fn test_successful_authentication_flow() {
         let mock_server = MockServer::start().await;
