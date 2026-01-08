@@ -30,6 +30,7 @@ jobs:
         CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
       with:
         files: e2e_coverage.txt
+        disable_search: true
         flags: e2e-testsuite
     - name: Upload upstream_coverage report to Codecov with GitHub Action.
       uses: codecov/codecov-action@v5
@@ -37,4 +38,5 @@ jobs:
         CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
       with:
         files: upstream_coverage.xml
+        disable_search: true
         flags: upstream-unit-tests

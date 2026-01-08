@@ -15,8 +15,8 @@ jobs:
     - name: Wait for Packit tests to finish and download e2e_coverage.txt and upstream_coverage.xml files.
       run: ./download_packit_coverage.sh
       env:
-        MAX_DURATION: 5400
-        SLEEP_DELAY: 120
+        MAX_DURATION: 7200
+        SLEEP_DELAY: 300
     - name: List downloaded files.
       run: ls
     - name: Upload e2e_coverage.txt report to Codecov with GitHub Action.
@@ -25,6 +25,7 @@ jobs:
         CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
       with:
         files: scripts/e2e_coverage.txt
+        disable_search: true
         flags: e2e-testsuite
     - name: Upload upstream_coverage.xml report to Codecov with GitHub Action.
       uses: codecov/codecov-action@v5
@@ -32,4 +33,5 @@ jobs:
         CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
       with:
         files: scripts/upstream_coverage.xml
+        disable_search: true
         flags: upstream-unit-tests
