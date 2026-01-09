@@ -53,6 +53,13 @@ pub async fn register_agent(
 ) -> Result<()> {
     let config = keylime::config::get_config();
 
+    // Resolve agent UUID: use ek_hash if config says "hash_ek"
+    let agent_uuid = if config.uuid() == "hash_ek" {
+        context_info.ek_hash.clone()
+    } else {
+        config.uuid().to_string()
+    };
+
     let (ca_cert, client_cert, client_key, insecure, timeout) =
         if let Some(tls) = tls_config {
             (
@@ -89,7 +96,7 @@ pub async fn register_agent(
     };
 
     let cert_config = cert::CertificateConfig {
-        agent_uuid: config.uuid().to_string(),
+        agent_uuid: agent_uuid.clone(),
         contact_ip: config.contact_ip().to_string(),
         contact_port: config.contact_port(),
         server_cert: config.server_cert().to_string(),
@@ -110,7 +117,7 @@ pub async fn register_agent(
             .map(|e| e.to_string())
             .collect(),
         agent_registration_config: ac,
-        agent_uuid: config.uuid().to_string(),
+        agent_uuid,
         mtls_cert: Some(server_cert_key.0),
         device_id: None, // TODO: Check how to proceed with device ID
         attest: None, // TODO: Check how to proceed with attestation, normally, no device ID means no attest
