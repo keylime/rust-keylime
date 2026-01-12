@@ -1,14 +1,14 @@
---- a/keylime/Cargo.toml	2025-09-25 17:29:45.897621366 +0200
-+++ b/keylime/Cargo.toml	2025-09-25 17:29:54.827404783 +0200
-@@ -44,7 +44,6 @@
- url.workspace = true
+--- a/keylime/Cargo.toml
++++ b/keylime/Cargo.toml
+@@ -40,7 +40,6 @@
+ tokio.workspace = true
  uuid.workspace = true
  zip.workspace = true
 -zmq = {version = "0.9.2", optional = true}
 
  [dev-dependencies]
  tempfile.workspace = true
-@@ -52,6 +51,5 @@
+@@ -48,6 +47,5 @@
  wiremock = {version = "0.6"}
 
  [features]
@@ -16,9 +16,9 @@
  testing = []
 -# This feature is deprecated and will be removed on next major release
 -with-zmq = ["zmq"]
---- a/keylime-agent/Cargo.toml	2025-09-03 13:40:44.826218516 +0200
-+++ b/keylime-agent/Cargo.toml	2025-09-03 13:44:24.357847991 +0200
-@@ -32,7 +32,6 @@
+--- a/keylime-agent/Cargo.toml
++++ b/keylime-agent/Cargo.toml
+@@ -28,7 +28,6 @@
  thiserror.workspace = true
  uuid.workspace = true
  zip.workspace = true
@@ -26,7 +26,7 @@
 
  [dev-dependencies]
  actix-rt.workspace = true
-@@ -41,18 +40,6 @@
+@@ -37,18 +36,6 @@
  # The features enabled by default
  default = []
  testing = []
@@ -45,9 +45,9 @@
 
  [package.metadata.deb]
  section = "net"
---- a/keylime-push-model-agent/Cargo.toml	2025-09-03 13:40:40.221414602 +0200
-+++ b/keylime-push-model-agent/Cargo.toml	2025-09-03 13:45:30.856052632 +0200
-@@ -36,7 +36,6 @@
+--- a/keylime-push-model-agent/Cargo.toml
++++ b/keylime-push-model-agent/Cargo.toml
+@@ -34,7 +34,6 @@
  # The features enabled by default
  default = []
  testing = ["keylime/testing"]
