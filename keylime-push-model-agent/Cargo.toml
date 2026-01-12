@@ -10,20 +10,14 @@ version.workspace = true
 [dependencies]
 actix-web.workspace = true
 anyhow.workspace = true
-assert_cmd.workspace = true
 async-trait.workspace = true
-base64.workspace = true
 chrono.workspace = true
 clap.workspace = true
 keylime.workspace = true
 log.workspace = true
-predicates.workspace = true
 pretty_env_logger.workspace = true
 reqwest.workspace = true
-serde.workspace = true
-serde_derive.workspace = true
 serde_json.workspace = true
-static_assertions.workspace = true
 tokio.workspace = true
 url.workspace = true
 
