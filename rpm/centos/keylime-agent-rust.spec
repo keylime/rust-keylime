@@ -159,11 +159,9 @@ The Keylime IMA emulator for testing with emulated TPM
 %endif
 
 %build
-%if 0%{?rhel} >= 10
+# From CentOS Stream 9.8 the cargo_build macro was aligned to Fedora and CentOS
+# Stream 10 (see https://issues.redhat.com/browse/RHEL-104777)
 %cargo_build -ftesting
-%else
-%cargo_build --features=testing
-%endif
 %cargo_license_summary
 %{cargo_license} > LICENSE.dependencies
 %if 0%{?bundled_rust_deps}
