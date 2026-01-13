@@ -212,7 +212,32 @@ async fn run(
     };
     let agent_identifier = match &args.agent_identifier {
         Some(id) => id.clone(),
-        None => config.uuid().to_string(),
+        None => {
+            let uuid_config = config.uuid().trim();
+            if uuid_config.eq_ignore_ascii_case("hash_ek") {
+                // Use ek_hash from context info when uuid is set to hash_ek
+                match &ctx_info {
+                    Some(info) => {
+                        let resolved = info.resolve_agent_id(uuid_config);
+                        info!(
+                            "Using hashed EK as agent identifier: {}",
+                            resolved
+                        );
+                        resolved
+                    }
+                    None => {
+                        error!(
+                            "Cannot use hash_ek: TPM context not available"
+                        );
+                        return Err(anyhow::anyhow!(
+                            "Cannot use hash_ek without TPM context"
+                        ));
+                    }
+                }
+            } else {
+                uuid_config.to_string()
+            }
+        }
     };
     let verifier_url = match args.verifier_url {
         Some(ref url) => url.clone(),
