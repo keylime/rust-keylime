@@ -247,6 +247,18 @@ impl ContextInfo {
         Ok(())
     }
 
+    /// Resolves the agent identifier from the configuration UUID.
+    /// If the config UUID is "hash_ek" (case-insensitive, trimmed),
+    /// returns the computed EK hash. Otherwise returns the config value.
+    pub fn resolve_agent_id(&self, config_uuid: &str) -> String {
+        let trimmed = config_uuid.trim();
+        if trimmed.eq_ignore_ascii_case("hash_ek") {
+            self.ek_hash.clone()
+        } else {
+            trimmed.to_string()
+        }
+    }
+
     pub fn get_key_class(&self) -> String {
         algorithms::get_key_class(&self.tpm_encryption_alg).to_string()
     }
