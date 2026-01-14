@@ -49,7 +49,9 @@ use futures::{
 };
 use keylime::{
     agent_data::AgentData,
-    agent_registration::{AgentRegistration, AgentRegistrationConfig},
+    agent_registration::{
+        AgentRegistration, AgentRegistrationConfig, RetryConfig,
+    },
     config,
     crypto::{self, x509::CertificateBuilder},
     device_id::{DeviceID, DeviceIDBuilder},
@@ -95,6 +97,26 @@ use uuid::Uuid;
 extern crate static_assertions;
 
 static NOTFOUND: &[u8] = b"Not Found";
+
+/// Get retry configuration from the agent config
+///
+/// Always returns a RetryConfig with values from the config or defaults.
+/// This ensures the resilient client is always used for registrar communication.
+fn get_retry_config(config: &config::AgentConfig) -> RetryConfig {
+    RetryConfig {
+        max_retries: config
+            .exponential_backoff_max_retries
+            .unwrap_or(config::DEFAULT_EXP_BACKOFF_MAX_RETRIES),
+        initial_delay_ms: config
+            .exponential_backoff_initial_delay
+            .unwrap_or(config::DEFAULT_EXP_BACKOFF_INITIAL_DELAY as u64),
+        max_delay_ms: Some(
+            config
+                .exponential_backoff_max_delay
+                .unwrap_or(config::DEFAULT_EXP_BACKOFF_MAX_DELAY as u64),
+        ),
+    }
+}
 
 // This data is passed in to the actix httpserver threads that
 // handle quotes.
@@ -628,7 +650,7 @@ async fn main() -> Result<()> {
         attest,
         signature,
         ak_handle,
-        retry_config: None,
+        retry_config: Some(get_retry_config(&config)),
     };
     use keylime::error::Error;
     use keylime::registrar_client::RegistrarClientError;
@@ -646,8 +668,9 @@ async fn main() -> Result<()> {
             ));
         }
         Err(e) => {
-            error!("Failed to register agent: {e:?}");
-            error!("Registration failed with a non-security error. The agent will continue but may have degraded functionality.");
+            error!("Failed to register agent after retrying: {e:?}");
+            error!("Exiting due to registration failure.");
+            return Err(e);
         }
     }
 
@@ -1112,6 +1135,77 @@ mod tests {
             read_in_file("test-data/test_input.txt".to_string())
                 .expect("File doesn't exist"),
             String::from("Hello World!\n")
+        );
+    }
+
+    #[test]
+    fn test_get_retry_config_with_all_values_set() {
+        // Create a mock config with all retry values set
+        let mock_config = config::AgentConfig {
+            exponential_backoff_max_retries: Some(3),
+            exponential_backoff_initial_delay: Some(5000),
+            exponential_backoff_max_delay: Some(60000),
+            ..Default::default()
+        };
+
+        let retry_config = get_retry_config(&mock_config);
+
+        // Verify the config values are used
+        assert_eq!(retry_config.max_retries, 3);
+        assert_eq!(retry_config.initial_delay_ms, 5000);
+        assert_eq!(retry_config.max_delay_ms, Some(60000));
+    }
+
+    #[test]
+    fn test_get_retry_config_with_no_values_uses_defaults() {
+        // Create a mock config with all retry values set to None
+        let mock_config = config::AgentConfig {
+            exponential_backoff_max_retries: None,
+            exponential_backoff_initial_delay: None,
+            exponential_backoff_max_delay: None,
+            ..Default::default()
+        };
+
+        let retry_config = get_retry_config(&mock_config);
+
+        // Verify defaults are used
+        assert_eq!(
+            retry_config.max_retries,
+            config::DEFAULT_EXP_BACKOFF_MAX_RETRIES
+        );
+        assert_eq!(
+            retry_config.initial_delay_ms,
+            config::DEFAULT_EXP_BACKOFF_INITIAL_DELAY as u64
+        );
+        assert_eq!(
+            retry_config.max_delay_ms,
+            Some(config::DEFAULT_EXP_BACKOFF_MAX_DELAY as u64)
+        );
+    }
+
+    #[test]
+    fn test_get_retry_config_with_partial_values_uses_defaults() {
+        // Create a mock config with some values set and some None
+        let mock_config = config::AgentConfig {
+            exponential_backoff_max_retries: None,
+            exponential_backoff_initial_delay: Some(15000),
+            exponential_backoff_max_delay: None,
+            ..Default::default()
+        };
+
+        let retry_config = get_retry_config(&mock_config);
+
+        // Verify custom value is used for initial_delay
+        assert_eq!(retry_config.initial_delay_ms, 15000);
+
+        // Verify defaults are used for unset values
+        assert_eq!(
+            retry_config.max_retries,
+            config::DEFAULT_EXP_BACKOFF_MAX_RETRIES
+        );
+        assert_eq!(
+            retry_config.max_delay_ms,
+            Some(config::DEFAULT_EXP_BACKOFF_MAX_DELAY as u64)
         );
     }
 }
