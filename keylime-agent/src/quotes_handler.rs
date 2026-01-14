@@ -3,7 +3,7 @@
 
 use crate::crypto;
 use crate::serialization::serialize_maybe_base64;
-use crate::{tpm, Error as KeylimeError, QuoteData};
+use crate::{api, tpm, Error as KeylimeError, QuoteData};
 use actix_web::{http, web, HttpRequest, HttpResponse, Responder};
 use base64::{engine::general_purpose, Engine as _};
 use keylime::{
@@ -60,6 +60,12 @@ async fn identity(
 
     debug!("Calling Identity Quote with nonce: {}", param.nonce);
 
+    // Extract API version from request app_data for version-aware algorithm formatting
+    let api_version = match api::get_api_version(&req) {
+        Ok(v) => v,
+        Err(e) => return e,
+    };
+
     // must unwrap here due to lock mechanism
     // https://github.com/rust-lang-nursery/failure/issues/192
     let mut context = data.tpmcontext.lock().unwrap(); //#[allow_ci]
@@ -87,7 +93,7 @@ async fn identity(
     let mut quote = KeylimeQuote {
         quote: tpm_quote,
         hash_alg: data.hash_alg.to_string(),
-        enc_alg: data.enc_alg.to_string(),
+        enc_alg: data.enc_alg.to_string_for_api_version(&api_version),
         sign_alg: data.sign_alg.to_string(),
         ..Default::default()
     };
@@ -200,6 +206,12 @@ async fn integrity(
         param.nonce, param.mask
     );
 
+    // Extract API version from request app_data for version-aware algorithm formatting
+    let api_version = match api::get_api_version(&req) {
+        Ok(v) => v,
+        Err(e) => return e,
+    };
+
     // If an index was provided, the request is for the entries starting from the given index
     // (iterative attestation). Otherwise the request is for the whole list.
     let nth_entry = match &param.ima_ml_entry {
@@ -235,7 +247,7 @@ async fn integrity(
     let id_quote = KeylimeQuote {
         quote: tpm_quote,
         hash_alg: data.hash_alg.to_string(),
-        enc_alg: data.enc_alg.to_string(),
+        enc_alg: data.enc_alg.to_string_for_api_version(&api_version),
         sign_alg: data.sign_alg.to_string(),
         ..Default::default()
     };
@@ -363,20 +375,26 @@ mod tests {
     use actix_web::{test, web, App};
     use keylime::{crypto::testing::pkey_pub_from_pem, tpm};
     use serde_json::{json, Value};
+    use std::str::FromStr;
 
     #[actix_rt::test]
-    async fn test_identity() {
+    async fn test_identity_v2_4_legacy_format() {
         let (fixture, mutex) = QuoteData::fixture().await.unwrap(); //#[allow_ci]
         let quotedata = web::Data::new(fixture);
+
+        // Create API version for v2.4
+        let version = keylime::version::Version::from_str("2.4").unwrap(); //#[allow_ci]
+
         let mut app = test::init_service(
             App::new()
+                .app_data(web::Data::new(version))
                 .app_data(quotedata.clone())
-                .route("/vX.Y/quotes/identity", web::get().to(identity)),
+                .route("/v2.4/quotes/identity", web::get().to(identity)),
         )
         .await;
 
         let req = test::TestRequest::get()
-            .uri("/vX.Y/quotes/identity?nonce=1234567890ABCDEFHIJ")
+            .uri("/v2.4/quotes/identity?nonce=1234567890ABCDEFHIJ")
             .to_request();
 
         let resp = test::call_service(&app, req).await;
@@ -385,7 +403,7 @@ mod tests {
         let result: JsonWrapper<KeylimeQuote> =
             test::read_body_json(resp).await;
         assert_eq!(result.results.hash_alg.as_str(), "sha256");
-        assert_eq!(result.results.enc_alg.as_str(), "rsa2048");
+        assert_eq!(result.results.enc_alg.as_str(), "rsa"); // Legacy format for v2.4
         assert_eq!(result.results.sign_alg.as_str(), "rsassa");
         assert!(
             pkey_pub_from_pem(&result.results.pubkey.unwrap()) //#[allow_ci]
@@ -409,19 +427,73 @@ mod tests {
     }
 
     #[actix_rt::test]
-    async fn test_integrity_pre() {
+    async fn test_identity_v2_5_new_format() {
         let (fixture, mutex) = QuoteData::fixture().await.unwrap(); //#[allow_ci]
         let quotedata = web::Data::new(fixture);
+
+        // Create API version for v2.5
+        let version = keylime::version::Version::from_str("2.5").unwrap(); //#[allow_ci]
+
         let mut app = test::init_service(
             App::new()
+                .app_data(web::Data::new(version))
                 .app_data(quotedata.clone())
-                .route("vX.Y/quotes/integrity", web::get().to(integrity)),
+                .route("/v2.5/quotes/identity", web::get().to(identity)),
+        )
+        .await;
+
+        let req = test::TestRequest::get()
+            .uri("/v2.5/quotes/identity?nonce=1234567890ABCDEFHIJ")
+            .to_request();
+
+        let resp = test::call_service(&app, req).await;
+        assert!(resp.status().is_success());
+
+        let result: JsonWrapper<KeylimeQuote> =
+            test::read_body_json(resp).await;
+        assert_eq!(result.results.hash_alg.as_str(), "sha256");
+        assert_eq!(result.results.enc_alg.as_str(), "rsa2048"); // New format for v2.5
+        assert_eq!(result.results.sign_alg.as_str(), "rsassa");
+        assert!(
+            pkey_pub_from_pem(&result.results.pubkey.unwrap()) //#[allow_ci]
+                .unwrap() //#[allow_ci]
+                .public_eq(&quotedata.payload_pub_key)
+        );
+        assert!(result.results.quote.starts_with('r'));
+
+        let mut context = quotedata.tpmcontext.lock().unwrap(); //#[allow_ci]
+        tpm::testing::check_quote(
+            &mut context,
+            quotedata.ak_handle,
+            &result.results.quote,
+            b"1234567890ABCDEFHIJ",
+        )
+        .expect("unable to verify quote");
+
+        // Explicitly drop QuoteData to cleanup keys
+        drop(context);
+        drop(quotedata);
+    }
+
+    #[actix_rt::test]
+    async fn test_integrity_pre_v2_5_new_format() {
+        let (fixture, mutex) = QuoteData::fixture().await.unwrap(); //#[allow_ci]
+        let quotedata = web::Data::new(fixture);
+
+        // Create API version for v2.5
+        let version = keylime::version::Version::from_str("2.5").unwrap(); //#[allow_ci]
+
+        let mut app = test::init_service(
+            App::new()
+                .app_data(web::Data::new(version))
+                .app_data(quotedata.clone())
+                .route("/v2.5/quotes/integrity", web::get().to(integrity)),
         )
         .await;
 
         let req = test::TestRequest::get()
             .uri(
-                "/vX.Y/quotes/integrity?nonce=1234567890ABCDEFHIJ&mask=0x408000&partial=0",
+                "/v2.5/quotes/integrity?nonce=1234567890ABCDEFHIJ&mask=0x408000&partial=0",
             )
             .to_request();
 
@@ -431,7 +503,7 @@ mod tests {
         let result: JsonWrapper<KeylimeQuote> =
             test::read_body_json(resp).await;
         assert_eq!(result.results.hash_alg.as_str(), "sha256");
-        assert_eq!(result.results.enc_alg.as_str(), "rsa2048");
+        assert_eq!(result.results.enc_alg.as_str(), "rsa2048"); // New format for v2.5
         assert_eq!(result.results.sign_alg.as_str(), "rsassa");
         assert!(
             pkey_pub_from_pem(&result.results.pubkey.unwrap()) //#[allow_ci]
@@ -471,19 +543,24 @@ mod tests {
     }
 
     #[actix_rt::test]
-    async fn test_integrity_post() {
+    async fn test_integrity_post_v2_5_new_format() {
         let (fixture, mutex) = QuoteData::fixture().await.unwrap(); //#[allow_ci]
         let quotedata = web::Data::new(fixture);
+
+        // Create API version for v2.5
+        let version = keylime::version::Version::from_str("2.5").unwrap(); //#[allow_ci]
+
         let mut app = test::init_service(
             App::new()
+                .app_data(web::Data::new(version))
                 .app_data(quotedata.clone())
-                .route("/vX.Y/quotes/integrity", web::get().to(integrity)),
+                .route("/v2.5/quotes/integrity", web::get().to(integrity)),
         )
         .await;
 
         let req = test::TestRequest::get()
             .uri(
-                "/vX.Y/quotes/integrity?nonce=1234567890ABCDEFHIJ&mask=0x408000&partial=1",
+                "/v2.5/quotes/integrity?nonce=1234567890ABCDEFHIJ&mask=0x408000&partial=1",
             )
             .to_request();
 
@@ -493,7 +570,7 @@ mod tests {
         let result: JsonWrapper<KeylimeQuote> =
             test::read_body_json(resp).await;
         assert_eq!(result.results.hash_alg.as_str(), "sha256");
-        assert_eq!(result.results.enc_alg.as_str(), "rsa2048");
+        assert_eq!(result.results.enc_alg.as_str(), "rsa2048"); // New format for v2.5
         assert_eq!(result.results.sign_alg.as_str(), "rsassa");
 
         if let Some(ima_mutex) = &quotedata.ima_ml_file {
@@ -535,16 +612,21 @@ mod tests {
         // Remove the IMA log file from the context
         fixture.ima_ml_file = None;
         let quotedata = web::Data::new(fixture);
+
+        // Create API version for v2.5
+        let version = keylime::version::Version::from_str("2.5").unwrap(); //#[allow_ci]
+
         let mut app = test::init_service(
             App::new()
+                .app_data(web::Data::new(version))
                 .app_data(quotedata.clone())
-                .route("/vX.Y/quotes/integrity", web::get().to(integrity)),
+                .route("/v2.5/quotes/integrity", web::get().to(integrity)),
         )
         .await;
 
         let req = test::TestRequest::get()
             .uri(
-                "/vX.Y/quotes/integrity?nonce=1234567890ABCDEFHIJ&mask=0x408000&partial=0",
+                "/v2.5/quotes/integrity?nonce=1234567890ABCDEFHIJ&mask=0x408000&partial=0",
             )
             .to_request();
 

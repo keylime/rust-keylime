@@ -287,6 +287,36 @@ impl TryFrom<&str> for EncryptionAlgorithm {
     }
 }
 
+/// API version 2.5 introduced specific algorithm names (rsa2048, ecc256)
+/// instead of generic names (rsa, ecc)
+const API_VERSION_2_5: crate::version::Version =
+    crate::version::Version::new(2, 5);
+
+impl EncryptionAlgorithm {
+    /// Format the encryption algorithm for a specific API version
+    ///
+    /// - For API versions < 2.5: Rsa2048 returns "rsa" and Ecc256 returns "ecc" (legacy format)
+    /// - For API versions >= 2.5: all algorithms use their specific format (e.g., "rsa2048", "ecc256")
+    pub fn to_string_for_api_version(
+        &self,
+        api_version: &crate::version::Version,
+    ) -> String {
+        // Only Rsa2048 and Ecc256 had different formats in legacy API versions
+        let (legacy_name, modern_name) = match self {
+            EncryptionAlgorithm::Rsa2048 => ("rsa", "rsa2048"),
+            EncryptionAlgorithm::Ecc256 => ("ecc", "ecc256"),
+            // All other algorithms use standard Display format regardless of version
+            _ => return self.to_string(),
+        };
+
+        if api_version < &API_VERSION_2_5 {
+            legacy_name.to_string()
+        } else {
+            modern_name.to_string()
+        }
+    }
+}
+
 impl fmt::Display for EncryptionAlgorithm {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let value = match self {
