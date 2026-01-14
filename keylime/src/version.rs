@@ -60,6 +60,13 @@ pub struct Version {
     minor: u32,
 }
 
+impl Version {
+    /// Create a new Version with the given major and minor version numbers.
+    pub const fn new(major: u32, minor: u32) -> Self {
+        Version { major, minor }
+    }
+}
+
 impl fmt::Display for Version {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{}.{}", self.major, self.minor)

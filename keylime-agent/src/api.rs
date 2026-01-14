@@ -4,17 +4,38 @@ use crate::{
 };
 use actix_web::{http, web, HttpRequest, HttpResponse, Responder, Scope};
 use keylime::{
-    config::SUPPORTED_API_VERSIONS, json_wrapper::JsonWrapper,
-    list_parser::parse_list, version::KeylimeVersion,
+    config::SUPPORTED_API_VERSIONS,
+    json_wrapper::JsonWrapper,
+    list_parser::parse_list,
+    version::{KeylimeVersion, Version},
 };
 use log::*;
 use serde::{Deserialize, Serialize};
+use std::str::FromStr;
 use thiserror::Error;
 
 #[derive(Error, Debug, PartialEq)]
 pub enum APIError {
     #[error("API version \"{0}\" not supported")]
     UnsupportedVersion(String),
+}
+
+/// Extract the API version from the request's app_data
+///
+/// Returns an error response if the API version is not configured.
+/// This should never happen in production if routes are correctly configured.
+pub(crate) fn get_api_version(
+    req: &HttpRequest,
+) -> Result<Version, HttpResponse> {
+    req.app_data::<web::Data<Version>>()
+        .map(|v| v.as_ref().clone())
+        .ok_or_else(|| {
+            error!("API version not configured for endpoint: {}", req.uri());
+            HttpResponse::InternalServerError().json(JsonWrapper::error(
+                500,
+                "Internal server error: API version not configured",
+            ))
+        })
 }
 
 /// This is the handler for the GET request for the API version
@@ -83,10 +104,10 @@ async fn api_default(req: HttpRequest) -> impl Responder {
     response
 }
 
-/// Configure the endpoints supported by API version 2.1
+/// Configure the base endpoints shared by all API versions
 ///
-/// Version 2.1 is the base API version
-fn configure_api_v2_1(cfg: &mut web::ServiceConfig) {
+/// This includes /keys, /quotes, and /notifications endpoints
+fn configure_base_endpoints(cfg: &mut web::ServiceConfig) {
     _ = cfg
         .service(
             web::scope("/keys")
@@ -102,14 +123,64 @@ fn configure_api_v2_1(cfg: &mut web::ServiceConfig) {
         .default_service(web::to(api_default))
 }
 
+/// Configure the endpoints supported by API version 2.1
+///
+/// Version 2.1 is the base API version
+fn configure_api_v2_1(cfg: &mut web::ServiceConfig) {
+    let version = Version::from_str("2.1").expect("Invalid API version");
+    _ = cfg.app_data(web::Data::new(version));
+    configure_base_endpoints(cfg);
+}
+
 /// Configure the endpoints supported by API version 2.2
 ///
 /// The version 2.2 added the /agent/info endpoint
 fn configure_api_v2_2(cfg: &mut web::ServiceConfig) {
-    // Configure the endpoints shared with version 2.1
-    configure_api_v2_1(cfg);
+    let version = Version::from_str("2.2").expect("Invalid API version");
+    _ = cfg.app_data(web::Data::new(version));
+    configure_base_endpoints(cfg);
 
     // Configure added endpoints
+    _ = cfg.service(
+        web::scope("/agent")
+            .configure(agent_handler::configure_agent_endpoints),
+    )
+}
+
+/// Configure the endpoints supported by API version 2.3
+///
+/// Version 2.3 has the same agent-side endpoints as 2.2 (server-side only changes)
+fn configure_api_v2_3(cfg: &mut web::ServiceConfig) {
+    let version = Version::from_str("2.3").expect("Invalid API version");
+    _ = cfg.app_data(web::Data::new(version));
+    configure_base_endpoints(cfg);
+    _ = cfg.service(
+        web::scope("/agent")
+            .configure(agent_handler::configure_agent_endpoints),
+    )
+}
+
+/// Configure the endpoints supported by API version 2.4
+///
+/// Version 2.4 has the same agent-side endpoints as 2.2 (server-side only changes)
+fn configure_api_v2_4(cfg: &mut web::ServiceConfig) {
+    let version = Version::from_str("2.4").expect("Invalid API version");
+    _ = cfg.app_data(web::Data::new(version));
+    configure_base_endpoints(cfg);
+    _ = cfg.service(
+        web::scope("/agent")
+            .configure(agent_handler::configure_agent_endpoints),
+    )
+}
+
+/// Configure the endpoints supported by API version 2.5
+///
+/// Version 2.5 has the same agent-side endpoints as 2.2, but uses updated
+/// algorithm reporting format (e.g., "rsa2048" instead of "rsa")
+fn configure_api_v2_5(cfg: &mut web::ServiceConfig) {
+    let version = Version::from_str("2.5").expect("Invalid API version");
+    _ = cfg.app_data(web::Data::new(version));
+    configure_base_endpoints(cfg);
     _ = cfg.service(
         web::scope("/agent")
             .configure(agent_handler::configure_agent_endpoints),
@@ -123,6 +194,12 @@ pub(crate) fn get_api_scope(version: &str) -> Result<Scope, APIError> {
             .configure(configure_api_v2_1)),
         "2.2" => Ok(web::scope(format!("v{version}").as_ref())
             .configure(configure_api_v2_2)),
+        "2.3" => Ok(web::scope(format!("v{version}").as_ref())
+            .configure(configure_api_v2_3)),
+        "2.4" => Ok(web::scope(format!("v{version}").as_ref())
+            .configure(configure_api_v2_4)),
+        "2.5" => Ok(web::scope(format!("v{version}").as_ref())
+            .configure(configure_api_v2_5)),
         _ => Err(APIError::UnsupportedVersion(version.into())),
     }
 }
