@@ -13,6 +13,12 @@ pub struct KeylimeRegistrarVersion {
     pub supported_versions: Vec<String>,
 }
 
+#[derive(Serialize, Deserialize, Debug)]
+pub struct KeylimeAgentVersion {
+    pub supported_version: String, // Latest version (backward compat)
+    pub supported_versions: Vec<String>, // All versions (new)
+}
+
 pub trait GetErrorInput {
     fn input(&self) -> String;
 }

@@ -7,7 +7,7 @@ use keylime::{
     config::SUPPORTED_API_VERSIONS,
     json_wrapper::JsonWrapper,
     list_parser::parse_list,
-    version::{KeylimeVersion, Version},
+    version::{KeylimeAgentVersion, KeylimeVersion, Version},
 };
 use log::*;
 use serde::{Deserialize, Serialize};
@@ -49,13 +49,14 @@ pub async fn version(
         req.uri()
     );
 
-    // The response reports the latest supported version or error
+    // The response reports all supported versions (new) and latest version (backward compat)
     match quote_data.api_versions.last() {
-        Some(version) => {
-            HttpResponse::Ok().json(JsonWrapper::success(KeylimeVersion {
+        Some(version) => HttpResponse::Ok().json(JsonWrapper::success(
+            KeylimeAgentVersion {
                 supported_version: version.clone(),
-            }))
-        }
+                supported_versions: quote_data.api_versions.clone(),
+            },
+        )),
         None => HttpResponse::InternalServerError()
             .json(JsonWrapper::error(500, "Misconfigured API version")),
     }
@@ -295,11 +296,25 @@ mod tests {
         let resp = test::call_service(&app, req).await;
         assert!(resp.status().is_success());
 
-        let body: JsonWrapper<KeylimeVersion> =
+        let body: JsonWrapper<KeylimeAgentVersion> =
             test::read_body_json(resp).await;
+
+        // Verify supported_version (backward compat) equals latest version
         assert_eq!(
-            Some(body.results.supported_version),
+            Some(body.results.supported_version.clone()),
             SUPPORTED_API_VERSIONS.last().map(|x| x.to_string())
+        );
+
+        // Verify supported_versions contains all API versions
+        assert_eq!(
+            body.results.supported_versions,
+            SUPPORTED_API_VERSIONS.to_vec()
+        );
+
+        // Verify supported_version is the last element of supported_versions
+        assert_eq!(
+            Some(&body.results.supported_version),
+            body.results.supported_versions.last()
         );
     }
 
