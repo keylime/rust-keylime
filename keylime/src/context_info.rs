@@ -1164,4 +1164,51 @@ mod tests {
         assert!(result.is_ok());
         context_info.flush_context().unwrap(); //#[allow_ci]
     }
+
+    #[tokio::test]
+    async fn test_resolve_agent_id() {
+        let _mutex = testing::lock_tests().await;
+        let config = AlgorithmConfigurationString {
+            tpm_encryption_alg: "rsa".to_string(),
+            tpm_hash_alg: "sha256".to_string(),
+            tpm_signing_alg: "rsassa".to_string(),
+            agent_data_path: "".to_string(),
+        };
+
+        let mut context_info = ContextInfo::new_from_str(config)
+            .expect("Failed to create context from string");
+
+        // Test that "hash_ek" returns the computed ek_hash
+        let resolved = context_info.resolve_agent_id("hash_ek");
+        assert_eq!(resolved, context_info.ek_hash);
+        assert!(!resolved.is_empty());
+
+        // Test case-insensitivity
+        assert_eq!(
+            context_info.resolve_agent_id("HASH_EK"),
+            context_info.ek_hash
+        );
+        assert_eq!(
+            context_info.resolve_agent_id("Hash_Ek"),
+            context_info.ek_hash
+        );
+
+        // Test whitespace trimming
+        assert_eq!(
+            context_info.resolve_agent_id("  hash_ek  "),
+            context_info.ek_hash
+        );
+
+        // Test non-hash_ek values return unchanged (but trimmed)
+        assert_eq!(
+            context_info.resolve_agent_id("my-custom-uuid"),
+            "my-custom-uuid"
+        );
+        assert_eq!(
+            context_info.resolve_agent_id("  custom-with-spaces  "),
+            "custom-with-spaces"
+        );
+
+        context_info.flush_context().unwrap(); //#[allow_ci]
+    }
 }
