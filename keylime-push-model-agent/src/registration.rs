@@ -8,10 +8,10 @@ use keylime::{
     error::Result,
 };
 
+/// TLS configuration for registrar communication in push model.
+/// Push model uses server-only TLS verification (no client certificates/mTLS).
 pub struct RegistrarTlsConfig {
     pub ca_cert: Option<String>,
-    pub client_cert: Option<String>,
-    pub client_key: Option<String>,
     pub insecure: Option<bool>,
     pub timeout: Option<u64>,
 }
@@ -56,18 +56,12 @@ pub async fn register_agent(
     // Resolve agent UUID using the centralized helper
     let agent_uuid = context_info.resolve_agent_id(config.uuid());
 
-    let (ca_cert, client_cert, client_key, insecure, timeout) =
-        if let Some(tls) = tls_config {
-            (
-                tls.ca_cert,
-                tls.client_cert,
-                tls.client_key,
-                tls.insecure,
-                tls.timeout,
-            )
-        } else {
-            (None, None, None, None, None)
-        };
+    // Extract TLS config values; push model doesn't use client certs (no mTLS)
+    let (ca_cert, insecure, timeout) = if let Some(tls) = tls_config {
+        (tls.ca_cert, tls.insecure, tls.timeout)
+    } else {
+        (None, None, None)
+    };
 
     let ac = AgentRegistrationConfig {
         contact_ip: config.contact_ip().to_string(),
@@ -85,8 +79,9 @@ pub async fn register_agent(
             })?
             .to_string(),
         registrar_ca_cert: ca_cert,
-        registrar_client_cert: client_cert,
-        registrar_client_key: client_key,
+        // Push model doesn't use mTLS for registrar communication
+        registrar_client_cert: None,
+        registrar_client_key: None,
         registrar_insecure: insecure,
         registrar_timeout: timeout,
     };
@@ -182,21 +177,11 @@ mod tests {
     async fn test_registrar_tls_config_creation() {
         let tls_config = RegistrarTlsConfig {
             ca_cert: Some("/path/to/ca.pem".to_string()),
-            client_cert: Some("/path/to/cert.pem".to_string()),
-            client_key: Some("/path/to/key.pem".to_string()),
             insecure: Some(false),
             timeout: Some(5000),
         };
 
         assert_eq!(tls_config.ca_cert, Some("/path/to/ca.pem".to_string()));
-        assert_eq!(
-            tls_config.client_cert,
-            Some("/path/to/cert.pem".to_string())
-        );
-        assert_eq!(
-            tls_config.client_key,
-            Some("/path/to/key.pem".to_string())
-        );
         assert_eq!(tls_config.insecure, Some(false));
         assert_eq!(tls_config.timeout, Some(5000));
     }
@@ -205,15 +190,11 @@ mod tests {
     async fn test_registrar_tls_config_all_none() {
         let tls_config = RegistrarTlsConfig {
             ca_cert: None,
-            client_cert: None,
-            client_key: None,
             insecure: None,
             timeout: None,
         };
 
         assert_eq!(tls_config.ca_cert, None);
-        assert_eq!(tls_config.client_cert, None);
-        assert_eq!(tls_config.client_key, None);
         assert_eq!(tls_config.insecure, None);
         assert_eq!(tls_config.timeout, None);
     }
@@ -222,15 +203,11 @@ mod tests {
     async fn test_registrar_tls_config_partial() {
         let tls_config = RegistrarTlsConfig {
             ca_cert: Some("/path/to/ca.pem".to_string()),
-            client_cert: None,
-            client_key: None,
             insecure: Some(true),
             timeout: Some(10000),
         };
 
         assert_eq!(tls_config.ca_cert, Some("/path/to/ca.pem".to_string()));
-        assert_eq!(tls_config.client_cert, None);
-        assert_eq!(tls_config.client_key, None);
         assert_eq!(tls_config.insecure, Some(true));
         assert_eq!(tls_config.timeout, Some(10000));
     }
@@ -239,15 +216,11 @@ mod tests {
     async fn test_registrar_tls_config_empty_strings() {
         let tls_config = RegistrarTlsConfig {
             ca_cert: Some("".to_string()),
-            client_cert: Some("".to_string()),
-            client_key: Some("".to_string()),
             insecure: Some(false),
             timeout: Some(0),
         };
 
         assert_eq!(tls_config.ca_cert, Some("".to_string()));
-        assert_eq!(tls_config.client_cert, Some("".to_string()));
-        assert_eq!(tls_config.client_key, Some("".to_string()));
         assert_eq!(tls_config.insecure, Some(false));
         assert_eq!(tls_config.timeout, Some(0));
     }
@@ -273,8 +246,6 @@ mod tests {
 
         let tls_config = RegistrarTlsConfig {
             ca_cert: Some("/path/to/ca.pem".to_string()),
-            client_cert: Some("/path/to/cert.pem".to_string()),
-            client_key: Some("/path/to/key.pem".to_string()),
             insecure: Some(false),
             timeout: Some(5000),
         };
@@ -310,8 +281,6 @@ mod tests {
 
         let tls_config = RegistrarTlsConfig {
             ca_cert: Some("/path/to/ca.pem".to_string()),
-            client_cert: Some("/path/to/cert.pem".to_string()),
-            client_key: Some("/path/to/key.pem".to_string()),
             insecure: Some(false),
             timeout: Some(5000),
         };
@@ -349,8 +318,6 @@ mod tests {
         // Test with only CA cert
         let tls_config = RegistrarTlsConfig {
             ca_cert: Some("/path/to/ca.pem".to_string()),
-            client_cert: None,
-            client_key: None,
             insecure: None,
             timeout: Some(5000),
         };
@@ -388,8 +355,6 @@ mod tests {
         // Test with insecure=true
         let tls_config = RegistrarTlsConfig {
             ca_cert: Some("/path/to/ca.pem".to_string()),
-            client_cert: Some("/path/to/cert.pem".to_string()),
-            client_key: Some("/path/to/key.pem".to_string()),
             insecure: Some(true),
             timeout: Some(5000),
         };
@@ -461,8 +426,6 @@ mod tests {
         // Test with zero timeout
         let tls_config_zero = RegistrarTlsConfig {
             ca_cert: Some("/path/to/ca.pem".to_string()),
-            client_cert: Some("/path/to/cert.pem".to_string()),
-            client_key: Some("/path/to/key.pem".to_string()),
             insecure: None,
             timeout: Some(0),
         };
@@ -471,8 +434,6 @@ mod tests {
         // Test with large timeout
         let tls_config_large = RegistrarTlsConfig {
             ca_cert: Some("/path/to/ca.pem".to_string()),
-            client_cert: Some("/path/to/cert.pem".to_string()),
-            client_key: Some("/path/to/key.pem".to_string()),
             insecure: None,
             timeout: Some(300000),
         };
@@ -481,8 +442,6 @@ mod tests {
         // Test with None timeout
         let tls_config_none = RegistrarTlsConfig {
             ca_cert: Some("/path/to/ca.pem".to_string()),
-            client_cert: Some("/path/to/cert.pem".to_string()),
-            client_key: Some("/path/to/key.pem".to_string()),
             insecure: None,
             timeout: None,
         };
@@ -493,28 +452,17 @@ mod tests {
     async fn test_tls_config_extraction_some() {
         let tls_config = Some(RegistrarTlsConfig {
             ca_cert: Some("/ca.pem".to_string()),
-            client_cert: Some("/cert.pem".to_string()),
-            client_key: Some("/key.pem".to_string()),
             insecure: Some(false),
             timeout: Some(5000),
         });
 
-        let (ca_cert, client_cert, client_key, insecure, timeout) =
-            if let Some(tls) = tls_config {
-                (
-                    tls.ca_cert,
-                    tls.client_cert,
-                    tls.client_key,
-                    tls.insecure,
-                    tls.timeout,
-                )
-            } else {
-                (None, None, None, None, None)
-            };
+        let (ca_cert, insecure, timeout) = if let Some(tls) = tls_config {
+            (tls.ca_cert, tls.insecure, tls.timeout)
+        } else {
+            (None, None, None)
+        };
 
         assert_eq!(ca_cert, Some("/ca.pem".to_string()));
-        assert_eq!(client_cert, Some("/cert.pem".to_string()));
-        assert_eq!(client_key, Some("/key.pem".to_string()));
         assert_eq!(insecure, Some(false));
         assert_eq!(timeout, Some(5000));
     }
@@ -523,22 +471,13 @@ mod tests {
     async fn test_tls_config_extraction_none() {
         let tls_config: Option<RegistrarTlsConfig> = None;
 
-        let (ca_cert, client_cert, client_key, insecure, timeout) =
-            if let Some(tls) = tls_config {
-                (
-                    tls.ca_cert,
-                    tls.client_cert,
-                    tls.client_key,
-                    tls.insecure,
-                    tls.timeout,
-                )
-            } else {
-                (None, None, None, None, None)
-            };
+        let (ca_cert, insecure, timeout) = if let Some(tls) = tls_config {
+            (tls.ca_cert, tls.insecure, tls.timeout)
+        } else {
+            (None, None, None)
+        };
 
         assert_eq!(ca_cert, None);
-        assert_eq!(client_cert, None);
-        assert_eq!(client_key, None);
         assert_eq!(insecure, None);
         assert_eq!(timeout, None);
     }
@@ -548,15 +487,13 @@ mod tests {
         let _mutex = testing::lock_tests().await;
 
         let tmpdir = tempfile::tempdir().expect("failed to create tmpdir");
-        let (ca_path, _server_cert, _server_key, cert_path, key_path) =
+        let (ca_path, _server_cert, _server_key, _cert_path, _key_path) =
             keylime::crypto::testing::generate_tls_certs_for_test(
                 tmpdir.path(),
             );
 
-        // Verify files were created
+        // Verify CA file was created
         assert!(ca_path.exists());
-        assert!(cert_path.exists());
-        assert!(key_path.exists());
 
         let mut config = get_testing_config(tmpdir.path(), None);
         let alg_config = AlgorithmConfigurationString {
@@ -579,8 +516,6 @@ mod tests {
 
         let tls_config = RegistrarTlsConfig {
             ca_cert: Some(ca_path.to_string_lossy().to_string()),
-            client_cert: Some(cert_path.to_string_lossy().to_string()),
-            client_key: Some(key_path.to_string_lossy().to_string()),
             insecure: Some(false),
             timeout: Some(5000),
         };
@@ -616,11 +551,9 @@ mod tests {
         let mut context_info = ContextInfo::new_from_str(alg_config)
             .expect("Failed to create context info from string");
 
-        // Use paths to non-existent certificate files
+        // Use path to non-existent CA certificate file
         let tls_config = RegistrarTlsConfig {
             ca_cert: Some("/nonexistent/ca.pem".to_string()),
-            client_cert: Some("/nonexistent/cert.pem".to_string()),
-            client_key: Some("/nonexistent/key.pem".to_string()),
             insecure: Some(false),
             timeout: Some(5000),
         };
@@ -635,15 +568,13 @@ mod tests {
     #[actix_rt::test]
     async fn test_tls_config_all_fields_set() {
         let tmpdir = tempfile::tempdir().expect("failed to create tmpdir");
-        let (ca_path, _server_cert, _server_key, cert_path, key_path) =
+        let (ca_path, _server_cert, _server_key, _cert_path, _key_path) =
             keylime::crypto::testing::generate_tls_certs_for_test(
                 tmpdir.path(),
             );
 
         let tls_config = RegistrarTlsConfig {
             ca_cert: Some(ca_path.to_string_lossy().to_string()),
-            client_cert: Some(cert_path.to_string_lossy().to_string()),
-            client_key: Some(key_path.to_string_lossy().to_string()),
             insecure: Some(false),
             timeout: Some(10000),
         };
@@ -652,14 +583,6 @@ mod tests {
         assert_eq!(
             tls_config.ca_cert,
             Some(ca_path.to_string_lossy().to_string())
-        );
-        assert_eq!(
-            tls_config.client_cert,
-            Some(cert_path.to_string_lossy().to_string())
-        );
-        assert_eq!(
-            tls_config.client_key,
-            Some(key_path.to_string_lossy().to_string())
         );
         assert_eq!(tls_config.insecure, Some(false));
         assert_eq!(tls_config.timeout, Some(10000));
@@ -689,11 +612,9 @@ mod tests {
         let mut context_info = ContextInfo::new_from_str(alg_config)
             .expect("Failed to create context info from string");
 
-        // Empty paths should result in HTTP fallback
+        // Empty CA path should result in HTTP fallback
         let tls_config = RegistrarTlsConfig {
             ca_cert: Some("".to_string()),
-            client_cert: Some("".to_string()),
-            client_key: Some("".to_string()),
             insecure: Some(false),
             timeout: Some(5000),
         };

@@ -170,14 +170,6 @@ mod test {
                 "KEYLIME_AGENT_VERIFIER_TLS_CA_CERT",
                 "override_verifier_tls_ca_cert",
             ),
-            (
-                "KEYLIME_AGENT_VERIFIER_TLS_CLIENT_CERT",
-                "override_verifier_tls_client_cert",
-            ),
-            (
-                "KEYLIME_AGENT_VERIFIER_TLS_CLIENT_KEY",
-                "override_verifier_tls_client_key",
-            ),
         ]);
 
         // Get the configuration using a temporary directory as `keylime_dir`

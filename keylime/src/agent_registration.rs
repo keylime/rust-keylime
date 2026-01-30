@@ -120,21 +120,15 @@ pub async fn register_agent(
     let ac = &aa.agent_registration_config;
 
     // Build the registrar client
-    // Create a RegistrarClientBuilder and set the parameters
+    // Uses HTTPS if CA certificate is provided, otherwise plain HTTP
     let mut builder = RegistrarClientBuilder::new()
         .registrar_address(ac.registrar_ip.clone())
         .registrar_port(ac.registrar_port)
         .retry_config(aa.retry_config.clone());
 
-    // Add TLS configuration if provided
+    // Add TLS configuration if CA certificate is provided
     if let Some(ca_cert) = &ac.registrar_ca_cert {
         builder = builder.ca_certificate(ca_cert.clone());
-    }
-    if let Some(client_cert) = &ac.registrar_client_cert {
-        builder = builder.certificate(client_cert.clone());
-    }
-    if let Some(client_key) = &ac.registrar_client_key {
-        builder = builder.key(client_key.clone());
     }
     if let Some(insecure) = ac.registrar_insecure {
         builder = builder.insecure(insecure);
