@@ -43,18 +43,10 @@ struct Args {
     /// Default: "v3.0"
     #[arg(long, default_value = url_selector::DEFAULT_API_VERSION)]
     api_version: Option<String>,
-    /// CA certificate file
+    /// CA certificate file for TLS server verification
     /// If not provided, uses verifier_tls_ca_cert from config (default: $KEYLIME_DIR/cv_ca/cacert.crt)
     #[arg(long)]
     ca_certificate: Option<String>,
-    /// Client certificate file
-    /// If not provided, uses verifier_tls_client_cert from config (default: $KEYLIME_DIR/cv_ca/client-cert.crt)
-    #[arg(short, long)]
-    certificate: Option<String>,
-    /// Client private key file
-    /// If not provided, uses verifier_tls_client_key from config (default: $KEYLIME_DIR/cv_ca/client-private.pem)
-    #[arg(short, long)]
-    key: Option<String>,
     /// json file
     #[arg(short, long, default_missing_value = "")]
     json_file: Option<String>,
@@ -102,75 +94,35 @@ fn get_avoid_tpm_from_args(args: &Args) -> bool {
     args.avoid_tpm.unwrap_or(false)
 }
 
+/// Creates registrar TLS config for push model.
+/// Push model uses TLS with server verification only (no client certs/mTLS).
 fn create_registrar_tls_config<T: PushModelConfigTrait>(
     config: &T,
     timeout: u64,
 ) -> Option<registration::RegistrarTlsConfig> {
     if !config.registrar_tls_enabled() {
-        info!("Registrar TLS enabled: false - using plain HTTP");
+        info!("Registrar TLS disabled - using plain HTTP");
         return None;
     }
 
     let ca_cert = config.registrar_tls_ca_cert();
-    let client_cert = config.registrar_tls_client_cert();
-    let client_key = config.registrar_tls_client_key();
 
     info!("Registrar TLS enabled: true");
     debug!("Registrar CA certificate: {ca_cert}");
-    debug!("Registrar client certificate: {client_cert}");
-    debug!("Registrar client key: {client_key}");
 
-    // Only use TLS if all certificate paths are provided
-    if !ca_cert.is_empty()
-        && !client_cert.is_empty()
-        && !client_key.is_empty()
-    {
-        info!("Registrar TLS configuration complete - using HTTPS");
+    // Use TLS if CA certificate path is provided
+    if !ca_cert.is_empty() {
+        info!("Registrar TLS configuration complete - using HTTPS with server verification");
         return Some(registration::RegistrarTlsConfig {
             ca_cert: Some(ca_cert.to_string()),
-            client_cert: Some(client_cert.to_string()),
-            client_key: Some(client_key.to_string()),
             insecure: None,
             timeout: Some(timeout),
         });
     }
 
-    // Check for partial configuration
-    let provided_count = [
-        !ca_cert.is_empty(),
-        !client_cert.is_empty(),
-        !client_key.is_empty(),
-    ]
-    .iter()
-    .filter(|&&x| x)
-    .count();
-
-    if provided_count > 0 {
-        warn!(
-            "Registrar TLS is enabled but only {provided_count} out of 3 certificate paths are configured."
-        );
-        warn!("This may indicate a configuration mistake.");
-        warn!(
-            "Missing paths: {}{}{}",
-            if ca_cert.is_empty() {
-                "registrar_tls_ca_cert "
-            } else {
-                ""
-            },
-            if client_cert.is_empty() {
-                "registrar_tls_client_cert "
-            } else {
-                ""
-            },
-            if client_key.is_empty() {
-                "registrar_tls_client_key "
-            } else {
-                ""
-            }
-        );
-    } else {
-        warn!("Registrar TLS is enabled but no certificate paths are configured.");
-    }
+    warn!(
+        "Registrar TLS is enabled but no CA certificate path is configured."
+    );
     warn!("Falling back to plain HTTP for Registrar communication.");
     None
 }
@@ -254,27 +206,20 @@ async fn run(
         return Err(anyhow::anyhow!(negotiations_request_url));
     }
     debug!("Negotiations request URL: {negotiations_request_url}");
+    // Push model uses TLS (server verification only) + mandatory PoP authentication
+    // Client certificates (mTLS) are NOT used
     let neg_config = attestation::NegotiationConfig {
         avoid_tpm,
         ca_certificate: args
             .ca_certificate
             .as_deref()
             .unwrap_or(config.verifier_tls_ca_cert()),
-        client_certificate: args
-            .certificate
-            .as_deref()
-            .unwrap_or(config.verifier_tls_client_cert()),
-        enable_authentication: config.enable_authentication(),
         agent_id: &agent_identifier,
         ima_log_path: Some(config.ima_ml_path.as_str()),
         initial_delay_ms: config
             .exponential_backoff_initial_delay
             .unwrap_or(1000),
         insecure: args.insecure,
-        key: args
-            .key
-            .as_deref()
-            .unwrap_or(config.verifier_tls_client_key()),
         max_delay_ms: config.exponential_backoff_max_delay,
         max_retries: config.exponential_backoff_max_retries.unwrap_or(5),
         timeout: args.timeout,
@@ -406,8 +351,6 @@ mod tests {
     struct MockConfig {
         tls_enabled: bool,
         ca_cert: String,
-        client_cert: String,
-        client_key: String,
         backoff_max_delay: Option<u64>,
         backoff_max_retries: Option<u32>,
         backoff_initial_delay: Option<u64>,
@@ -422,24 +365,8 @@ mod tests {
             &self.ca_cert
         }
 
-        fn registrar_tls_client_cert(&self) -> &str {
-            &self.client_cert
-        }
-
-        fn registrar_tls_client_key(&self) -> &str {
-            &self.client_key
-        }
-
         fn verifier_tls_ca_cert(&self) -> &str {
             &self.ca_cert
-        }
-
-        fn verifier_tls_client_cert(&self) -> &str {
-            &self.client_cert
-        }
-
-        fn verifier_tls_client_key(&self) -> &str {
-            &self.client_key
         }
 
         // Dummy implementations for other required trait methods
@@ -462,9 +389,6 @@ mod tests {
         }
         fn contact_port(&self) -> u32 {
             0
-        }
-        fn enable_authentication(&self) -> bool {
-            false
         }
         fn exponential_backoff_max_delay(&self) -> &Option<u64> {
             &self.backoff_max_delay
@@ -536,8 +460,6 @@ mod tests {
         let config = MockConfig {
             tls_enabled: false,
             ca_cert: "".to_string(),
-            client_cert: "".to_string(),
-            client_key: "".to_string(),
             backoff_max_delay: None,
             backoff_max_retries: None,
             backoff_initial_delay: None,
@@ -548,13 +470,11 @@ mod tests {
     }
 
     #[test]
-    fn test_create_registrar_tls_config_enabled_complete() {
-        // Test when TLS is enabled with all certificate paths
+    fn test_create_registrar_tls_config_enabled_with_ca_cert() {
+        // Test when TLS is enabled with CA certificate (push model doesn't use client certs)
         let config = MockConfig {
             tls_enabled: true,
             ca_cert: "/path/to/ca.crt".to_string(),
-            client_cert: "/path/to/client.crt".to_string(),
-            client_key: "/path/to/client.key".to_string(),
             backoff_max_delay: None,
             backoff_max_retries: None,
             backoff_initial_delay: None,
@@ -565,77 +485,16 @@ mod tests {
 
         let tls_config = result.unwrap();
         assert_eq!(tls_config.ca_cert, Some("/path/to/ca.crt".to_string()));
-        assert_eq!(
-            tls_config.client_cert,
-            Some("/path/to/client.crt".to_string())
-        );
-        assert_eq!(
-            tls_config.client_key,
-            Some("/path/to/client.key".to_string())
-        );
         assert_eq!(tls_config.timeout, Some(5000));
         assert_eq!(tls_config.insecure, None);
     }
 
     #[test]
-    fn test_create_registrar_tls_config_enabled_no_certs() {
-        // Test when TLS is enabled but no certificate paths are provided
+    fn test_create_registrar_tls_config_enabled_no_ca_cert() {
+        // Test when TLS is enabled but no CA certificate path is provided
         let config = MockConfig {
             tls_enabled: true,
             ca_cert: "".to_string(),
-            client_cert: "".to_string(),
-            client_key: "".to_string(),
-            backoff_max_delay: None,
-            backoff_max_retries: None,
-            backoff_initial_delay: None,
-        };
-
-        let result = create_registrar_tls_config(&config, 5000);
-        assert!(result.is_none());
-    }
-
-    #[test]
-    fn test_create_registrar_tls_config_partial_one_cert() {
-        // Test when TLS is enabled with only 1 certificate path (partial config)
-        let config = MockConfig {
-            tls_enabled: true,
-            ca_cert: "/path/to/ca.crt".to_string(),
-            client_cert: "".to_string(),
-            client_key: "".to_string(),
-            backoff_max_delay: None,
-            backoff_max_retries: None,
-            backoff_initial_delay: None,
-        };
-
-        let result = create_registrar_tls_config(&config, 5000);
-        assert!(result.is_none());
-    }
-
-    #[test]
-    fn test_create_registrar_tls_config_partial_two_certs() {
-        // Test when TLS is enabled with only 2 certificate paths (partial config)
-        let config = MockConfig {
-            tls_enabled: true,
-            ca_cert: "/path/to/ca.crt".to_string(),
-            client_cert: "/path/to/client.crt".to_string(),
-            client_key: "".to_string(),
-            backoff_max_delay: None,
-            backoff_max_retries: None,
-            backoff_initial_delay: None,
-        };
-
-        let result = create_registrar_tls_config(&config, 5000);
-        assert!(result.is_none());
-    }
-
-    #[test]
-    fn test_create_registrar_tls_config_partial_different_combo() {
-        // Test another partial config combination (ca_cert and client_key only)
-        let config = MockConfig {
-            tls_enabled: true,
-            ca_cert: "/path/to/ca.crt".to_string(),
-            client_cert: "".to_string(),
-            client_key: "/path/to/client.key".to_string(),
             backoff_max_delay: None,
             backoff_max_retries: None,
             backoff_initial_delay: None,
@@ -651,8 +510,6 @@ mod tests {
         let config = MockConfig {
             tls_enabled: true,
             ca_cert: "/path/to/ca.crt".to_string(),
-            client_cert: "/path/to/client.crt".to_string(),
-            client_key: "/path/to/client.key".to_string(),
             backoff_max_delay: None,
             backoff_max_retries: None,
             backoff_initial_delay: None,
@@ -675,8 +532,6 @@ mod tests {
             verifier_url: Some("".to_string()),
             timeout: 0,
             ca_certificate: Some("".to_string()),
-            certificate: Some("".to_string()),
-            key: Some("".to_string()),
             insecure: None,
             agent_identifier: None,
             json_file: None,
@@ -710,8 +565,6 @@ mod tests {
             verifier_url: Some("".to_string()),
             timeout: 0,
             ca_certificate: Some("".to_string()),
-            certificate: Some("".to_string()),
-            key: Some("".to_string()),
             insecure: None,
             agent_identifier: None,
             json_file: None,

@@ -37,7 +37,6 @@ pub struct PushModelConfig {
     certification_keys_server_identifier: String,
     contact_ip: String,
     contact_port: u32,
-    enable_authentication: bool,
     exponential_backoff_max_delay: Option<u64>,
     exponential_backoff_max_retries: Option<u32>,
     exponential_backoff_initial_delay: Option<u64>,
@@ -52,8 +51,6 @@ pub struct PushModelConfig {
     registrar_port: u32,
     registrar_tls_enabled: bool,
     registrar_tls_ca_cert: String,
-    registrar_tls_client_cert: String,
-    registrar_tls_client_key: String,
     server_cert: String,
     server_key: String,
     server_key_password: String,
@@ -64,8 +61,6 @@ pub struct PushModelConfig {
     uuid: String,
     verifier_url: String,
     verifier_tls_ca_cert: String,
-    verifier_tls_client_cert: String,
-    verifier_tls_client_key: String,
 }
 
 #[cfg(feature = "testing")]
@@ -165,62 +160,16 @@ mod tests {
     }
 
     #[test]
-    fn test_enable_authentication_default() {
+    fn test_verifier_tls_ca_cert_path_default() {
         let tmpdir = tempfile::tempdir().expect("failed to create tmpdir");
         let config = get_testing_config(tmpdir.path(), None);
 
-        // Verify default is false (disabled)
-        assert_eq!(
-            config.enable_authentication(),
-            DEFAULT_ENABLE_AUTHENTICATION
-        );
-        assert!(!config.enable_authentication());
-    }
-
-    #[test]
-    fn test_enable_authentication_custom() {
-        let tmpdir = tempfile::tempdir().expect("failed to create tmpdir");
-        let mut config = get_testing_config(tmpdir.path(), None);
-
-        // Enable authentication
-        config.enable_authentication = true;
-
-        assert!(config.enable_authentication());
-
-        // Verify it's different from default
-        assert_ne!(
-            config.enable_authentication(),
-            DEFAULT_ENABLE_AUTHENTICATION
-        );
-    }
-
-    #[test]
-    fn test_verifier_tls_cert_paths_default() {
-        let tmpdir = tempfile::tempdir().expect("failed to create tmpdir");
-        let config = get_testing_config(tmpdir.path(), None);
-
-        // Verify default paths are resolved correctly relative to keylime_dir
+        // Verify default path is resolved correctly relative to keylime_dir
         assert_eq!(
             config.verifier_tls_ca_cert(),
             tmpdir
                 .path()
                 .join(DEFAULT_VERIFIER_TLS_CA_CERT)
-                .display()
-                .to_string()
-        );
-        assert_eq!(
-            config.verifier_tls_client_cert(),
-            tmpdir
-                .path()
-                .join(DEFAULT_VERIFIER_TLS_CLIENT_CERT)
-                .display()
-                .to_string()
-        );
-        assert_eq!(
-            config.verifier_tls_client_key(),
-            tmpdir
-                .path()
-                .join(DEFAULT_VERIFIER_TLS_CLIENT_KEY)
                 .display()
                 .to_string()
         );
