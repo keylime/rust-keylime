@@ -79,9 +79,6 @@ pub async fn register_agent(
             })?
             .to_string(),
         registrar_ca_cert: ca_cert,
-        // Push model doesn't use mTLS for registrar communication
-        registrar_client_cert: None,
-        registrar_client_key: None,
         registrar_insecure: insecure,
         registrar_timeout: timeout,
     };
