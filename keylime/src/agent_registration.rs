@@ -24,8 +24,6 @@ pub struct AgentRegistrationConfig {
     pub registrar_ip: String,
     pub registrar_port: u32,
     pub registrar_ca_cert: Option<String>,
-    pub registrar_client_cert: Option<String>,
-    pub registrar_client_key: Option<String>,
     pub registrar_insecure: Option<bool>,
     pub registrar_timeout: Option<u64>,
 }
