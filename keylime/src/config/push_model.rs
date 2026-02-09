@@ -43,7 +43,6 @@ pub struct PushModelConfig {
     enable_iak_idevid: bool,
     #[transform(using = override_default_ek_handle, error = OverrideError)]
     ek_handle: String,
-    ima_ml_count_file: String,
     measuredboot_ml_path: String,
     #[transform(using = parse_list, error = ListParsingError)]
     registrar_api_versions: Vec<&str>,
@@ -93,7 +92,6 @@ mod tests {
             DEFAULT_PUSH_EK_HANDLE
         );
         assert_eq!(config.enable_iak_idevid(), DEFAULT_ENABLE_IAK_IDEVID);
-        assert_eq!(config.ima_ml_count_file(), DEFAULT_IMA_ML_COUNT_FILE);
         assert_eq!(config.registrar_ip(), DEFAULT_REGISTRAR_IP);
         assert_eq!(config.registrar_port(), DEFAULT_REGISTRAR_PORT);
         assert_eq!(

@@ -156,7 +156,6 @@ fn apply_config_overrides(
             "certification_keys_server_identifier" => {
                 config.certification_keys_server_identifier = value
             }
-            "ima_ml_count_file" => config.ima_ml_count_file = value,
             "registrar_api_versions" => config.registrar_api_versions = value,
             "uefi_logs_evidence_version" => {
                 config.uefi_logs_evidence_version = value
