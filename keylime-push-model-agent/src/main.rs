@@ -407,9 +407,6 @@ mod tests {
         ) -> Result<String, keylime::config::OverrideError> {
             Ok(String::new())
         }
-        fn ima_ml_count_file(&self) -> &str {
-            ""
-        }
         fn measuredboot_ml_path(&self) -> &str {
             ""
         }

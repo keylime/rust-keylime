@@ -89,12 +89,7 @@ pub static DEFAULT_PAYLOAD_KEY_PASSWORD: &str = "";
 pub static DEFAULT_TRUSTED_CLIENT_CA: &str = "cv_ca/cacert.crt";
 
 // Push attestation agent option defaults
-pub const DEFAULT_IMA_ML_DIRECTORY_PATH: &str = "/sys/kernel/security/ima";
-pub const DEFAULT_IMA_ML_COUNT_FILE: &str =
-    "/sys/kernel/security/ima/measurements";
 pub const DEFAULT_UEFI_LOGS_EVIDENCE_VERSION: &str = "2.1";
-pub const DEFAULT_UEFI_LOGS_BINARY_FILE_PATH: &str =
-    "/sys/kernel/security/tpm0/binary_bios_measurements";
 
 // Default values for exponential backoff
 pub const DEFAULT_EXP_BACKOFF_INITIAL_DELAY: u32 = 10000; // 10 seconds
@@ -183,7 +178,6 @@ pub struct AgentConfig {
     // Push attestation options
     pub attestation_interval_seconds: u64,
     pub certification_keys_server_identifier: String,
-    pub ima_ml_count_file: String,
     pub registrar_api_versions: String,
     pub uefi_logs_evidence_version: String,
     pub verifier_url: String,
@@ -352,7 +346,6 @@ impl Default for AgentConfig {
                 DEFAULT_ATTESTATION_INTERVAL_SECONDS,
             certification_keys_server_identifier:
                 DEFAULT_CERTIFICATION_KEYS_SERVER_IDENTIFIER.to_string(),
-            ima_ml_count_file: DEFAULT_IMA_ML_COUNT_FILE.to_string(),
             registrar_api_versions: DEFAULT_REGISTRAR_API_VERSIONS.join(", "),
             uefi_logs_evidence_version: DEFAULT_UEFI_LOGS_EVIDENCE_VERSION
                 .to_string(),
