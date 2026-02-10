@@ -52,7 +52,10 @@ pub struct AttestationClient {
 }
 
 impl AttestationClient {
-    pub fn new(config: &NegotiationConfig<'_>) -> Result<Self> {
+    pub fn new(
+        config: &NegotiationConfig<'_>,
+        context_info: Option<keylime::context_info::ContextInfo>,
+    ) -> Result<Self> {
         if config.url.is_empty() {
             return Err(anyhow::anyhow!("URL cannot be empty"));
         }
@@ -87,6 +90,7 @@ impl AttestationClient {
                 max_auth_retries: keylime::config::DEFAULT_AUTH_MAX_RETRIES,
                 accept_invalid_certs: config.tls_accept_invalid_certs,
                 accept_invalid_hostnames: config.tls_accept_invalid_hostnames,
+                context_info: context_info.clone(),
             })
         } else {
             debug!("Authentication DISABLED - no auth middleware");
@@ -332,7 +336,7 @@ mod tests {
         let mut config = create_test_config(&uri, "", "", "");
         config.max_retries = 3; // Allow up to 3 retries
 
-        let client = AttestationClient::new(&config).unwrap();
+        let client = AttestationClient::new(&config, None).unwrap();
         let result = client
             .send_negotiation(&config, &create_test_privileged_resources())
             .await;
@@ -353,7 +357,8 @@ mod tests {
         let negotiation_config =
             create_test_config("http://127.0.0.1:9999/test", "", "", "");
 
-        let client = AttestationClient::new(&negotiation_config).unwrap();
+        let client =
+            AttestationClient::new(&negotiation_config, None).unwrap();
         let result = client
             .send_negotiation(
                 &negotiation_config.clone(),
@@ -375,7 +380,7 @@ mod tests {
             "/tmp/unexisting_key_file_12345.pem",
         );
 
-        let client_result = AttestationClient::new(&config);
+        let client_result = AttestationClient::new(&config, None);
 
         assert!(client_result.is_err());
         let err_msg = client_result.unwrap_err().to_string();
@@ -400,7 +405,7 @@ mod tests {
             key_path.to_str().unwrap(),
         );
 
-        let client_result = AttestationClient::new(&config);
+        let client_result = AttestationClient::new(&config, None);
 
         assert!(client_result.is_err());
         let err_msg = client_result.unwrap_err().to_string();
@@ -418,7 +423,7 @@ mod tests {
             "", "", "",
         );
 
-        let client = AttestationClient::new(&config).unwrap();
+        let client = AttestationClient::new(&config, None).unwrap();
         let result = client
             .send_negotiation(&config, &create_test_privileged_resources())
             .await;
@@ -449,7 +454,7 @@ mod tests {
             "", "", "",
         );
 
-        let client = AttestationClient::new(&config).unwrap();
+        let client = AttestationClient::new(&config, None).unwrap();
         let result = client
             .send_negotiation(&config, &create_test_privileged_resources())
             .await;
@@ -569,7 +574,7 @@ mod tests {
     #[actix_rt::test]
     async fn test_handle_evidence_submission_no_location_header() {
         let config = create_test_config("http://localhost:3000", "", "", "");
-        let client = AttestationClient::new(&config).unwrap();
+        let client = AttestationClient::new(&config, None).unwrap();
 
         // Create a response with no Location header
         let neg_response = ResponseInformation {
@@ -617,7 +622,7 @@ mod tests {
         let config = create_test_config(&uri, "", "", "");
 
         // Create the client
-        let client = AttestationClient::new(&config).unwrap();
+        let client = AttestationClient::new(&config, None).unwrap();
 
         let result =
             client.send_evidence(single_serialized_body, &config).await;

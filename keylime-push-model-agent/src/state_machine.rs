@@ -453,36 +453,19 @@ mod tpm_tests {
         // Create guard that will automatically clear override when dropped
         let guard = keylime::config::TestConfigGuard::new(config);
 
-        let client = AttestationClient::new(neg_config).unwrap();
-
-        // Create context with proper error handling to avoid TPM resource leaks
-        let context_info = match ContextInfo::new(
-            keylime::context_info::AlgorithmConfiguration {
+        let context_info =
+            ContextInfo::new(keylime::context_info::AlgorithmConfiguration {
                 tpm_encryption_alg:
                     keylime::algorithms::EncryptionAlgorithm::Rsa2048,
                 tpm_hash_alg: keylime::algorithms::HashAlgorithm::Sha256,
                 tpm_signing_alg: keylime::algorithms::SignAlgorithm::RsaSsa,
                 agent_data_path: "".to_string(),
-            },
-        ) {
-            Ok(ctx) => ctx,
-            Err(e) => {
-                // Log the error but don't panic to avoid leaving TPM objects behind
-                eprintln!("TPM context creation failed: {e:?}. This test requires TPM access with proper permissions");
-                // Return a state machine without context instead of panicking
-                return (
-                    StateMachine::new(
-                        client,
-                        neg_config.clone(),
-                        None,
-                        DEFAULT_ATTESTATION_INTERVAL_SECONDS,
-                        None,
-                        create_test_privileged_resources(),
-                    ),
-                    guard,
-                );
-            }
-        };
+            })
+            .expect("This test requires TPM access with proper permissions");
+
+        let client =
+            AttestationClient::new(neg_config, Some(context_info.clone()))
+                .unwrap();
 
         (
             StateMachine::new(
@@ -765,7 +748,9 @@ mod tpm_tests {
             None,
         );
 
-        let attestation_client = AttestationClient::new(&neg_config).unwrap();
+        let attestation_client =
+            AttestationClient::new(&neg_config, Some(context_info.clone()))
+                .unwrap();
 
         let sm = StateMachine::new(
             attestation_client,
@@ -846,7 +831,7 @@ mod tests {
             Some(30000),
         );
         let attestation_client =
-            AttestationClient::new(&test_config).unwrap();
+            AttestationClient::new(&test_config, None).unwrap();
 
         let state_machine = StateMachine::new(
             attestation_client,
@@ -875,7 +860,7 @@ mod tests {
             Some(30000),
         );
         let attestation_client =
-            AttestationClient::new(&test_config).unwrap();
+            AttestationClient::new(&test_config, None).unwrap();
 
         let state_machine = StateMachine::new(
             attestation_client,
@@ -900,7 +885,7 @@ mod tests {
             Some(30000),
         );
         let attestation_client =
-            AttestationClient::new(&test_config).unwrap();
+            AttestationClient::new(&test_config, None).unwrap();
 
         let mut state_machine = StateMachine::new(
             attestation_client,
@@ -938,7 +923,7 @@ mod tests {
             Some(30000),
         );
         let attestation_client =
-            AttestationClient::new(&test_config).unwrap();
+            AttestationClient::new(&test_config, None).unwrap();
 
         let state_machine = StateMachine::new(
             attestation_client,
@@ -966,7 +951,7 @@ mod tests {
             Some(30000),
         );
         let attestation_client =
-            AttestationClient::new(&test_config).unwrap();
+            AttestationClient::new(&test_config, None).unwrap();
 
         let state_machine = StateMachine::new(
             attestation_client,
@@ -991,7 +976,7 @@ mod tests {
             Some(30000),
         );
         let attestation_client =
-            AttestationClient::new(&test_config).unwrap();
+            AttestationClient::new(&test_config, None).unwrap();
 
         let state_machine = StateMachine::new(
             attestation_client,
@@ -1020,7 +1005,7 @@ mod tests {
             Some(30000),
         );
         let attestation_client =
-            AttestationClient::new(&test_config).unwrap();
+            AttestationClient::new(&test_config, None).unwrap();
 
         let mut state_machine = StateMachine::new(
             attestation_client,
@@ -1053,7 +1038,7 @@ mod tests {
             Some(30000),
         );
         let attestation_client =
-            AttestationClient::new(&test_config).unwrap();
+            AttestationClient::new(&test_config, None).unwrap();
 
         let mut state_machine = StateMachine::new(
             attestation_client,
@@ -1082,7 +1067,7 @@ mod tests {
         let test_config1 =
             create_test_config("http://localhost", 1000, 5, 500, Some(10000));
         let attestation_client1 =
-            AttestationClient::new(&test_config1).unwrap();
+            AttestationClient::new(&test_config1, None).unwrap();
         let state_machine1 = StateMachine::new(
             attestation_client1,
             test_config1,
@@ -1099,7 +1084,7 @@ mod tests {
         let test_config2 =
             create_test_config("http://localhost", 2000, 10, 1000, None);
         let attestation_client2 =
-            AttestationClient::new(&test_config2).unwrap();
+            AttestationClient::new(&test_config2, None).unwrap();
         let state_machine2 = StateMachine::new(
             attestation_client2,
             test_config2,
@@ -1124,7 +1109,7 @@ mod tests {
             Some(30000),
         );
         let attestation_client =
-            AttestationClient::new(&test_config).unwrap();
+            AttestationClient::new(&test_config, None).unwrap();
 
         let state_machine = StateMachine::new(
             attestation_client,
@@ -1153,7 +1138,7 @@ mod tests {
             Some(30000),
         );
         let attestation_client =
-            AttestationClient::new(&test_config).unwrap();
+            AttestationClient::new(&test_config, None).unwrap();
 
         let mut state_machine = StateMachine::new(
             attestation_client,
@@ -1174,11 +1159,7 @@ mod tests {
     }
 
     #[actix_rt::test]
-    #[cfg(feature = "testing")]
     async fn test_extract_next_attestation_interval_with_valid_field() {
-        let tmpdir = tempfile::tempdir().expect("failed to create tmpdir");
-        let _config =
-            keylime::config::get_testing_config(tmpdir.path(), None);
         let test_config = create_test_config(
             "http://localhost",
             5000,
@@ -1187,7 +1168,7 @@ mod tests {
             Some(30000),
         );
         let attestation_client =
-            AttestationClient::new(&test_config).unwrap();
+            AttestationClient::new(&test_config, None).unwrap();
 
         let state_machine = StateMachine::new(
             attestation_client,

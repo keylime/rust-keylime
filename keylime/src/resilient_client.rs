@@ -1189,6 +1189,7 @@ mod tests {
             max_auth_retries: 3,
             accept_invalid_certs: true, // Tests use self-signed certs
             accept_invalid_hostnames: false,
+            context_info: None,
         };
 
         // Test with authentication
@@ -1236,6 +1237,7 @@ mod tests {
             max_auth_retries: 3,
             accept_invalid_certs: true, // Tests use self-signed certs
             accept_invalid_hostnames: false,
+            context_info: None,
         };
 
         let middleware = AuthenticationMiddleware::new(auth_config).unwrap(); //#[allow_ci]
@@ -1276,6 +1278,7 @@ mod tests {
                 max_auth_retries: 3,
                 accept_invalid_certs: true, // Tests use self-signed certs
                 accept_invalid_hostnames: false,
+                context_info: None,
             };
 
             let token_state = TokenState::new(auth_config).unwrap(); //#[allow_ci]
@@ -1334,6 +1337,7 @@ mod tests {
                 max_auth_retries: 3,
                 accept_invalid_certs: true, // Tests use self-signed certs
                 accept_invalid_hostnames: false,
+                context_info: None,
             };
 
             let middleware =
@@ -1374,6 +1378,7 @@ mod tests {
                 max_auth_retries: 3,
                 accept_invalid_certs: true, // Tests use self-signed certs
                 accept_invalid_hostnames: false,
+                context_info: None,
             };
 
             let token_state = Arc::new(TokenState::new(auth_config).unwrap()); //#[allow_ci]
@@ -1416,6 +1421,7 @@ mod tests {
                 max_auth_retries: 1,
                 accept_invalid_certs: true, // Tests use self-signed certs
                 accept_invalid_hostnames: false,
+                context_info: None,
             };
 
             let middleware =
