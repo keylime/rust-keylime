@@ -8,11 +8,10 @@
 
 use crate::{
     config::{
-        get_config, PushModelConfigTrait, DEFAULT_AUTH_MAX_RETRIES,
-        DEFAULT_AUTH_TIMEOUT_MS,
+        DEFAULT_AUTH_MAX_RETRIES, DEFAULT_AUTH_TIMEOUT_MS,
         DEFAULT_AUTH_TOKEN_EXPIRATION_FALLBACK_MINUTES, DEFAULT_VERIFIER_URL,
     },
-    context_info::{AlgorithmConfigurationString, ContextInfo},
+    context_info::ContextInfo,
     structures::{
         ProofOfPossession, SessionIdRequest, SessionIdRequestAuthProvided,
         SessionIdResponse, SessionRequest, SessionRequestAttributes,
@@ -59,6 +58,8 @@ pub struct AuthConfig {
     pub accept_invalid_certs: bool,
     /// Accept invalid TLS hostnames (INSECURE - for testing only)
     pub accept_invalid_hostnames: bool,
+    /// ContextInfo for TPM operations (required when avoid_tpm is false).
+    pub context_info: Option<ContextInfo>,
 }
 
 impl Default for AuthConfig {
@@ -72,6 +73,7 @@ impl Default for AuthConfig {
             max_auth_retries: DEFAULT_AUTH_MAX_RETRIES,
             accept_invalid_certs: false,
             accept_invalid_hostnames: false,
+            context_info: None,
         }
     }
 }
@@ -316,20 +318,13 @@ impl AuthenticationClient {
             Box::new(MockTpmOperations)
         } else {
             debug!("Using real TPM operations for authentication");
-            // Initialize context info for real TPM operations using global config
-            let global_config = get_config();
             let context_info =
-                ContextInfo::new_from_str(AlgorithmConfigurationString {
-                    tpm_encryption_alg: global_config
-                        .tpm_encryption_alg()
-                        .to_string(),
-                    tpm_hash_alg: global_config.tpm_hash_alg().to_string(),
-                    tpm_signing_alg: global_config
-                        .tpm_signing_alg()
-                        .to_string(),
-                    agent_data_path: global_config
-                        .agent_data_path()
-                        .to_string(),
+                config.context_info.clone().ok_or_else(|| {
+                    anyhow!(
+                        "ContextInfo is required when avoid_tpm is false. \
+                     Pass a ContextInfo via AuthConfig to avoid creating \
+                     duplicate TPM transient objects."
+                    )
                 })?;
             Box::new(RealTpmOperations::new(context_info))
         };
@@ -377,20 +372,13 @@ impl AuthenticationClient {
             Box::new(MockTpmOperations)
         } else {
             debug!("Using real TPM operations for raw authentication client");
-            // Initialize context info for real TPM operations using global config
-            let global_config = get_config();
             let context_info =
-                ContextInfo::new_from_str(AlgorithmConfigurationString {
-                    tpm_encryption_alg: global_config
-                        .tpm_encryption_alg()
-                        .to_string(),
-                    tpm_hash_alg: global_config.tpm_hash_alg().to_string(),
-                    tpm_signing_alg: global_config
-                        .tpm_signing_alg()
-                        .to_string(),
-                    agent_data_path: global_config
-                        .agent_data_path()
-                        .to_string(),
+                config.context_info.clone().ok_or_else(|| {
+                    anyhow!(
+                        "ContextInfo is required when avoid_tpm is false. \
+                     Pass a ContextInfo via AuthConfig to avoid creating \
+                     duplicate TPM transient objects."
+                    )
                 })?;
             Box::new(RealTpmOperations::new(context_info))
         };
@@ -762,6 +750,7 @@ mod tests {
             max_auth_retries: 2,
             accept_invalid_certs: true, // Tests use self-signed certs
             accept_invalid_hostnames: false,
+            context_info: None,
         };
 
         AuthenticationClient::new(config).unwrap() //#[allow_ci]
@@ -1100,6 +1089,7 @@ mod tests {
             max_auth_retries: 2,
             accept_invalid_certs: true, // Tests use self-signed certs
             accept_invalid_hostnames: false,
+            context_info: None,
         };
 
         let client = AuthenticationClient::new(config).unwrap(); //#[allow_ci]
@@ -1126,6 +1116,7 @@ mod tests {
             max_auth_retries: 2,
             accept_invalid_certs: true, // Tests use self-signed certs
             accept_invalid_hostnames: false,
+            context_info: None,
         };
 
         let raw_client = AuthenticationClient::new_raw(config).unwrap(); //#[allow_ci]
@@ -1147,6 +1138,7 @@ mod tests {
             max_auth_retries: 1,
             accept_invalid_certs: true, // Tests use self-signed certs
             accept_invalid_hostnames: false,
+            context_info: None,
         };
 
         let custom_tpm_ops = Box::new(MockTpmOperations);
@@ -1277,6 +1269,7 @@ mod tests {
             max_auth_retries: 1,
             accept_invalid_certs: true, // Tests use self-signed certs
             accept_invalid_hostnames: false,
+            context_info: None,
         };
 
         // This should succeed even without real TPM hardware
@@ -1295,6 +1288,7 @@ mod tests {
             max_auth_retries: 1,
             accept_invalid_certs: true, // Tests use self-signed certs
             accept_invalid_hostnames: false,
+            context_info: None,
         };
 
         let custom_ops = Box::new(TestTpmOperations {
@@ -1382,6 +1376,7 @@ mod tests {
             max_auth_retries: 1,
             accept_invalid_certs: true, // Tests use self-signed certs
             accept_invalid_hostnames: false,
+            context_info: None,
         };
 
         // Use custom TPM operations that will succeed
@@ -1440,6 +1435,7 @@ mod tests {
             max_auth_retries: 1,
             accept_invalid_certs: true, // Tests use self-signed certs
             accept_invalid_hostnames: false,
+            context_info: None,
         };
 
         // Use custom TPM operations that will fail
@@ -1502,6 +1498,7 @@ mod tests {
             max_auth_retries: 1,
             accept_invalid_certs: true, // Tests use self-signed certs
             accept_invalid_hostnames: false,
+            context_info: None,
         };
 
         // Mock TPM should always work
@@ -1518,6 +1515,7 @@ mod tests {
             max_auth_retries: 1,
             accept_invalid_certs: true, // Tests use self-signed certs
             accept_invalid_hostnames: false,
+            context_info: None,
         };
 
         let custom_ops = Box::new(TestTpmOperations {

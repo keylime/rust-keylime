@@ -285,7 +285,7 @@ async fn run(
         tls_accept_invalid_hostnames: config.tls_accept_invalid_hostnames,
     };
     let attestation_client =
-        attestation::AttestationClient::new(&neg_config)?;
+        attestation::AttestationClient::new(&neg_config, ctx_info.clone())?;
 
     // Create Registrar TLS config from configuration
     let registrar_tls_config =
