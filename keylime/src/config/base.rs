@@ -21,7 +21,7 @@ use uuid::Uuid;
 pub static CONFIG_VERSION: &str = "2.0";
 pub static SUPPORTED_API_VERSIONS: &[&str] =
     &["2.1", "2.2", "2.3", "2.4", "2.5"];
-pub static DEFAULT_REGISTRAR_API_VERSIONS: &[&str] = &["2.3"];
+pub static DEFAULT_REGISTRAR_API_VERSIONS: &str = "default";
 
 pub static DEFAULT_CONFIG: &str = "/etc/keylime/agent.conf";
 pub static DEFAULT_CONFIG_SNIPPETS_DIR: &str = "/etc/keylime/agent.conf.d";
@@ -346,7 +346,8 @@ impl Default for AgentConfig {
                 DEFAULT_ATTESTATION_INTERVAL_SECONDS,
             certification_keys_server_identifier:
                 DEFAULT_CERTIFICATION_KEYS_SERVER_IDENTIFIER.to_string(),
-            registrar_api_versions: DEFAULT_REGISTRAR_API_VERSIONS.join(", "),
+            registrar_api_versions: DEFAULT_REGISTRAR_API_VERSIONS
+                .to_string(),
             uefi_logs_evidence_version: DEFAULT_UEFI_LOGS_EVIDENCE_VERSION
                 .to_string(),
             verifier_url: DEFAULT_VERIFIER_URL.to_string(),

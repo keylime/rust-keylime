@@ -22,6 +22,28 @@ fn override_default_api_versions(
     Ok(DEFAULT_PUSH_API_VERSIONS.into())
 }
 
+/// Parse the registrar API versions from the configuration string.
+///
+/// Supports the same keywords as the agent's own `api_versions`:
+/// - "default": Use all supported API versions
+/// - "latest": Use only the latest supported API version
+/// - A comma-separated list of versions (e.g. "2.1, 2.3")
+fn parse_registrar_api_versions(
+    input: &str,
+) -> Result<Vec<&str>, OverrideError> {
+    match input {
+        "default" => Ok(SUPPORTED_API_VERSIONS.into()),
+        "latest" => {
+            if let Some(&version) = SUPPORTED_API_VERSIONS.last() {
+                Ok(vec![version])
+            } else {
+                unreachable!();
+            }
+        }
+        versions => Ok(parse_list(versions)?),
+    }
+}
+
 //TODO Temporary
 fn override_default_ek_handle(_input: &str) -> Result<String, OverrideError> {
     warn!("Overriding default EK handle for push model");
@@ -44,7 +66,7 @@ pub struct PushModelConfig {
     #[transform(using = override_default_ek_handle, error = OverrideError)]
     ek_handle: String,
     measuredboot_ml_path: String,
-    #[transform(using = parse_list, error = ListParsingError)]
+    #[transform(using = parse_registrar_api_versions, error = OverrideError)]
     registrar_api_versions: Vec<&str>,
     registrar_ip: String,
     registrar_port: u32,
@@ -130,7 +152,7 @@ mod tests {
                 .iter()
                 .map(|e| e.to_string())
                 .collect::<Vec<String>>(),
-            DEFAULT_REGISTRAR_API_VERSIONS
+            SUPPORTED_API_VERSIONS
         );
         assert_eq!(config.uuid(), DEFAULT_UUID);
         assert_eq!(config.verifier_url(), DEFAULT_VERIFIER_URL);

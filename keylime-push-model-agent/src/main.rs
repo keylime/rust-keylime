@@ -412,8 +412,7 @@ mod tests {
         }
         fn registrar_api_versions(
             &self,
-        ) -> Result<Vec<&str>, keylime::list_parser::ListParsingError>
-        {
+        ) -> Result<Vec<&str>, keylime::config::OverrideError> {
             Ok(vec![])
         }
         fn registrar_ip(&self) -> &str {

@@ -106,6 +106,8 @@ pub enum Error {
     Receiver(String),
     #[error("List parser error")]
     ListParser(#[from] crate::list_parser::ListParsingError),
+    #[error("Config override error")]
+    ConfigOverride(#[from] crate::config::OverrideError),
     #[error("Zip error: {0}")]
     Zip(#[from] zip::result::ZipError),
     #[error("Certificate generation error")]
