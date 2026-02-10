@@ -434,9 +434,14 @@ impl Middleware for AuthenticationMiddleware {
 
         let response = next.run(req, extensions).await?;
 
-        // Handle 401 responses by clearing token
-        if response.status() == StatusCode::UNAUTHORIZED {
-            warn!("Received 401, clearing token for future requests");
+        // Handle 401/403 responses by clearing token
+        if response.status() == StatusCode::UNAUTHORIZED
+            || response.status() == StatusCode::FORBIDDEN
+        {
+            warn!(
+                "Received {}, clearing token for future requests",
+                response.status()
+            );
             self.token_state.clear_token().await;
             // Note: We don't retry here to avoid infinite loops
             // The retry will happen naturally on the next request
