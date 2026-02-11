@@ -2,7 +2,6 @@ use keylime::{
     agent_registration::{
         AgentRegistration, AgentRegistrationConfig, RetryConfig,
     },
-    cert,
     config::PushModelConfigTrait,
     context_info,
     error::Result,
@@ -83,17 +82,6 @@ pub async fn register_agent(
         registrar_timeout: timeout,
     };
 
-    let cert_config = cert::CertificateConfig {
-        agent_uuid: agent_uuid.clone(),
-        contact_ip: config.contact_ip().to_string(),
-        contact_port: config.contact_port(),
-        server_cert: config.server_cert().to_string(),
-        server_key: config.server_key().to_string(),
-        server_key_password: config.server_key_password().to_string(),
-    };
-
-    let server_cert_key = cert::cert_from_server_key(&cert_config)?;
-
     let retry_config = get_retry_config();
 
     let aa = AgentRegistration {
@@ -106,7 +94,7 @@ pub async fn register_agent(
             .collect(),
         agent_registration_config: ac,
         agent_uuid,
-        mtls_cert: Some(server_cert_key.0),
+        mtls_cert: None,
         device_id: None, // TODO: Check how to proceed with device ID
         attest: None, // TODO: Check how to proceed with attestation, normally, no device ID means no attest
         signature: None, // TODO: Normally, no device ID means no signature
