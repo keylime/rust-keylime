@@ -54,6 +54,8 @@ pub struct AuthConfig {
     pub timeout_ms: u64,
     /// Maximum number of authentication retries
     pub max_auth_retries: u32,
+    /// Path to the CA certificate PEM file for verifying the verifier's TLS certificate
+    pub ca_certificate: Option<String>,
     /// Accept invalid TLS certificates (INSECURE - for testing only)
     pub accept_invalid_certs: bool,
     /// Accept invalid TLS hostnames (INSECURE - for testing only)
@@ -71,6 +73,7 @@ impl Default for AuthConfig {
             avoid_tpm: true,
             timeout_ms: DEFAULT_AUTH_TIMEOUT_MS,
             max_auth_retries: DEFAULT_AUTH_MAX_RETRIES,
+            ca_certificate: None,
             accept_invalid_certs: false,
             accept_invalid_hostnames: false,
             context_info: None,
@@ -303,15 +306,46 @@ impl std::fmt::Debug for AuthenticationClient {
 }
 
 impl AuthenticationClient {
+    /// Build an HTTP client configured with TLS settings from AuthConfig
+    fn build_http_client(config: &AuthConfig) -> Result<Client> {
+        let timeout = std::time::Duration::from_millis(config.timeout_ms);
+        let mut builder = Client::builder()
+            .timeout(timeout)
+            .danger_accept_invalid_certs(config.accept_invalid_certs)
+            .danger_accept_invalid_hostnames(config.accept_invalid_hostnames);
+
+        // Load CA certificate if provided (and not bypassing cert validation)
+        if !config.accept_invalid_certs {
+            if let Some(ref ca_cert_path) = config.ca_certificate {
+                let ca_cert_data =
+                    std::fs::read(ca_cert_path).map_err(|e| {
+                        anyhow!(
+                            "Failed to read CA certificate '{}': {}",
+                            ca_cert_path,
+                            e
+                        )
+                    })?;
+                let ca_cert = reqwest::Certificate::from_pem(&ca_cert_data)
+                    .map_err(|e| {
+                    anyhow!(
+                        "Failed to parse CA certificate '{}': {}",
+                        ca_cert_path,
+                        e
+                    )
+                })?;
+                builder = builder.add_root_certificate(ca_cert);
+            }
+        }
+
+        builder
+            .build()
+            .map_err(|e| anyhow!("Failed to build HTTP client: {}", e))
+    }
+
     /// Create a new authentication client with the given configuration
     /// Automatically chooses between real TPM and mock based on config.avoid_tpm
     pub fn new(config: AuthConfig) -> Result<Self> {
-        let timeout = std::time::Duration::from_millis(config.timeout_ms);
-        let http_client = Client::builder()
-            .timeout(timeout)
-            .danger_accept_invalid_certs(config.accept_invalid_certs)
-            .danger_accept_invalid_hostnames(config.accept_invalid_hostnames)
-            .build()?;
+        let http_client = Self::build_http_client(&config)?;
 
         let tpm_ops: Box<dyn TpmOperations> = if config.avoid_tpm {
             debug!("Using mock TPM operations for authentication");
@@ -342,12 +376,7 @@ impl AuthenticationClient {
         config: AuthConfig,
         tpm_ops: Box<dyn TpmOperations>,
     ) -> Result<Self> {
-        let timeout = std::time::Duration::from_millis(config.timeout_ms);
-        let http_client = Client::builder()
-            .timeout(timeout)
-            .danger_accept_invalid_certs(config.accept_invalid_certs)
-            .danger_accept_invalid_hostnames(config.accept_invalid_hostnames)
-            .build()?;
+        let http_client = Self::build_http_client(&config)?;
 
         Ok(Self {
             config,
@@ -360,12 +389,7 @@ impl AuthenticationClient {
     /// Create a raw authentication client with no middleware
     /// This is used internally by the authentication middleware to avoid infinite loops
     pub fn new_raw(config: AuthConfig) -> Result<Self> {
-        let timeout = std::time::Duration::from_millis(config.timeout_ms);
-        let http_client = Client::builder()
-            .timeout(timeout)
-            .danger_accept_invalid_certs(config.accept_invalid_certs)
-            .danger_accept_invalid_hostnames(config.accept_invalid_hostnames)
-            .build()?;
+        let http_client = Self::build_http_client(&config)?;
 
         let tpm_ops: Box<dyn TpmOperations> = if config.avoid_tpm {
             debug!("Using mock TPM operations for raw authentication client");
@@ -396,12 +420,7 @@ impl AuthenticationClient {
         config: AuthConfig,
         tpm_ops: Box<dyn TpmOperations>,
     ) -> Result<Self> {
-        let timeout = std::time::Duration::from_millis(config.timeout_ms);
-        let http_client = Client::builder()
-            .timeout(timeout)
-            .danger_accept_invalid_certs(config.accept_invalid_certs)
-            .danger_accept_invalid_hostnames(config.accept_invalid_hostnames)
-            .build()?;
+        let http_client = Self::build_http_client(&config)?;
 
         Ok(Self {
             config,
@@ -748,6 +767,7 @@ mod tests {
             avoid_tpm: true,
             timeout_ms: 1000,
             max_auth_retries: 2,
+            ca_certificate: None,
             accept_invalid_certs: true, // Tests use self-signed certs
             accept_invalid_hostnames: false,
             context_info: None,
@@ -1087,6 +1107,7 @@ mod tests {
             avoid_tpm: true,
             timeout_ms: 1000,
             max_auth_retries: 2,
+            ca_certificate: None,
             accept_invalid_certs: true, // Tests use self-signed certs
             accept_invalid_hostnames: false,
             context_info: None,
@@ -1114,6 +1135,7 @@ mod tests {
             avoid_tpm: true,
             timeout_ms: 1000,
             max_auth_retries: 2,
+            ca_certificate: None,
             accept_invalid_certs: true, // Tests use self-signed certs
             accept_invalid_hostnames: false,
             context_info: None,
@@ -1136,6 +1158,7 @@ mod tests {
             avoid_tpm: false,
             timeout_ms: 2000,
             max_auth_retries: 1,
+            ca_certificate: None,
             accept_invalid_certs: true, // Tests use self-signed certs
             accept_invalid_hostnames: false,
             context_info: None,
@@ -1267,6 +1290,7 @@ mod tests {
             avoid_tpm: true, // Should use MockTpmOperations
             timeout_ms: 1000,
             max_auth_retries: 1,
+            ca_certificate: None,
             accept_invalid_certs: true, // Tests use self-signed certs
             accept_invalid_hostnames: false,
             context_info: None,
@@ -1286,6 +1310,7 @@ mod tests {
             avoid_tpm: false,
             timeout_ms: 1000,
             max_auth_retries: 1,
+            ca_certificate: None,
             accept_invalid_certs: true, // Tests use self-signed certs
             accept_invalid_hostnames: false,
             context_info: None,
@@ -1374,6 +1399,7 @@ mod tests {
             avoid_tpm: false,
             timeout_ms: 1000,
             max_auth_retries: 1,
+            ca_certificate: None,
             accept_invalid_certs: true, // Tests use self-signed certs
             accept_invalid_hostnames: false,
             context_info: None,
@@ -1433,6 +1459,7 @@ mod tests {
             avoid_tpm: false,
             timeout_ms: 1000,
             max_auth_retries: 1,
+            ca_certificate: None,
             accept_invalid_certs: true, // Tests use self-signed certs
             accept_invalid_hostnames: false,
             context_info: None,
@@ -1496,6 +1523,7 @@ mod tests {
             avoid_tpm: true, // Only test mock TPM to avoid config issues
             timeout_ms: 1000,
             max_auth_retries: 1,
+            ca_certificate: None,
             accept_invalid_certs: true, // Tests use self-signed certs
             accept_invalid_hostnames: false,
             context_info: None,
@@ -1513,6 +1541,7 @@ mod tests {
             avoid_tpm: false,
             timeout_ms: 1000,
             max_auth_retries: 1,
+            ca_certificate: None,
             accept_invalid_certs: true, // Tests use self-signed certs
             accept_invalid_hostnames: false,
             context_info: None,

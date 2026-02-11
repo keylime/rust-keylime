@@ -87,6 +87,11 @@ impl AttestationClient {
             avoid_tpm: config.avoid_tpm,
             timeout_ms: keylime::config::DEFAULT_AUTH_TIMEOUT_MS,
             max_auth_retries: keylime::config::DEFAULT_AUTH_MAX_RETRIES,
+            ca_certificate: if config.ca_certificate.is_empty() {
+                None
+            } else {
+                Some(config.ca_certificate.to_string())
+            },
             accept_invalid_certs: config.tls_accept_invalid_certs,
             accept_invalid_hostnames: config.tls_accept_invalid_hostnames,
             context_info: context_info.clone(),
