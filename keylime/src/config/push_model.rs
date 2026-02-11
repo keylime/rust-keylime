@@ -72,9 +72,6 @@ pub struct PushModelConfig {
     registrar_port: u32,
     registrar_tls_enabled: bool,
     registrar_tls_ca_cert: String,
-    server_cert: String,
-    server_key: String,
-    server_key_password: String,
     tpm_encryption_alg: String,
     tpm_hash_alg: String,
     tpm_signing_alg: String,
@@ -116,19 +113,6 @@ mod tests {
         assert_eq!(config.enable_iak_idevid(), DEFAULT_ENABLE_IAK_IDEVID);
         assert_eq!(config.registrar_ip(), DEFAULT_REGISTRAR_IP);
         assert_eq!(config.registrar_port(), DEFAULT_REGISTRAR_PORT);
-        assert_eq!(
-            config.server_cert(),
-            tmpdir
-                .path()
-                .join(DEFAULT_SERVER_CERT)
-                .display()
-                .to_string()
-        );
-        assert_eq!(
-            config.server_key(),
-            tmpdir.path().join(DEFAULT_SERVER_KEY).display().to_string()
-        );
-        assert_eq!(config.server_key_password(), DEFAULT_SERVER_KEY_PASSWORD);
         assert_eq!(
             config.uefi_logs_evidence_version(),
             DEFAULT_UEFI_LOGS_EVIDENCE_VERSION

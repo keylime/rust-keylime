@@ -421,15 +421,6 @@ mod tests {
         fn registrar_port(&self) -> u32 {
             0
         }
-        fn server_cert(&self) -> &str {
-            ""
-        }
-        fn server_key(&self) -> &str {
-            ""
-        }
-        fn server_key_password(&self) -> &str {
-            ""
-        }
         fn tpm_encryption_alg(&self) -> &str {
             ""
         }

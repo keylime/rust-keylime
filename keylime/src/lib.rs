@@ -4,7 +4,6 @@ pub mod agent_registration;
 pub mod algorithms;
 pub mod auth;
 pub mod boot_time;
-pub mod cert;
 pub mod config;
 pub mod context_info;
 pub mod crypto;
