@@ -633,7 +633,7 @@ async fn main() -> Result<()> {
         ek_handle: config.ek_handle.clone(),
         // Pull model agent does not use TLS for registrar communication
         registrar_ca_cert: None,
-        registrar_insecure: None,
+        registrar_disable_tls: None,
         registrar_timeout: None,
     };
 
