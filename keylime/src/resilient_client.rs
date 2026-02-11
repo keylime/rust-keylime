@@ -1187,6 +1187,7 @@ mod tests {
             avoid_tpm: true,
             timeout_ms: 5000,
             max_auth_retries: 3,
+            ca_certificate: None,
             accept_invalid_certs: true, // Tests use self-signed certs
             accept_invalid_hostnames: false,
             context_info: None,
@@ -1235,6 +1236,7 @@ mod tests {
             avoid_tpm: true,
             timeout_ms: 5000,
             max_auth_retries: 3,
+            ca_certificate: None,
             accept_invalid_certs: true, // Tests use self-signed certs
             accept_invalid_hostnames: false,
             context_info: None,
@@ -1276,6 +1278,7 @@ mod tests {
                 avoid_tpm: true,
                 timeout_ms: 5000,
                 max_auth_retries: 3,
+                ca_certificate: None,
                 accept_invalid_certs: true, // Tests use self-signed certs
                 accept_invalid_hostnames: false,
                 context_info: None,
@@ -1335,6 +1338,7 @@ mod tests {
                 avoid_tpm: true,
                 timeout_ms: 5000,
                 max_auth_retries: 3,
+                ca_certificate: None,
                 accept_invalid_certs: true, // Tests use self-signed certs
                 accept_invalid_hostnames: false,
                 context_info: None,
@@ -1376,6 +1380,7 @@ mod tests {
                 avoid_tpm: true,
                 timeout_ms: 5000,
                 max_auth_retries: 3,
+                ca_certificate: None,
                 accept_invalid_certs: true, // Tests use self-signed certs
                 accept_invalid_hostnames: false,
                 context_info: None,
@@ -1419,6 +1424,7 @@ mod tests {
                 avoid_tpm: true,
                 timeout_ms: 30000,
                 max_auth_retries: 1,
+                ca_certificate: None,
                 accept_invalid_certs: true, // Tests use self-signed certs
                 accept_invalid_hostnames: false,
                 context_info: None,
