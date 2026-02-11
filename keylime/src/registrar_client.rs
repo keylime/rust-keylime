@@ -54,7 +54,7 @@ pub struct RegistrarClientBuilder {
     registrar_port: Option<u32>,
     retry_config: Option<RetryConfig>,
     ca_certificate: Option<String>,
-    insecure: Option<bool>,
+    disable_tls: Option<bool>,
     timeout: Option<u64>,
 }
 
@@ -108,13 +108,13 @@ impl RegistrarClientBuilder {
         self
     }
 
-    /// Set the insecure flag to disable TLS certificate validation
+    /// Set the disable_tls flag to disable TLS entirely (use plain HTTP)
     ///
     /// # Arguments:
     ///
-    /// * insecure (bool): If true, disable certificate validation
-    pub fn insecure(mut self, insecure: bool) -> Self {
-        self.insecure = Some(insecure);
+    /// * disable_tls (bool): If true, disable TLS and use plain HTTP
+    pub fn disable_tls(mut self, disable_tls: bool) -> Self {
+        self.disable_tls = Some(disable_tls);
         self
     }
 
@@ -202,9 +202,9 @@ impl RegistrarClientBuilder {
         };
 
         // Determine if TLS should be used
-        // TLS is used if a CA certificate is provided and insecure is not true
-        let use_tls =
-            self.ca_certificate.is_some() && !self.insecure.unwrap_or(false);
+        // TLS is used if a CA certificate is provided and disable_tls is not true
+        let use_tls = self.ca_certificate.is_some()
+            && !self.disable_tls.unwrap_or(false);
 
         let scheme = if use_tls { "https" } else { "http" };
 
@@ -219,7 +219,7 @@ impl RegistrarClientBuilder {
                     .ca_certificate
                     .clone()
                     .unwrap_or_default(),
-                insecure: self.insecure,
+                insecure: self.disable_tls,
                 timeout: self.timeout.unwrap_or(5000),
                 accept_invalid_hostnames: false,
             };
@@ -1449,17 +1449,17 @@ mod tests {
     }
 
     #[actix_rt::test]
-    async fn test_builder_insecure_true() {
-        let builder = RegistrarClientBuilder::new().insecure(true);
+    async fn test_builder_disable_tls_true() {
+        let builder = RegistrarClientBuilder::new().disable_tls(true);
 
-        assert_eq!(builder.insecure, Some(true));
+        assert_eq!(builder.disable_tls, Some(true));
     }
 
     #[actix_rt::test]
-    async fn test_builder_insecure_false() {
-        let builder = RegistrarClientBuilder::new().insecure(false);
+    async fn test_builder_disable_tls_false() {
+        let builder = RegistrarClientBuilder::new().disable_tls(false);
 
-        assert_eq!(builder.insecure, Some(false));
+        assert_eq!(builder.disable_tls, Some(false));
     }
 
     #[actix_rt::test]
@@ -1467,7 +1467,7 @@ mod tests {
         let builder = RegistrarClientBuilder::new();
 
         assert_eq!(builder.ca_certificate, None);
-        assert_eq!(builder.insecure, None);
+        assert_eq!(builder.disable_tls, None);
         assert_eq!(builder.timeout, None);
     }
 
@@ -1477,7 +1477,7 @@ mod tests {
             .registrar_address("127.0.0.1".to_string())
             .registrar_port(8891)
             .ca_certificate("/path/to/ca.pem".to_string())
-            .insecure(false)
+            .disable_tls(false)
             .timeout(5000);
 
         assert_eq!(builder.registrar_address, Some("127.0.0.1".to_string()));
@@ -1486,7 +1486,7 @@ mod tests {
             builder.ca_certificate,
             Some("/path/to/ca.pem".to_string())
         );
-        assert_eq!(builder.insecure, Some(false));
+        assert_eq!(builder.disable_tls, Some(false));
         assert_eq!(builder.timeout, Some(5000));
     }
 

@@ -115,7 +115,7 @@ fn create_registrar_tls_config<T: PushModelConfigTrait>(
         info!("Registrar TLS configuration complete - using HTTPS with server verification");
         return Some(registration::RegistrarTlsConfig {
             ca_cert: Some(ca_cert.to_string()),
-            insecure: None,
+            disable_tls: None,
             timeout: Some(timeout),
         });
     }
@@ -473,7 +473,7 @@ mod tests {
         let tls_config = result.unwrap();
         assert_eq!(tls_config.ca_cert, Some("/path/to/ca.crt".to_string()));
         assert_eq!(tls_config.timeout, Some(5000));
-        assert_eq!(tls_config.insecure, None);
+        assert_eq!(tls_config.disable_tls, None);
     }
 
     #[test]

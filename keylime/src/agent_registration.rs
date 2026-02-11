@@ -24,7 +24,7 @@ pub struct AgentRegistrationConfig {
     pub registrar_ip: String,
     pub registrar_port: u32,
     pub registrar_ca_cert: Option<String>,
-    pub registrar_insecure: Option<bool>,
+    pub registrar_disable_tls: Option<bool>,
     pub registrar_timeout: Option<u64>,
 }
 
@@ -128,8 +128,8 @@ pub async fn register_agent(
     if let Some(ca_cert) = &ac.registrar_ca_cert {
         builder = builder.ca_certificate(ca_cert.clone());
     }
-    if let Some(insecure) = ac.registrar_insecure {
-        builder = builder.insecure(insecure);
+    if let Some(disable_tls) = ac.registrar_disable_tls {
+        builder = builder.disable_tls(disable_tls);
     }
     if let Some(timeout) = ac.registrar_timeout {
         builder = builder.timeout(timeout);
