@@ -17,7 +17,7 @@ jobs:
       - name: NPM installation
         run: dnf install -y npm
       - name: Run Mockoon CLI
-        uses: mockoon/cli-action@v2
+        uses: mockoon/cli-action@v3
         with:
           version: latest
           data-file: keylime-push-model-agent/test-data/verifier.json
@@ -77,7 +77,7 @@ jobs:
           cat /etc/os-release | head -5
           echo "======== END PRE-MOCKOON SYSTEM STATE ========"
       - name: Run Mockoon CLI
-        uses: mockoon/cli-action@v2
+        uses: mockoon/cli-action@v3
         with:
           version: latest
           data-file: keylime-push-model-agent/test-data/registrar.json
