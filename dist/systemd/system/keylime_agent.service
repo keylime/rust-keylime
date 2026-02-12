@@ -11,6 +11,7 @@ After=tpm2-abrmd.service
 # If the service should start only when hardware TPMs are available, uncomment the below lines
 #ConditionPathExistsGlob=/dev/tpm[0-9]*
 #ConditionPathExistsGlob=/dev/tpmrm[0-9]*
+Conflicts=keylime_push_model_agent.service
 
 [Service]
 ExecStart=/usr/bin/keylime_agent
