@@ -344,6 +344,7 @@ impl VerifierClient {
                 self.api_version = version;
                 return Ok(());
             }
+            #[cfg(feature = "api-v3")]
             Err(KeylimectlError::Api { status: 410, .. }) => {
                 info!("/version endpoint returned 410 Gone - this indicates a v3.0+ verifier");
 
@@ -367,9 +368,23 @@ impl VerifierClient {
             debug!("Testing verifier API version {api_version}");
 
             let version_works = if api_version.starts_with("3.") {
-                self.test_api_version_v3(api_version).await.is_ok()
+                #[cfg(feature = "api-v3")]
+                {
+                    self.test_api_version_v3(api_version).await.is_ok()
+                }
+                #[cfg(not(feature = "api-v3"))]
+                {
+                    false
+                }
             } else {
-                self.test_api_version(api_version).await.is_ok()
+                #[cfg(feature = "api-v2")]
+                {
+                    self.test_api_version(api_version).await.is_ok()
+                }
+                #[cfg(not(feature = "api-v2"))]
+                {
+                    false
+                }
             };
 
             if version_works {
@@ -427,6 +442,7 @@ impl VerifierClient {
 
     /// Test if a specific API version v3.0+ works by testing the versioned root endpoint
     /// In API v3.0+, the /version endpoint was removed, so we test endpoint availability directly
+    #[cfg(feature = "api-v3")]
     async fn test_api_version_v3(
         &self,
         api_version: &str,
@@ -457,6 +473,7 @@ impl VerifierClient {
     }
 
     /// Test if a specific API version v2.x works by making a simple request
+    #[cfg(feature = "api-v2")]
     async fn test_api_version(
         &self,
         api_version: &str,
@@ -638,7 +655,8 @@ impl VerifierClient {
         debug!("Getting agent {agent_uuid} from verifier");
 
         // Try API v3.0+ first, fallback to v2.x if not implemented
-        if self.api_version.parse::<f32>().unwrap_or(2.0) >= 3.0 {
+        #[cfg(feature = "api-v3")]
+        if crate::api_versions::is_v3(&self.api_version) {
             match self.get_agent_v3(agent_uuid).await {
                 Ok(result) => return Ok(result),
                 Err(KeylimectlError::Api { status: 404, .. }) => {
@@ -650,48 +668,57 @@ impl VerifierClient {
         }
 
         // V2.x endpoint (or fallback from v3.0)
-        let url = format!(
-            "{}/v2.1/agents/{}", // Use v2.1 as stable legacy version
-            self.base.base_url, agent_uuid
-        );
+        #[cfg(feature = "api-v2")]
+        {
+            let url = format!(
+                "{}/v2.1/agents/{}", // Use v2.1 as stable legacy version
+                self.base.base_url, agent_uuid
+            );
 
-        debug!("GET {url}");
+            debug!("GET {url}");
 
-        let response = self
-            .base
-            .client
-            .get_request(Method::GET, &url)
-            .send()
-            .await
-            .with_context(|| {
-                "Failed to send get agent request to verifier".to_string()
-            })?;
+            let response = self
+                .base
+                .client
+                .get_request(Method::GET, &url)
+                .send()
+                .await
+                .with_context(|| {
+                    "Failed to send get agent request to verifier".to_string()
+                })?;
 
-        match response.status() {
-            StatusCode::OK => {
-                let json_response: Value = self
-                    .base
-                    .handle_response(response)
-                    .await
-                    .map_err(KeylimectlError::from)?;
-                Ok(Some(json_response))
-            }
-            StatusCode::NOT_FOUND => Ok(None),
-            _ => {
-                let error_response: Result<Value, KeylimectlError> = self
-                    .base
-                    .handle_response(response)
-                    .await
-                    .map_err(KeylimectlError::from);
-                match error_response {
-                    Ok(_) => Ok(None),
-                    Err(e) => Err(e),
+            match response.status() {
+                StatusCode::OK => {
+                    let json_response: Value = self
+                        .base
+                        .handle_response(response)
+                        .await
+                        .map_err(KeylimectlError::from)?;
+                    Ok(Some(json_response))
+                }
+                StatusCode::NOT_FOUND => Ok(None),
+                _ => {
+                    let error_response: Result<Value, KeylimectlError> = self
+                        .base
+                        .handle_response(response)
+                        .await
+                        .map_err(KeylimectlError::from);
+                    match error_response {
+                        Ok(_) => Ok(None),
+                        Err(e) => Err(e),
+                    }
                 }
             }
         }
+
+        #[cfg(not(feature = "api-v2"))]
+        Err(KeylimectlError::validation(
+            "v3.0 endpoint failed and v2.x fallback not enabled",
+        ))
     }
 
     /// Get agent using v3.0 API (when implemented)
+    #[cfg(feature = "api-v3")]
     async fn get_agent_v3(
         &self,
         agent_uuid: &str,
@@ -782,7 +809,8 @@ impl VerifierClient {
         debug!("Deleting agent {agent_uuid} from verifier");
 
         // Try API v3.0+ first, fallback to v2.x if not implemented
-        if self.api_version.parse::<f32>().unwrap_or(2.0) >= 3.0 {
+        #[cfg(feature = "api-v3")]
+        if crate::api_versions::is_v3(&self.api_version) {
             match self.delete_agent_v3(agent_uuid).await {
                 Ok(result) => return Ok(result),
                 Err(KeylimectlError::Api { status: 404, .. }) => {
@@ -794,30 +822,40 @@ impl VerifierClient {
         }
 
         // V2.x endpoint (or fallback from v3.0)
-        let url = format!(
-            "{}/v2.1/agents/{}", // Use v2.1 as stable legacy version
-            self.base.base_url, agent_uuid
-        );
+        #[cfg(feature = "api-v2")]
+        {
+            let url = format!(
+                "{}/v2.1/agents/{}", // Use v2.1 as stable legacy version
+                self.base.base_url, agent_uuid
+            );
 
-        debug!("DELETE {url}");
+            debug!("DELETE {url}");
 
-        let response = self
-            .base
-            .client
-            .get_request(Method::DELETE, &url)
-            .send()
-            .await
-            .with_context(|| {
-                "Failed to send delete agent request to verifier".to_string()
-            })?;
+            let response = self
+                .base
+                .client
+                .get_request(Method::DELETE, &url)
+                .send()
+                .await
+                .with_context(|| {
+                    "Failed to send delete agent request to verifier"
+                        .to_string()
+                })?;
 
-        self.base
-            .handle_response(response)
-            .await
-            .map_err(KeylimectlError::from)
+            self.base
+                .handle_response(response)
+                .await
+                .map_err(KeylimectlError::from)
+        }
+
+        #[cfg(not(feature = "api-v2"))]
+        Err(KeylimectlError::validation(
+            "v3.0 endpoint failed and v2.x fallback not enabled",
+        ))
     }
 
     /// Delete agent using v3.0 API (when implemented)
+    #[cfg(feature = "api-v3")]
     async fn delete_agent_v3(
         &self,
         agent_uuid: &str,
@@ -854,7 +892,8 @@ impl VerifierClient {
         debug!("Reactivating agent {agent_uuid} on verifier");
 
         // Try API v3.0+ first, fallback to v2.x if not implemented
-        if self.api_version.parse::<f32>().unwrap_or(2.0) >= 3.0 {
+        #[cfg(feature = "api-v3")]
+        if crate::api_versions::is_v3(&self.api_version) {
             match self.reactivate_agent_v3(agent_uuid).await {
                 Ok(result) => return Ok(result),
                 Err(KeylimectlError::Api { status: 404, .. }) => {
@@ -866,30 +905,39 @@ impl VerifierClient {
         }
 
         // V2.x endpoint (or fallback from v3.0)
-        let url = format!(
-            "{}/v2.1/agents/{}/reactivate", // Use v2.1 as stable legacy version
-            self.base.base_url, agent_uuid
-        );
+        #[cfg(feature = "api-v2")]
+        {
+            let url = format!(
+                "{}/v2.1/agents/{}/reactivate", // Use v2.1 as stable legacy version
+                self.base.base_url, agent_uuid
+            );
 
-        let response = self
-            .base
-            .client
-            .get_request(Method::PUT, &url)
-            .body("")
-            .send()
-            .await
-            .with_context(|| {
-                "Failed to send reactivate agent request to verifier"
-                    .to_string()
-            })?;
+            let response = self
+                .base
+                .client
+                .get_request(Method::PUT, &url)
+                .body("")
+                .send()
+                .await
+                .with_context(|| {
+                    "Failed to send reactivate agent request to verifier"
+                        .to_string()
+                })?;
 
-        self.base
-            .handle_response(response)
-            .await
-            .map_err(KeylimectlError::from)
+            self.base
+                .handle_response(response)
+                .await
+                .map_err(KeylimectlError::from)
+        }
+
+        #[cfg(not(feature = "api-v2"))]
+        Err(KeylimectlError::validation(
+            "v3.0 endpoint failed and v2.x fallback not enabled",
+        ))
     }
 
     /// Reactivate agent using v3.0 API (when implemented)
+    #[cfg(feature = "api-v3")]
     async fn reactivate_agent_v3(
         &self,
         agent_uuid: &str,
@@ -980,7 +1028,8 @@ impl VerifierClient {
         debug!("Listing agents on verifier");
 
         // Try API v3.0+ first, fallback to v2.x if not implemented
-        if self.api_version.parse::<f32>().unwrap_or(2.0) >= 3.0 {
+        #[cfg(feature = "api-v3")]
+        if crate::api_versions::is_v3(&self.api_version) {
             match self.list_agents_v3(verifier_id).await {
                 Ok(result) => return Ok(result),
                 Err(KeylimectlError::Api { status: 404, .. }) => {
@@ -992,31 +1041,41 @@ impl VerifierClient {
         }
 
         // V2.x endpoint (or fallback from v3.0)
-        let mut url = format!("{}/v2.1/agents/", self.base.base_url); // Use v2.1 as stable legacy version
+        #[cfg(feature = "api-v2")]
+        {
+            let mut url = format!("{}/v2.1/agents/", self.base.base_url); // Use v2.1 as stable legacy version
 
-        if let Some(vid) = verifier_id {
-            url.push_str(&format!("?verifier={vid}"));
+            if let Some(vid) = verifier_id {
+                url.push_str(&format!("?verifier={vid}"));
+            }
+
+            debug!("GET {url}");
+
+            let response = self
+                .base
+                .client
+                .get_request(Method::GET, &url)
+                .send()
+                .await
+                .with_context(|| {
+                    "Failed to send list agents request to verifier"
+                        .to_string()
+                })?;
+
+            self.base
+                .handle_response(response)
+                .await
+                .map_err(KeylimectlError::from)
         }
 
-        debug!("GET {url}");
-
-        let response = self
-            .base
-            .client
-            .get_request(Method::GET, &url)
-            .send()
-            .await
-            .with_context(|| {
-                "Failed to send list agents request to verifier".to_string()
-            })?;
-
-        self.base
-            .handle_response(response)
-            .await
-            .map_err(KeylimectlError::from)
+        #[cfg(not(feature = "api-v2"))]
+        Err(KeylimectlError::validation(
+            "v3.0 endpoint failed and v2.x fallback not enabled",
+        ))
     }
 
     /// List agents using v3.0 API (when implemented)
+    #[cfg(feature = "api-v3")]
     async fn list_agents_v3(
         &self,
         verifier_id: Option<&str>,
@@ -1112,7 +1171,8 @@ impl VerifierClient {
         debug!("Getting bulk agent info from verifier");
 
         // Try API v3.0+ first, fallback to v2.x if not implemented
-        if self.api_version.parse::<f32>().unwrap_or(2.0) >= 3.0 {
+        #[cfg(feature = "api-v3")]
+        if crate::api_versions::is_v3(&self.api_version) {
             match self.get_bulk_info_v3(verifier_id).await {
                 Ok(result) => return Ok(result),
                 Err(KeylimectlError::Api { status: 404, .. }) => {
@@ -1124,32 +1184,41 @@ impl VerifierClient {
         }
 
         // V2.x endpoint (or fallback from v3.0)
-        let mut url = format!(
-            "{}/v2.1/agents/?bulk=true", // Use v2.1 as stable legacy version
-            self.base.base_url
-        );
+        #[cfg(feature = "api-v2")]
+        {
+            let mut url = format!(
+                "{}/v2.1/agents/?bulk=true", // Use v2.1 as stable legacy version
+                self.base.base_url
+            );
 
-        if let Some(vid) = verifier_id {
-            url.push_str(&format!("&verifier={vid}"));
+            if let Some(vid) = verifier_id {
+                url.push_str(&format!("&verifier={vid}"));
+            }
+
+            let response = self
+                .base
+                .client
+                .get_request(Method::GET, &url)
+                .send()
+                .await
+                .with_context(|| {
+                    "Failed to send bulk info request to verifier".to_string()
+                })?;
+
+            self.base
+                .handle_response(response)
+                .await
+                .map_err(KeylimectlError::from)
         }
 
-        let response = self
-            .base
-            .client
-            .get_request(Method::GET, &url)
-            .send()
-            .await
-            .with_context(|| {
-                "Failed to send bulk info request to verifier".to_string()
-            })?;
-
-        self.base
-            .handle_response(response)
-            .await
-            .map_err(KeylimectlError::from)
+        #[cfg(not(feature = "api-v2"))]
+        Err(KeylimectlError::validation(
+            "v3.0 endpoint failed and v2.x fallback not enabled",
+        ))
     }
 
     /// Get bulk info using v3.0 API (when implemented)
+    #[cfg(feature = "api-v3")]
     async fn get_bulk_info_v3(
         &self,
         verifier_id: Option<&str>,
@@ -1189,7 +1258,8 @@ impl VerifierClient {
         debug!("Adding runtime policy {policy_name} to verifier");
 
         // Try API v3.0+ first, fallback to v2.x if not implemented
-        if self.api_version.parse::<f32>().unwrap_or(2.0) >= 3.0 {
+        #[cfg(feature = "api-v3")]
+        if crate::api_versions::is_v3(&self.api_version) {
             match self
                 .add_runtime_policy_v3(policy_name, policy_data.clone())
                 .await
@@ -1204,42 +1274,51 @@ impl VerifierClient {
         }
 
         // V2.x endpoint (or fallback from v3.0)
-        let url = format!(
-            "{}/v2.1/allowlists/{}", // Use v2.1 as stable legacy version
-            self.base.base_url, policy_name
-        );
+        #[cfg(feature = "api-v2")]
+        {
+            let url = format!(
+                "{}/v2.1/allowlists/{}", // Use v2.1 as stable legacy version
+                self.base.base_url, policy_name
+            );
 
-        debug!(
-            "POST {} with data: {}",
-            url,
-            serde_json::to_string_pretty(&policy_data)
-                .unwrap_or_else(|_| "Invalid JSON".to_string())
-        );
+            debug!(
+                "POST {} with data: {}",
+                url,
+                serde_json::to_string_pretty(&policy_data)
+                    .unwrap_or_else(|_| "Invalid JSON".to_string())
+            );
 
-        let response = self
-            .base
-            .client
-            .get_json_request_from_struct(
-                Method::POST,
-                &url,
-                &policy_data,
-                None,
-            )
-            .map_err(KeylimectlError::Json)?
-            .send()
-            .await
-            .with_context(|| {
-                "Failed to send add runtime policy request to verifier"
-                    .to_string()
-            })?;
+            let response = self
+                .base
+                .client
+                .get_json_request_from_struct(
+                    Method::POST,
+                    &url,
+                    &policy_data,
+                    None,
+                )
+                .map_err(KeylimectlError::Json)?
+                .send()
+                .await
+                .with_context(|| {
+                    "Failed to send add runtime policy request to verifier"
+                        .to_string()
+                })?;
 
-        self.base
-            .handle_response(response)
-            .await
-            .map_err(KeylimectlError::from)
+            self.base
+                .handle_response(response)
+                .await
+                .map_err(KeylimectlError::from)
+        }
+
+        #[cfg(not(feature = "api-v2"))]
+        Err(KeylimectlError::validation(
+            "v3.0 endpoint failed and v2.x fallback not enabled",
+        ))
     }
 
     /// Add runtime policy using v3.0 API (when implemented)
+    #[cfg(feature = "api-v3")]
     async fn add_runtime_policy_v3(
         &self,
         policy_name: &str,
