@@ -32,6 +32,7 @@ pub(super) struct AddAgentParams<'a> {
     /// Optional agent port (overrides registrar data)
     pub port: Option<u16>,
     /// Optional verifier IP for agent communication
+    #[cfg_attr(not(feature = "api-v2"), allow(dead_code))]
     pub verifier_ip: Option<&'a str>,
     /// Optional path to runtime policy file
     pub runtime_policy: Option<&'a str>,
@@ -41,11 +42,10 @@ pub(super) struct AddAgentParams<'a> {
     pub payload: Option<&'a str>,
     /// Optional path to certificate directory
     pub cert_dir: Option<&'a str>,
-    /// Whether to perform key derivation verification
+    /// Whether to perform key derivation verification (pull model only)
+    #[cfg_attr(not(feature = "api-v2"), allow(dead_code))]
     pub verify: bool,
     /// Whether to use push model (agent connects to verifier)
-    #[allow(dead_code)]
-    // Will be used when explicit push model flag is implemented
     pub push_model: bool,
     /// Optional TPM policy in JSON format
     pub tpm_policy: Option<&'a str>,
@@ -148,6 +148,7 @@ pub struct AddAgentRequest {
     pub supported_version: Option<String>,
 }
 
+#[cfg_attr(not(feature = "api-v2"), allow(dead_code))]
 impl AddAgentRequest {
     /// Create a new agent request with the required fields
     #[must_use]
