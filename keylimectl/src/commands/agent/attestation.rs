@@ -320,9 +320,7 @@ pub(super) async fn verify_key_derivation(
 ///
 /// # Arguments
 /// * `num_bytes` - Number of random bytes to generate (output string will be `2 * num_bytes` hex chars)
-fn generate_secure_nonce(
-    num_bytes: usize,
-) -> Result<String, CommandError> {
+fn generate_secure_nonce(num_bytes: usize) -> Result<String, CommandError> {
     let mut buf = vec![0u8; num_bytes];
     rand::rand_bytes(&mut buf).map_err(|e| {
         CommandError::resource_error(
@@ -560,24 +558,21 @@ fn encrypt_u_key_with_agent_pubkey(
     let pubkey_pem = agent_public_key;
 
     // Step 2: Import the public key as OpenSSL PKey
-    let pubkey =
-        crypto::testing::pkey_pub_from_pem(pubkey_pem).map_err(|e| {
-            CommandError::resource_error(
-                "crypto",
-                format!("Failed to parse public key PEM: {e}"),
-            )
-        })?;
+    let pubkey = crypto::pkey_pub_from_pem(pubkey_pem).map_err(|e| {
+        CommandError::resource_error(
+            "crypto",
+            format!("Failed to parse public key PEM: {e}"),
+        )
+    })?;
 
     // Step 3: Perform RSA-OAEP encryption using keylime crypto module
-    let encrypted_bytes =
-        crypto::testing::rsa_oaep_encrypt(&pubkey, u_key_bytes).map_err(
-            |e| {
-                CommandError::resource_error(
-                    "crypto",
-                    format!("RSA encryption failed: {e}"),
-                )
-            },
-        )?;
+    let encrypted_bytes = crypto::rsa_oaep_encrypt(&pubkey, u_key_bytes)
+        .map_err(|e| {
+            CommandError::resource_error(
+                "crypto",
+                format!("RSA encryption failed: {e}"),
+            )
+        })?;
 
     // Step 4: Encode result as base64 for transmission
     let encrypted_b64 = STANDARD.encode(&encrypted_bytes);
@@ -626,10 +621,7 @@ mod tests {
         let mut nonces = HashSet::new();
         for _ in 0..100 {
             let nonce = generate_secure_nonce(20).expect("nonce generation"); //#[allow_ci]
-            assert!(
-                nonces.insert(nonce),
-                "Duplicate nonce generated"
-            );
+            assert!(nonces.insert(nonce), "Duplicate nonce generated");
         }
     }
 }
