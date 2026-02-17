@@ -52,7 +52,7 @@ pub(super) async fn perform_agent_attestation(
     output.progress("Generating nonce for TPM quote");
 
     // Generate random nonce for quote freshness
-    let nonce = generate_random_string(20);
+    let nonce = generate_secure_nonce(20)?;
     debug!("Generated nonce for TPM quote: {nonce}");
 
     output.progress("Requesting TPM quote from agent");
@@ -260,7 +260,7 @@ pub(super) async fn verify_key_derivation(
 ) -> Result<(), CommandError> {
     output.progress("Generating verification challenge");
 
-    let challenge = generate_random_string(20);
+    let challenge = generate_secure_nonce(20)?;
 
     // Calculate expected HMAC using K key
     let k_key_b64 = attestation
@@ -312,33 +312,23 @@ pub(super) async fn verify_key_derivation(
     }
 }
 
-/// Generate a random string of the specified length
+/// Generate a cryptographically secure random nonce
 ///
-/// Uses system time as seed for a simple random string generator. This is a simple
-/// replacement for the missing tmp_util::random_password function.
-// TODO(phase-1): Replace with CSPRNG
-#[must_use]
-fn generate_random_string(length: usize) -> String {
-    let charset: &[u8] =
-        b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-
-    // Use system time as a simple random seed
-    use std::time::{SystemTime, UNIX_EPOCH};
-    let seed = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap() //#[allow_ci]
-        .as_nanos() as u64;
-
-    // Simple linear congruential generator for demo purposes
-    let mut state = seed;
-    let mut result = String::new();
-    for _ in 0..length {
-        state = state.wrapping_mul(1103515245).wrapping_add(12345);
-        let char_idx = (state as usize) % charset.len();
-        result.push(charset[char_idx] as char);
-    }
-
-    result
+/// Uses OpenSSL's CSPRNG (`RAND_bytes`) to generate random bytes,
+/// then hex-encodes them to produce a string suitable for use as
+/// a nonce or challenge.
+///
+/// # Arguments
+/// * `num_bytes` - Number of random bytes to generate (output string will be `2 * num_bytes` hex chars)
+fn generate_secure_nonce(num_bytes: usize) -> Result<String, CommandError> {
+    let mut buf = vec![0u8; num_bytes];
+    rand::rand_bytes(&mut buf).map_err(|e| {
+        CommandError::resource_error(
+            "crypto",
+            format!("CSPRNG failed to generate nonce: {e}"),
+        )
+    })?;
+    Ok(hex::encode(buf))
 }
 
 /// Validate TPM quote against agent's AIK and verify nonce inclusion
@@ -597,4 +587,44 @@ fn encrypt_u_key_with_agent_pubkey(
     );
 
     Ok(encrypted_b64)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashSet;
+
+    #[test]
+    fn test_generate_secure_nonce_length() {
+        // Each byte becomes 2 hex chars
+        for num_bytes in [1, 10, 16, 20, 32] {
+            let nonce =
+                generate_secure_nonce(num_bytes).expect("nonce generation"); //#[allow_ci]
+            assert_eq!(
+                nonce.len(),
+                num_bytes * 2,
+                "Expected {} hex chars for {} bytes",
+                num_bytes * 2,
+                num_bytes
+            );
+        }
+    }
+
+    #[test]
+    fn test_generate_secure_nonce_hex_chars() {
+        let nonce = generate_secure_nonce(32).expect("nonce generation"); //#[allow_ci]
+        assert!(
+            nonce.chars().all(|c| c.is_ascii_hexdigit()),
+            "Nonce contains non-hex characters: {nonce}"
+        );
+    }
+
+    #[test]
+    fn test_generate_secure_nonce_uniqueness() {
+        let mut nonces = HashSet::new();
+        for _ in 0..100 {
+            let nonce = generate_secure_nonce(20).expect("nonce generation"); //#[allow_ci]
+            assert!(nonces.insert(nonce), "Duplicate nonce generated");
+        }
+    }
 }
