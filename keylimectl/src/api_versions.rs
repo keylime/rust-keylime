@@ -48,10 +48,18 @@ pub const DEFAULT_API_VERSION: &str = if cfg!(feature = "api-v2") {
 };
 
 /// Check if a version string represents a v3.0+ API version.
+///
+/// When the `api-v3` feature is disabled, this always returns `false`
+/// so call sites can use a simple `if is_v3()` without `#[cfg]` blocks.
+/// The compiler optimises the dead branch away.
 #[must_use]
-#[allow(dead_code)] // Used in later steps when v2/v3 branching is gated
 pub fn is_v3(version: &str) -> bool {
-    version.parse::<f32>().unwrap_or(2.0) >= 3.0 //#[allow_ci]
+    if cfg!(feature = "api-v3") {
+        version.parse::<f32>().unwrap_or(2.0) >= 3.0 //#[allow_ci]
+    } else {
+        let _ = version; // suppress unused warning
+        false
+    }
 }
 
 #[cfg(test)]
@@ -94,8 +102,9 @@ mod tests {
         assert!(!is_v3("2.0"));
         assert!(!is_v3("2.1"));
         assert!(!is_v3("2.3"));
-        assert!(is_v3("3.0"));
-        assert!(is_v3("3.1"));
+        // When api-v3 is enabled, 3.x returns true; otherwise always false
+        assert_eq!(is_v3("3.0"), cfg!(feature = "api-v3"));
+        assert_eq!(is_v3("3.1"), cfg!(feature = "api-v3"));
         assert!(!is_v3("invalid"));
     }
 
