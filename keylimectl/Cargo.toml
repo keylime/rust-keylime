@@ -34,6 +34,7 @@ thiserror.workspace = true
 tokio = {workspace = true, features = ["rt-multi-thread"]}
 tss-esapi = {workspace = true, optional = true}
 uuid.workspace = true
+zeroize = "1"
 
 [lints.clippy]
 all = "deny"

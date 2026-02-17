@@ -1501,6 +1501,7 @@ dependencies = [
  "toml 0.8.23",
  "tss-esapi",
  "uuid",
+ "zeroize",
 ]
 
 [[package]]
