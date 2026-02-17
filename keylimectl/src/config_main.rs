@@ -199,6 +199,7 @@ impl Default for RegistrarConfig {
 ///     trusted_ca: vec!["/path/to/ca.crt".to_string()],
 ///     verify_server_cert: true,
 ///     enable_agent_mtls: true,
+///     accept_invalid_hostnames: true,
 /// };
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -216,6 +217,18 @@ pub struct TlsConfig {
     pub verify_server_cert: bool,
     /// Enable agent mTLS
     pub enable_agent_mtls: bool,
+    /// Accept invalid hostnames in server certificates
+    ///
+    /// Keylime auto-generated certificates may not include the correct
+    /// hostname/IP in the SAN extension. Set to `true` to skip hostname
+    /// verification (default). Set to `false` for stricter security when
+    /// using properly issued certificates.
+    #[serde(default = "default_accept_invalid_hostnames")]
+    pub accept_invalid_hostnames: bool,
+}
+
+fn default_accept_invalid_hostnames() -> bool {
+    true
 }
 
 impl Default for TlsConfig {
@@ -231,6 +244,7 @@ impl Default for TlsConfig {
             trusted_ca: vec!["/var/lib/keylime/cv_ca/cacert.crt".to_string()],
             verify_server_cert: true,
             enable_agent_mtls: true,
+            accept_invalid_hostnames: true,
         }
     }
 }
@@ -933,6 +947,7 @@ mod tests {
                 trusted_ca: vec![], // Empty trusted CA to avoid non-existent file validation
                 verify_server_cert: true,
                 enable_agent_mtls: true,
+                accept_invalid_hostnames: true,
             },
             ..Config::default()
         };
