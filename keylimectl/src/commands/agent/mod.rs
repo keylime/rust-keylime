@@ -323,6 +323,7 @@ mod tests {
                 trusted_ca: vec![],
                 verify_server_cert: false, // Disable for testing
                 enable_agent_mtls: true,
+                accept_invalid_hostnames: true,
             },
             client: ClientConfig {
                 timeout: 30,
