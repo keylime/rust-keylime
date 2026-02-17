@@ -65,9 +65,9 @@ and one-shot evidence verification.
 - [x] ~~RSA encryption calls `crypto::testing::*` functions~~ (Phase 1.2/1.2b)
 - [ ] No EK certificate verification (Python tenant has this)
 - [ ] No `ek_check_script` support
-- [ ] API 2.x and 3.x code paths are interleaved (no feature flag separation)
+- [x] ~~API 2.x and 3.x code paths are interleaved (no feature flag separation)~~ (Phase 2)
 - [ ] Some client methods lack v3 fallback (inconsistent coverage)
-- [ ] `push_model` field in `AddAgentParams` is `#[allow(dead_code)]`
+- [x] ~~`push_model` field in `AddAgentParams` is `#[allow(dead_code)]`~~ (Phase 2.3)
 - [ ] No interactive configuration wizard
 - [ ] No diagnostics commands
 - [ ] Missing: `--runtime-policy-url`, `--cv_targethost`, `--verifier-id`, `--agent-api-version`
@@ -220,41 +220,43 @@ Clean separation of API 2.x (pull model) and API 3.x (push model) code paths usi
 Rust feature flags. This enables future removal of pull model code by disabling a
 feature.
 
-**Architecture consideration:** Instead of scattering `#[cfg(feature = "api-v2")]`
-throughout client code, consider defining an `ApiClient` trait with v2 and v3
-implementations. Feature flags control which implementations are compiled in. This
-provides cleaner separation and makes eventual v2 removal a matter of deleting one
-implementation file rather than hunting for `#[cfg]` attributes. Evaluate this
-approach before committing to the per-method gating described below.
+**Architecture decision:** After evaluation, `#[cfg]` attributes were chosen over
+an `ApiClient` trait because v3 methods are already separate (`*_v3()` suffix),
+the agent client is entirely v2-only, and `attestation.rs` is entirely pull-model
+code. The trait approach would require heavy refactoring for marginal benefit.
+Phase 9 removal is just deleting `#[cfg(feature = "api-v2")]` blocks.
 
 ### 2.1 Add feature flag infrastructure
 
-- [ ] Add `[features]` section to `keylimectl/Cargo.toml`:
+- [x] Add `[features]` section to `keylimectl/Cargo.toml`:
       ```toml
       [features]
       default = ["api-v2", "api-v3"]
       api-v2 = []
       api-v3 = []
       ```
-- [ ] Add `compile_error!` guard: at least one of `api-v2` or `api-v3` must be enabled
-- [ ] Verify the project builds with all feature combinations:
+- [x] Add `compile_error!` guard: at least one of `api-v2` or `api-v3` must be enabled
+- [x] Verify the project builds with all feature combinations:
       `default`, `api-v2` only, `api-v3` only
 
 ### 2.2 Gate supported version constants
 
-- [ ] Make `SUPPORTED_API_VERSIONS` in `client/verifier.rs` and `client/registrar.rs`
-      conditional on enabled features
-- [ ] Gate `client/agent.rs` entirely behind `#[cfg(feature = "api-v2")]` since the
+- [x] Create `api_versions.rs` module as single source of truth for version constants
+      (`SUPPORTED_API_VERSIONS`, `SUPPORTED_AGENT_API_VERSIONS`, `DEFAULT_API_VERSION`,
+      `is_v3()`), replacing duplicated arrays in verifier, registrar, and agent clients
+- [x] Make `SUPPORTED_API_VERSIONS` feature-conditional: v2 versions behind `api-v2`,
+      v3 versions behind `api-v3`
+- [x] Gate `client/agent.rs` entirely behind `#[cfg(feature = "api-v2")]` since the
       agent client is only used in pull model
-- [ ] Derive version arrays from a single source of truth (e.g., a constant in
-      `lib.rs` or a shared module) to avoid version list drift between clients
 
 ### 2.3 Separate client methods
 
-- [ ] In `client/verifier.rs`: gate all `*_v3()` helper methods with
+- [x] In `client/verifier.rs`: gate all `*_v3()` helper methods with
       `#[cfg(feature = "api-v3")]`
-- [ ] In `client/verifier.rs`: gate v2.x fallback paths with
+- [x] In `client/verifier.rs`: gate v2.x fallback paths with
       `#[cfg(feature = "api-v2")]`
+- [x] Restructure 6 public methods (`get_agent`, `delete_agent`, `reactivate_agent`,
+      `list_agents`, `get_bulk_info`, `add_runtime_policy`) with `#[cfg]` blocks
 - [ ] Apply the same pattern to `client/registrar.rs`
 - [ ] Ensure methods that currently lack v3 fallback (`update_runtime_policy`,
       `delete_runtime_policy`, `list_runtime_policies`, MB policy equivalents) are
@@ -262,28 +264,29 @@ approach before committing to the per-method gating described below.
 
 ### 2.4 Separate command-level logic
 
-- [ ] In `commands/agent/attestation.rs`: gate pull-model attestation flow (quote
+- [x] In `commands/agent/attestation.rs`: gate pull-model attestation flow (quote
       request, key exchange, key delivery) behind `#[cfg(feature = "api-v2")]`
-- [ ] In `commands/agent/add.rs`: ensure push-model path works independently when
+- [x] In `commands/agent/add.rs`: ensure push-model path works independently when
       only `api-v3` is enabled
-- [ ] Gate `AddAgentRequest` fields that are v2-only (e.g., `v`, `supported_version`)
-      behind `#[cfg(feature = "api-v2")]`
+- [x] Gate v2-only fields and imports with `#[cfg(feature = "api-v2")]` or
+      `#[cfg_attr(not(feature = "api-v2"), allow(dead_code))]`
 
 ### 2.5 Separate version detection logic
 
-- [ ] In `client/verifier.rs` and `client/registrar.rs`: make version detection
-      conditional -- only probe for versions that are feature-enabled
-- [ ] When only `api-v3` is enabled, skip v2.x detection entirely
-- [ ] When only `api-v2` is enabled, skip v3.x detection entirely
+- [x] In `client/verifier.rs`: make version detection conditional -- 410 Gone
+      match arm gated behind `api-v3`, version probing uses cfg-conditional blocks
+- [ ] Apply the same pattern to `client/registrar.rs`
+- [x] When only `api-v3` is enabled, skip v2.x detection (uses `false` fallback)
+- [x] When only `api-v2` is enabled, skip v3.x detection (uses `false` fallback)
 
 ### 2.6 Testing
 
-- [ ] Add CI matrix entries for: `--features api-v2`, `--features api-v3`,
+- [x] Add CI matrix entries for: `--features api-v2`, `--features api-v3`,
       `--features "api-v2,api-v3"` (default)
-- [ ] Ensure `cargo build` succeeds for all feature combinations
-- [ ] Ensure `cargo test` passes for all combinations
-- [ ] Ensure `cargo clippy` passes for all combinations
-- [ ] Verify `compile_error!` triggers when neither feature is enabled
+- [x] Ensure `cargo build` succeeds for all feature combinations
+- [x] Ensure `cargo test` passes for all combinations (302, 301, 290)
+- [x] Ensure `cargo clippy` passes for all combinations
+- [x] Verify `compile_error!` triggers when neither feature is enabled
 - [ ] Test that gated code is absent from the binary when its feature is disabled
 
 ---
@@ -294,7 +297,7 @@ Make the push model (API 3.x) the recommended and default operational mode.
 
 ### 3.1 Push model `agent add`
 
-- [ ] Remove `#[allow(dead_code)]` from `push_model` field in `AddAgentParams`
+- [x] ~~Remove `#[allow(dead_code)]` from `push_model` field in `AddAgentParams`~~ (Phase 2.4)
 - [ ] Restructure `AddAgentRequest`: make `cloudagent_ip` and `cloudagent_port`
       `Option<String>` / `Option<u16>` (currently mandatory, incompatible with push model)
 - [ ] When `--push-model` is used (or API 3.x is detected), skip the agent contact
