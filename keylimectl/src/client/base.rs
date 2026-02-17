@@ -156,7 +156,17 @@ impl BaseClient {
 
         let mut builder = reqwest::Client::builder()
             .timeout(Duration::from_secs(config.client.timeout))
-            .danger_accept_invalid_hostnames(true); // Required for Keylime certificates
+            .min_tls_version(reqwest::tls::Version::TLS_1_2)
+            .danger_accept_invalid_hostnames(
+                config.tls.accept_invalid_hostnames,
+            );
+
+        if config.tls.accept_invalid_hostnames {
+            warn!(
+                "TLS hostname verification is disabled. \
+                 Set tls.accept_invalid_hostnames = false for stricter security."
+            );
+        }
 
         // Configure TLS
         if !config.tls.verify_server_cert {
@@ -339,6 +349,7 @@ mod tests {
                 trusted_ca: vec![],
                 verify_server_cert: false, // Disable for testing
                 enable_agent_mtls: true,
+                accept_invalid_hostnames: true,
             },
             client: ClientConfig {
                 timeout: 30,

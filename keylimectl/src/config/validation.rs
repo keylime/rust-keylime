@@ -183,6 +183,7 @@ pub fn validate_network_config(
 ///     trusted_ca: vec![],
 ///     verify_server_cert: true,
 ///     enable_agent_mtls: true,
+///     accept_invalid_hostnames: true,
 /// };
 ///
 /// validation::validate_tls_config(&tls)?;
@@ -406,6 +407,7 @@ mod tests {
             trusted_ca: vec![],
             verify_server_cert: true,
             enable_agent_mtls: true,
+            accept_invalid_hostnames: true,
         }
     }
 
@@ -490,6 +492,7 @@ mod tests {
             trusted_ca: vec![],
             verify_server_cert: true,
             enable_agent_mtls: true,
+            accept_invalid_hostnames: true,
         };
 
         let result = validate_tls_config(&tls);
@@ -505,6 +508,7 @@ mod tests {
             trusted_ca: vec![],
             verify_server_cert: true,
             enable_agent_mtls: true,
+            accept_invalid_hostnames: true,
         };
 
         let result = validate_tls_config(&tls);
@@ -527,6 +531,7 @@ mod tests {
             trusted_ca: vec![],
             verify_server_cert: true,
             enable_agent_mtls: true,
+            accept_invalid_hostnames: true,
         };
 
         let result = validate_tls_config(&tls);
