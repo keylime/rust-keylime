@@ -3,9 +3,11 @@
 
 //! Agent status query command
 
+#[cfg(feature = "api-v2")]
 use crate::client::agent::AgentClient;
 use crate::client::factory;
 use crate::commands::error::CommandError;
+#[cfg(feature = "api-v2")]
 use crate::config::singleton::get_config;
 use crate::output::OutputHandler;
 use serde_json::{json, Value};
@@ -87,6 +89,8 @@ pub(super) async fn get_agent_status(
     }
 
     // Check agent directly if API < 3.0 and we have connection details
+    // This is only applicable for pull model (api-v2)
+    #[cfg(feature = "api-v2")]
     if !registrar_only {
         if let (Some(registrar_data), Some(verifier_data)) = (
             results.get("registrar").and_then(|r| r.get("data")),

@@ -75,6 +75,7 @@ pub enum AgentError {
     NotFound { uuid: String, service: String },
 
     /// Agent operation failed
+    #[cfg_attr(not(feature = "api-v2"), allow(dead_code))]
     #[error("Agent operation failed: {operation} for {uuid} - {reason}")]
     OperationFailed {
         operation: String,
@@ -152,6 +153,7 @@ impl CommandError {
     }
 
     /// Create an agent operation failed error
+    #[cfg_attr(not(feature = "api-v2"), allow(dead_code))]
     pub fn agent_operation_failed<
         U: Into<String>,
         O: Into<String>,

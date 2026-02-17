@@ -62,6 +62,7 @@
 //! ```
 
 mod add;
+#[cfg(feature = "api-v2")]
 mod attestation;
 mod helpers;
 mod reactivate;

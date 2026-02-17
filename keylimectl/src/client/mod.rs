@@ -3,6 +3,7 @@
 
 //! Client implementations for communicating with Keylime services
 
+#[cfg(feature = "api-v2")]
 pub mod agent;
 pub mod base;
 pub mod error;

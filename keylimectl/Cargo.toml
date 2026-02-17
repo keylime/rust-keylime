@@ -12,7 +12,9 @@ name = "keylimectl"
 path = "src/main.rs"
 
 [features]
-default = []
+default = ["api-v2", "api-v3"]
+api-v2 = []
+api-v3 = []
 tpm-quote-validation = ["dep:tss-esapi"]
 
 [dependencies]
