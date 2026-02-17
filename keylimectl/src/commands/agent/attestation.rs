@@ -20,6 +20,7 @@ use log::debug;
 use log::warn;
 use openssl::rand;
 use serde_json::{json, Value};
+use zeroize::Zeroizing;
 
 /// Validation result for TPM quote verification
 #[derive(Debug)]
@@ -140,17 +141,18 @@ pub(super) async fn perform_agent_attestation(
     output.progress("Generating cryptographic keys");
 
     // Generate U and V keys as random bytes (matching Keylime implementation)
-    let mut u_key_bytes = [0u8; 32]; // AES-256 key length
-    let mut v_key_bytes = [0u8; 32]; // AES-256 key length
+    // Wrapped in Zeroizing to clear from memory on drop
+    let mut u_key_bytes = Zeroizing::new([0u8; 32]); // AES-256 key length
+    let mut v_key_bytes = Zeroizing::new([0u8; 32]); // AES-256 key length
 
     // Use OpenSSL's random bytes generator (same as Keylime)
-    rand::rand_bytes(&mut u_key_bytes).map_err(|e| {
+    rand::rand_bytes(u_key_bytes.as_mut()).map_err(|e| {
         CommandError::resource_error(
             "crypto",
             format!("Failed to generate U key: {e}"),
         )
     })?;
-    rand::rand_bytes(&mut v_key_bytes).map_err(|e| {
+    rand::rand_bytes(v_key_bytes.as_mut()).map_err(|e| {
         CommandError::resource_error(
             "crypto",
             format!("Failed to generate V key: {e}"),
@@ -158,7 +160,7 @@ pub(super) async fn perform_agent_attestation(
     })?;
 
     // Compute K key as XOR of U and V (as in Keylime)
-    let mut k_key_bytes = [0u8; 32];
+    let mut k_key_bytes = Zeroizing::new([0u8; 32]);
     for i in 0..32 {
         k_key_bytes[i] = u_key_bytes[i] ^ v_key_bytes[i];
     }
@@ -171,14 +173,15 @@ pub(super) async fn perform_agent_attestation(
 
     // Implement proper RSA encryption using agent's public key
     let encrypted_u =
-        encrypt_u_key_with_agent_pubkey(&u_key_bytes, public_key)?;
-    let auth_tag = crypto::compute_hmac(&k_key_bytes, agent_id.as_bytes())
-        .map_err(|e| {
-            CommandError::resource_error(
-                "crypto",
-                format!("Failed to compute auth tag: {e}"),
-            )
-        })?;
+        encrypt_u_key_with_agent_pubkey(u_key_bytes.as_ref(), public_key)?;
+    let auth_tag =
+        crypto::compute_hmac(k_key_bytes.as_ref(), agent_id.as_bytes())
+            .map_err(|e| {
+                CommandError::resource_error(
+                    "crypto",
+                    format!("Failed to compute auth tag: {e}"),
+                )
+            })?;
 
     output.info("TPM quote verification completed successfully");
 
@@ -186,9 +189,9 @@ pub(super) async fn perform_agent_attestation(
         "quote": quote,
         "public_key": public_key,
         "nonce": nonce,
-        "u_key": STANDARD.encode(u_key_bytes),
-        "v_key": STANDARD.encode(v_key_bytes),
-        "k_key": STANDARD.encode(k_key_bytes),
+        "u_key": STANDARD.encode(u_key_bytes.as_ref()),
+        "v_key": STANDARD.encode(v_key_bytes.as_ref()),
+        "k_key": STANDARD.encode(k_key_bytes.as_ref()),
         "encrypted_u": encrypted_u,
         "auth_tag": hex::encode(auth_tag)
     })))
@@ -272,20 +275,22 @@ pub(super) async fn verify_key_derivation(
             CommandError::resource_error("crypto", "Missing K key")
         })?;
 
-    let k_key = STANDARD.decode(k_key_b64).map_err(|e| {
+    let k_key = Zeroizing::new(STANDARD.decode(k_key_b64).map_err(|e| {
         CommandError::resource_error(
             "crypto",
             format!("Failed to decode K key: {e}"),
         )
-    })?;
+    })?);
 
-    let expected_hmac = crypto::compute_hmac(&k_key, challenge.as_bytes())
-        .map_err(|e| {
-            CommandError::resource_error(
-                "crypto",
-                format!("Failed to compute expected HMAC: {e}"),
-            )
-        })?;
+    let expected_hmac =
+        crypto::compute_hmac(k_key.as_ref(), challenge.as_bytes()).map_err(
+            |e| {
+                CommandError::resource_error(
+                    "crypto",
+                    format!("Failed to compute expected HMAC: {e}"),
+                )
+            },
+        )?;
     let expected_hmac_b64 = STANDARD.encode(&expected_hmac);
 
     output.progress("Sending verification challenge to agent");
