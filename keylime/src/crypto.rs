@@ -10,7 +10,7 @@ use base64::{engine::general_purpose, Engine as _};
 use log::*;
 use openssl::{
     ec::{EcGroupRef, EcKey},
-    encrypt::Decrypter,
+    encrypt::{Decrypter, Encrypter},
     hash::MessageDigest,
     memcmp,
     nid::Nid,
@@ -180,6 +180,17 @@ pub enum CryptoError {
         message: String,
         source: openssl::error::ErrorStack,
     },
+
+    /// RSA OAEP encrypt error
+    #[error("RSA OAEP encrypt error: {message}")]
+    RSAOAEPEncryptError {
+        message: String,
+        source: openssl::error::ErrorStack,
+    },
+
+    /// Error decoding public key from PEM
+    #[error("failed to decode public key from PEM")]
+    PublicKeyFromPEMError(#[source] openssl::error::ErrorStack),
 
     /// Error signing data
     #[error("failed to sign data: {message}")]
@@ -802,6 +813,14 @@ fn pkey_pub_from_priv(
     }
 }
 
+/// Import an RSA or EC public key from PEM format
+///
+/// This is the inverse of `pkey_pub_to_pem()`.
+pub fn pkey_pub_from_pem(pem: &str) -> Result<PKey<Public>, CryptoError> {
+    PKey::<Public>::public_key_from_pem(pem.as_bytes())
+        .map_err(CryptoError::PublicKeyFromPEMError)
+}
+
 pub fn pkey_pub_to_pem(pubkey: &PKey<Public>) -> Result<String, CryptoError> {
     pubkey
         .public_key_to_pem()
@@ -1029,6 +1048,66 @@ pub fn rsa_oaep_decrypt(
 }
 
 /*
+ * Inputs: OpenSSL RSA public key
+ *         plaintext to be encrypted
+ * Output: encrypted ciphertext
+ *
+ * Take in plaintext and an RSA public key and encrypt the
+ * plaintext based on PKCS1 OAEP. This is the inverse of rsa_oaep_decrypt.
+ */
+pub fn rsa_oaep_encrypt(
+    pub_key: &PKey<Public>,
+    data: &[u8],
+) -> Result<Vec<u8>, CryptoError> {
+    let mut encrypter = Encrypter::new(pub_key).map_err(|source| {
+        CryptoError::RSAOAEPEncryptError {
+            message: "failed to create RSA encrypter object".into(),
+            source,
+        }
+    })?;
+
+    encrypter
+        .set_rsa_padding(Padding::PKCS1_OAEP)
+        .map_err(|source| CryptoError::RSAOAEPEncryptError {
+            message: "failed to set RSA encrypter padding".into(),
+            source,
+        })?;
+    encrypter
+        .set_rsa_mgf1_md(MessageDigest::sha1())
+        .map_err(|source| CryptoError::RSAOAEPEncryptError {
+            message: "failed to set RSA encrypter MGF1 digest".into(),
+            source,
+        })?;
+    encrypter
+        .set_rsa_oaep_md(MessageDigest::sha1())
+        .map_err(|source| CryptoError::RSAOAEPEncryptError {
+            message: "failed to set RSA encrypter OAEP digest".into(),
+            source,
+        })?;
+
+    // Create an output buffer
+    let buffer_len = encrypter.encrypt_len(data).map_err(|source| {
+        CryptoError::RSAOAEPEncryptError {
+            message: "failed to get RSA encrypter output length".into(),
+            source,
+        }
+    })?;
+    let mut encrypted = vec![0; buffer_len];
+
+    // Encrypt and truncate the buffer
+    let encrypted_len =
+        encrypter.encrypt(data, &mut encrypted).map_err(|source| {
+            CryptoError::RSAOAEPEncryptError {
+                message: "failed to encrypt data with RSA OAEP".into(),
+                source,
+            }
+        })?;
+    encrypted.truncate(encrypted_len);
+
+    Ok(encrypted)
+}
+
+/*
  * Inputs: secret key
  *        message to sign
  * Output: signed HMAC result
@@ -1129,7 +1208,6 @@ pub fn decrypt_aead(key: &[u8], data: &[u8]) -> Result<Vec<u8>, CryptoError> {
 
 pub mod testing {
     use super::*;
-    use openssl::encrypt::Encrypter;
     use std::path::{Path, PathBuf};
 
     #[derive(Error, Debug)]
@@ -1163,29 +1241,15 @@ pub mod testing {
     pub fn pkey_pub_from_pem(
         pem: &str,
     ) -> Result<PKey<Public>, CryptoTestError> {
-        PKey::<Public>::public_key_from_pem(pem.as_bytes())
-            .map_err(CryptoTestError::OpenSSLError)
+        super::pkey_pub_from_pem(pem).map_err(CryptoTestError::CryptoError)
     }
 
     pub fn rsa_oaep_encrypt(
         pub_key: &PKey<Public>,
         data: &[u8],
     ) -> Result<Vec<u8>, CryptoTestError> {
-        let mut encrypter = Encrypter::new(pub_key)?;
-
-        encrypter.set_rsa_padding(Padding::PKCS1_OAEP)?;
-        encrypter.set_rsa_mgf1_md(MessageDigest::sha1())?;
-        encrypter.set_rsa_oaep_md(MessageDigest::sha1())?;
-
-        // Create an output buffer
-        let buffer_len = encrypter.encrypt_len(data)?;
-        let mut encrypted = vec![0; buffer_len];
-
-        // Encrypt and truncate the buffer
-        let encrypted_len = encrypter.encrypt(data, &mut encrypted)?;
-        encrypted.truncate(encrypted_len);
-
-        Ok(encrypted)
+        super::rsa_oaep_encrypt(pub_key, data)
+            .map_err(CryptoTestError::CryptoError)
     }
 
     pub fn encrypt_aead(
@@ -2046,5 +2110,39 @@ mod tests {
         let validation =
             validate_key_algorithm(&private_key, EncryptionAlgorithm::Ecc256);
         assert!(validation.is_ok(), "Generated key should be ECC 256");
+    }
+
+    #[test]
+    fn test_rsa_oaep_encrypt_decrypt_roundtrip() {
+        let (pub_key, priv_key) = rsa_generate_pair(2048).unwrap(); //#[allow_ci]
+        let plaintext = b"test data for RSA-OAEP roundtrip";
+
+        let encrypted = rsa_oaep_encrypt(&pub_key, plaintext).unwrap(); //#[allow_ci]
+        assert_ne!(
+            &encrypted[..],
+            plaintext,
+            "Encrypted data should differ from plaintext"
+        );
+
+        let decrypted = rsa_oaep_decrypt(&priv_key, &encrypted).unwrap(); //#[allow_ci]
+        assert_eq!(
+            &decrypted[..],
+            plaintext,
+            "Decrypted data should match original plaintext"
+        );
+    }
+
+    #[test]
+    fn test_pkey_pub_from_pem_roundtrip() {
+        let (pub_key, _) = rsa_generate_pair(2048).unwrap(); //#[allow_ci]
+
+        let pem = pkey_pub_to_pem(&pub_key).unwrap(); //#[allow_ci]
+        let reimported = pkey_pub_from_pem(&pem).unwrap(); //#[allow_ci]
+        let pem2 = pkey_pub_to_pem(&reimported).unwrap(); //#[allow_ci]
+
+        assert_eq!(
+            pem, pem2,
+            "PEM roundtrip should produce identical output"
+        );
     }
 }
