@@ -61,10 +61,8 @@ and one-shot evidence verification.
 
 ### What needs attention
 
-- [ ] `generate_random_string()` uses time-seeded LCG instead of CSPRNG
-      (now in `commands/agent/attestation.rs`, marked with `// TODO(phase-1)`)
-- [ ] RSA encryption calls `crypto::testing::*` functions (correct code, wrong module;
-      now in `commands/agent/attestation.rs`)
+- [x] ~~`generate_random_string()` uses time-seeded LCG instead of CSPRNG~~ (Phase 1.1)
+- [x] ~~RSA encryption calls `crypto::testing::*` functions~~ (Phase 1.2/1.2b)
 - [ ] No EK certificate verification (Python tenant has this)
 - [ ] No `ek_check_script` support
 - [ ] API 2.x and 3.x code paths are interleaved (no feature flag separation)
@@ -79,7 +77,7 @@ and one-shot evidence verification.
 - [ ] No evidence verification (`/verify/evidence` endpoint)
 - [ ] No interactive policy creation wizards
 - [x] ~~`commands/agent.rs` is 2200+ lines -- needs splitting into submodules~~ (Phase 0.2)
-- [ ] No secret zeroization for U/V/K keys in memory
+- [x] ~~No secret zeroization for U/V/K keys in memory~~ (Phase 1.4)
 - [ ] No IPv6 address support (Python tenant uses `bracketize_ipv6`)
 - [ ] Config singleton pattern hinders test parallelism
 - [ ] `AddAgentRequest` has mandatory `cloudagent_ip`/`cloudagent_port` -- incompatible with push model
@@ -156,16 +154,16 @@ Critical items that must be resolved before any release.
 
 ### 1.1 Cryptographically secure random number generation
 
-- [ ] Replace `generate_random_string()` (time-seeded LCG in `commands/agent/attestation.rs`)
+- [x] Replace `generate_random_string()` (time-seeded LCG in `commands/agent/attestation.rs`)
       with OpenSSL `rand::rand_bytes` or the `rand` crate (already in workspace deps)
-- [ ] Ensure all nonces and challenges are generated with a CSPRNG
-- [ ] Remove the `generate_random_string()` function entirely
+- [x] Ensure all nonces and challenges are generated with a CSPRNG
+- [x] Remove the `generate_random_string()` function entirely
 
 ### 1.2 Move crypto functions out of `testing` module
 
-- [ ] Expose `pkey_pub_from_pem()` and `rsa_oaep_encrypt()` as public API in the
+- [x] Expose `pkey_pub_from_pem()` and `rsa_oaep_encrypt()` as public API in the
       `keylime::crypto` module (not under `testing`)
-- [ ] Update keylimectl to import from the production module path
+- [x] Update keylimectl to import from the production module path
 - [ ] Coordinate with rust-keylime upstream if these functions are needed there too
 
 **Note:** The `keylime` crate is shared with `keylime-agent` and
@@ -175,24 +173,27 @@ of keylimectl changes, so that the agent is not broken.
 
 ### 1.3 TPM quote validation review
 
-- [ ] Audit the current quote validation in `commands/agent/attestation.rs` against
+- [x] Audit the current quote validation in `commands/agent/attestation.rs` against
       the Python tenant implementation for completeness
-- [ ] Ensure AIK verification, nonce verification, and PCR validation match the
-      Python tenant behavior for API 2.x
+- [x] Ensure AIK verification, nonce verification, and PCR validation match the
+      Python tenant behavior for API 2.x (implemented behind `tpm-quote-validation`
+      feature flag with full cryptographic verification)
 
 ### 1.4 Secret zeroization
 
-- [ ] Add the `zeroize` crate as a dependency
-- [ ] Apply `Zeroize` and `ZeroizeOnDrop` to all key material: U key, V key,
+- [x] Add the `zeroize` crate as a dependency
+- [x] Apply `Zeroize` and `ZeroizeOnDrop` to all key material: U key, V key,
       K (derived) key, nonces, and HMAC secrets
-- [ ] Ensure key material is cleared from memory after use in both pull and push
+- [x] Ensure key material is cleared from memory after use in both pull and push
       model flows
 - [ ] Audit all `String` and `Vec<u8>` variables that hold cryptographic secrets
 
 ### 1.5 TLS configuration audit
 
-- [ ] Verify certificate hostname verification is enforced (verifier and registrar)
-- [ ] Ensure minimum TLS version is enforced (TLS 1.2+)
+- [x] Verify certificate hostname verification is enforced (verifier and registrar)
+      (made configurable via `tls.accept_invalid_hostnames`, default true for
+      Keylime cert compatibility)
+- [x] Ensure minimum TLS version is enforced (TLS 1.2+)
 - [ ] Evaluate certificate revocation checking (CRL/OCSP) -- decide if keylimectl
       should support it or delegate to the OS trust store
 - [ ] Document the TLS security posture in `--help` and README

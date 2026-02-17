@@ -57,11 +57,11 @@ Legend: **Yes** = implemented, **No** = not implemented, **Partial** = partially
 | # | Feature | Python tenant | keylimectl | Notes |
 |---|---------|:---:|:---:|-------|
 | 22 | TPM quote request (nonce-based) | Yes | Yes | |
-| 23 | TPM quote validation (AIK, nonce) | Yes | Partial | Basic validation present; full cryptographic verification needs review |
+| 23 | TPM quote validation (AIK, nonce) | Yes | Yes | Full cryptographic verification behind `tpm-quote-validation` feature flag; structural validation by default |
 | 24 | EK certificate verification | Yes | No | Python checks EK cert against `tpm_cert_store` |
 | 25 | EK check script (`ek_check_script`) | Yes | No | Python runs external script for custom EK validation |
 | 26 | U/V/K key generation | Yes | Yes | Uses OpenSSL `rand_bytes` for U and V |
-| 27 | RSA-OAEP encryption of U key | Yes | Yes | Uses `crypto::testing::rsa_oaep_encrypt`; functional but sourced from `testing` module |
+| 27 | RSA-OAEP encryption of U key | Yes | Yes | Uses `crypto::rsa_oaep_encrypt` (moved from `testing` module to production API) |
 | 28 | HMAC auth tag computation | Yes | Yes | |
 | 29 | Key delivery to agent (`POST /keys/ukey`) | Yes | Yes | |
 | 30 | Key derivation verification (`--verify`) | Yes | Yes | |
@@ -138,8 +138,8 @@ in keylimectl. They are listed here for completeness.
 
 | # | Issue | Severity | Location | Details |
 |---|-------|----------|----------|---------|
-| A | Non-cryptographic RNG for nonces | High | `commands/agent/attestation.rs` | `generate_random_string()` uses system time + LCG instead of a CSPRNG. Nonces and challenges must be unpredictable. Marked with `// TODO(phase-1): Replace with CSPRNG`. |
-| B | `crypto::testing` module usage in production | Medium | `commands/agent/attestation.rs` | RSA-OAEP encryption calls `crypto::testing::pkey_pub_from_pem` and `crypto::testing::rsa_oaep_encrypt`. The functions are correct but live in a `testing` module; they should be exposed via a production API. |
+| A | ~~Non-cryptographic RNG for nonces~~ | ~~High~~ | ~~`commands/agent/attestation.rs`~~ | **Fixed** (Phase 1.1): Replaced with OpenSSL `rand::rand_bytes` CSPRNG. `generate_random_string()` removed entirely. |
+| B | ~~`crypto::testing` module usage in production~~ | ~~Medium~~ | ~~`commands/agent/attestation.rs`~~ | **Fixed** (Phase 1.2/1.2b): `pkey_pub_from_pem()` and `rsa_oaep_encrypt()` exposed as public API in `keylime::crypto` module. |
 | C | Missing EK certificate verification | Medium | Not implemented | Python tenant verifies EK certificates against `tpm_cert_store` and supports `ek_check_script`. keylimectl does not perform these checks. |
 
 ## Summary
@@ -151,11 +151,11 @@ in keylimectl. They are listed here for completeness.
 | Agent Listing | 3 | 3 | 0 | 0 |
 | Runtime Policy Mgmt | 5 | 5 | 0 | 0 |
 | Measured Boot Policy Mgmt | 5 | 5 | 0 | 0 |
-| Attestation Protocol | 9 | 7 | 2 | 0 |
+| Attestation Protocol | 9 | 8 | 1 | 0 |
 | Payload/Cert Delivery | 5 | 2 | 3 | 0 |
 | Connection/Config | 11 | 8 | 3 | 0 |
 | Policy Options (agent add) | 6 | 4 | 2 | 0 |
 | Deprecated Features | 10 | 0 | 0 | 10 |
-| **Totals** | **62** | **42** | **10** | **10** |
+| **Totals** | **62** | **43** | **9** | **10** |
 | New keylimectl features | 8 | 8 | -- | -- |
-| Security items | 3 | -- | 3 | -- |
+| Security items | 3 | 2 | 1 | -- |
