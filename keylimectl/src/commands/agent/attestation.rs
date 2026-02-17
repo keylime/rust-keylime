@@ -16,6 +16,8 @@ use crate::output::OutputHandler;
 use base64::{engine::general_purpose::STANDARD, Engine};
 use keylime::crypto;
 use log::debug;
+#[cfg(not(feature = "tpm-quote-validation"))]
+use log::warn;
 use openssl::rand;
 use serde_json::{json, Value};
 
@@ -331,31 +333,164 @@ fn generate_secure_nonce(num_bytes: usize) -> Result<String, CommandError> {
     Ok(hex::encode(buf))
 }
 
-/// Validate TPM quote against agent's AIK and verify nonce inclusion
+/// Validate TPM quote structure (default: structural checks only)
 ///
-/// This function implements proper TPM quote validation by:
-/// 1. Retrieving the agent's AIK from the registrar
-/// 2. Verifying the quote was signed by the correct AIK
-/// 3. Checking that the provided nonce is correctly included in the quote
-/// 4. Performing basic structural validation of the quote format
+/// # Security Limitations
 ///
-/// # Arguments
-/// * `quote` - Base64-encoded TPM quote from the agent
-/// * `public_key` - Agent's public key from quote response
-/// * `nonce` - Original nonce sent to agent for quote generation
-/// * `registrar_client` - Client for retrieving agent's registered AIK
-/// * `agent_uuid` - UUID of the agent being validated
+/// Without the `tpm-quote-validation` feature, this function performs
+/// **structural validation only**. It does NOT verify:
 ///
-/// # Returns
-/// Returns validation result with detailed information about what was verified
+/// - The cryptographic signature on the TPM quote against the registered AIK
+///   (a full implementation uses `decode_quote_string` to parse the quote,
+///   hashes the `AttestBuffer` with SHA-256, and verifies the signature
+///   using the AIK public key with OpenSSL)
+/// - The nonce via the `TPMS_ATTEST.extraData` field
+///   (a full implementation converts the `AttestBuffer` to `Attest` and
+///   compares `extra_data().value()` with the expected nonce bytes)
+/// - The PCR digest integrity
+///   (a full implementation hashes the selected PCR values and compares
+///   with `QuoteInfo.pcr_digest()`)
+///
+/// Enable the `tpm-quote-validation` cargo feature for full cryptographic
+/// verification following the same logic as `tpm2_checkquote`.
+#[cfg(not(feature = "tpm-quote-validation"))]
 async fn validate_tpm_quote(
     quote: &str,
-    public_key: &str,
+    _public_key: &str,
+    _nonce: &str,
+    registrar_client: &RegistrarClient,
+    agent_id: &str,
+) -> Result<TpmQuoteValidation, CommandError> {
+    // SECURITY: This path performs structural validation only.
+    // Enable the `tpm-quote-validation` cargo feature for full
+    // cryptographic verification of signature, nonce, and PCR digest.
+    warn!(
+        "TPM quote validation uses structural checks only. \
+         Enable the 'tpm-quote-validation' feature for cryptographic verification."
+    );
+    debug!("Starting structural TPM quote validation for agent {agent_id}");
+
+    // Verify agent is registered (ensures registrar is reachable)
+    let agent_data = registrar_client
+        .get_agent(agent_id)
+        .await
+        .map_err(|e| {
+            CommandError::resource_error(
+                "registrar",
+                format!("Failed to get agent: {e}"),
+            )
+        })?
+        .ok_or_else(|| {
+            CommandError::agent_not_found(agent_id.to_string(), "registrar")
+        })?;
+
+    let registered_aik = agent_data["aik_tpm"].as_str().ok_or_else(|| {
+        CommandError::agent_operation_failed(
+            agent_id.to_string(),
+            "aik_validation",
+            "Agent AIK not found in registrar",
+        )
+    })?;
+
+    // Structural check: quote format is r<base64_att>:<base64_sig>:<base64_pcr>
+    if !quote.starts_with('r') {
+        return Ok(TpmQuoteValidation {
+            is_valid: false,
+            nonce_verified: false,
+            aik_verified: false,
+            details: "Quote does not start with expected 'r' prefix"
+                .to_string(),
+        });
+    }
+
+    let quote_parts: Vec<&str> = quote[1..].split(':').collect();
+    if quote_parts.len() < 3 {
+        return Ok(TpmQuoteValidation {
+            is_valid: false,
+            nonce_verified: false,
+            aik_verified: false,
+            details: format!(
+                "Quote has {} colon-separated parts, expected at least 3",
+                quote_parts.len()
+            ),
+        });
+    }
+
+    // Structural check: base64 components decode successfully
+    let labels = ["attestation", "signature", "PCR blob"];
+    for (i, part) in quote_parts.iter().take(3).enumerate() {
+        if STANDARD.decode(part).is_err() {
+            return Ok(TpmQuoteValidation {
+                is_valid: false,
+                nonce_verified: false,
+                aik_verified: false,
+                details: format!(
+                    "Quote {} component is not valid base64",
+                    labels[i]
+                ),
+            });
+        }
+    }
+
+    // Structural check: attestation data has reasonable length
+    let att_bytes = STANDARD.decode(quote_parts[0]).map_err(|e| {
+        CommandError::agent_operation_failed(
+            agent_id.to_string(),
+            "quote_validation",
+            format!("Failed to decode attestation data: {e}"),
+        )
+    })?;
+
+    if att_bytes.len() < 32 {
+        return Ok(TpmQuoteValidation {
+            is_valid: false,
+            nonce_verified: false,
+            aik_verified: false,
+            details: "Attestation data too short to be a valid TPM quote"
+                .to_string(),
+        });
+    }
+
+    let aik_available = !registered_aik.is_empty();
+    let att_len = att_bytes.len();
+    let details = format!(
+        "Structural validation only: {} quote parts, \
+         {att_len} bytes attestation data, \
+         registered AIK available: {aik_available}",
+        quote_parts.len()
+    );
+
+    debug!("TPM quote structural validation result: {details}");
+
+    // SECURITY: nonce_verified and aik_verified are false because structural
+    // validation cannot verify cryptographic properties.
+    Ok(TpmQuoteValidation {
+        is_valid: true,
+        nonce_verified: false,
+        aik_verified: false,
+        details,
+    })
+}
+
+/// Validate TPM quote with full cryptographic verification
+///
+/// This function performs proper TPM quote validation following the same
+/// logic as `tpm2_checkquote`:
+/// 1. Parses the quote using `decode_quote_string`
+/// 2. Verifies the quote signature against the registered AIK using OpenSSL
+/// 3. Verifies the nonce from the `TPMS_ATTEST.extraData` field
+/// 4. Verifies the PCR digest matches the quoted PCR values
+#[cfg(feature = "tpm-quote-validation")]
+async fn validate_tpm_quote(
+    quote: &str,
+    _public_key: &str,
     nonce: &str,
     registrar_client: &RegistrarClient,
     agent_id: &str,
 ) -> Result<TpmQuoteValidation, CommandError> {
-    debug!("Starting TPM quote validation for agent {agent_id}");
+    debug!(
+        "Starting cryptographic TPM quote validation for agent {agent_id}"
+    );
 
     // Step 1: Retrieve agent's registered AIK from registrar
     let agent_data = registrar_client
@@ -379,153 +514,225 @@ async fn validate_tpm_quote(
         )
     })?;
 
-    // Step 2: Parse colon-separated quote format
-    // Keylime TPM quotes are formatted as: quote:signature:additional_data
-    debug!(
-        "Original quote string length: {}, first 50 chars: '{}'",
-        quote.len(),
-        &quote.chars().take(50).collect::<String>()
-    );
-
-    let quote_parts: Vec<&str> = quote.split(':').collect();
-    if quote_parts.is_empty() {
-        return Ok(TpmQuoteValidation {
-            is_valid: false,
-            nonce_verified: false,
-            aik_verified: false,
-            details: "Quote is empty".to_string(),
-        });
-    }
-
-    // Decode the first part (actual TPM quote)
-    let quote_data = quote_parts[0];
-    debug!(
-        "Quote data part length: {}, content: '{}'",
-        quote_data.len(),
-        if quote_data.len() > 100 {
-            format!(
-                "{}...{}",
-                &quote_data[..50],
-                &quote_data[quote_data.len() - 10..]
+    // Step 2: Parse quote using keylime's decode_quote_string
+    let (att, sig, pcrsel, pcrdata) =
+        keylime::tpm::testing::decode_quote_string(quote).map_err(|e| {
+            CommandError::agent_operation_failed(
+                agent_id.to_string(),
+                "quote_validation",
+                format!("Failed to parse TPM quote: {e}"),
             )
-        } else {
-            quote_data.to_string()
-        }
-    );
+        })?;
 
-    // Check for invalid characters around position 179
-    if quote_data.len() > 179 {
-        let char_at_179 = quote_data.chars().nth(179).unwrap_or('?');
-        debug!(
-            "Character at position 179: '{}' (ASCII: {})",
-            char_at_179, char_at_179 as u8
-        );
+    // Step 3: Verify signature against registered AIK using OpenSSL
+    let aik_pubkey =
+        crypto::pkey_pub_from_pem(registered_aik).map_err(|e| {
+            CommandError::resource_error(
+                "crypto",
+                format!("Failed to parse AIK public key: {e}"),
+            )
+        })?;
 
-        // Show context around position 179
-        let start = 179usize.saturating_sub(10);
-        let end = (179usize + 10).min(quote_data.len());
-        let context = &quote_data[start..end];
-        debug!("Context around position 179: '{context}'");
+    let aik_verified =
+        verify_quote_signature(&aik_pubkey, att.value(), &sig)?;
 
-        // Check if there are multiple base64 segments
-        let parts_by_equals: Vec<&str> = quote_data.split("==").collect();
-        debug!("Parts split by '==': {} parts", parts_by_equals.len());
-        for (i, part) in parts_by_equals.iter().enumerate() {
-            debug!(
-                "Part {}: length {}, content: '{}'",
-                i,
-                part.len(),
-                if part.len() > 40 {
-                    format!("{}...", &part[..40])
-                } else {
-                    part.to_string()
-                }
-            );
-        }
-    }
+    // Step 4: Verify nonce from TPMS_ATTEST.extraData
+    let attestation: tss_esapi::structures::Attest =
+        att.try_into().map_err(|e: tss_esapi::Error| {
+            CommandError::agent_operation_failed(
+                agent_id.to_string(),
+                "quote_validation",
+                format!("Failed to parse attestation structure: {e}"),
+            )
+        })?;
 
-    // Handle the 'r' prefix - remove the single 'r' character as documented
-    let quote_data_clean =
-        if let Some(stripped) = quote_data.strip_prefix('r') {
-            debug!("Removing 'r' prefix from quote data");
-            stripped
-        } else {
-            quote_data
-        };
+    let nonce_verified = attestation.extra_data().value() == nonce.as_bytes();
 
-    debug!("Cleaned quote data length: {}", quote_data_clean.len());
+    // Step 5: Verify PCR digest
+    let pcr_digest_ok = verify_pcr_digest(&attestation, &pcrsel, &pcrdata)?;
 
-    // Ensure proper base64 padding (length must be multiple of 4)
-    let quote_data_padded = if quote_data_clean.len() % 4 != 0 {
-        let padding_needed = 4 - (quote_data_clean.len() % 4);
-        let padding = "=".repeat(padding_needed);
-        debug!("Adding {padding_needed} padding characters");
-        format!("{quote_data_clean}{padding}")
-    } else {
-        quote_data_clean.to_string()
-    };
-
-    debug!("Final quote data length: {}", quote_data_padded.len());
-
-    // Try to decode the cleaned and padded quote data
-    let quote_bytes = STANDARD.decode(&quote_data_padded).map_err(|e| {
-        CommandError::agent_operation_failed(
-            agent_id.to_string(),
-            "quote_validation",
-            format!(
-                "Invalid base64 quote data (after cleaning and padding): {e}"
-            ),
-        )
-    })?;
-
-    debug!(
-        "Parsed quote with {} parts, quote data length: {} bytes",
-        quote_parts.len(),
-        quote_bytes.len()
-    );
-
-    if quote_bytes.len() < 32 {
-        return Ok(TpmQuoteValidation {
-            is_valid: false,
-            nonce_verified: false,
-            aik_verified: false,
-            details: "Quote too short to be valid TPM quote".to_string(),
-        });
-    }
-
-    // Step 3: Verify nonce inclusion (simplified check)
-    // In a real implementation, this would parse the TPM quote structure
-    // and extract the nonce from the appropriate field
-    let nonce_bytes = nonce.as_bytes();
-    let nonce_found = quote_bytes
-        .windows(nonce_bytes.len())
-        .any(|window| window == nonce_bytes);
-
-    // Step 4: Verify AIK consistency (simplified check)
-    // In a real implementation, this would:
-    // - Parse the quote's signature
-    // - Verify signature against the registered AIK
-    // - Check certificate chain if available
-    let aik_consistent = public_key.len() > 100; // Basic length check
-
-    // Step 5: Comprehensive validation
-    let is_valid = nonce_found && aik_consistent && !quote_bytes.is_empty();
-
-    let quote_len = quote_bytes.len();
-    let aik_available = !registered_aik.is_empty();
     let details = format!(
-        "Quote parts: {}, Quote length: {quote_len} bytes, Nonce found: {nonce_found}, AIK consistent: {aik_consistent}, Registered AIK available: {aik_available}",
-        quote_parts.len()
+        "Cryptographic validation: signature={aik_verified}, \
+         nonce={nonce_verified}, pcr_digest={pcr_digest_ok}"
     );
 
     debug!("TPM quote validation result: {details}");
 
     Ok(TpmQuoteValidation {
-        is_valid,
-        nonce_verified: nonce_found,
-        aik_verified: aik_consistent,
+        is_valid: aik_verified && nonce_verified && pcr_digest_ok,
+        nonce_verified,
+        aik_verified,
         details,
     })
+}
+
+/// Verify the TPM quote signature using OpenSSL
+///
+/// Supports RSA-SSA (PKCS#1 v1.5) and RSA-PSS signature schemes,
+/// which cover the vast majority of TPM attestation keys.
+#[cfg(feature = "tpm-quote-validation")]
+fn verify_quote_signature(
+    aik_pubkey: &openssl::pkey::PKey<openssl::pkey::Public>,
+    att_data: &[u8],
+    sig: &tss_esapi::structures::Signature,
+) -> Result<bool, CommandError> {
+    use openssl::{rsa::Padding, sign::Verifier};
+    use tss_esapi::structures::Signature as TpmSignature;
+
+    match sig {
+        TpmSignature::RsaSsa(rsa_sig) => {
+            let raw_sig = rsa_sig.signature().value();
+            let md = hash_alg_to_message_digest(rsa_sig.hashing_algorithm())?;
+            let mut verifier =
+                Verifier::new(md, aik_pubkey).map_err(|e| {
+                    CommandError::resource_error(
+                        "crypto",
+                        format!("Failed to create verifier: {e}"),
+                    )
+                })?;
+            verifier.set_rsa_padding(Padding::PKCS1).map_err(|e| {
+                CommandError::resource_error(
+                    "crypto",
+                    format!("Failed to set PKCS1 padding: {e}"),
+                )
+            })?;
+            verifier.update(att_data).map_err(|e| {
+                CommandError::resource_error(
+                    "crypto",
+                    format!("Failed to update verifier: {e}"),
+                )
+            })?;
+            verifier.verify(raw_sig).map_err(|e| {
+                CommandError::resource_error(
+                    "crypto",
+                    format!("Signature verification error: {e}"),
+                )
+            })
+        }
+        TpmSignature::RsaPss(rsa_sig) => {
+            let raw_sig = rsa_sig.signature().value();
+            let md = hash_alg_to_message_digest(rsa_sig.hashing_algorithm())?;
+            let mut verifier =
+                Verifier::new(md, aik_pubkey).map_err(|e| {
+                    CommandError::resource_error(
+                        "crypto",
+                        format!("Failed to create verifier: {e}"),
+                    )
+                })?;
+            verifier.set_rsa_padding(Padding::PKCS1_PSS).map_err(|e| {
+                CommandError::resource_error(
+                    "crypto",
+                    format!("Failed to set PSS padding: {e}"),
+                )
+            })?;
+            verifier.update(att_data).map_err(|e| {
+                CommandError::resource_error(
+                    "crypto",
+                    format!("Failed to update verifier: {e}"),
+                )
+            })?;
+            verifier.verify(raw_sig).map_err(|e| {
+                CommandError::resource_error(
+                    "crypto",
+                    format!("PSS signature verification error: {e}"),
+                )
+            })
+        }
+        _ => Err(CommandError::resource_error(
+            "tpm",
+            format!(
+                "Unsupported TPM signature algorithm: {:?}. \
+                 Only RSA-SSA and RSA-PSS are currently supported.",
+                sig.algorithm()
+            ),
+        )),
+    }
+}
+
+/// Verify PCR digest matches the quoted PCR values
+#[cfg(feature = "tpm-quote-validation")]
+fn verify_pcr_digest(
+    attestation: &tss_esapi::structures::Attest,
+    pcrsel: &tss_esapi::structures::PcrSelectionList,
+    pcrdata: &tss_esapi::abstraction::pcr::PcrData,
+) -> Result<bool, CommandError> {
+    use openssl::hash::{Hasher, MessageDigest};
+    use tss_esapi::{
+        interface_types::algorithm::HashingAlgorithm, structures::AttestInfo,
+    };
+
+    // Get SHA-256 PCR bank
+    let pcrbank =
+        pcrdata.pcr_bank(HashingAlgorithm::Sha256).ok_or_else(|| {
+            CommandError::resource_error(
+                "tpm",
+                "No SHA-256 PCR bank in quote data",
+            )
+        })?;
+
+    // Hash selected PCR values in order
+    let mut hasher = Hasher::new(MessageDigest::sha256()).map_err(|e| {
+        CommandError::resource_error(
+            "crypto",
+            format!("Failed to create hasher: {e}"),
+        )
+    })?;
+
+    for &sel in pcrsel.get_selections() {
+        for i in &sel.selected() {
+            if let Some(digest) = pcrbank.get_digest(*i) {
+                hasher.update(digest.value()).map_err(|e| {
+                    CommandError::resource_error(
+                        "crypto",
+                        format!("Failed to hash PCR value: {e}"),
+                    )
+                })?;
+            }
+        }
+    }
+
+    let computed_digest = hasher.finish().map_err(|e| {
+        CommandError::resource_error(
+            "crypto",
+            format!("Failed to finalize PCR hash: {e}"),
+        )
+    })?;
+
+    // Extract quote info and compare PCR digest
+    let quote_info = match attestation.attested() {
+        AttestInfo::Quote { info } => info,
+        _ => {
+            return Err(CommandError::resource_error(
+                "tpm",
+                format!(
+                    "Expected attestation type Quote, got {:?}",
+                    attestation.attestation_type()
+                ),
+            ))
+        }
+    };
+
+    Ok(quote_info.pcr_digest().value() == computed_digest.as_ref())
+}
+
+/// Convert TSS hashing algorithm to OpenSSL message digest
+#[cfg(feature = "tpm-quote-validation")]
+fn hash_alg_to_message_digest(
+    alg: tss_esapi::interface_types::algorithm::HashingAlgorithm,
+) -> Result<openssl::hash::MessageDigest, CommandError> {
+    use openssl::hash::MessageDigest;
+    use tss_esapi::interface_types::algorithm::HashingAlgorithm;
+
+    match alg {
+        HashingAlgorithm::Sha1 => Ok(MessageDigest::sha1()),
+        HashingAlgorithm::Sha256 => Ok(MessageDigest::sha256()),
+        HashingAlgorithm::Sha384 => Ok(MessageDigest::sha384()),
+        HashingAlgorithm::Sha512 => Ok(MessageDigest::sha512()),
+        _ => Err(CommandError::resource_error(
+            "tpm",
+            format!("Unsupported hash algorithm in TPM signature: {alg:?}"),
+        )),
+    }
 }
 
 /// Encrypt U key using agent's RSA public key with OAEP padding
