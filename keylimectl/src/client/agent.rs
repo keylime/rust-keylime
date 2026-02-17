@@ -66,11 +66,10 @@ use log::{debug, info, warn};
 use reqwest::{Method, StatusCode};
 use serde_json::{json, Value};
 
+use crate::api_versions::SUPPORTED_AGENT_API_VERSIONS;
+
 /// Unknown API version constant for when version detection fails
 const UNKNOWN_API_VERSION: &str = "unknown";
-
-/// Supported API versions for agent communication (all < 3.0)
-const SUPPORTED_AGENT_API_VERSIONS: &[&str] = &["2.0", "2.1", "2.2"];
 
 /// Response structure for agent version endpoint
 #[derive(serde::Deserialize, Debug)]
@@ -342,7 +341,7 @@ impl AgentClient {
 
         Ok(Self {
             base,
-            api_version: "2.1".to_string(), // Default API version
+            api_version: crate::api_versions::DEFAULT_API_VERSION.to_string(),
             agent_ip: agent_ip.to_string(),
             agent_port,
         })

@@ -5,16 +5,21 @@
 //!
 //! Handles both pull model (API 2.x) and push model (API 3.0+) enrollment.
 
+#[cfg(feature = "api-v2")]
 use super::attestation::{
     perform_agent_attestation, perform_key_delivery, verify_key_derivation,
 };
 use super::helpers::{
     load_payload_file, load_policy_file, resolve_tpm_policy_enhanced,
 };
-use super::types::{AddAgentParams, AddAgentRequest};
+use super::types::AddAgentParams;
+#[cfg(feature = "api-v2")]
+use super::types::AddAgentRequest;
+#[cfg(feature = "api-v2")]
 use crate::client::agent::AgentClient;
 use crate::client::factory;
 use crate::commands::error::CommandError;
+#[cfg(feature = "api-v2")]
 use crate::config::singleton::get_config;
 use crate::output::OutputHandler;
 use base64::{engine::general_purpose::STANDARD, Engine};
@@ -141,28 +146,41 @@ pub(super) async fn add_agent(
         })?;
 
     // Step 3: Perform attestation for pull model
-    let attestation_result = if !is_push_model {
-        output.step(3, 4, "Performing TPM attestation (pull model)");
+    #[allow(unused_assignments, unused_variables)]
+    let attestation_result: Option<Value> = if !is_push_model {
+        #[cfg(feature = "api-v2")]
+        {
+            output.step(3, 4, "Performing TPM attestation (pull model)");
 
-        // Create agent client for direct communication
-        let agent_client = AgentClient::builder()
-            .agent_ip(&agent_ip)
-            .agent_port(agent_port)
-            .config(get_config())
-            .build()
-            .await
-            .map_err(|e| {
-                CommandError::resource_error("agent", e.to_string())
-            })?;
+            // Create agent client for direct communication
+            let agent_client = AgentClient::builder()
+                .agent_ip(&agent_ip)
+                .agent_port(agent_port)
+                .config(get_config())
+                .build()
+                .await
+                .map_err(|e| {
+                    CommandError::resource_error("agent", e.to_string())
+                })?;
 
-        // Perform TPM quote verification
-        perform_agent_attestation(
-            &agent_client,
-            &agent_data,
-            params.agent_id,
-            output,
-        )
-        .await?
+            // Perform TPM quote verification
+            perform_agent_attestation(
+                &agent_client,
+                &agent_data,
+                params.agent_id,
+                output,
+            )
+            .await?
+        }
+        #[cfg(not(feature = "api-v2"))]
+        {
+            return Err(CommandError::invalid_parameter(
+                "push_model",
+                "Pull model is not available (api-v2 feature not enabled). \
+                 Use --push-model for API v3.0+ enrollment."
+                    .to_string(),
+            ));
+        }
     } else {
         output.step(3, 4, "Skipping agent attestation (push model)");
         None
@@ -172,6 +190,7 @@ pub(super) async fn add_agent(
     output.step(4, 4, "Enrolling agent with verifier");
 
     // Build the request payload based on API version
+    #[cfg(feature = "api-v2")]
     let cv_agent_ip = params.verifier_ip.unwrap_or(&agent_ip);
 
     // Resolve TPM policy with enhanced precedence handling
@@ -179,6 +198,7 @@ pub(super) async fn add_agent(
         resolve_tpm_policy_enhanced(params.tpm_policy, params.mb_policy)?;
 
     // Build enrollment request with version-appropriate fields
+    #[allow(unused_mut)]
     let mut request = if is_push_model {
         // API 3.0+: Simplified enrollment for push model
         build_push_model_request(
@@ -191,79 +211,91 @@ pub(super) async fn add_agent(
             agent_port,
         )?
     } else {
-        // API 2.x: Full enrollment with direct agent communication
-        let mut request = AddAgentRequest::new(
-            cv_agent_ip.to_string(),
-            agent_port,
-            get_config().verifier.ip.clone(),
-            get_config().verifier.port,
-            tpm_policy,
-        )
-        .with_ak_tpm(agent_data.get("aik_tpm").cloned())
-        .with_mtls_cert(agent_data.get("mtls_cert").cloned())
-        .with_metadata(
-            agent_data
-                .get("metadata")
-                .and_then(|v| v.as_str())
-                .map(|s| s.to_string())
-                .or_else(|| Some("{}".to_string())),
-        ) // Use agent metadata or default
-        .with_ima_sign_verification_keys(
-            agent_data
-                .get("ima_sign_verification_keys")
-                .and_then(|v| v.as_str())
-                .map(|s| s.to_string())
-                .or_else(|| Some("".to_string())),
-        ) // Use agent IMA keys or default
-        .with_revocation_key(
-            agent_data
-                .get("revocation_key")
-                .and_then(|v| v.as_str())
-                .map(|s| s.to_string())
-                .or_else(|| Some("".to_string())),
-        ) // Use agent revocation key or default
-        .with_accept_tpm_hash_algs(Some(vec![
-            "sha256".to_string(),
-            "sha1".to_string(),
-        ])) // Add required TPM hash algorithms
-        .with_accept_tpm_encryption_algs(Some(vec![
-            "rsa".to_string(),
-            "ecc".to_string(),
-        ])) // Add required TPM encryption algorithms
-        .with_accept_tpm_signing_algs(Some(vec![
-            "rsa".to_string(),
-            "ecdsa".to_string(),
-        ])) // Add required TPM signing algorithms
-        .with_supported_version(
-            agent_data
-                .get("supported_version")
-                .and_then(|v| v.as_str())
-                .map(|s| s.to_string())
-                .or_else(|| Some("2.1".to_string())),
-        ) // Use agent supported version or default
-        .with_mb_policy_name(
-            agent_data
-                .get("mb_policy_name")
-                .and_then(|v| v.as_str())
-                .map(|s| s.to_string())
-                .or_else(|| Some("".to_string())),
-        ) // Use agent MB policy name or default
-        .with_mb_policy(
-            agent_data
-                .get("mb_policy")
-                .and_then(|v| v.as_str())
-                .map(|s| s.to_string())
-                .or_else(|| Some("".to_string())),
-        ); // Use agent MB policy or default
+        #[cfg(feature = "api-v2")]
+        {
+            // API 2.x: Full enrollment with direct agent communication
+            let mut request = AddAgentRequest::new(
+                cv_agent_ip.to_string(),
+                agent_port,
+                get_config().verifier.ip.clone(),
+                get_config().verifier.port,
+                tpm_policy,
+            )
+            .with_ak_tpm(agent_data.get("aik_tpm").cloned())
+            .with_mtls_cert(agent_data.get("mtls_cert").cloned())
+            .with_metadata(
+                agent_data
+                    .get("metadata")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string())
+                    .or_else(|| Some("{}".to_string())),
+            ) // Use agent metadata or default
+            .with_ima_sign_verification_keys(
+                agent_data
+                    .get("ima_sign_verification_keys")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string())
+                    .or_else(|| Some("".to_string())),
+            ) // Use agent IMA keys or default
+            .with_revocation_key(
+                agent_data
+                    .get("revocation_key")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string())
+                    .or_else(|| Some("".to_string())),
+            ) // Use agent revocation key or default
+            .with_accept_tpm_hash_algs(Some(vec![
+                "sha256".to_string(),
+                "sha1".to_string(),
+            ])) // Add required TPM hash algorithms
+            .with_accept_tpm_encryption_algs(Some(vec![
+                "rsa".to_string(),
+                "ecc".to_string(),
+            ])) // Add required TPM encryption algorithms
+            .with_accept_tpm_signing_algs(Some(vec![
+                "rsa".to_string(),
+                "ecdsa".to_string(),
+            ])) // Add required TPM signing algorithms
+            .with_supported_version(
+                agent_data
+                    .get("supported_version")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string())
+                    .or_else(|| Some("2.1".to_string())),
+            ) // Use agent supported version or default
+            .with_mb_policy_name(
+                agent_data
+                    .get("mb_policy_name")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string())
+                    .or_else(|| Some("".to_string())),
+            ) // Use agent MB policy name or default
+            .with_mb_policy(
+                agent_data
+                    .get("mb_policy")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string())
+                    .or_else(|| Some("".to_string())),
+            ); // Use agent MB policy or default
 
-        // Add V key from attestation if available
-        if let Some(attestation) = &attestation_result {
-            if let Some(v_key) = attestation.get("v_key") {
-                request = request.with_v_key(Some(v_key.clone()));
+            // Add V key from attestation if available
+            if let Some(attestation) = &attestation_result {
+                if let Some(v_key) = attestation.get("v_key") {
+                    request = request.with_v_key(Some(v_key.clone()));
+                }
             }
-        }
 
-        serde_json::to_value(request)?
+            serde_json::to_value(request)?
+        }
+        #[cfg(not(feature = "api-v2"))]
+        {
+            return Err(CommandError::invalid_parameter(
+                "push_model",
+                "Pull model is not available (api-v2 feature not enabled). \
+                 Use --push-model for API v3.0+ enrollment."
+                    .to_string(),
+            ));
+        }
     };
 
     // Add policies if provided (base64-encoded as expected by verifier)
@@ -313,6 +345,7 @@ pub(super) async fn add_agent(
         })?;
 
     // Step 5: Perform legacy key delivery for API < 3.0
+    #[cfg(feature = "api-v2")]
     if !is_push_model && attestation_result.is_some() {
         let agent_client = AgentClient::builder()
             .agent_ip(&agent_ip)

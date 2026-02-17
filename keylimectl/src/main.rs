@@ -33,6 +33,14 @@
     unused_results
 )]
 
+// Ensure at least one API version feature is enabled
+#[cfg(not(any(feature = "api-v2", feature = "api-v3")))]
+compile_error!(
+    "At least one of the 'api-v2' or 'api-v3' features must be enabled. \
+     Use '--features api-v2' or '--features api-v3' or both."
+);
+
+mod api_versions;
 mod client;
 mod commands;
 mod config;
