@@ -22,6 +22,45 @@ jobs:
     - name: Check for panics
       run: ./tests/nopanic.ci
 
+  keylimectl-features:
+    name: keylimectl feature flags (${{ matrix.features }})
+    runs-on: ubuntu-latest
+    container:
+      image: quay.io/keylime/keylime-ci:latest
+    strategy:
+      fail-fast: false
+      matrix:
+        features:
+          - "api-v2,api-v3"
+          - "api-v2"
+          - "api-v3"
+    steps:
+    - uses: actions/checkout@v6
+    - name: Set git safe.directory for the working directory
+      run: git config --system --add safe.directory "$PWD"
+    - name: Build
+      run: cargo build -p keylimectl --no-default-features --features "${{ matrix.features }}"
+    - name: Test
+      run: cargo test -p keylimectl --no-default-features --features "${{ matrix.features }}"
+    - name: Clippy
+      run: cargo clippy -p keylimectl --all-targets --no-default-features --features "${{ matrix.features }}" -- -D clippy::all
+
+  keylimectl-no-features:
+    name: keylimectl compile_error guard
+    runs-on: ubuntu-latest
+    container:
+      image: quay.io/keylime/keylime-ci:latest
+    steps:
+    - uses: actions/checkout@v6
+    - name: Set git safe.directory for the working directory
+      run: git config --system --add safe.directory "$PWD"
+    - name: Verify compile_error triggers with no features
+      run: |
+        if cargo build -p keylimectl --no-default-features 2>&1; then
+          echo "ERROR: Build should have failed with no features enabled"
+          exit 1
+        fi
+
   tests:
     name: Fedora tests
     runs-on: ubuntu-latest
