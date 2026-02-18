@@ -805,6 +805,7 @@ mod tests {
     /// Create a test configuration for registrar
     fn create_test_config() -> Config {
         Config {
+            loaded_from: None,
             verifier: crate::config::VerifierConfig::default(),
             registrar: RegistrarConfig {
                 ip: "127.0.0.1".to_string(),
