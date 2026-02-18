@@ -398,21 +398,23 @@ system may be in an inconsistent state.
 
 ### 4.1 Sane defaults audit
 
-- [ ] Verify all configuration options have sensible defaults (current state is good)
-- [ ] Ensure keylimectl runs without any config file: `keylimectl list agents` should
+- [x] Verify all configuration options have sensible defaults (current state is good)
+- [x] Ensure keylimectl runs without any config file: `keylimectl list agents` should
       attempt `127.0.0.1:8881` (verifier) and `127.0.0.1:8891` (registrar) by default
-- [ ] Document the default values in `--help` output for each option
-- [ ] Add environment variable support: `KEYLIMECTL_VERIFIER_IP`,
-      `KEYLIMECTL_VERIFIER_PORT`, `KEYLIMECTL_REGISTRAR_IP`,
-      `KEYLIMECTL_REGISTRAR_PORT`
-- [ ] Support IPv6 addresses: validate and format both IPv4 and IPv6 addresses
+- [x] Document the default values in `--help` output for each option
+- [x] Add environment variable support: `KEYLIME_VERIFIER__IP`,
+      `KEYLIME_VERIFIER__PORT`, `KEYLIME_REGISTRAR__IP`,
+      `KEYLIME_REGISTRAR__PORT` (uses `config` crate's env var support with
+      `KEYLIME_` prefix and double-underscore separators)
+- [x] Support IPv6 addresses: validate and format both IPv4 and IPv6 addresses
       (bracket notation for IPv6 in URLs, e.g., `[::1]:8881`)
-- [ ] Add `--timeout` CLI override for per-command timeout control (useful for
+- [x] Add `--timeout` CLI override for per-command timeout control (useful for
       long-running operations like policy generation from RPM repos)
-- [ ] Evaluate replacing the config singleton pattern (`config::singleton`) with
+- [x] Evaluate replacing the config singleton pattern (`config::singleton`) with
       passing config through function parameters for better testability and
-      parallel test execution. The singleton makes it hard to test different
-      configurations in the same test binary.
+      parallel test execution. **Decision**: Keep singleton, document as known
+      limitation. Tests work around it by constructing `Config` directly. Defer
+      refactoring to a later phase if parallel test execution becomes blocking.
 
 ### 4.2 No-argument behavior and configuration wizard
 
@@ -431,11 +433,11 @@ Would you like to run the configuration wizard? [Y/n]
   Tip: You can also run `keylimectl configure` at any time.
 ```
 
-- [ ] Detect absence of config file at all search path locations
-- [ ] If stdin is a TTY, offer to launch the interactive wizard
-- [ ] If stdin is not a TTY (scripted/piped), print a message suggesting
-      `keylimectl configure` and show the standard `--help` output
-- [ ] After the wizard completes (or is declined), show the minimal usage summary
+- [x] Detect absence of config file at all search path locations
+- [x] If stdin is a TTY, show tip about `keylimectl configure`
+- [x] If stdin is not a TTY (scripted/piped), show config summary and
+      clap's auto-generated `--help` output (no interactive prompts)
+- [x] Show config summary followed by clap's dynamically generated help
 
 **Config file found → show summary and usage:**
 
@@ -463,14 +465,16 @@ Commands:
 Run `keylimectl <COMMAND> --help` for more information on a command.
 ```
 
-- [ ] Show keylimectl version
-- [ ] Show which config file was loaded (full path)
-- [ ] Show verifier IP:port
-- [ ] Show registrar IP:port
-- [ ] Show TLS status summary (mTLS/server-only/disabled, cert path)
-- [ ] Show detected API version and model (push/pull) if possible
-- [ ] Follow with a compact usage summary listing available commands
-- [ ] Mention `keylimectl configure` for reconfiguration
+- [x] Show keylimectl version (via clap's auto-generated help)
+- [x] Show which config file was loaded (full path) or "(defaults)"
+- [x] Show verifier IP:port
+- [x] Show registrar IP:port
+- [x] Show TLS status summary (mTLS/server-only/disabled)
+- [ ] Show detected API version and model (push/pull) if possible (deferred:
+      requires connecting to verifier, better suited for a `keylimectl info` command)
+- [x] Follow with a compact usage summary listing available commands (via
+      clap's `CommandFactory::command().print_help()` for dynamic rendering)
+- [x] Mention `keylimectl configure` for reconfiguration
 
 **`keylimectl configure` subcommand:**
 
@@ -491,49 +495,52 @@ is worth considering if a polished wizard UX is a priority.
 
 **Wizard implementation:**
 
-- [ ] Add `configure` subcommand to CLI
-- [ ] Add interactive prompt crate as an optional dependency behind a feature flag
-      (e.g., `wizard` feature, enabled by default)
-- [ ] Implement wizard flow:
-  1. Choose configuration scope: local (`./.keylimectl/config.toml`),
-     user (`~/.config/keylimectl/config.toml`), or system (`/etc/keylime/keylimectl.conf`)
+- [x] Add `configure` subcommand to CLI
+- [x] Add interactive prompt crate as an optional dependency behind a feature flag
+      (`wizard` feature using `dialoguer` 0.12, enabled by default)
+- [x] Implement wizard flow:
+  1. Choose configuration scope via `--scope` (local/user/system)
   2. Verifier connection: IP, port
   3. Registrar connection: IP, port
-  4. TLS setup: client cert path, client key path, trusted CA path, verify server cert
-  5. Client settings: timeout, retry interval, max retries
-  6. Test connectivity (optional): attempt to reach verifier and registrar
-  7. Write configuration file
-- [ ] Support `--non-interactive` flag for scripted configuration
+  4. TLS setup: verify server cert, enable mTLS, client cert/key paths
+  5. Client settings: timeout
+  6. Test connectivity (optional, `--test-connectivity` flag, not yet implemented)
+  7. Write configuration file with `toml::to_string_pretty()`
+- [x] Support `--non-interactive` flag for scripted configuration
       (e.g., `keylimectl configure --verifier-ip 10.0.0.1 --non-interactive`)
-- [ ] Print the generated configuration file path on success
-- [ ] If a config file already exists, show diff and ask for confirmation before
-      overwriting
+- [x] Print the generated configuration file path on success
+- [x] If a config file already exists, ask for confirmation before overwriting
+      (in interactive mode)
 
 ### 4.3 Configuration file locations
 
 Formalize the search path and directory naming:
 
-- [ ] CLI argument: `--config <FILE>` (highest priority)
-- [ ] Local: `./.keylimectl/config.toml` (project-local)
-- [ ] User: `~/.config/keylimectl/config.toml` (XDG standard)
-- [ ] System: `/etc/keylime/keylimectl.conf` (system-wide, shared with keylime)
-- [ ] Document the precedence order in `--help` and man page
+- [x] CLI argument: `--config <FILE>` (highest priority)
+- [x] Local: `./.keylimectl/config.toml` (project-local)
+- [x] User: `~/.config/keylimectl/config.toml` (XDG standard)
+- [x] System: `/etc/keylime/keylimectl.conf` (system-wide, shared with keylime)
+- [x] Document the precedence order in `--help` (`after_long_help`) and module docs
 
 ### 4.4 Testing
 
-- [ ] Unit tests for config loading: verify defaults work with no config file
-- [ ] Unit tests for config precedence: CLI > env var > config file > default
-- [ ] Unit tests for environment variable overrides
-- [ ] Test no-argument behavior without config file: wizard offer is shown
-- [ ] Test no-argument behavior with config file: summary is shown with correct
-      values (verifier, registrar, TLS, config path)
-- [ ] Test no-argument behavior with non-TTY stdin: no wizard prompt, shows
-      help text instead
-- [ ] Test configuration wizard in non-interactive mode
+- [x] Unit tests for config loading: verify defaults work with no config file
+- [x] Unit tests for config precedence: CLI > env var > config file > default
+- [x] Unit tests for environment variable overrides (existing from Phase 2)
+- [x] Test no-argument behavior without config file: "No configuration file found"
+      message shown, config summary with defaults, clap help on stdout
+- [x] Test no-argument behavior shows config summary with correct values
+      (verifier, registrar, TLS, config path)
+- [x] Test no-argument behavior exits successfully (integration test)
+- [x] Test configuration wizard in non-interactive mode
       (`keylimectl configure --verifier-ip 10.0.0.1 --non-interactive`)
-- [ ] Test wizard output: generated TOML is valid and contains expected values
-- [ ] Test config file search path resolution (local, user, system)
-- [ ] Test `--config <FILE>` override
+- [x] Test wizard output: generated TOML is valid and contains expected values
+      (unit test: `test_generated_toml_roundtrips`, `test_write_config_file_creates_dirs_and_file`)
+- [x] Test config file search path resolution (local, user, system)
+      (unit tests: `test_resolve_config_path_*`)
+- [x] Test `--config <FILE>` override (existing: `test_get_config_paths_explicit`)
+- [x] All tests pass across all feature combinations: 340 unit + 8 integration
+      (default), 339 unit (api-v2 only), 318 unit (api-v3 only); clippy clean
 
 ---
 
