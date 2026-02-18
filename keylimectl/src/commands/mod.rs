@@ -9,3 +9,4 @@ pub mod error;
 pub mod info;
 pub mod measured_boot;
 pub mod policy;
+pub mod verify;

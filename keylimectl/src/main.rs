@@ -46,6 +46,7 @@ mod commands;
 mod config;
 mod error;
 mod output;
+mod policy_tools;
 
 use anyhow::Result;
 use clap::{CommandFactory, Parser, Subcommand};
@@ -149,6 +150,11 @@ enum Commands {
     Info {
         #[command(subcommand)]
         subcommand: Option<InfoSubcommand>,
+    },
+    /// Verify attestation evidence against a verifier
+    Verify {
+        #[command(subcommand)]
+        action: VerifyAction,
     },
     /// Create or update a configuration file
     Configure {
@@ -322,14 +328,14 @@ enum PolicyAction {
         file: String,
     },
 
-    /// Show a runtime policy
+    /// Show a runtime policy from the verifier
     Show {
         /// Policy name
         #[arg(value_name = "NAME")]
         name: String,
     },
 
-    /// Update an existing runtime policy
+    /// Update an existing runtime policy on the verifier
     Update {
         /// Policy name
         #[arg(value_name = "NAME")]
@@ -340,7 +346,7 @@ enum PolicyAction {
         file: String,
     },
 
-    /// Delete a runtime policy
+    /// Delete a runtime policy from the verifier
     Delete {
         /// Policy name
         #[arg(value_name = "NAME")]
@@ -349,6 +355,208 @@ enum PolicyAction {
 
     /// List all runtime policies
     List,
+
+    /// Generate a policy locally from input sources
+    Generate {
+        #[command(subcommand)]
+        subcommand: GenerateSubcommand,
+    },
+
+    /// Sign a policy file using DSSE
+    Sign {
+        /// Policy file to sign
+        #[arg(value_name = "FILE")]
+        file: String,
+
+        /// Private key file to sign with (generates new key if omitted)
+        #[arg(short, long, value_name = "FILE")]
+        keyfile: Option<String>,
+
+        /// Path to save generated private key
+        #[arg(short = 'p', long, value_name = "PATH")]
+        keypath: Option<String>,
+
+        /// Signing backend
+        #[arg(short, long, value_enum, default_value = "ecdsa")]
+        backend: SigningBackend,
+
+        /// Output file for signed policy
+        #[arg(short, long, value_name = "FILE")]
+        output: Option<String>,
+
+        /// Output file for X.509 certificate (x509 backend only)
+        #[arg(short = 'c', long, value_name = "FILE")]
+        cert_outfile: Option<String>,
+    },
+
+    /// Verify the DSSE signature on a signed policy
+    VerifySignature {
+        /// Signed policy file to verify
+        #[arg(value_name = "FILE")]
+        file: String,
+
+        /// Public key or certificate file to verify against
+        #[arg(short, long, value_name = "FILE")]
+        key: String,
+    },
+
+    /// Validate a policy file structure and content
+    Validate {
+        /// Policy file to validate
+        #[arg(value_name = "FILE")]
+        file: String,
+
+        /// Policy type (auto-detected if omitted)
+        #[arg(
+            short = 't',
+            long,
+            value_name = "TYPE",
+            value_parser = ["runtime", "measured-boot", "tpm"]
+        )]
+        policy_type: Option<String>,
+
+        /// Also verify DSSE signature using this key
+        #[arg(short = 's', long, value_name = "FILE")]
+        signature_key: Option<String>,
+    },
+
+    /// Convert a legacy allowlist to the current policy format
+    Convert {
+        /// Input allowlist or policy file
+        #[arg(value_name = "FILE")]
+        file: String,
+
+        /// Output file (required)
+        #[arg(short, long, value_name = "FILE")]
+        output: String,
+
+        /// Exclude list file to merge
+        #[arg(short, long, value_name = "FILE")]
+        excludelist: Option<String>,
+
+        /// Verification key files to add
+        #[arg(short = 'v', long, value_name = "FILES")]
+        verification_keys: Option<String>,
+    },
+}
+
+/// Policy generation subcommands
+#[derive(Subcommand)]
+enum GenerateSubcommand {
+    /// Generate a runtime policy from IMA logs, allowlists, or filesystem
+    Runtime {
+        /// IMA measurement list path
+        #[arg(
+            short = 'm',
+            long,
+            value_name = "FILE",
+            default_value = "/sys/kernel/security/ima/ascii_runtime_measurements"
+        )]
+        ima_measurement_list: Option<String>,
+
+        /// Plain-text allowlist file
+        #[arg(short, long, value_name = "FILE")]
+        allowlist: Option<String>,
+
+        /// Root filesystem path to scan
+        #[arg(long, value_name = "PATH")]
+        rootfs: Option<String>,
+
+        /// Paths to skip during filesystem scan (repeatable)
+        #[arg(long, value_name = "PATH")]
+        skip_path: Vec<String>,
+
+        /// Base policy to merge into
+        #[arg(short = 'B', long, value_name = "FILE")]
+        base_policy: Option<String>,
+
+        /// IMA exclude list file
+        #[arg(short, long, value_name = "FILE")]
+        excludelist: Option<String>,
+
+        /// Output file (stdout if omitted)
+        #[arg(short, long, value_name = "FILE")]
+        output: Option<String>,
+
+        /// Include keyrings entries
+        #[arg(short, long)]
+        keyrings: bool,
+
+        /// Include ima-buf entries
+        #[arg(long)]
+        ima_buf: bool,
+
+        /// Keyrings to ignore (repeatable)
+        #[arg(short, long, value_name = "KEYRING")]
+        ignored_keyrings: Vec<String>,
+
+        /// Add IMA signature verification key (repeatable)
+        #[arg(short = 'A', long, value_name = "FILE")]
+        add_ima_signature_verification_key: Vec<String>,
+
+        /// Hash algorithm (auto-detected if omitted)
+        #[arg(long, value_name = "ALG")]
+        hash_alg: Option<String>,
+    },
+
+    /// Generate a measured boot policy from a UEFI event log
+    MeasuredBoot {
+        /// UEFI event log file
+        #[arg(
+            long,
+            value_name = "FILE",
+            default_value = "/sys/kernel/security/tpm0/binary_bios_measurements"
+        )]
+        eventlog_file: String,
+
+        /// Generate policy without Secure Boot variables
+        #[arg(long)]
+        without_secureboot: bool,
+
+        /// Output file (stdout if omitted)
+        #[arg(short, long, value_name = "FILE")]
+        output: Option<String>,
+    },
+
+    /// Generate a TPM policy from PCR values
+    Tpm {
+        /// Read PCR values from file (one per line)
+        #[arg(long, value_name = "FILE", group = "pcr_source")]
+        pcr_file: Option<String>,
+
+        /// Read PCR values from local TPM (requires tpm-local feature)
+        #[arg(long, group = "pcr_source")]
+        from_tpm: bool,
+
+        /// PCR indices to include (comma-separated, e.g., "0,1,2,7")
+        #[arg(
+            long,
+            value_name = "INDICES",
+            default_value = "0,1,2,3,4,5,6,7"
+        )]
+        pcrs: String,
+
+        /// PCR mask (overrides --pcrs, e.g., "0x408000")
+        #[arg(long, value_name = "MASK")]
+        mask: Option<String>,
+
+        /// Hash algorithm
+        #[arg(long, value_name = "ALG", default_value = "sha256")]
+        hash_alg: String,
+
+        /// Output file (stdout if omitted)
+        #[arg(short, long, value_name = "FILE")]
+        output: Option<String>,
+    },
+}
+
+/// Signing backend for policy signing
+#[derive(Clone, Debug, clap::ValueEnum)]
+enum SigningBackend {
+    /// ECDSA P-256 signing (default)
+    Ecdsa,
+    /// X.509 certificate-based signing
+    X509,
 }
 
 /// Measured boot policy actions
@@ -420,6 +628,62 @@ enum InfoSubcommand {
     },
     /// Validate TLS certificates and test connectivity
     Tls,
+}
+
+/// Evidence verification actions
+#[derive(Subcommand)]
+enum VerifyAction {
+    /// Verify TPM or TEE attestation evidence
+    Evidence {
+        /// Nonce used for the quote
+        #[arg(long, value_name = "NONCE")]
+        nonce: String,
+
+        /// TPM quote file
+        #[arg(long, value_name = "FILE")]
+        quote: String,
+
+        /// Hash algorithm
+        #[arg(long, value_name = "ALG", default_value = "sha256")]
+        hash_alg: String,
+
+        /// TPM Attestation Key (AK) file
+        #[arg(long, value_name = "FILE")]
+        tpm_ak: String,
+
+        /// TPM Endorsement Key (EK) file
+        #[arg(long, value_name = "FILE")]
+        tpm_ek: String,
+
+        /// Runtime policy file
+        #[arg(long, value_name = "FILE")]
+        runtime_policy: Option<String>,
+
+        /// IMA measurement list file
+        #[arg(long, value_name = "FILE")]
+        ima_measurement_list: Option<String>,
+
+        /// Measured boot policy file
+        #[arg(long, value_name = "FILE")]
+        mb_policy: Option<String>,
+
+        /// Measured boot log file
+        #[arg(long, value_name = "FILE")]
+        mb_log: Option<String>,
+
+        /// TPM policy file
+        #[arg(long, value_name = "FILE")]
+        tpm_policy: Option<String>,
+
+        /// Evidence type
+        #[arg(
+            long,
+            value_name = "TYPE",
+            default_value = "tpm",
+            value_parser = ["tpm", "tee"]
+        )]
+        evidence_type: String,
+    },
 }
 
 #[tokio::main]
@@ -627,6 +891,9 @@ async fn execute_command(
         }
         Commands::Info { subcommand } => {
             commands::info::execute(subcommand, output).await
+        }
+        Commands::Verify { action } => {
+            commands::verify::execute(action, output).await
         }
         Commands::Configure {
             non_interactive,
