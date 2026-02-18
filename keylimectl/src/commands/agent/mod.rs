@@ -322,6 +322,7 @@ mod tests {
     /// Create a test configuration for agent operations
     fn create_test_config() -> Config {
         Config {
+            loaded_from: None,
             verifier: VerifierConfig {
                 ip: "127.0.0.1".to_string(),
                 port: 8881,

@@ -12,10 +12,11 @@ name = "keylimectl"
 path = "src/main.rs"
 
 [features]
-default = ["api-v2", "api-v3"]
+default = ["api-v2", "api-v3", "wizard"]
 api-v2 = []
 api-v3 = []
 tpm-quote-validation = ["dep:tss-esapi"]
+wizard = ["dep:dialoguer"]
 
 [dependencies]
 anyhow.workspace = true
@@ -36,6 +37,8 @@ thiserror.workspace = true
 tokio = {workspace = true, features = ["rt-multi-thread"]}
 tss-esapi = {workspace = true, optional = true}
 uuid.workspace = true
+dialoguer = { version = "0.12", optional = true }
+toml = "0.8"
 zeroize = "1"
 
 [lints.clippy]
@@ -46,4 +49,3 @@ must_use_candidate = "warn"
 assert_cmd.workspace = true
 predicates.workspace = true
 tempfile.workspace = true
-toml = "0.8"
