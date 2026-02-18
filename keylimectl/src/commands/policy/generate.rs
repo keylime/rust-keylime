@@ -9,6 +9,7 @@
 use crate::commands::error::CommandError;
 use crate::error::KeylimectlError;
 use crate::output::OutputHandler;
+use crate::policy_tools::filesystem;
 use crate::policy_tools::ima_parser;
 use crate::policy_tools::runtime_policy::RuntimePolicy;
 use crate::GenerateSubcommand;
@@ -24,8 +25,8 @@ pub async fn execute(
         GenerateSubcommand::Runtime {
             ima_measurement_list,
             allowlist,
-            rootfs: _,    // Step 4
-            skip_path: _, // Step 4
+            rootfs,
+            skip_path,
             base_policy,
             excludelist,
             output: output_file,
@@ -37,6 +38,8 @@ pub async fn execute(
         } => generate_runtime(
             ima_measurement_list.as_deref(),
             allowlist.as_deref(),
+            rootfs.as_deref(),
+            skip_path,
             base_policy.as_deref(),
             excludelist.as_deref(),
             output_file.as_deref(),
@@ -64,6 +67,8 @@ pub async fn execute(
 async fn generate_runtime(
     ima_measurement_list: Option<&str>,
     allowlist: Option<&str>,
+    rootfs: Option<&str>,
+    skip_path: &[String],
     base_policy: Option<&str>,
     excludelist: Option<&str>,
     output_file: Option<&str>,
@@ -153,6 +158,47 @@ async fn generate_runtime(
         output.info(format!(
             "Loaded {} entries from allowlist",
             allowlist_digests.len()
+        ));
+    }
+
+    // Scan filesystem
+    if let Some(rootfs_path) = rootfs {
+        let algorithm = detected_algorithm.as_deref().unwrap_or("sha256");
+
+        output.info(format!(
+            "Scanning filesystem: {rootfs_path} (algorithm: {algorithm})"
+        ));
+
+        let root = Path::new(rootfs_path);
+        let fs_digests = tokio::task::spawn_blocking({
+            let root = root.to_path_buf();
+            let skip = skip_path.to_vec();
+            let alg = algorithm.to_string();
+            move || {
+                filesystem::scan_filesystem(
+                    &root, &skip, &alg,
+                )
+            }
+        })
+        .await
+        .map_err(|e| {
+            CommandError::from(
+                crate::commands::error::PolicyGenerationError::FilesystemScan {
+                    path: root.to_path_buf(),
+                    reason: format!("Task join error: {e}"),
+                },
+            )
+        })??;
+
+        for (file_path, digests) in &fs_digests {
+            for digest in digests {
+                policy.add_digest(file_path.clone(), digest.clone());
+            }
+        }
+
+        output.info(format!(
+            "Scanned {} files from filesystem",
+            fs_digests.len()
         ));
     }
 
