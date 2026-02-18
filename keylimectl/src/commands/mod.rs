@@ -6,5 +6,6 @@
 pub mod agent;
 pub mod configure;
 pub mod error;
+pub mod info;
 pub mod measured_boot;
 pub mod policy;

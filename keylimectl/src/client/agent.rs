@@ -754,6 +754,7 @@ mod tests {
     fn create_test_config() -> Config {
         Config {
             loaded_from: None,
+            cli_overrides: crate::config::CliOverrides::default(),
             verifier: crate::config::VerifierConfig::default(),
             registrar: crate::config::RegistrarConfig::default(),
             tls: TlsConfig {

@@ -86,6 +86,24 @@ use config::{ConfigError, Environment, File, FileFormat};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+/// Records which configuration fields were overridden by CLI arguments.
+///
+/// This is used by the `info` command to annotate each config field with
+/// its source (CLI, env var, config file, or default).
+#[derive(Default, Debug, Clone)]
+pub struct CliOverrides {
+    /// Whether `--verifier-ip` was provided
+    pub verifier_ip: bool,
+    /// Whether `--verifier-port` was provided
+    pub verifier_port: bool,
+    /// Whether `--registrar-ip` was provided
+    pub registrar_ip: bool,
+    /// Whether `--registrar-port` was provided
+    pub registrar_port: bool,
+    /// Whether `--timeout` was provided
+    pub timeout: bool,
+}
+
 /// Main configuration structure for keylimectl
 ///
 /// This structure contains all configuration settings needed for keylimectl operations,
@@ -102,6 +120,9 @@ pub struct Config {
     /// Path of the configuration file that was loaded, if any
     #[serde(skip)]
     pub loaded_from: Option<PathBuf>,
+    /// Records which fields were overridden by CLI arguments
+    #[serde(skip)]
+    pub cli_overrides: CliOverrides,
     /// Verifier configuration
     pub verifier: VerifierConfig,
     /// Registrar configuration
@@ -300,6 +321,14 @@ impl Config {
         self.loaded_from.is_some()
     }
 
+    /// Return the list of configuration file search paths.
+    ///
+    /// Used by the `info` command to show which paths were searched.
+    #[must_use]
+    pub fn config_search_paths() -> Vec<PathBuf> {
+        Self::get_config_paths(None)
+    }
+
     /// Load configuration from multiple sources
     ///
     /// Loads configuration with the following precedence (highest to lowest):
@@ -420,22 +449,27 @@ impl Config {
     pub fn with_cli_overrides(mut self, cli: &Cli) -> Self {
         if let Some(ref ip) = cli.verifier_ip {
             self.verifier.ip = ip.clone();
+            self.cli_overrides.verifier_ip = true;
         }
 
         if let Some(port) = cli.verifier_port {
             self.verifier.port = port;
+            self.cli_overrides.verifier_port = true;
         }
 
         if let Some(ref ip) = cli.registrar_ip {
             self.registrar.ip = ip.clone();
+            self.cli_overrides.registrar_ip = true;
         }
 
         if let Some(port) = cli.registrar_port {
             self.registrar.port = port;
+            self.cli_overrides.registrar_port = true;
         }
 
         if let Some(timeout) = cli.timeout {
             self.client.timeout = timeout;
+            self.cli_overrides.timeout = true;
         }
 
         self
