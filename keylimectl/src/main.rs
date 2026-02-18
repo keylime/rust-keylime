@@ -178,12 +178,24 @@ enum AgentAction {
         verify: bool,
 
         /// Use push model (agent connects to verifier)
-        #[arg(long)]
+        #[arg(long, conflicts_with = "pull_model")]
         push_model: bool,
+
+        /// Force pull model (legacy API 2.x behavior, overrides auto-detection)
+        #[arg(long, conflicts_with = "push_model")]
+        pull_model: bool,
 
         /// TPM policy in JSON format
         #[arg(long, value_name = "POLICY")]
         tpm_policy: Option<String>,
+
+        /// Wait for first attestation to complete after enrollment
+        #[arg(long)]
+        wait_for_attestation: bool,
+
+        /// Timeout in seconds for --wait-for-attestation (default: 60)
+        #[arg(long, value_name = "SECONDS", default_value_t = 60)]
+        attestation_timeout: u64,
     },
 
     /// Remove an agent from the verifier

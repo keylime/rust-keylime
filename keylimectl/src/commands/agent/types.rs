@@ -47,8 +47,14 @@ pub(super) struct AddAgentParams<'a> {
     pub verify: bool,
     /// Whether to use push model (agent connects to verifier)
     pub push_model: bool,
+    /// Whether to force pull model (legacy, overrides auto-detection)
+    pub pull_model: bool,
     /// Optional TPM policy in JSON format
     pub tpm_policy: Option<&'a str>,
+    /// Whether to wait for attestation after enrollment
+    pub wait_for_attestation: bool,
+    /// Timeout for waiting for attestation (seconds)
+    pub attestation_timeout: u64,
 }
 
 /// Request structure for adding an agent to the verifier
@@ -95,8 +101,10 @@ pub(super) struct AddAgentParams<'a> {
 /// * `supported_version` - API version supported by the agent
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AddAgentRequest {
-    pub cloudagent_ip: String,
-    pub cloudagent_port: u16,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cloudagent_ip: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cloudagent_port: Option<u16>,
     pub verifier_ip: String,
     pub verifier_port: u16,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -153,8 +161,8 @@ impl AddAgentRequest {
     /// Create a new agent request with the required fields
     #[must_use]
     pub fn new(
-        cloudagent_ip: String,
-        cloudagent_port: u16,
+        cloudagent_ip: Option<String>,
+        cloudagent_port: Option<u16>,
         verifier_ip: String,
         verifier_port: u16,
         tpm_policy: String,
@@ -342,18 +350,22 @@ impl AddAgentRequest {
     /// Validate the request before sending
     #[allow(dead_code)] // Will be used when validation is enabled
     pub fn validate(&self) -> Result<(), CommandError> {
-        if self.cloudagent_ip.is_empty() {
-            return Err(CommandError::invalid_parameter(
-                "cloudagent_ip",
-                "Agent IP cannot be empty".to_string(),
-            ));
+        if let Some(ref ip) = self.cloudagent_ip {
+            if ip.is_empty() {
+                return Err(CommandError::invalid_parameter(
+                    "cloudagent_ip",
+                    "Agent IP cannot be empty".to_string(),
+                ));
+            }
         }
 
-        if self.cloudagent_port == 0 {
-            return Err(CommandError::invalid_parameter(
-                "cloudagent_port",
-                "Agent port cannot be zero".to_string(),
-            ));
+        if let Some(port) = self.cloudagent_port {
+            if port == 0 {
+                return Err(CommandError::invalid_parameter(
+                    "cloudagent_port",
+                    "Agent port cannot be zero".to_string(),
+                ));
+            }
         }
 
         if self.verifier_ip.is_empty() {
@@ -536,7 +548,10 @@ mod tests {
             cert_dir: None,
             verify: true,
             push_model: false,
+            pull_model: false,
             tpm_policy: None,
+            wait_for_attestation: false,
+            attestation_timeout: 60,
         };
 
         assert_eq!(params.agent_id, "550e8400-e29b-41d4-a716-446655440000");
@@ -559,7 +574,10 @@ mod tests {
             cert_dir: Some("/path/to/certs"),
             verify: false,
             push_model: true,
+            pull_model: false,
             tpm_policy: Some("{\"test\": \"policy\"}"),
+            wait_for_attestation: false,
+            attestation_timeout: 60,
         };
 
         assert_eq!(params.runtime_policy, Some("/path/to/runtime.json"));
@@ -587,7 +605,10 @@ mod tests {
                 cert_dir: None,
                 verify: false,
                 push_model: false,
+                pull_model: false,
                 tpm_policy: None,
+                wait_for_attestation: false,
+                attestation_timeout: 60,
             };
 
             assert_eq!(
@@ -613,7 +634,10 @@ mod tests {
                 cert_dir: Some("/etc/keylime/certs"),
                 verify: true,
                 push_model: true,
+                pull_model: false,
                 tpm_policy: Some("{\"pcr\": [\"15\"]}"),
+                wait_for_attestation: false,
+                attestation_timeout: 60,
             };
 
             assert!(params.ip.is_some());
@@ -640,7 +664,10 @@ mod tests {
                 cert_dir: None,
                 verify: false, // Verification different in push model
                 push_model: true,
+                pull_model: false,
                 tpm_policy: None,
+                wait_for_attestation: false,
+                attestation_timeout: 60,
             };
 
             assert!(params.push_model);
@@ -659,8 +686,8 @@ mod tests {
         fn test_add_agent_request_with_all_fields() {
             // Create a request with all possible fields
             let request = AddAgentRequest::new(
-                "192.168.1.100".to_string(),
-                9002,
+                Some("192.168.1.100".to_string()),
+                Some(9002),
                 "127.0.0.1".to_string(),
                 8881,
                 "{}".to_string(),
@@ -693,8 +720,11 @@ mod tests {
             .with_supported_version(Some("2.1".to_string()));
 
             // Validate that all fields are set correctly
-            assert_eq!(request.cloudagent_ip, "192.168.1.100");
-            assert_eq!(request.cloudagent_port, 9002);
+            assert_eq!(
+                request.cloudagent_ip,
+                Some("192.168.1.100".to_string())
+            );
+            assert_eq!(request.cloudagent_port, Some(9002));
             assert_eq!(request.verifier_ip, "127.0.0.1");
             assert_eq!(request.verifier_port, 8881);
             assert_eq!(request.tpm_policy, "{}");
@@ -744,8 +774,8 @@ mod tests {
         #[test]
         fn test_add_agent_request_validation_all_fields() {
             let request = AddAgentRequest::new(
-                "192.168.1.100".to_string(),
-                9002,
+                Some("192.168.1.100".to_string()),
+                Some(9002),
                 "127.0.0.1".to_string(),
                 8881,
                 "{\"pcr\": [15]}".to_string(),
@@ -763,8 +793,8 @@ mod tests {
         #[test]
         fn test_add_agent_request_validation_invalid_metadata() {
             let request = AddAgentRequest::new(
-                "192.168.1.100".to_string(),
-                9002,
+                Some("192.168.1.100".to_string()),
+                Some(9002),
                 "127.0.0.1".to_string(),
                 8881,
                 "{}".to_string(),
@@ -782,8 +812,8 @@ mod tests {
         #[test]
         fn test_add_agent_request_validation_invalid_hash_algorithm() {
             let request = AddAgentRequest::new(
-                "192.168.1.100".to_string(),
-                9002,
+                Some("192.168.1.100".to_string()),
+                Some(9002),
                 "127.0.0.1".to_string(),
                 8881,
                 "{}".to_string(),
@@ -803,8 +833,8 @@ mod tests {
         #[test]
         fn test_add_agent_request_validation_invalid_encryption_algorithm() {
             let request = AddAgentRequest::new(
-                "192.168.1.100".to_string(),
-                9002,
+                Some("192.168.1.100".to_string()),
+                Some(9002),
                 "127.0.0.1".to_string(),
                 8881,
                 "{}".to_string(),
@@ -824,8 +854,8 @@ mod tests {
         #[test]
         fn test_add_agent_request_validation_invalid_signing_algorithm() {
             let request = AddAgentRequest::new(
-                "192.168.1.100".to_string(),
-                9002,
+                Some("192.168.1.100".to_string()),
+                Some(9002),
                 "127.0.0.1".to_string(),
                 8881,
                 "{}".to_string(),
@@ -845,8 +875,8 @@ mod tests {
         #[test]
         fn test_add_agent_request_validation_invalid_api_version() {
             let request = AddAgentRequest::new(
-                "192.168.1.100".to_string(),
-                9002,
+                Some("192.168.1.100".to_string()),
+                Some(9002),
                 "127.0.0.1".to_string(),
                 8881,
                 "{}".to_string(),
@@ -866,8 +896,8 @@ mod tests {
         #[test]
         fn test_serialization_all_fields() {
             let request = AddAgentRequest::new(
-                "192.168.1.100".to_string(),
-                9002,
+                Some("192.168.1.100".to_string()),
+                Some(9002),
                 "127.0.0.1".to_string(),
                 8881,
                 "{}".to_string(),
@@ -880,7 +910,7 @@ mod tests {
             let json_value: Value =
                 serde_json::from_str(&serialized).unwrap(); //#[allow_ci]
 
-            // Check that required fields are present
+            // Check that optional agent fields are present when set
             assert_eq!(json_value["cloudagent_ip"], "192.168.1.100");
             assert_eq!(json_value["cloudagent_port"], 9002);
             assert_eq!(json_value["verifier_ip"], "127.0.0.1");
@@ -962,6 +992,163 @@ mod tests {
             assert!(!is_valid_api_version("2.x"));
             assert!(!is_valid_api_version(""));
             assert!(!is_valid_api_version("invalid"));
+        }
+    }
+
+    // Test Optional cloudagent_ip/cloudagent_port in AddAgentRequest
+    mod optional_agent_fields {
+        use super::*;
+
+        #[test]
+        fn test_add_agent_request_with_none_ip_port() {
+            let request = AddAgentRequest::new(
+                None,
+                None,
+                "127.0.0.1".to_string(),
+                8881,
+                "{}".to_string(),
+            );
+
+            assert_eq!(request.cloudagent_ip, None);
+            assert_eq!(request.cloudagent_port, None);
+        }
+
+        #[test]
+        fn test_add_agent_request_none_fields_not_serialized() {
+            let request = AddAgentRequest::new(
+                None,
+                None,
+                "127.0.0.1".to_string(),
+                8881,
+                "{}".to_string(),
+            );
+
+            let serialized = serde_json::to_string(&request).unwrap(); //#[allow_ci]
+            let json_value: Value =
+                serde_json::from_str(&serialized).unwrap(); //#[allow_ci]
+
+            // cloudagent_ip and cloudagent_port should not be in JSON when None
+            assert!(json_value.get("cloudagent_ip").is_none());
+            assert!(json_value.get("cloudagent_port").is_none());
+
+            // Required fields should be present
+            assert_eq!(json_value["verifier_ip"], "127.0.0.1");
+            assert_eq!(json_value["verifier_port"], 8881);
+        }
+
+        #[test]
+        fn test_add_agent_request_some_fields_serialized() {
+            let request = AddAgentRequest::new(
+                Some("192.168.1.100".to_string()),
+                Some(9002),
+                "127.0.0.1".to_string(),
+                8881,
+                "{}".to_string(),
+            );
+
+            let serialized = serde_json::to_string(&request).unwrap(); //#[allow_ci]
+            let json_value: Value =
+                serde_json::from_str(&serialized).unwrap(); //#[allow_ci]
+
+            assert_eq!(json_value["cloudagent_ip"], "192.168.1.100");
+            assert_eq!(json_value["cloudagent_port"], 9002);
+        }
+
+        #[test]
+        fn test_validate_with_none_ip_port_succeeds() {
+            // When IP/port are None, validation should succeed
+            // (push model doesn't require them)
+            let request = AddAgentRequest::new(
+                None,
+                None,
+                "127.0.0.1".to_string(),
+                8881,
+                "{}".to_string(),
+            );
+
+            assert!(request.validate().is_ok());
+        }
+
+        #[test]
+        fn test_validate_with_empty_ip_fails() {
+            let request = AddAgentRequest::new(
+                Some(String::new()),
+                Some(9002),
+                "127.0.0.1".to_string(),
+                8881,
+                "{}".to_string(),
+            );
+
+            let result = request.validate();
+            assert!(result.is_err());
+            assert!(result
+                .unwrap_err()
+                .to_string()
+                .contains("Agent IP cannot be empty"));
+        }
+
+        #[test]
+        fn test_validate_with_zero_port_fails() {
+            let request = AddAgentRequest::new(
+                Some("192.168.1.100".to_string()),
+                Some(0),
+                "127.0.0.1".to_string(),
+                8881,
+                "{}".to_string(),
+            );
+
+            let result = request.validate();
+            assert!(result.is_err());
+            assert!(result
+                .unwrap_err()
+                .to_string()
+                .contains("Agent port cannot be zero"));
+        }
+
+        #[test]
+        fn test_add_agent_params_with_pull_model() {
+            let params = AddAgentParams {
+                agent_id: "test-agent",
+                ip: None,
+                port: None,
+                verifier_ip: None,
+                runtime_policy: None,
+                mb_policy: None,
+                payload: None,
+                cert_dir: None,
+                verify: false,
+                push_model: false,
+                pull_model: true,
+                tpm_policy: None,
+                wait_for_attestation: false,
+                attestation_timeout: 60,
+            };
+
+            assert!(!params.push_model);
+            assert!(params.pull_model);
+        }
+
+        #[test]
+        fn test_add_agent_params_with_wait_for_attestation() {
+            let params = AddAgentParams {
+                agent_id: "test-agent",
+                ip: None,
+                port: None,
+                verifier_ip: None,
+                runtime_policy: None,
+                mb_policy: None,
+                payload: None,
+                cert_dir: None,
+                verify: false,
+                push_model: true,
+                pull_model: false,
+                tpm_policy: None,
+                wait_for_attestation: true,
+                attestation_timeout: 120,
+            };
+
+            assert!(params.wait_for_attestation);
+            assert_eq!(params.attestation_timeout, 120);
         }
     }
 }

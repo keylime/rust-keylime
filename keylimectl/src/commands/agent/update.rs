@@ -85,8 +85,19 @@ pub(super) async fn update_agent(
             )
         })?;
 
-    // Determine if agent is using push model (API version >= 3.0)
-    let existing_push_model = existing_port == 0; // Port 0 typically indicates push model
+    // Determine if agent is using push model based on API version and port
+    let existing_push_model = {
+        #[cfg(feature = "api-v3")]
+        {
+            let api_version =
+                verifier_client.api_version().parse::<f32>().unwrap_or(2.1);
+            existing_port == 0 || api_version >= 3.0
+        }
+        #[cfg(not(feature = "api-v3"))]
+        {
+            existing_port == 0
+        }
+    };
 
     // Step 2: Remove existing agent configuration
     output.step(2, 3, "Removing existing agent configuration");
@@ -106,7 +117,10 @@ pub(super) async fn update_agent(
             cert_dir: None, // Use default cert handling
             verify: false, // Skip verification during update
             push_model: existing_push_model, // Preserve existing model
+            pull_model: false, // Let auto-detection handle it
             tpm_policy: None, // Use default policy during update
+            wait_for_attestation: false, // Don't wait during update
+            attestation_timeout: 60,
         },
         output,
     )
