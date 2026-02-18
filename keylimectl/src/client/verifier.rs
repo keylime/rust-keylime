@@ -1834,6 +1834,55 @@ impl VerifierClient {
             .map_err(KeylimectlError::from)
     }
 
+    /// Verify attestation evidence via the verifier's one-shot endpoint.
+    ///
+    /// Posts evidence data to `POST /v{version}/verify/evidence` and
+    /// returns the verification result.
+    pub async fn verify_evidence(
+        &self,
+        evidence_data: Value,
+    ) -> Result<Value, KeylimectlError> {
+        debug!("Verifying evidence via verifier");
+
+        let url = format!(
+            "{}/v{}/verify/evidence",
+            self.base.base_url, self.api_version
+        );
+
+        // v3: JSON:API body with "evidence" resource type
+        // v2: plain JSON
+        let (body, content_type) = if is_v3(&self.api_version) {
+            (
+                json_api_resource("evidence", None, evidence_data),
+                Some(JSON_API_CONTENT_TYPE.to_string()),
+            )
+        } else {
+            (evidence_data, None)
+        };
+
+        let response = self
+            .base
+            .client
+            .get_json_request_from_struct(
+                Method::POST,
+                &url,
+                &body,
+                content_type,
+            )
+            .map_err(KeylimectlError::Json)?
+            .send()
+            .await
+            .with_context(|| {
+                "Failed to send verify evidence request to verifier"
+                    .to_string()
+            })?;
+
+        self.base
+            .handle_response(response)
+            .await
+            .map_err(KeylimectlError::from)
+    }
+
     /// Get the detected API version
     pub fn api_version(&self) -> &str {
         &self.api_version
