@@ -2145,4 +2145,52 @@ mod tests {
             "PEM roundtrip should produce identical output"
         );
     }
+
+    // Negative security tests for pkey_pub_from_pem
+
+    #[test]
+    fn test_pkey_pub_from_pem_empty() {
+        assert!(pkey_pub_from_pem("").is_err());
+    }
+
+    #[test]
+    fn test_pkey_pub_from_pem_garbage() {
+        assert!(pkey_pub_from_pem("not-a-pem").is_err());
+    }
+
+    #[test]
+    fn test_pkey_pub_from_pem_truncated() {
+        assert!(pkey_pub_from_pem(
+            "-----BEGIN PUBLIC KEY-----\nMIIB\n-----END PUBLIC KEY-----"
+        )
+        .is_err());
+    }
+
+    // Negative security tests for rsa_oaep_encrypt
+
+    #[test]
+    fn test_rsa_oaep_encrypt_with_ec_key() {
+        use openssl::ec::{EcGroup, EcKey};
+        use openssl::nid::Nid;
+        use openssl::pkey::PKey;
+
+        let group = EcGroup::from_curve_name(Nid::X9_62_PRIME256V1).unwrap(); //#[allow_ci]
+        let ec = EcKey::generate(&group).unwrap(); //#[allow_ci]
+        let pkey = PKey::from_ec_key(ec).unwrap(); //#[allow_ci]
+
+        // Extract public key only
+        let pem = pkey.public_key_to_pem().unwrap(); //#[allow_ci]
+        let pub_key = PKey::public_key_from_pem(&pem).unwrap(); //#[allow_ci]
+
+        let result = rsa_oaep_encrypt(&pub_key, b"test data");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_rsa_oaep_encrypt_oversized_plaintext() {
+        // RSA-2048 with OAEP/SHA-256 can encrypt at most ~190 bytes
+        let (pub_key, _) = rsa_generate_pair(2048).unwrap(); //#[allow_ci]
+        let result = rsa_oaep_encrypt(&pub_key, &[0u8; 256]);
+        assert!(result.is_err());
+    }
 }
