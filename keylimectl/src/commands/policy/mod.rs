@@ -92,6 +92,7 @@ pub async fn execute(
                 output,
             )
             .await
+            .map_err(KeylimectlError::from)
         }
     }
 }
