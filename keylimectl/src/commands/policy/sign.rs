@@ -62,8 +62,6 @@ pub async fn execute(
             ))
         })?;
         output.info(format!("Signed policy written to {out_path}"));
-    } else {
-        output.success(envelope_json.clone());
     }
 
     Ok(envelope_json)
