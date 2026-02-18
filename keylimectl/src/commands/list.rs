@@ -303,7 +303,8 @@ async fn list_mb_policies(
 mod tests {
     use super::*;
     use crate::config::{
-        ClientConfig, Config, RegistrarConfig, TlsConfig, VerifierConfig,
+        CliOverrides, ClientConfig, Config, RegistrarConfig, TlsConfig,
+        VerifierConfig,
     };
     use serde_json::json;
 
@@ -311,6 +312,7 @@ mod tests {
     fn create_test_config() -> Config {
         Config {
             loaded_from: None,
+            cli_overrides: CliOverrides::default(),
             verifier: VerifierConfig {
                 ip: "127.0.0.1".to_string(),
                 port: 8881,

@@ -11,7 +11,7 @@ use serde_json::{json, Value};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::config::{Config, RegistrarConfig, VerifierConfig};
+use crate::config::{CliOverrides, Config, RegistrarConfig, VerifierConfig};
 #[cfg(feature = "wizard")]
 use crate::config::{ClientConfig, TlsConfig};
 use crate::error::KeylimectlError;
@@ -114,6 +114,7 @@ fn build_non_interactive_config(
 
     Config {
         loaded_from: None,
+        cli_overrides: CliOverrides::default(),
         verifier: VerifierConfig {
             ip: verifier_ip
                 .unwrap_or(&defaults.verifier.ip)
@@ -394,6 +395,7 @@ fn run_interactive_wizard(
 
     let config = Config {
         loaded_from: None,
+        cli_overrides: CliOverrides::default(),
         verifier: VerifierConfig {
             ip: verifier_ip,
             port: verifier_port,

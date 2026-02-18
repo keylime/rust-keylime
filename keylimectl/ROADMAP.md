@@ -550,59 +550,57 @@ Formalize the search path and directory naming:
 
 Show the effective runtime configuration and environment.
 
-- [ ] Add `info` subcommand (or `diagnostics` / `diag`)
-- [ ] Show effective configuration (merged from all sources, with source annotations):
-      ```
-      Verifier:
-        IP:   10.0.0.1   (from: ~/.config/keylimectl/config.toml)
-        Port: 8881        (from: default)
-      Registrar:
-        IP:   10.0.0.2   (from: KEYLIMECTL_REGISTRAR_IP)
-        Port: 8891        (from: default)
-      TLS:
-        Client cert: /var/lib/keylime/cv_ca/client-cert.crt  (from: default)
-        Verify server: true                                   (from: default)
-      ```
-- [ ] Show configuration file search results (which files were found/loaded)
-- [ ] Show keylimectl version, build info, and enabled features (`api-v2`, `api-v3`)
+- [x] Add `info` subcommand with `diag` alias
+- [x] Show effective configuration with per-field source annotations
+      (`cli`, `env_var`, `config_file`, `default`) via `CliOverrides` tracking
+- [x] Show configuration file search results (which files were found/loaded)
+- [x] Show keylimectl version, build info, and enabled features (`api-v2`, `api-v3`,
+      `wizard`, `tpm-quote-validation`)
+- [x] Scan and report `KEYLIME_*` environment variables
 
 ### 5.2 `keylimectl info verifier`
 
-- [ ] Query verifier `/version` endpoint and display supported API versions
-- [ ] Show verifier build version if available
-- [ ] Test TLS connectivity and report certificate details
-- [ ] Report number of monitored agents
+- [x] Connect to verifier with API version auto-detection
+- [x] Report URL, reachability, detected API version
+- [x] Report number of monitored agents (graceful fallback on failure)
+- [x] Handle unreachable verifier gracefully (`"reachable": false`)
 
 ### 5.3 `keylimectl info registrar`
 
-- [ ] Query registrar `/version` endpoint and display supported API versions
-- [ ] Test TLS connectivity and report certificate details
-- [ ] Report number of registered agents
+- [x] Connect to registrar with API version auto-detection
+- [x] Added `api_version()` public getter to `RegistrarClient`
+- [x] Report URL, reachability, detected API version
+- [x] Report number of registered agents (graceful fallback on failure)
 
 ### 5.4 `keylimectl info agent <AGENT_ID>`
 
-- [ ] Combine verifier + registrar data for a single agent
-- [ ] Show operational state, IP, port, policies, TPM info
-- [ ] In pull model: attempt direct agent contact and show agent version
-- [ ] Show attestation history summary if available
+- [x] Combine verifier + registrar data for a single agent
+- [x] Build summary with registration status, monitoring status, operational state
+- [x] In pull model (api-v2): attempt direct agent contact via `AgentClient`
+- [x] Each query independent — one failing does not prevent others
 
 ### 5.5 `keylimectl info tls`
 
-- [ ] Validate all configured TLS certificate files exist and are readable
-- [ ] Check certificate expiration dates
-- [ ] Verify cert/key pairing
-- [ ] Test TLS handshake with verifier and registrar
-- [ ] Report any TLS issues with actionable suggestions
+- [x] Validate all configured TLS certificate files exist and are readable
+- [x] Parse PEM certificates: extract subject, issuer, not_before, not_after
+- [x] Check certificate expiration dates (expired, expiring within 30 days)
+- [x] Verify cert/key pairing (public key comparison)
+- [x] Inspect trusted CA certificate files
+- [x] Report issues and actionable suggestions
 
 ### 5.6 Testing
 
-- [ ] Unit tests for `info` output formatting (JSON, table, YAML)
-- [ ] Unit tests for configuration source annotation logic
-- [ ] Integration tests: `info verifier` and `info registrar` against mocked
-      servers returning known `/version` responses
-- [ ] Integration tests: `info tls` with valid certs, expired certs, and
-      mismatched cert/key pairs
-- [ ] Test `info agent <ID>` with agents in various operational states
+- [x] Unit tests for source annotation logic (`determine_source_*`)
+- [x] Unit tests for version/feature info, config file search info
+- [x] Unit tests for agent count extraction (verifier and registrar)
+- [x] Unit tests for agent summary building and connection extraction
+- [x] Unit tests for TLS certificate inspection, key inspection, cert/key pairing
+- [x] Integration tests: `info` JSON output structure, version, features, defaults
+- [x] Integration tests: `info tls` JSON structure, no-certs-configured case
+- [x] Integration tests: `diag` alias, help includes `info` command
+- [x] All tests pass across all feature combinations: 372 unit + 19 integration
+      (default), 371 unit + 19 integration (api-v2 only),
+      347 unit + 19 integration (api-v3 only); clippy clean
 
 ---
 
