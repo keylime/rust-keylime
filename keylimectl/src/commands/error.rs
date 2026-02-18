@@ -43,6 +43,18 @@ pub enum CommandError {
     #[error("Policy error: {0}")]
     Policy(#[from] PolicyError),
 
+    /// Policy generation errors
+    #[error("Policy generation error: {0}")]
+    PolicyGeneration(#[from] PolicyGenerationError),
+
+    /// DSSE signing/verification errors
+    #[error("DSSE error: {0}")]
+    Dsse(#[from] DsseError),
+
+    /// Evidence verification errors
+    #[error("Evidence error: {0}")]
+    Evidence(#[from] EvidenceError),
+
     /// Resource listing and management errors
     #[error("Resource error: {0}")]
     Resource(#[from] ResourceError),
@@ -111,6 +123,82 @@ pub enum ResourceError {
         resource_type: String,
         reason: String,
     },
+}
+
+/// Policy generation errors
+///
+/// These errors represent issues with local policy generation,
+/// including IMA log parsing, filesystem scanning, and digest calculation.
+#[derive(Error, Debug)]
+#[allow(dead_code)] // Variants used as features are implemented
+pub enum PolicyGenerationError {
+    /// IMA measurement list parse error
+    #[error("Failed to parse IMA measurement list {path}: {reason}")]
+    ImaParse { path: PathBuf, reason: String },
+
+    /// Allowlist parse error
+    #[error("Failed to parse allowlist {path}: {reason}")]
+    AllowlistParse { path: PathBuf, reason: String },
+
+    /// Filesystem scan error
+    #[error("Filesystem scan error at {path}: {reason}")]
+    FilesystemScan { path: PathBuf, reason: String },
+
+    /// Digest calculation error
+    #[error("Failed to calculate digest for {path}: {reason}")]
+    Digest { path: PathBuf, reason: String },
+
+    /// Policy merge error
+    #[error("Failed to merge policies: {reason}")]
+    Merge { reason: String },
+
+    /// Unsupported hash algorithm
+    #[error("Unsupported hash algorithm: {algorithm}")]
+    UnsupportedAlgorithm { algorithm: String },
+
+    /// Output write error
+    #[error("Failed to write output to {path}: {reason}")]
+    Output { path: PathBuf, reason: String },
+}
+
+/// DSSE (Dead Simple Signing Envelope) errors
+///
+/// These errors represent issues with policy signing and
+/// signature verification using the DSSE protocol.
+#[derive(Error, Debug)]
+#[allow(dead_code)] // Variants used as features are implemented
+pub enum DsseError {
+    /// Signing operation failed
+    #[error("Signing failed: {reason}")]
+    SigningFailed { reason: String },
+
+    /// Signature verification failed
+    #[error("Signature verification failed: {reason}")]
+    VerificationFailed { reason: String },
+
+    /// Invalid DSSE envelope structure
+    #[error("Invalid DSSE envelope: {reason}")]
+    InvalidEnvelope { reason: String },
+
+    /// Key loading or generation error
+    #[error("Key error: {reason}")]
+    KeyError { reason: String },
+}
+
+/// Evidence verification errors
+///
+/// These errors represent issues with one-shot attestation
+/// evidence verification via the verifier.
+#[derive(Error, Debug)]
+#[allow(dead_code)] // Variants used as features are implemented
+pub enum EvidenceError {
+    /// Invalid or malformed evidence
+    #[error("Invalid evidence: {reason}")]
+    InvalidEvidence { reason: String },
+
+    /// Verifier communication error
+    #[error("Verifier error: {reason}")]
+    VerifierError { reason: String },
 }
 
 impl CommandError {
