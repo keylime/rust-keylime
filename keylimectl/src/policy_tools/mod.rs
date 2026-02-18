@@ -7,3 +7,7 @@
 //! validation, and conversion. It is used by the CLI command handlers
 //! in `commands::policy` and `commands::verify` but contains no CLI
 //! concerns itself.
+
+pub mod measured_boot_policy;
+pub mod runtime_policy;
+pub mod tpm_policy;
