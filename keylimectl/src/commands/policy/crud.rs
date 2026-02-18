@@ -1,75 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2025 Keylime Authors
 
-//! Runtime policy management commands for keylimectl
+//! Runtime policy CRUD operations (verifier-side management).
 //!
-//! This module provides comprehensive management of runtime policies for the Keylime
-//! attestation system. Runtime policies define the expected runtime behavior of agents
-//! by specifying allowlists for files, processes, and system activities.
-//!
-//! # Runtime Policy Overview
-//!
-//! Runtime policies in Keylime control what activities are considered trustworthy
-//! during agent operation. They work in conjunction with IMA (Integrity Measurement
-//! Architecture) to provide continuous runtime attestation:
-//!
-//! 1. **File Allowlists**: Specify which files are allowed to be accessed/executed
-//! 2. **Process Controls**: Define permitted process creation and execution
-//! 3. **System Call Monitoring**: Control allowed system calls and parameters
-//! 4. **Dynamic Updates**: Policies can be updated without agent restart
-//!
-//! # Policy Structure
-//!
-//! Runtime policies are JSON documents that specify:
-//! - Allowlists for executable files and libraries
-//! - Permitted file access patterns
-//! - Process execution rules
-//! - System call restrictions
-//! - Cryptographic hash verification rules
-//!
-//! # Command Types
-//!
-//! - [`PolicyAction::Push`]: Create a new runtime policy
-//! - [`PolicyAction::Show`]: Display an existing policy
-//! - [`PolicyAction::Update`]: Update an existing policy
-//! - [`PolicyAction::Delete`]: Remove a policy
-//!
-//! # Security Considerations
-//!
-//! - Policies must be cryptographically signed in production
-//! - Changes to policies affect agent attestation immediately
-//! - Invalid policies can prevent agent enrollment or cause failures
-//! - Policy management requires proper authorization and audit trails
-//!
-//! # Examples
-//!
-//! ```rust
-//! use keylimectl::commands::policy;
-//! use keylimectl::config::Config;
-//! use keylimectl::output::OutputHandler;
-//! use keylimectl::PolicyAction;
-//!
-//! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-//! let config = Config::default();
-//! let output = OutputHandler::new(crate::OutputFormat::Json, false);
-//!
-//! // Create a new runtime policy
-//! let create_action = PolicyAction::Push {
-//!     name: "web-server-policy".to_string(),
-//!     file: "/etc/keylime/policies/web-server.json".to_string(),
-//! };
-//!
-//! let result = policy::execute(&create_action, &config, &output).await?;
-//! println!("Policy created: {:?}", result);
-//!
-//! // Show the policy
-//! let show_action = PolicyAction::Show {
-//!     name: "web-server-policy".to_string(),
-//! };
-//! let policy_data = policy::execute(&show_action, &config, &output).await?;
-//! # Ok(())
-//! # }
-//! ```
+//! This module handles push, show, update, and delete operations for
+//! runtime policies stored on the Keylime verifier.
 
 use crate::client::factory;
 use crate::commands::error::CommandError;
@@ -82,96 +17,7 @@ use log::debug;
 use serde_json::{json, Value};
 use std::fs;
 
-/// Execute a runtime policy management command
-///
-/// This is the main entry point for all runtime policy operations. It dispatches
-/// to the appropriate handler based on the action type and manages the complete
-/// operation lifecycle including file validation, policy processing, and result reporting.
-///
-/// # Arguments
-///
-/// * `action` - The specific policy action to perform (Push, Show, Update, or Delete)
-/// * `config` - Configuration containing verifier endpoint and authentication settings
-/// * `output` - Output handler for progress reporting and result formatting
-///
-/// # Returns
-///
-/// Returns a JSON value containing the operation results:
-/// - `status`: "success" if operation completed successfully
-/// - `message`: Human-readable status message
-/// - `policy_name`: Name of the affected policy (for single-policy operations)
-/// - `results`: Detailed operation results from the verifier service
-///
-/// # Policy File Format
-///
-/// Policy files must be valid JSON documents containing runtime policy specifications:
-/// ```json
-/// {
-///   "allowlist": [
-///     {
-///       "path": "/usr/bin/bash",
-///       "hash": "sha256:abcdef1234567890..."
-///     },
-///     {
-///       "path": "/lib/x86_64-linux-gnu/libc.so.6",
-///       "hash": "sha256:1234567890abcdef..."
-///     }
-///   ],
-///   "exclude": [
-///     "/tmp/*",
-///     "/var/cache/*"
-///   ],
-///   "ima": {
-///     "require_signatures": true,
-///     "allowed_keyrings": ["builtin_trusted_keys"]
-///   }
-/// }
-/// ```
-///
-/// # Error Handling
-///
-/// This function handles various error conditions:
-/// - Invalid policy file paths or unreadable files
-/// - Malformed JSON in policy files
-/// - Network failures when communicating with verifier
-/// - Policy validation errors from the verifier
-/// - Missing or duplicate policy names
-///
-/// # Examples
-///
-/// ```rust
-/// use keylimectl::commands::policy;
-/// use keylimectl::config::Config;
-/// use keylimectl::output::OutputHandler;
-/// use keylimectl::PolicyAction;
-///
-/// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-/// let config = Config::default();
-/// let output = OutputHandler::new(crate::OutputFormat::Json, false);
-///
-/// // Create a policy
-/// let create_action = PolicyAction::Push {
-///     name: "production-policy".to_string(),
-///     file: "/etc/keylime/runtime-policy.json".to_string(),
-/// };
-/// let result = policy::execute(&create_action, &config, &output).await?;
-/// assert_eq!(result["status"], "success");
-///
-/// // Show the policy
-/// let show_action = PolicyAction::Show {
-///     name: "production-policy".to_string(),
-/// };
-/// let policy = policy::execute(&show_action, &config, &output).await?;
-///
-/// // Update the policy
-/// let update_action = PolicyAction::Update {
-///     name: "production-policy".to_string(),
-///     file: "/etc/keylime/updated-policy.json".to_string(),
-/// };
-/// let result = policy::execute(&update_action, &config, &output).await?;
-/// # Ok(())
-/// # }
-/// ```
+/// Execute a runtime policy CRUD command.
 pub async fn execute(
     action: &PolicyAction,
     output: &OutputHandler,
@@ -192,6 +38,10 @@ pub async fn execute(
         PolicyAction::Delete { name } => delete_policy(name, output)
             .await
             .map_err(KeylimectlError::from),
+        // Non-CRUD actions are handled by the parent module
+        _ => unreachable!(
+            "Non-CRUD policy actions should be dispatched by the parent module"
+        ),
     }
 }
 
