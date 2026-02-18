@@ -9,6 +9,7 @@
 //! concerns itself.
 
 pub mod digest;
+pub mod dsse;
 pub mod filesystem;
 pub mod ima_parser;
 pub mod measured_boot_policy;
