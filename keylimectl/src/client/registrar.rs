@@ -345,25 +345,59 @@ impl RegistrarClient {
     pub async fn detect_api_version(
         &mut self,
     ) -> Result<(), KeylimectlError> {
-        // Try to get version from /version endpoint first
+        info!("Starting registrar API version detection");
+
+        // Step 1: Try the /version endpoint first
         match self.get_registrar_api_version().await {
             Ok(version) => {
-                info!("Detected registrar API version: {version}");
+                info!("Successfully detected registrar API version from /version endpoint: {version}");
                 self.api_version = version;
                 return Ok(());
             }
+            #[cfg(feature = "api-v3")]
+            Err(KeylimectlError::Api { status: 410, .. }) => {
+                info!("/version endpoint returned 410 Gone - this indicates a v3.0+ registrar");
+
+                // Step 2: Confirm v3.0 support by testing the v3.0 endpoint
+                if self.test_api_version_v3("3.0").await.is_ok() {
+                    info!("Confirmed registrar supports API v3.0");
+                    self.api_version = "3.0".to_string();
+                    return Ok(());
+                } else {
+                    warn!("Got 410 from /version but v3.0 endpoint test failed - falling back to version probing");
+                }
+            }
             Err(e) => {
-                debug!("Failed to get version from /version endpoint: {e}");
-                // Continue with fallback approach
+                debug!("Failed to get version from /version endpoint ({e}), falling back to version probing");
             }
         }
 
-        // Fallback: try each supported version from newest to oldest
+        // Step 3: Fall back to testing each version individually (newest to oldest)
+        info!("Falling back to individual version testing");
         for &api_version in SUPPORTED_API_VERSIONS.iter().rev() {
-            info!("Trying registrar API version {api_version}");
+            debug!("Testing registrar API version {api_version}");
 
-            // Test this version by making a simple request (list agents)
-            if self.test_api_version(api_version).await.is_ok() {
+            let version_works = if api_version.starts_with("3.") {
+                #[cfg(feature = "api-v3")]
+                {
+                    self.test_api_version_v3(api_version).await.is_ok()
+                }
+                #[cfg(not(feature = "api-v3"))]
+                {
+                    false
+                }
+            } else {
+                #[cfg(feature = "api-v2")]
+                {
+                    self.test_api_version(api_version).await.is_ok()
+                }
+                #[cfg(not(feature = "api-v2"))]
+                {
+                    false
+                }
+            };
+
+            if version_works {
                 info!("Successfully detected registrar API version: {api_version}");
                 self.api_version = api_version.to_string();
                 return Ok(());
@@ -417,7 +451,40 @@ impl RegistrarClient {
         Ok(resp.results.current_version)
     }
 
-    /// Test if a specific API version works by making a simple request
+    /// Test if a specific API version v3.0+ works by testing the versioned root endpoint
+    /// In API v3.0+, the /version endpoint was removed, so we test endpoint availability directly
+    #[cfg(feature = "api-v3")]
+    async fn test_api_version_v3(
+        &self,
+        api_version: &str,
+    ) -> Result<(), KeylimectlError> {
+        let url = format!("{}/v{}/", self.base.base_url, api_version);
+
+        debug!("Testing registrar API version {api_version} with root endpoint: {url}");
+
+        let response = self
+            .base
+            .client
+            .get_request(Method::GET, &url)
+            .send()
+            .await
+            .with_context(|| {
+                format!("Failed to test API version {api_version}")
+            })?;
+
+        if response.status().is_success() {
+            Ok(())
+        } else {
+            Err(KeylimectlError::api_error(
+                response.status().as_u16(),
+                format!("API version {api_version} not supported"),
+                None,
+            ))
+        }
+    }
+
+    /// Test if a specific API version v2.x works by making a simple request
+    #[cfg(feature = "api-v2")]
     async fn test_api_version(
         &self,
         api_version: &str,
