@@ -85,16 +85,15 @@ pub async fn execute(
             output: output_file,
             excludelist,
             verification_keys,
-        } => {
-            convert::execute(
-                file,
-                output_file,
-                excludelist.as_deref(),
-                verification_keys.as_deref(),
-                output,
-            )
-            .await
-        }
+        } => convert::execute(
+            file,
+            output_file,
+            excludelist.as_deref(),
+            verification_keys.as_deref(),
+            output,
+        )
+        .await
+        .map_err(KeylimectlError::from),
     }
 }
 
