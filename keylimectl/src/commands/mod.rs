@@ -10,3 +10,4 @@ pub mod info;
 pub mod list;
 pub mod measured_boot;
 pub mod policy;
+pub mod verify;
