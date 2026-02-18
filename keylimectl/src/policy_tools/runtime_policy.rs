@@ -123,9 +123,12 @@ impl RuntimePolicy {
         }
     }
 
-    /// Add a digest entry for a file path.
+    /// Add a digest entry for a file path, avoiding duplicates.
     pub fn add_digest(&mut self, path: String, digest: String) {
-        self.digests.entry(path).or_default().push(digest);
+        let entry = self.digests.entry(path).or_default();
+        if !entry.contains(&digest) {
+            entry.push(digest);
+        }
     }
 
     /// Add an exclude pattern.
@@ -135,14 +138,20 @@ impl RuntimePolicy {
         }
     }
 
-    /// Add a keyring entry.
+    /// Add a keyring entry, avoiding duplicates.
     pub fn add_keyring(&mut self, keyring: String, digest: String) {
-        self.keyrings.entry(keyring).or_default().push(digest);
+        let entry = self.keyrings.entry(keyring).or_default();
+        if !entry.contains(&digest) {
+            entry.push(digest);
+        }
     }
 
-    /// Add an ima-buf entry.
+    /// Add an ima-buf entry, avoiding duplicates.
     pub fn add_ima_buf(&mut self, name: String, digest: String) {
-        self.ima_buf.entry(name).or_default().push(digest);
+        let entry = self.ima_buf.entry(name).or_default();
+        if !entry.contains(&digest) {
+            entry.push(digest);
+        }
     }
 
     /// Set the hash algorithm used in the IMA log.
