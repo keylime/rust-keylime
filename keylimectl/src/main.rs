@@ -48,8 +48,8 @@ mod error;
 mod output;
 
 use anyhow::Result;
-use clap::{Parser, Subcommand};
-use log::{debug, error};
+use clap::{CommandFactory, Parser, Subcommand};
+use log::{debug, error, warn};
 use serde_json::Value;
 use std::process;
 
@@ -65,28 +65,38 @@ use crate::output::OutputHandler;
     about = "A modern command-line tool for Keylime remote attestation",
     long_about = "keylimectl provides an intuitive interface for managing Keylime agents, \
                   policies, and attestation. It replaces keylime_tenant with improved \
-                  usability while maintaining full API compatibility."
+                  usability while maintaining full API compatibility.",
+    after_long_help = "CONFIGURATION SOURCES (highest to lowest priority):\n  \
+        1. Command-line arguments (--verifier-ip, --timeout, etc.)\n  \
+        2. Environment variables (KEYLIME_VERIFIER__IP, KEYLIME_CLIENT__TIMEOUT, etc.)\n  \
+        3. Configuration files (keylimectl.toml, ~/.config/keylimectl/config.toml, etc.)\n  \
+        4. Built-in defaults\n\n\
+        Run `keylimectl configure` to create a configuration file interactively."
 )]
 struct Cli {
     /// Configuration file path
     #[arg(short, long, value_name = "FILE")]
     config: Option<String>,
 
-    /// Verifier IP address
+    /// Verifier IP address [default: 127.0.0.1]
     #[arg(long, value_name = "IP")]
     verifier_ip: Option<String>,
 
-    /// Verifier port
+    /// Verifier port [default: 8881]
     #[arg(long, value_name = "PORT")]
     verifier_port: Option<u16>,
 
-    /// Registrar IP address
+    /// Registrar IP address [default: 127.0.0.1]
     #[arg(long, value_name = "IP")]
     registrar_ip: Option<String>,
 
-    /// Registrar port
+    /// Registrar port [default: 8891]
     #[arg(long, value_name = "PORT")]
     registrar_port: Option<u16>,
+
+    /// Request timeout in seconds [default: 60]
+    #[arg(long, value_name = "SECONDS")]
+    timeout: Option<u64>,
 
     /// Enable verbose logging
     #[arg(short, long, action = clap::ArgAction::Count)]
@@ -101,7 +111,7 @@ struct Cli {
     format: OutputFormat,
 
     #[command(subcommand)]
-    command: Commands,
+    command: Option<Commands>,
 }
 
 /// Available output formats
@@ -133,6 +143,36 @@ enum Commands {
     MeasuredBoot {
         #[command(subcommand)]
         action: MeasuredBootAction,
+    },
+    /// Create or update a configuration file
+    Configure {
+        /// Run without interactive prompts
+        #[arg(long)]
+        non_interactive: bool,
+
+        /// Configuration scope
+        #[arg(long, value_enum, default_value = "user")]
+        scope: ConfigScope,
+
+        /// Verifier IP for non-interactive mode
+        #[arg(long, value_name = "IP")]
+        verifier_ip: Option<String>,
+
+        /// Verifier port for non-interactive mode
+        #[arg(long, value_name = "PORT")]
+        verifier_port: Option<u16>,
+
+        /// Registrar IP for non-interactive mode
+        #[arg(long, value_name = "IP")]
+        registrar_ip: Option<String>,
+
+        /// Registrar port for non-interactive mode
+        #[arg(long, value_name = "PORT")]
+        registrar_port: Option<u16>,
+
+        /// Test connectivity after configuration
+        #[arg(long)]
+        test_connectivity: bool,
     },
 }
 
@@ -348,6 +388,17 @@ enum MeasuredBootAction {
     },
 }
 
+/// Configuration scope for the `configure` command
+#[derive(Clone, Debug, clap::ValueEnum)]
+enum ConfigScope {
+    /// Local directory: ./.keylimectl/config.toml
+    Local,
+    /// User home: ~/.config/keylimectl/config.toml
+    User,
+    /// System-wide: /etc/keylime/keylimectl.conf
+    System,
+}
+
 #[tokio::main]
 async fn main() {
     let cli = Cli::parse();
@@ -373,33 +424,63 @@ async fn main() {
     debug!("Final configuration after CLI overrides: client_cert={:?}, client_key={:?}, trusted_ca={:?}",
            config.tls.client_cert, config.tls.client_key, config.tls.trusted_ca);
 
-    // Validate the final configuration
-    if let Err(e) = config.validate() {
-        error!("Configuration validation failed: {e}");
-        process::exit(1);
-    }
-    debug!("Configuration validation passed");
+    match cli.command {
+        Some(ref command @ Commands::Configure { .. }) => {
+            // Configure command does not require config validation
+            // or the singleton — it creates/updates configuration.
+            let output = OutputHandler::new(cli.format, cli.quiet);
 
-    // Initialize config singleton
-    if let Err(e) = config::singleton::initialize_config(config) {
-        error!("Failed to initialize config singleton: {e}");
-        process::exit(1);
-    }
+            let result = execute_command(command, &output).await;
 
-    // Initialize output handler
-    let output = OutputHandler::new(cli.format, cli.quiet);
-
-    // Execute command (no longer pass config)
-    let result = execute_command(&cli.command, &output).await;
-
-    match result {
-        Ok(response) => {
-            output.success(response);
+            match result {
+                Ok(response) => {
+                    output.success(response);
+                }
+                Err(e) => {
+                    error!("Command failed: {e}");
+                    output.error(e);
+                    process::exit(1);
+                }
+            }
         }
-        Err(e) => {
-            error!("Command failed: {e}");
-            output.error(e);
-            process::exit(1);
+        Some(ref command) => {
+            // Validate the final configuration strictly for commands
+            if let Err(e) = config.validate() {
+                error!("Configuration validation failed: {e}");
+                process::exit(1);
+            }
+            debug!("Configuration validation passed");
+
+            // Initialize config singleton
+            if let Err(e) = config::singleton::initialize_config(config) {
+                error!("Failed to initialize config singleton: {e}");
+                process::exit(1);
+            }
+
+            // Initialize output handler
+            let output = OutputHandler::new(cli.format, cli.quiet);
+
+            // Execute command
+            let result = execute_command(command, &output).await;
+
+            match result {
+                Ok(response) => {
+                    output.success(response);
+                }
+                Err(e) => {
+                    error!("Command failed: {e}");
+                    output.error(e);
+                    process::exit(1);
+                }
+            }
+        }
+        None => {
+            // Warn about validation issues but don't exit
+            if let Err(e) = config.validate() {
+                warn!("Configuration validation: {e}");
+            }
+
+            handle_no_command(&config);
         }
     }
 }
@@ -423,6 +504,60 @@ fn init_logging(verbose: u8, quiet: bool) {
         .init();
 }
 
+/// Handle the case when no subcommand is provided.
+///
+/// Shows a configuration summary followed by clap's auto-generated help text.
+fn handle_no_command(config: &Config) {
+    use std::io::IsTerminal;
+
+    print_config_summary(config);
+
+    if !config.has_config_file() {
+        eprintln!("No configuration file found.");
+        if std::io::stdin().is_terminal() {
+            eprintln!("  Tip: Run `keylimectl configure` to create one.");
+        }
+        eprintln!();
+    }
+
+    // Print clap's auto-generated help (subcommands, options, etc.)
+    // This stays in sync automatically as commands are added/removed.
+    let mut cmd = Cli::command();
+    let _ = cmd.print_help();
+}
+
+/// Print a summary of the current configuration to stderr.
+fn print_config_summary(config: &Config) {
+    if let Some(ref path) = config.loaded_from {
+        eprintln!("Configuration: {}", path.display());
+    } else {
+        eprintln!("Configuration: (defaults)");
+    }
+    eprintln!(
+        "Verifier:      {}:{}",
+        config.verifier.ip, config.verifier.port
+    );
+    eprintln!(
+        "Registrar:     {}:{}",
+        config.registrar.ip, config.registrar.port
+    );
+    eprintln!("TLS:           {}", tls_summary(&config.tls));
+    eprintln!();
+}
+
+/// Generate a short summary of the TLS configuration.
+fn tls_summary(tls: &config::TlsConfig) -> &'static str {
+    if tls.client_cert.is_some() && tls.verify_server_cert {
+        "mTLS enabled, server verification on"
+    } else if tls.client_cert.is_some() {
+        "mTLS enabled, server verification off"
+    } else if tls.verify_server_cert {
+        "server verification on"
+    } else {
+        "disabled"
+    }
+}
+
 /// Execute the given command
 async fn execute_command(
     command: &Commands,
@@ -437,6 +572,26 @@ async fn execute_command(
         }
         Commands::MeasuredBoot { action } => {
             commands::measured_boot::execute(action, output).await
+        }
+        Commands::Configure {
+            non_interactive,
+            scope,
+            verifier_ip,
+            verifier_port,
+            registrar_ip,
+            registrar_port,
+            test_connectivity,
+        } => {
+            let params = commands::configure::ConfigureParams {
+                non_interactive: *non_interactive,
+                scope,
+                verifier_ip: verifier_ip.as_deref(),
+                verifier_port: *verifier_port,
+                registrar_ip: registrar_ip.as_deref(),
+                registrar_port: *registrar_port,
+                test_connectivity: *test_connectivity,
+            };
+            commands::configure::execute(&params, output).await
         }
     }
 }
