@@ -8,6 +8,7 @@
 //! in `commands::policy` and `commands::verify` but contains no CLI
 //! concerns itself.
 
+pub mod conversion;
 pub mod digest;
 pub mod dsse;
 pub mod filesystem;
