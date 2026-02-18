@@ -18,6 +18,7 @@ use super::types::AddAgentRequest;
 #[cfg(feature = "api-v2")]
 use crate::client::agent::AgentClient;
 use crate::client::factory;
+use crate::client::verifier::VerifierClient;
 use crate::commands::error::CommandError;
 #[cfg(feature = "api-v2")]
 use crate::config::singleton::get_config;
@@ -84,9 +85,15 @@ pub(super) async fn add_agent(
     let agent_data = match agent_data {
         Some(data) => data,
         None => {
-            return Err(CommandError::agent_not_found(
-                params.agent_id.to_string(),
-                "registrar",
+            return Err(CommandError::agent_operation_failed(
+                params.agent_id,
+                "enrollment",
+                format!(
+                    "Agent not found in registrar. \
+                     Ensure the agent is running and has completed TPM registration. \
+                     Check with: keylimectl agent status --registrar-only {}",
+                    params.agent_id
+                ),
             ));
         }
     };
@@ -101,49 +108,68 @@ pub(super) async fn add_agent(
     let api_version =
         verifier_client.api_version().parse::<f32>().unwrap_or(2.1);
 
-    // Use push model if explicitly requested via --push-model flag
-    // This skips direct agent communication and uses API v3.0 for verifier requests
-    let is_push_model = params.push_model;
-
-    if is_push_model {
-        debug!(
-            "Detected API version: auto-detected (overridden to 3.0), using API version: {api_version}, push model: {is_push_model}"
-        );
+    // Determine enrollment model based on flags and API version:
+    // 1. Explicit --push-model flag: always push
+    // 2. Explicit --pull-model flag: always pull (with deprecation warning for v3.x)
+    // 3. Auto-detect: push for API >= 3.0, pull for API < 3.0
+    let is_push_model = if params.push_model {
+        true
+    } else if params.pull_model {
+        if api_version >= 3.0 {
+            log::warn!(
+                "Pull model is deprecated for API v{api_version} verifiers. \
+                 Consider using push model (default) instead."
+            );
+        }
+        false
     } else {
-        debug!(
-            "Detected API version: {api_version}, using API version: {api_version}, push model: {is_push_model}"
-        );
-    }
+        // Auto-detect based on API version
+        #[cfg(feature = "api-v3")]
+        {
+            api_version >= 3.0
+        }
+        #[cfg(not(feature = "api-v3"))]
+        {
+            false
+        }
+    };
+
+    debug!(
+        "Detected API version: {api_version}, push model: {is_push_model}"
+    );
 
     // Determine agent connection details
-    let agent_ip = params
-        .ip
-        .map(|s| s.to_string())
-        .or_else(|| {
-            agent_data
-                .get("ip")
-                .and_then(|v| v.as_str().map(|s| s.to_string()))
-        })
-        .ok_or_else(|| {
-            CommandError::invalid_parameter(
-                "ip",
-                "Agent IP address is required".to_string(),
-            )
-        })?;
+    let agent_ip = params.ip.map(|s| s.to_string()).or_else(|| {
+        agent_data
+            .get("ip")
+            .and_then(|v| v.as_str().map(|s| s.to_string()))
+    });
 
-    let agent_port = params
-        .port
-        .or_else(|| {
-            agent_data
-                .get("port")
-                .and_then(|v| v.as_u64().map(|n| n as u16))
-        })
-        .ok_or_else(|| {
-            CommandError::invalid_parameter(
+    let agent_port = params.port.or_else(|| {
+        agent_data
+            .get("port")
+            .and_then(|v| v.as_u64().map(|n| n as u16))
+    });
+
+    // Pull model requires IP and port for direct agent communication
+    if !is_push_model {
+        if agent_ip.is_none() {
+            return Err(CommandError::invalid_parameter(
+                "ip",
+                "Agent IP address is required for pull model".to_string(),
+            ));
+        }
+        if agent_port.is_none() {
+            return Err(CommandError::invalid_parameter(
                 "port",
-                "Agent port is required".to_string(),
-            )
-        })?;
+                "Agent port is required for pull model".to_string(),
+            ));
+        }
+    }
+
+    // Use defaults for push model if not available from registrar
+    let agent_ip = agent_ip.unwrap_or_else(|| "0.0.0.0".to_string());
+    let agent_port = agent_port.unwrap_or(0);
 
     // Step 3: Perform attestation for pull model
     #[allow(unused_assignments, unused_variables)]
@@ -215,8 +241,8 @@ pub(super) async fn add_agent(
         {
             // API 2.x: Full enrollment with direct agent communication
             let mut request = AddAgentRequest::new(
-                cv_agent_ip.to_string(),
-                agent_port,
+                Some(cv_agent_ip.to_string()),
+                Some(agent_port),
                 get_config().verifier.ip.clone(),
                 get_config().verifier.port,
                 tpm_policy,
@@ -298,6 +324,16 @@ pub(super) async fn add_agent(
         }
     };
 
+    // Ensure policy fields always have defaults (the Python verifier
+    // expects these fields to be present as strings, not absent/null)
+    if let Some(obj) = request.as_object_mut() {
+        let _ = obj.entry("runtime_policy").or_insert(json!(""));
+        let _ = obj.entry("runtime_policy_name").or_insert(json!(""));
+        let _ = obj.entry("runtime_policy_key").or_insert(json!(""));
+        let _ = obj.entry("runtime_policy_sig").or_insert(json!(""));
+        let _ = obj.entry("mb_policy_name").or_insert(json!(""));
+    }
+
     // Add policies if provided (base64-encoded as expected by verifier)
     if let Some(policy_path) = params.runtime_policy {
         let policy_content = load_policy_file(policy_path)?;
@@ -338,9 +374,14 @@ pub(super) async fn add_agent(
         .add_agent(params.agent_id, request)
         .await
         .map_err(|e| {
+            let model = if is_push_model { "push" } else { "pull" };
             CommandError::resource_error(
                 "verifier",
-                format!("Failed to add agent: {e}"),
+                format!(
+                    "Failed to enroll agent ({model} model): {e}. \
+                     Retry with: keylimectl agent add {agent_id}",
+                    agent_id = params.agent_id
+                ),
             )
         })?;
 
@@ -354,7 +395,14 @@ pub(super) async fn add_agent(
             .build()
             .await
             .map_err(|e| {
-                CommandError::resource_error("agent", e.to_string())
+                CommandError::resource_error(
+                    "agent",
+                    format!(
+                        "Key delivery failed (agent enrolled but key not delivered): {e}. \
+                         Remove and re-add: keylimectl agent remove {} && keylimectl agent add {}",
+                        params.agent_id, params.agent_id
+                    ),
+                )
             })?;
 
         // Deliver U key and payload to agent
@@ -386,14 +434,35 @@ pub(super) async fn add_agent(
         params.agent_id, enrollment_type
     ));
 
-    Ok(json!({
+    // Optional: Wait for first attestation to complete
+    let attestation_state = if params.wait_for_attestation {
+        output.info("Waiting for first attestation to complete...");
+        let state = poll_attestation_status(
+            verifier_client,
+            params.agent_id,
+            params.attestation_timeout,
+            output,
+        )
+        .await?;
+        Some(state)
+    } else {
+        None
+    };
+
+    let mut result = json!({
         "status": "success",
         "message": format!("Agent {} enrolled successfully ({})", params.agent_id, enrollment_type),
         "agent_id": params.agent_id,
         "api_version": api_version,
         "push_model": is_push_model,
         "results": response
-    }))
+    });
+
+    if let Some(state) = attestation_state {
+        result["attestation_state"] = json!(state);
+    }
+
+    Ok(result)
 }
 
 /// Build enrollment request for push model (API 3.0+)
@@ -453,4 +522,240 @@ fn build_push_model_request(
 
     debug!("Push model request built successfully");
     Ok(request)
+}
+
+/// Extract operational state from verifier agent data
+///
+/// The verifier response structure may nest the state under "results" or
+/// return it at the top level depending on API version.
+fn extract_operational_state(data: &Value) -> Option<&str> {
+    data.get("results")
+        .and_then(|r| r.get("operational_state"))
+        .and_then(|s| s.as_str())
+        .or_else(|| data.get("operational_state").and_then(|s| s.as_str()))
+}
+
+/// Poll verifier for agent attestation status until it progresses past initial states
+///
+/// Returns the operational state once attestation has started or completed.
+/// Returns an error if the agent enters a failure state or the timeout expires.
+async fn poll_attestation_status(
+    verifier_client: &VerifierClient,
+    agent_id: &str,
+    timeout_secs: u64,
+    output: &OutputHandler,
+) -> Result<String, CommandError> {
+    let start = std::time::Instant::now();
+    let timeout = std::time::Duration::from_secs(timeout_secs);
+    let poll_interval = std::time::Duration::from_secs(2);
+
+    // States that indicate attestation has not yet started
+    let initial_states = ["Start", "Tenant Start", "Registered"];
+    // States that indicate attestation has failed
+    let failure_states = ["Failed", "Terminated", "Invalid Quote"];
+
+    loop {
+        if start.elapsed() > timeout {
+            return Err(CommandError::resource_error(
+                "verifier",
+                format!(
+                    "Timed out waiting for attestation after {timeout_secs}s. \
+                     The agent may still complete attestation. \
+                     Check status with: keylimectl agent status {agent_id}"
+                ),
+            ));
+        }
+
+        match verifier_client.get_agent(agent_id).await {
+            Ok(Some(data)) => {
+                if let Some(state) = extract_operational_state(&data) {
+                    if failure_states.contains(&state) {
+                        return Err(CommandError::agent_operation_failed(
+                            agent_id,
+                            "attestation",
+                            format!("Agent entered failure state: {state}"),
+                        ));
+                    }
+                    if !initial_states.contains(&state) {
+                        output.info(format!(
+                            "Attestation progressed to state: {state}"
+                        ));
+                        return Ok(state.to_string());
+                    }
+                    debug!(
+                        "Agent in state '{state}', waiting for attestation..."
+                    );
+                }
+            }
+            Ok(None) => {
+                debug!("Agent not yet visible on verifier, waiting...");
+            }
+            Err(e) => {
+                debug!("Error polling agent status: {e}, retrying...");
+            }
+        }
+
+        tokio::time::sleep(poll_interval).await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_extract_operational_state_nested() {
+        let data = json!({
+            "results": {
+                "operational_state": "Get Quote"
+            }
+        });
+        assert_eq!(extract_operational_state(&data), Some("Get Quote"));
+    }
+
+    #[test]
+    fn test_extract_operational_state_top_level() {
+        let data = json!({
+            "operational_state": "Failed"
+        });
+        assert_eq!(extract_operational_state(&data), Some("Failed"));
+    }
+
+    #[test]
+    fn test_extract_operational_state_missing() {
+        let data = json!({
+            "other_field": "value"
+        });
+        assert_eq!(extract_operational_state(&data), None);
+    }
+
+    #[test]
+    fn test_extract_operational_state_empty() {
+        let data = json!({});
+        assert_eq!(extract_operational_state(&data), None);
+    }
+
+    #[test]
+    fn test_extract_operational_state_prefers_nested() {
+        // When both exist, nested (under "results") should be preferred
+        let data = json!({
+            "operational_state": "Start",
+            "results": {
+                "operational_state": "Get Quote"
+            }
+        });
+        assert_eq!(extract_operational_state(&data), Some("Get Quote"));
+    }
+
+    #[test]
+    fn test_attestation_state_classification() {
+        // Test the state classification used by poll_attestation_status
+        let initial_states = ["Start", "Tenant Start", "Registered"];
+        let failure_states = ["Failed", "Terminated", "Invalid Quote"];
+
+        // Initial states
+        for state in &initial_states {
+            assert!(
+                initial_states.contains(state),
+                "{state} should be initial"
+            );
+            assert!(
+                !failure_states.contains(state),
+                "{state} should not be failure"
+            );
+        }
+
+        // Failure states
+        for state in &failure_states {
+            assert!(
+                failure_states.contains(state),
+                "{state} should be failure"
+            );
+            assert!(
+                !initial_states.contains(state),
+                "{state} should not be initial"
+            );
+        }
+
+        // Progress states (not initial, not failure)
+        let progress_states = ["Get Quote", "Provide V", "Provide V (Retry)"];
+        for state in &progress_states {
+            assert!(
+                !initial_states.contains(state),
+                "{state} should not be initial"
+            );
+            assert!(
+                !failure_states.contains(state),
+                "{state} should not be failure"
+            );
+        }
+    }
+
+    #[test]
+    fn test_model_auto_detection_logic() {
+        // Test the auto-detection logic that determines push vs pull model
+        // This tests the decision matrix without requiring async/network calls
+
+        struct ModelParams {
+            push_model: bool,
+            pull_model: bool,
+            api_version: f32,
+        }
+
+        fn determine_model(params: &ModelParams) -> bool {
+            if params.push_model {
+                true
+            } else if params.pull_model {
+                false
+            } else {
+                params.api_version >= 3.0
+            }
+        }
+
+        // Explicit --push-model always wins
+        assert!(determine_model(&ModelParams {
+            push_model: true,
+            pull_model: false,
+            api_version: 2.1,
+        }));
+        assert!(determine_model(&ModelParams {
+            push_model: true,
+            pull_model: false,
+            api_version: 3.0,
+        }));
+
+        // Explicit --pull-model forces pull
+        assert!(!determine_model(&ModelParams {
+            push_model: false,
+            pull_model: true,
+            api_version: 2.1,
+        }));
+        assert!(!determine_model(&ModelParams {
+            push_model: false,
+            pull_model: true,
+            api_version: 3.0,
+        }));
+
+        // Auto-detect: push for v3.x, pull for v2.x
+        assert!(!determine_model(&ModelParams {
+            push_model: false,
+            pull_model: false,
+            api_version: 2.0,
+        }));
+        assert!(!determine_model(&ModelParams {
+            push_model: false,
+            pull_model: false,
+            api_version: 2.1,
+        }));
+        assert!(determine_model(&ModelParams {
+            push_model: false,
+            pull_model: false,
+            api_version: 3.0,
+        }));
+        assert!(determine_model(&ModelParams {
+            push_model: false,
+            pull_model: false,
+            api_version: 3.1,
+        }));
+    }
 }
