@@ -11,7 +11,9 @@ use crate::error::KeylimectlError;
 use crate::output::OutputHandler;
 use crate::policy_tools::filesystem;
 use crate::policy_tools::ima_parser;
+use crate::policy_tools::measured_boot_gen;
 use crate::policy_tools::runtime_policy::RuntimePolicy;
+use crate::policy_tools::tpm_policy_gen;
 use crate::GenerateSubcommand;
 use serde_json::Value;
 use std::path::Path;
@@ -51,14 +53,33 @@ pub async fn execute(
         )
         .await
         .map_err(KeylimectlError::from),
-        GenerateSubcommand::MeasuredBoot { .. } => {
-            Err(KeylimectlError::validation(
-                "policy generate measured-boot is not yet implemented",
-            ))
-        }
-        GenerateSubcommand::Tpm { .. } => Err(KeylimectlError::validation(
-            "policy generate tpm is not yet implemented",
-        )),
+        GenerateSubcommand::MeasuredBoot {
+            eventlog_file,
+            without_secureboot,
+            output: output_file,
+        } => generate_measured_boot(
+            eventlog_file,
+            *without_secureboot,
+            output_file.as_deref(),
+            output,
+        )
+        .map_err(KeylimectlError::from),
+        GenerateSubcommand::Tpm {
+            pcr_file,
+            from_tpm,
+            pcrs,
+            mask,
+            hash_alg: _,
+            output: output_file,
+        } => generate_tpm(
+            pcr_file.as_deref(),
+            *from_tpm,
+            pcrs,
+            mask.as_deref(),
+            output_file.as_deref(),
+            output,
+        )
+        .map_err(KeylimectlError::from),
     }
 }
 
@@ -247,6 +268,116 @@ async fn generate_runtime(
         ));
     } else {
         // Output to stdout via the output handler
+        output.success(policy_json.clone());
+    }
+
+    Ok(policy_json)
+}
+
+/// Generate a measured boot policy from a UEFI event log.
+fn generate_measured_boot(
+    eventlog_file: &str,
+    without_secureboot: bool,
+    output_file: Option<&str>,
+    output: &OutputHandler,
+) -> Result<Value, CommandError> {
+    let path = Path::new(eventlog_file);
+    output.info(format!("Parsing UEFI event log: {eventlog_file}"));
+
+    let include_secureboot = !without_secureboot;
+    let policy =
+        measured_boot_gen::generate_from_eventlog(path, include_secureboot)?;
+
+    output.info(format!(
+        "Generated measured boot policy (secureboot: {})",
+        if include_secureboot { "yes" } else { "no" }
+    ));
+    output.info(format!(
+        "  PK entries: {}, KEK entries: {}, db entries: {}, dbx entries: {}",
+        policy.pk.len(),
+        policy.kek.len(),
+        policy.db.len(),
+        policy.dbx.len()
+    ));
+    output.info(format!(
+        "  Kernel entries: {}, S-CRTM/BIOS entries: {}",
+        policy.kernels.len(),
+        policy.scrtm_and_bios.len()
+    ));
+
+    let policy_json = serde_json::to_value(&policy)?;
+
+    if let Some(out_path) = output_file {
+        let json_str = serde_json::to_string_pretty(&policy_json)?;
+        std::fs::write(out_path, &json_str)?;
+        output.info(format!("Measured boot policy written to {out_path}"));
+    } else {
+        output.success(policy_json.clone());
+    }
+
+    Ok(policy_json)
+}
+
+/// Generate a TPM policy from PCR values.
+fn generate_tpm(
+    pcr_file: Option<&str>,
+    from_tpm: bool,
+    pcrs_str: &str,
+    mask: Option<&str>,
+    output_file: Option<&str>,
+    output: &OutputHandler,
+) -> Result<Value, CommandError> {
+    if from_tpm {
+        return Err(CommandError::from(
+            crate::commands::error::PolicyGenerationError::UnsupportedAlgorithm {
+                algorithm: "Reading from local TPM requires the tpm-local feature flag".to_string(),
+            },
+        ));
+    }
+
+    let pcr_file = pcr_file.ok_or_else(|| {
+        CommandError::from(
+            crate::commands::error::PolicyGenerationError::Output {
+                path: "<pcr-file>".into(),
+                reason: "Either --pcr-file or --from-tpm is required"
+                    .to_string(),
+            },
+        )
+    })?;
+
+    // Determine PCR indices from mask or pcrs argument
+    let pcr_indices = if let Some(mask_str) = mask {
+        crate::policy_tools::tpm_policy::TpmPolicy::parse_mask(mask_str)
+            .map_err(|e| {
+                CommandError::from(
+                    crate::commands::error::PolicyGenerationError::Output {
+                        path: "<mask>".into(),
+                        reason: e,
+                    },
+                )
+            })?
+    } else {
+        tpm_policy_gen::parse_pcr_indices(pcrs_str)?
+    };
+
+    output.info(format!("Reading PCR values from: {pcr_file}"));
+    output.info(format!("PCR indices: {:?}", pcr_indices));
+
+    let policy = tpm_policy_gen::generate_from_file(
+        Path::new(pcr_file),
+        &pcr_indices,
+    )?;
+
+    output.info(format!("Generated TPM policy with mask: {}", policy.mask));
+    output.info(format!("  {} PCR values", policy.pcr_values.len()));
+
+    let policy_json = serde_json::to_value(&policy)?;
+
+    if let Some(out_path) = output_file {
+        let json_str = serde_json::to_string_pretty(&policy_json)?;
+        std::fs::write(out_path, &json_str)?;
+        output.info(format!("TPM policy written to {out_path}"));
+    } else {
         output.success(policy_json.clone());
     }
 
