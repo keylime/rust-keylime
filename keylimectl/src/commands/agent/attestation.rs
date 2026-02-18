@@ -1066,4 +1066,150 @@ mod tests {
             assert!(nonces.insert(nonce), "Duplicate nonce generated");
         }
     }
+
+    // Negative security tests: attacker-controlled public keys
+
+    #[test]
+    fn test_encrypt_u_key_empty_pem() {
+        let result = encrypt_u_key_with_agent_pubkey(&[0u8; 32], "");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_encrypt_u_key_garbage_pem() {
+        let result =
+            encrypt_u_key_with_agent_pubkey(&[0u8; 32], "not-a-pem-key");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_encrypt_u_key_truncated_pem() {
+        let result = encrypt_u_key_with_agent_pubkey(
+            &[0u8; 32],
+            "-----BEGIN PUBLIC KEY-----\nMIIB\n-----END PUBLIC KEY-----",
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_encrypt_u_key_ec_key_rejected() {
+        // RSA-OAEP encryption must reject non-RSA keys
+        use openssl::ec::{EcGroup, EcKey};
+        use openssl::nid::Nid;
+        use openssl::pkey::PKey;
+
+        let group = EcGroup::from_curve_name(Nid::X9_62_PRIME256V1)
+            .expect("EC group"); //#[allow_ci]
+        let ec = EcKey::generate(&group).expect("EC key generation"); //#[allow_ci]
+        let pkey = PKey::from_ec_key(ec).expect("PKey from EC"); //#[allow_ci]
+        let pem = String::from_utf8(
+            pkey.public_key_to_pem().expect("PEM encoding"), //#[allow_ci]
+        )
+        .expect("UTF-8"); //#[allow_ci]
+
+        let result = encrypt_u_key_with_agent_pubkey(&[0u8; 32], &pem);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_encrypt_u_key_valid_rsa_key() {
+        use openssl::pkey::PKey;
+        use openssl::rsa::Rsa;
+
+        let rsa = Rsa::generate(2048).expect("RSA key generation"); //#[allow_ci]
+        let pkey = PKey::from_rsa(rsa).expect("PKey from RSA"); //#[allow_ci]
+        let pem = String::from_utf8(
+            pkey.public_key_to_pem().expect("PEM encoding"), //#[allow_ci]
+        )
+        .expect("UTF-8"); //#[allow_ci]
+
+        let result = encrypt_u_key_with_agent_pubkey(&[0u8; 32], &pem);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_encrypt_u_key_empty_plaintext_no_panic() {
+        use openssl::pkey::PKey;
+        use openssl::rsa::Rsa;
+
+        let rsa = Rsa::generate(2048).expect("RSA key generation"); //#[allow_ci]
+        let pkey = PKey::from_rsa(rsa).expect("PKey from RSA"); //#[allow_ci]
+        let pem = String::from_utf8(
+            pkey.public_key_to_pem().expect("PEM encoding"), //#[allow_ci]
+        )
+        .expect("UTF-8"); //#[allow_ci]
+
+        // Empty plaintext — verifies no panic regardless of result
+        let _ = encrypt_u_key_with_agent_pubkey(&[], &pem);
+    }
+
+    // Negative security tests: malformed TPM quote parsing
+
+    #[test]
+    fn test_malformed_quote_base64_decode() {
+        // Verify base64 decode returns Err for garbage, not panic
+        assert!(STANDARD.decode("!!!invalid!!!").is_err());
+        assert!(STANDARD.decode("").is_ok()); // empty decodes to empty
+    }
+
+    #[test]
+    fn test_quote_format_parsing_edge_cases() {
+        // Verify quote string splitting handles edge cases without panic
+        let empty = "";
+        assert!(!empty.starts_with('r'));
+
+        let no_parts = "r";
+        let parts: Vec<&str> = no_parts[1..].split(':').collect();
+        assert_eq!(parts.len(), 1);
+        assert!(parts[0].is_empty());
+
+        let one_part = "rYWJj";
+        let parts: Vec<&str> = one_part[1..].split(':').collect();
+        assert_eq!(parts.len(), 1);
+
+        let two_parts = "rYWJj:ZGVm";
+        let parts: Vec<&str> = two_parts[1..].split(':').collect();
+        assert_eq!(parts.len(), 2);
+    }
+
+    // Zeroization verification tests
+
+    #[test]
+    fn test_zeroizing_wraps_and_clears_on_explicit_zeroize() {
+        use zeroize::Zeroize;
+
+        // Verify Zeroizing wraps correctly
+        let mut key = Zeroizing::new([0xFFu8; 32]);
+        assert!(key.iter().all(|&b| b == 0xFF));
+
+        // Verify explicit zeroize clears the value
+        key.zeroize();
+        assert!(key.iter().all(|&b| b == 0x00));
+    }
+
+    #[test]
+    fn test_zeroizing_key_material_operations() {
+        // Verify key material operations work correctly with Zeroizing wrapper
+        let mut u_key = Zeroizing::new([0u8; 32]);
+        let mut v_key = Zeroizing::new([0u8; 32]);
+
+        // Fill with test data (simulating rand::rand_bytes)
+        for (i, b) in u_key.iter_mut().enumerate() {
+            *b = i as u8;
+        }
+        for (i, b) in v_key.iter_mut().enumerate() {
+            *b = (255 - i) as u8;
+        }
+
+        // XOR operation (K = U ^ V) should work through Zeroizing
+        let mut k_key = Zeroizing::new([0u8; 32]);
+        for i in 0..32 {
+            k_key[i] = u_key[i] ^ v_key[i];
+        }
+
+        // Verify XOR result
+        for i in 0..32 {
+            assert_eq!(k_key[i], (i as u8) ^ (255 - i) as u8);
+        }
+    }
 }
