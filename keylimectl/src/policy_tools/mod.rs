@@ -9,7 +9,9 @@
 //! concerns itself.
 
 pub mod digest;
+pub mod filesystem;
 pub mod ima_parser;
 pub mod measured_boot_policy;
+pub mod merge;
 pub mod runtime_policy;
 pub mod tpm_policy;
