@@ -144,6 +144,12 @@ enum Commands {
         #[command(subcommand)]
         action: MeasuredBootAction,
     },
+    /// Show diagnostic information
+    #[command(alias = "diag")]
+    Info {
+        #[command(subcommand)]
+        subcommand: Option<InfoSubcommand>,
+    },
     /// Create or update a configuration file
     Configure {
         /// Run without interactive prompts
@@ -399,6 +405,23 @@ enum ConfigScope {
     System,
 }
 
+/// Info subcommands for diagnostic inspection
+#[derive(Subcommand)]
+enum InfoSubcommand {
+    /// Show verifier status and API version
+    Verifier,
+    /// Show registrar status and API version
+    Registrar,
+    /// Show detailed information for a specific agent
+    Agent {
+        /// Agent identifier
+        #[arg(value_name = "AGENT_ID")]
+        agent_id: String,
+    },
+    /// Validate TLS certificates and test connectivity
+    Tls,
+}
+
 #[tokio::main]
 async fn main() {
     let cli = Cli::parse();
@@ -428,6 +451,35 @@ async fn main() {
         Some(ref command @ Commands::Configure { .. }) => {
             // Configure command does not require config validation
             // or the singleton — it creates/updates configuration.
+            let output = OutputHandler::new(cli.format, cli.quiet);
+
+            let result = execute_command(command, &output).await;
+
+            match result {
+                Ok(response) => {
+                    output.success(response);
+                }
+                Err(e) => {
+                    error!("Command failed: {e}");
+                    output.error(e);
+                    process::exit(1);
+                }
+            }
+        }
+        Some(ref command @ Commands::Info { .. }) => {
+            // Info commands should work even with incomplete config.
+            // Warn on validation failures instead of exiting.
+            if let Err(e) = config.validate() {
+                warn!("Configuration validation: {e}");
+            }
+
+            // Always initialize singleton so info subcommands can
+            // use get_config() uniformly.
+            if let Err(e) = config::singleton::initialize_config(config) {
+                error!("Failed to initialize config singleton: {e}");
+                process::exit(1);
+            }
+
             let output = OutputHandler::new(cli.format, cli.quiet);
 
             let result = execute_command(command, &output).await;
@@ -572,6 +624,9 @@ async fn execute_command(
         }
         Commands::MeasuredBoot { action } => {
             commands::measured_boot::execute(action, output).await
+        }
+        Commands::Info { subcommand } => {
+            commands::info::execute(subcommand, output).await
         }
         Commands::Configure {
             non_interactive,

@@ -313,7 +313,8 @@ async fn list_agents(
 mod tests {
     use crate::commands::error::CommandError;
     use crate::config::{
-        ClientConfig, Config, RegistrarConfig, TlsConfig, VerifierConfig,
+        CliOverrides, ClientConfig, Config, RegistrarConfig, TlsConfig,
+        VerifierConfig,
     };
     use crate::output::OutputHandler;
     use crate::AgentAction;
@@ -323,6 +324,7 @@ mod tests {
     fn create_test_config() -> Config {
         Config {
             loaded_from: None,
+            cli_overrides: CliOverrides::default(),
             verifier: VerifierConfig {
                 ip: "127.0.0.1".to_string(),
                 port: 8881,
