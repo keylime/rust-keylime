@@ -53,6 +53,10 @@
 //!     cert_dir: None,
 //!     verify: true,
 //!     push_model: false,
+//!     pull_model: false,
+//!     tpm_policy: None,
+//!     wait_for_attestation: false,
+//!     attestation_timeout: 60,
 //! };
 //!
 //! let result = agent::execute(&action, &config, &output).await?;
@@ -139,6 +143,10 @@ use serde_json::{json, Value};
 ///     cert_dir: None,
 ///     verify: true,
 ///     push_model: false,
+///     pull_model: false,
+///     tpm_policy: None,
+///     wait_for_attestation: false,
+///     attestation_timeout: 60,
 /// };
 ///
 /// let result = agent::execute(&add_action, &config, &output).await?;
@@ -172,7 +180,10 @@ pub async fn execute(
             cert_dir,
             verify,
             push_model,
+            pull_model,
             tpm_policy,
+            wait_for_attestation,
+            attestation_timeout,
         } => add_agent(
             AddAgentParams {
                 agent_id: uuid,
@@ -185,7 +196,10 @@ pub async fn execute(
                 cert_dir: cert_dir.as_deref(),
                 verify: *verify,
                 push_model: *push_model,
+                pull_model: *pull_model,
                 tpm_policy: tpm_policy.as_deref(),
+                wait_for_attestation: *wait_for_attestation,
+                attestation_timeout: *attestation_timeout,
             },
             output,
         )
@@ -439,7 +453,10 @@ mod tests {
                 cert_dir: None,
                 verify: true,
                 push_model: false,
+                pull_model: false,
                 tpm_policy: None,
+                wait_for_attestation: false,
+                attestation_timeout: 60,
             };
 
             let remove_action = AgentAction::Remove {
@@ -649,7 +666,10 @@ mod tests {
                 cert_dir: None,
                 verify: true,
                 push_model: false,
+                pull_model: false,
                 tpm_policy: None,
+                wait_for_attestation: false,
+                attestation_timeout: 60,
             };
 
             // Verify the action was created properly

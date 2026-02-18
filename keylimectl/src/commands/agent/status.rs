@@ -92,92 +92,93 @@ pub(super) async fn get_agent_status(
     // This is only applicable for pull model (api-v2)
     #[cfg(feature = "api-v2")]
     if !registrar_only {
-        if let (Some(registrar_data), Some(verifier_data)) = (
-            results.get("registrar").and_then(|r| r.get("data")),
-            results.get("verifier").and_then(|v| v.get("data")),
-        ) {
-            // Extract agent IP and port
-            let agent_ip = verifier_data
-                .get("ip")
-                .or_else(|| registrar_data.get("ip"))
-                .and_then(|ip| ip.as_str());
+        // Extract IP and port from results (clone to avoid borrow conflicts)
+        let agent_connection = {
+            let registrar_data =
+                results.get("registrar").and_then(|r| r.get("data"));
+            let verifier_data =
+                results.get("verifier").and_then(|v| v.get("data"));
+            match (registrar_data, verifier_data) {
+                (Some(reg), Some(ver)) => {
+                    let ip = ver
+                        .get("ip")
+                        .or_else(|| reg.get("ip"))
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string());
+                    let port = ver
+                        .get("port")
+                        .or_else(|| reg.get("port"))
+                        .and_then(|v| v.as_u64().map(|p| p as u16));
+                    ip.zip(port)
+                }
+                _ => None,
+            }
+        };
 
-            let agent_port = verifier_data
-                .get("port")
-                .or_else(|| registrar_data.get("port"))
-                .and_then(|port| port.as_u64().map(|p| p as u16));
+        if let Some((ip, port)) = agent_connection {
+            let verifier_client =
+                factory::get_verifier().await.map_err(|e| {
+                    CommandError::resource_error("verifier", e.to_string())
+                })?;
+            let api_version =
+                verifier_client.api_version().parse::<f32>().unwrap_or(2.1);
 
-            if let (Some(ip), Some(port)) = (agent_ip, agent_port) {
-                // Check if we should try direct agent communication
-                let verifier_client =
-                    factory::get_verifier().await.map_err(|e| {
-                        CommandError::resource_error(
-                            "verifier",
-                            e.to_string(),
-                        )
-                    })?;
-                let api_version = verifier_client
-                    .api_version()
-                    .parse::<f32>()
-                    .unwrap_or(2.1);
+            if api_version < 3.0 {
+                results["model"] = json!("pull");
+                output.progress("Checking agent status directly");
 
-                if api_version < 3.0 {
-                    output.progress("Checking agent status directly");
-
-                    match AgentClient::builder()
-                        .agent_ip(ip)
-                        .agent_port(port)
-                        .config(get_config())
-                        .build()
-                        .await
-                    {
-                        Ok(agent_client) => {
-                            // Try a simple test request to check if agent is responsive
-                            match agent_client
-                                .get_quote("test_connectivity")
-                                .await
-                            {
-                                Ok(_) => {
+                match AgentClient::builder()
+                    .agent_ip(&ip)
+                    .agent_port(port)
+                    .config(get_config())
+                    .build()
+                    .await
+                {
+                    Ok(agent_client) => {
+                        match agent_client
+                            .get_quote("test_connectivity")
+                            .await
+                        {
+                            Ok(_) => {
+                                results["agent"] = json!({
+                                    "status": "responsive",
+                                    "connection": format!("{ip}:{port}")
+                                });
+                            }
+                            Err(e) => {
+                                if e.to_string().contains("400")
+                                    || e.to_string().contains("Bad Request")
+                                {
                                     results["agent"] = json!({
                                         "status": "responsive",
-                                        "connection": format!("{ip}:{port}")
+                                        "connection": format!("{ip}:{port}"),
+                                        "note": "Agent rejected test nonce (expected)"
                                     });
-                                }
-                                Err(e) => {
-                                    // Check if it's a 400 error (bad nonce) which means agent is up
-                                    if e.to_string().contains("400")
-                                        || e.to_string()
-                                            .contains("Bad Request")
-                                    {
-                                        results["agent"] = json!({
-                                            "status": "responsive",
-                                            "connection": format!("{ip}:{port}"),
-                                            "note": "Agent rejected test nonce (expected)"
-                                        });
-                                    } else {
-                                        results["agent"] = json!({
-                                            "status": "unreachable",
-                                            "connection": format!("{ip}:{port}"),
-                                            "error": e.to_string()
-                                        });
-                                    }
+                                } else {
+                                    results["agent"] = json!({
+                                        "status": "unreachable",
+                                        "connection": format!("{ip}:{port}"),
+                                        "error": e.to_string()
+                                    });
                                 }
                             }
                         }
-                        Err(e) => {
-                            results["agent"] = json!({
-                                "status": "connection_failed",
-                                "connection": format!("{ip}:{port}"),
-                                "error": e.to_string()
-                            });
-                        }
                     }
-                } else {
-                    results["agent"] = json!({
-                        "status": "not_applicable",
-                        "note": "Direct agent communication not used in API >= 3.0"
-                    });
+                    Err(e) => {
+                        results["agent"] = json!({
+                            "status": "connection_failed",
+                            "connection": format!("{ip}:{port}"),
+                            "error": e.to_string()
+                        });
+                    }
                 }
+            } else {
+                results["agent"] = json!({
+                    "status": "not_applicable",
+                    "note": "Direct agent communication is not used with push model (API >= 3.0). \
+                             Agent attestation status is managed by the verifier."
+                });
+                results["model"] = json!("push");
             }
         }
     }
