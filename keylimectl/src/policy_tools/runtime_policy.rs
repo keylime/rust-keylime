@@ -7,8 +7,6 @@
 //! from `keylime.ima.types`, ensuring compatibility between the Python
 //! and Rust implementations.
 
-#![allow(dead_code)] // Types used in later implementation steps
-
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 

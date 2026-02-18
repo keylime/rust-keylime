@@ -8,6 +8,8 @@
 //! in `commands::policy` and `commands::verify` but contains no CLI
 //! concerns itself.
 
+pub mod digest;
+pub mod ima_parser;
 pub mod measured_boot_policy;
 pub mod runtime_policy;
 pub mod tpm_policy;
