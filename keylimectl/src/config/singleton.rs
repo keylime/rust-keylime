@@ -96,6 +96,7 @@ mod tests {
     fn create_test_config() -> Config {
         Config {
             loaded_from: None,
+            cli_overrides: crate::config::CliOverrides::default(),
             verifier: VerifierConfig {
                 ip: "127.0.0.1".to_string(),
                 port: 8881,

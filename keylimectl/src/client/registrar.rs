@@ -772,6 +772,12 @@ impl RegistrarClient {
     /// # Ok(())
     /// # }
     /// ```
+    /// Get the detected API version
+    pub fn api_version(&self) -> &str {
+        &self.api_version
+    }
+
+    /// List all agents registered with the registrar
     pub async fn list_agents(&self) -> Result<Value, KeylimectlError> {
         debug!("Listing agents on registrar");
 
@@ -806,6 +812,7 @@ mod tests {
     fn create_test_config() -> Config {
         Config {
             loaded_from: None,
+            cli_overrides: crate::config::CliOverrides::default(),
             verifier: crate::config::VerifierConfig::default(),
             registrar: RegistrarConfig {
                 ip: "127.0.0.1".to_string(),
