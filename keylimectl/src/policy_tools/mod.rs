@@ -16,3 +16,4 @@ pub mod measured_boot_policy;
 pub mod merge;
 pub mod runtime_policy;
 pub mod tpm_policy;
+pub mod validation;
