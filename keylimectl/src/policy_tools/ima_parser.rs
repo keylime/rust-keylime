@@ -324,6 +324,87 @@ pub fn merge_digest_maps(base: &mut DigestMap, other: &DigestMap) {
     }
 }
 
+/// Parse a JSON allowlist from a `serde_json::Value`.
+///
+/// Accepts either the legacy format with a `"hashes"` key or
+/// the current format with a `"digests"` key.
+pub fn parse_json_allowlist_value(
+    value: &serde_json::Value,
+) -> Result<DigestMap, PolicyGenerationError> {
+    let hashes = value
+        .get("digests")
+        .or_else(|| value.get("hashes"))
+        .ok_or_else(|| PolicyGenerationError::AllowlistParse {
+            path: "<input>".into(),
+            reason: "Missing 'digests' or 'hashes' key".to_string(),
+        })?;
+
+    let hashes_map = hashes.as_object().ok_or_else(|| {
+        PolicyGenerationError::AllowlistParse {
+            path: "<input>".into(),
+            reason: "'digests'/'hashes' is not an object".to_string(),
+        }
+    })?;
+
+    let mut digests: DigestMap = HashMap::new();
+
+    for (file_path, digest_list) in hashes_map {
+        if let Some(arr) = digest_list.as_array() {
+            for digest_val in arr {
+                if let Some(digest_str) = digest_val.as_str() {
+                    // Strip algorithm prefix if present (e.g., "sha256:hex" → "hex")
+                    let bare_hex = digest_str
+                        .split_once(':')
+                        .map(|(_, h)| h)
+                        .unwrap_or(digest_str);
+                    add_digest(
+                        &mut digests,
+                        file_path.clone(),
+                        bare_hex.to_string(),
+                    );
+                }
+            }
+        }
+    }
+
+    Ok(digests)
+}
+
+/// Parse a flat-text allowlist from a string.
+///
+/// Each line contains a digest value and a file path separated by whitespace.
+/// Lines starting with `#` are treated as comments. Empty lines are skipped.
+pub fn parse_flat_allowlist_str(
+    text: &str,
+) -> Result<DigestMap, PolicyGenerationError> {
+    let mut digests: DigestMap = HashMap::new();
+
+    for line in text.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+
+        let parts: Vec<&str> =
+            line.splitn(2, |c: char| c.is_whitespace()).collect();
+        if parts.len() != 2 {
+            continue;
+        }
+
+        let hash = parts[0].trim();
+        let file_path = parts[1].trim().replace(' ', "_");
+
+        if !hash.is_empty() && !file_path.is_empty() {
+            // Strip algorithm prefix if present (e.g., "sha256:hex" → "hex")
+            let bare_hex =
+                hash.split_once(':').map(|(_, h)| h).unwrap_or(hash);
+            add_digest(&mut digests, file_path, bare_hex.to_string());
+        }
+    }
+
+    Ok(digests)
+}
+
 // --- Internal parsing helpers ---
 
 /// Parse legacy `ima` template data: `<digest_hex> <path>`
