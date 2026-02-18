@@ -431,18 +431,28 @@ enum PolicyAction {
     },
 }
 
+impl PolicyAction {
+    /// Returns true if this action operates entirely locally
+    /// (no network connectivity required).
+    fn is_local_only(&self) -> bool {
+        matches!(
+            self,
+            PolicyAction::Generate { .. }
+                | PolicyAction::Sign { .. }
+                | PolicyAction::VerifySignature { .. }
+                | PolicyAction::Validate { .. }
+                | PolicyAction::Convert { .. }
+        )
+    }
+}
+
 /// Policy generation subcommands
 #[derive(Subcommand)]
 enum GenerateSubcommand {
     /// Generate a runtime policy from IMA logs, allowlists, or filesystem
     Runtime {
-        /// IMA measurement list path
-        #[arg(
-            short = 'm',
-            long,
-            value_name = "FILE",
-            default_value = "/sys/kernel/security/ima/ascii_runtime_measurements"
-        )]
+        /// IMA measurement list path (default: /sys/kernel/security/ima/ascii_runtime_measurements)
+        #[arg(short = 'm', long, value_name = "FILE")]
         ima_measurement_list: Option<String>,
 
         /// Plain-text allowlist file
@@ -720,6 +730,44 @@ async fn main() {
         Some(ref command @ Commands::Configure { .. }) => {
             // Configure command does not require config validation
             // or the singleton — it creates/updates configuration.
+            let output = OutputHandler::new(cli.format, cli.quiet);
+
+            let result =
+                execute_command(command, &output).await;
+
+            match result {
+                Ok(response) => {
+                    output.success(response);
+                }
+                Err(e) => {
+                    error!("Command failed: {e}");
+                    output.error(e);
+                    process::exit(1);
+                }
+            }
+        }
+        Some(
+            ref command @ Commands::Policy {
+                action: ref action @ PolicyAction::Generate { .. }
+                    | ref action @ PolicyAction::Sign { .. }
+                    | ref action @ PolicyAction::VerifySignature { .. }
+                    | ref action @ PolicyAction::Validate { .. }
+                    | ref action @ PolicyAction::Convert { .. },
+            },
+        ) if action.is_local_only() => {
+            // Local-only policy commands do not require network
+            // connectivity or valid TLS configuration.
+            if let Err(e) = config.validate() {
+                warn!("Configuration validation: {e}");
+            }
+
+            if let Err(e) =
+                config::singleton::initialize_config(config)
+            {
+                error!("Failed to initialize config singleton: {e}");
+                process::exit(1);
+            }
+
             let output = OutputHandler::new(cli.format, cli.quiet);
 
             let result =

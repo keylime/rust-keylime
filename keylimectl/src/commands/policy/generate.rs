@@ -300,9 +300,6 @@ async fn generate_runtime(
             policy.digest_count(),
             policy.exclude_count()
         ));
-    } else {
-        // Output to stdout via the output handler
-        output.success(policy_json.clone());
     }
 
     Ok(policy_json)
@@ -353,8 +350,6 @@ fn generate_measured_boot(
         output.info(format!(
             "Measured boot policy written to {out_path}"
         ));
-    } else {
-        output.success(policy_json.clone());
     }
 
     Ok(policy_json)
@@ -432,8 +427,6 @@ fn generate_tpm(
         output.info(format!(
             "TPM policy written to {out_path}"
         ));
-    } else {
-        output.success(policy_json.clone());
     }
 
     Ok(policy_json)

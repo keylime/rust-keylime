@@ -58,6 +58,13 @@ and one-shot evidence verification.
 - [x] Key derivation verification (`--verify`)
 - [x] Payload and certificate delivery
 - [x] Comprehensive unit tests for policy, measured-boot, and list commands
+- [x] Local runtime policy generation from IMA logs, allowlists, filesystem
+- [x] Local measured boot policy generation from UEFI event logs
+- [x] Local TPM policy generation from PCR values files
+- [x] DSSE policy signing (ECDSA and X.509 backends)
+- [x] Policy validation (runtime, measured-boot, TPM) with auto-detection
+- [x] Legacy allowlist conversion (JSON and flat-text formats)
+- [x] One-shot evidence verification via verifier API
 
 ### What needs attention
 
@@ -71,10 +78,10 @@ and one-shot evidence verification.
 - [ ] No interactive configuration wizard
 - [ ] No diagnostics commands
 - [ ] Missing: `--runtime-policy-url`, `--cv_targethost`, `--verifier-id`, `--agent-api-version`
-- [ ] No policy generation (runtime, measured boot) -- requires porting keylime-policies
-- [ ] No policy signing (DSSE)
-- [ ] No policy validation
-- [ ] No evidence verification (`/verify/evidence` endpoint)
+- [x] ~~No policy generation (runtime, measured boot)~~ (Phase 6)
+- [x] ~~No policy signing (DSSE)~~ (Phase 6)
+- [x] ~~No policy validation~~ (Phase 6)
+- [x] ~~No evidence verification~~ (Phase 6)
 - [ ] No interactive policy creation wizards
 - [x] ~~`commands/agent.rs` is 2200+ lines -- needs splitting into submodules~~ (Phase 0.2)
 - [x] ~~No secret zeroization for U/V/K keys in memory~~ (Phase 1.4)
@@ -609,19 +616,13 @@ Show the effective runtime configuration and environment.
 Consolidate the Python `keylime-policies` tools into `keylimectl`, providing policy
 generation, signing, validation, and one-shot evidence verification from a single binary.
 
-**Prerequisites -- evaluate before starting this phase:**
+**Prerequisites (resolved):**
 
-- [ ] **Error type audit**: The codebase already has `KeylimectlError`,
-      `CommandError`, `ClientError`, `CryptoError`, and `CryptoTestError`. Phase 6
-      will add policy parsing, DSSE, and evidence errors. Decide on a unified error
-      strategy (e.g., `thiserror` enum nesting, single top-level error with sources)
-      before adding more error types.
-- [ ] **Async vs blocking strategy**: Phase 6 mixes CPU-bound work (digest
-      computation, filesystem scanning) with IO-bound work (HTTP requests to
-      verifier). Decide whether to use `tokio::spawn_blocking` for CPU work or
-      `rayon` for parallel digests alongside tokio. Using `rayon` for digest
-      calculation is a common pattern but requires care to avoid blocking the
-      tokio runtime.
+- [x] **Error type audit**: Extended existing `CommandError` with
+      `PolicyGeneration`, `Dsse`, `Evidence` variants using the same nesting
+      pattern as `AgentError`/`PolicyError`. Uses `thiserror` enum nesting.
+- [x] **Async vs blocking strategy**: Uses `tokio::spawn_blocking` for CPU-bound
+      work (digest calculation, filesystem scanning). Simpler than adding `rayon`.
 
 **Python tools being replaced:**
 
@@ -641,67 +642,52 @@ Rewrite `keylime/policy/create_runtime_policy.py` functionality in Rust.
 
 **Input sources:**
 
-- [ ] IMA measurement list (`--ima-measurement-list`, default:
-      `/sys/kernel/security/ima/ascii_runtime_measurements`)
-- [ ] Plain-text allowlist files (`--allowlist`, hash + path format)
-- [ ] Local filesystem scanning (`--rootfs`, with `--skip-path` exclusions).
-      Note: the Python code uses `psutil.disk_partitions()` to detect non-root
-      filesystems; in Rust, read `/proc/mounts` or `/proc/self/mountinfo` instead.
-- [ ] Initramfs extraction (`--ramdisk-dir`). **Library evaluation required:**
-      initramfs files are concatenated CPIO archives (microcode + main) with
-      multiple compression formats. Needed crates: `cpio` (basic), `flate2`
-      (gzip), `xz2` (xz), `zstd` (zstd), `lz4_flex` (lz4). Evaluate whether
-      the existing Rust crates handle the concatenated-archive case or if
-      custom parsing is needed. Consider making initramfs support an optional
-      feature flag if the dependency footprint is large.
-- [ ] Local RPM repository (`--local-rpm-repo`). **Library evaluation required:**
-      the Python code uses the `rpm` C library via Python bindings to parse RPM
-      headers and extract file digests. Options in Rust:
-      1. Bind to `librpm` via FFI (adds C dependency, fragile)
-      2. Use the `rpm-rs` crate (evaluate maturity and completeness)
-      3. Implement basic RPM header parsing in Rust (significant effort)
-      4. Defer RPM support behind a feature flag (e.g., `rpm`) and implement
-         the other input sources first
-- [ ] Remote RPM repository (`--remote-rpm-repo`) -- same library dependency
-      as local RPM, plus HTTP fetching of repository metadata
-- [ ] Base policy merging (`--base-policy`, merge new data into existing policy)
-- [ ] IMA exclude list (`--excludelist`)
+- [x] IMA measurement list (`--ima-measurement-list`)
+- [x] Plain-text allowlist files (`--allowlist`, hash + path format)
+- [x] Local filesystem scanning (`--rootfs`, with `--skip-path` exclusions).
+      Uses `/proc/mounts` parsing to detect non-root filesystems.
+- [ ] Initramfs extraction (`--ramdisk-dir`). Deferred behind feature flag.
+- [ ] Local RPM repository (`--local-rpm-repo`). Deferred behind feature flag.
+- [ ] Remote RPM repository (`--remote-rpm-repo`). Deferred behind feature flag.
+- [x] Base policy merging (`--base-policy`, merge new data into existing policy)
+- [x] IMA exclude list (`--excludelist`)
 
 **Policy features:**
 
-- [ ] Parse IMA log entries (ima, ima-ng, ima-sig templates)
-- [ ] Extract keyrings entries (`--keyrings`)
-- [ ] Extract ima-buf entries (`--ima-buf`)
+- [x] Parse IMA log entries (ima, ima-ng, ima-sig templates)
+- [x] Extract keyrings entries (`--keyrings`)
+- [x] Extract ima-buf entries (`--ima-buf`)
 - [ ] Add IMA signature verification keys (`--add-ima-signature-verification-key`)
-- [ ] Multi-algorithm support (SHA-1, SHA-256, SHA-384, SHA-512, SM3-256)
-- [ ] Automatic hash algorithm detection from digests
+- [x] Multi-algorithm support (SHA-1, SHA-256, SHA-384, SHA-512, SM3-256)
+- [x] Automatic hash algorithm detection from digests
 - [ ] Parallel digest calculation (thread pool)
-- [ ] Boot aggregate detection and parsing
-- [ ] Ignored keyrings (`--ignored-keyrings`)
+- [x] Boot aggregate detection and parsing
+- [x] Ignored keyrings (`--ignored-keyrings`)
 - [ ] Device-mapper policy support (`dm_policy` field): dm-verity and dm-crypt
       IMA policy handling
 
 **Output:**
 
-- [ ] JSON runtime policy following the v1 schema (`meta`, `release`, `digests`,
+- [x] JSON runtime policy following the v1 schema (`meta`, `release`, `digests`,
       `excludes`, `keyrings`, `ima`, `ima-buf`, `verification-keys`)
-- [ ] Output to file (`--output`) or stdout
+- [x] Output to file (`--output`) or stdout
 - [ ] Legacy allowlist format output (`--show-legacy-allowlist`)
 
 ### 6.2 Measured boot policy generation (`keylimectl policy generate measured-boot`)
 
 Rewrite `keylime/policy/create_mb_policy.py` functionality in Rust.
 
-- [ ] Parse binary UEFI event log (`--eventlog-file`, typically
-      `/sys/kernel/security/tpm0/binary_bios_measurements`)
-- [ ] Extract UEFI Secure Boot variables (PK, KEK, DB, DBX)
-- [ ] Extract platform firmware digests (S-CRTM, firmware blobs)
-- [ ] Extract bootloader digests and authcodes (SHIM, GRUB)
-- [ ] Extract kernel digests, command line, and initrd digests
-- [ ] Extract MOK/MOKx digests (Machine Owner Keys)
-- [ ] Detect Secure Boot enabled status
-- [ ] Support `--without-secureboot` flag
-- [ ] Output JSON measured boot reference state to file (`--output`) or stdout
+- [x] Parse binary UEFI event log (`--eventlog-file`, typically
+      `/sys/kernel/security/tpm0/binary_bios_measurements`).
+      Uses shared crate `keylime::uefi::UefiLogHandler`.
+- [x] Extract UEFI Secure Boot variables (PK, KEK, DB, DBX)
+- [x] Extract platform firmware digests (S-CRTM, firmware blobs)
+- [ ] Extract bootloader digests and authcodes (SHIM, GRUB) -- deferred
+- [ ] Extract kernel digests, command line, and initrd digests -- deferred
+- [ ] Extract MOK/MOKx digests (Machine Owner Keys) -- deferred
+- [x] Detect Secure Boot enabled status
+- [x] Support `--without-secureboot` flag
+- [x] Output JSON measured boot reference state to file (`--output`) or stdout
 
 **Reference state structure:**
 
@@ -728,12 +714,14 @@ Rewrite `keylime/policy/create_mb_policy.py` functionality in Rust.
 TPM policies (PCR mask and expected values) are simpler but currently require
 manual JSON construction.
 
-- [ ] Add `keylimectl policy generate tpm` subcommand
-- [ ] Read current PCR values from a TPM or from a file
-- [ ] Allow selecting PCR indices (e.g., `--pcrs 0,1,2,7`)
-- [ ] Support PCR mask specification (`--mask 0x408000`)
-- [ ] Generate JSON TPM policy with mask and expected PCR values
-- [ ] Support specifying hash algorithm (`--hash-alg sha256`)
+- [x] Add `keylimectl policy generate tpm` subcommand
+- [x] Read current PCR values from a file (`--pcr-file`)
+- [ ] Read current PCR values from a local TPM (`--from-tpm`, behind
+      `tpm-local` feature flag — returns error when feature not enabled)
+- [x] Allow selecting PCR indices (e.g., `--pcrs 0,1,2,7`)
+- [x] Support PCR mask specification (`--mask 0x408000`)
+- [x] Generate JSON TPM policy with mask and expected PCR values
+- [x] Support specifying hash algorithm (`--hash-alg sha256`)
 
 **Dependency note:** Reading PCR values from a local TPM requires the `tss-esapi`
 crate, which depends on the `tss2` C libraries at build time. This should be behind
@@ -747,26 +735,18 @@ Rewrite `keylime/policy/sign_runtime_policy.py` functionality in Rust.
 
 **DSSE implementation options:**
 
-- [ ] Evaluate `sigstore-rs` crate for existing Rust DSSE support before
-      implementing from scratch
-- [ ] Evaluate whether the `keylime::crypto::x509::CertificateBuilder` from the
-      shared crate can be reused for the X.509 signing backend (it already
-      supports self-signed certificate generation)
-- [ ] If no suitable crate exists, implement DSSE from the specification
-      (relatively simple: base64url encode payload, sign with ECDSA, build envelope)
-
-- [ ] DSSE (Dead Simple Signing Envelope) implementation
-- [ ] ECDSA signing backend (default)
-- [ ] X.509 certificate-based signing backend (`--backend x509`)
-- [ ] Sign with existing private key (`--keyfile`)
-- [ ] Generate new EC key pair if no key provided (`--keypath` to save key)
-- [ ] Output signed policy to file (`--output`) or stdout
-- [ ] Output X.509 certificate (`--cert-outfile`, for x509 backend)
-- [ ] Verify existing signature (`keylimectl policy verify-signature`)
-- [ ] Ensure all generated private key files have restrictive permissions
+- [x] Implemented DSSE from the specification (PAE, envelope, sign/verify)
+- [x] DSSE (Dead Simple Signing Envelope) implementation
+- [x] ECDSA signing backend (default)
+- [x] X.509 certificate-based signing backend (`--backend x509`)
+- [x] Sign with existing private key (`--keyfile`)
+- [x] Generate new EC key pair if no key provided (`--keypath` to save key)
+- [x] Output signed policy to file (`--output`) or stdout
+- [x] Output X.509 certificate (`--cert-outfile`, for x509 backend)
+- [x] Verify existing signature (`keylimectl policy verify-signature`)
+- [x] Ensure all generated private key files have restrictive permissions
       (`0o600`), consistent with `keylime::crypto::write_key_pair()`
 - [ ] Use constant-time comparison for DSSE signature verification
-      (same as `openssl::memcmp::eq()` used in HMAC verification)
 
 **DSSE envelope structure:**
 
@@ -782,27 +762,26 @@ Rewrite `keylime/policy/sign_runtime_policy.py` functionality in Rust.
 
 Rewrite `keylime/cmd/convert_runtime_policy.py` functionality in Rust.
 
-- [ ] Convert JSON-format allowlists (`{"hashes": {"/path": ["digest"]}}`)
-- [ ] Convert flat-text allowlists (`digest  /path` format)
+- [x] Convert JSON-format allowlists (`{"hashes": {"/path": ["digest"]}}`)
+- [x] Convert flat-text allowlists (`digest  /path` format)
 - [ ] Upgrade older policy versions to current version
-- [ ] Merge exclude lists into converted policy (`--excludelist`)
-- [ ] Add verification keys during conversion (`--verification-keys`)
-- [ ] Output to file (`--output`, required)
+- [x] Merge exclude lists into converted policy (`--excludelist`)
+- [x] Add verification keys during conversion (`--verification-keys`)
+- [x] Output to file (`--output`, required)
 
 ### 6.6 Policy validation (`keylimectl policy validate`)
 
-- [ ] Add `validate` subcommand for each policy type
-- [ ] Evaluate using the `jsonschema` crate for formal JSON Schema (RFC draft)
-      validation, sharing the same schema definition as the Python implementation.
-      Alternative: manual field-by-field validation (as the Python code does in
-      `ima.validate_runtime_policy()`). The `jsonschema` crate is more maintainable
-      and ensures schema consistency across implementations.
-- [ ] Runtime policy: JSON schema validation against the v1 runtime policy schema
-- [ ] Runtime policy: verify DSSE signature if signed (`--signature-key`)
-- [ ] Measured boot policy: validate JSON structure and field types
-- [ ] TPM policy: validate mask format and PCR value formats
-- [ ] Report validation errors with actionable messages
-- [ ] Exit code 0 on valid, non-zero on invalid (for scripting)
+- [x] Add `validate` subcommand for each policy type
+- [x] Manual field-by-field validation (digest format, required fields, version,
+      hash algorithm, mask consistency, PCR value hex)
+- [x] Runtime policy: validate digest format (`algorithm:hex`), required fields
+- [x] Runtime policy: verify DSSE signature if signed (`--signature-key`)
+- [x] Measured boot policy: validate JSON structure and field types
+- [x] TPM policy: validate mask format and PCR value formats
+- [x] Report validation errors with actionable messages
+- [x] Exit code 0 on valid, non-zero on invalid (for scripting)
+- [x] Auto-detect policy type from JSON keys (meta+digests=runtime,
+      has_secureboot=measured-boot, mask=tpm)
 
 ### 6.7 Evidence verification (`keylimectl verify evidence`)
 
@@ -815,8 +794,8 @@ to perform one-shot attestation without agent registration.
 targeting a 3.x verifier, the request format may differ. Implement support for both
 formats and select based on the detected API version.
 
-- [ ] Add `verify` top-level subcommand with `evidence` action
-- [ ] Send TPM evidence to verifier for verification:
+- [x] Add `verify` top-level subcommand with `evidence` action
+- [x] Send TPM evidence to verifier for verification:
   ```
   keylimectl verify evidence \
     --nonce <NONCE> \
@@ -827,15 +806,15 @@ formats and select based on the detected API version.
     --runtime-policy <POLICY_FILE> \
     --ima-measurement-list <IMA_LOG>
   ```
-- [ ] Support all evidence types: `--type tpm` (default), `--type tee`
-- [ ] Support all policy types: `--tpm-policy`, `--runtime-policy`, `--mb-policy`
-- [ ] Support measurement logs: `--ima-measurement-list`, `--mb-log`
-- [ ] Read evidence from local files or stdin
-- [ ] Display verification result (valid/invalid) with detailed failure information
+- [x] Support all evidence types: `--type tpm` (default), `--type tee`
+- [x] Support all policy types: `--tpm-policy`, `--runtime-policy`, `--mb-policy`
+- [x] Support measurement logs: `--ima-measurement-list`, `--mb-log`
+- [x] Read evidence from local files (base64 for binary, string for text)
+- [x] Display verification result (valid/invalid) with detailed failure information
 - [ ] Support collecting evidence from local TPM (`--collect-local`, requires
       TPM access) for self-attestation testing
-- [ ] Machine-readable output in JSON format (default)
-- [ ] Human-readable summary in table format (`--format table`)
+- [x] Machine-readable output in JSON format (default)
+- [x] Human-readable summary in table format (`--format table`)
 
 **Request format (sent to verifier):**
 
@@ -933,55 +912,57 @@ keylimectl policy convert <FILE> [OPTIONS]         # convert legacy (new)
 keylimectl verify evidence [OPTIONS]               # one-shot attestation (new)
 ```
 
-- [ ] Add `generate` subcommand group under `policy`
-- [ ] Add `sign`, `verify-signature`, `validate`, `convert` subcommands under `policy`
-- [ ] Add `verify` top-level command with `evidence` subcommand
-- [ ] Ensure no naming conflicts with existing `policy create` (CRUD) and
-      `policy generate` (local generation) subcommands. **UX decision needed:**
-      the verbs "create" and "generate" are similar and may confuse users.
-      Alternatives to consider:
-      - `policy push` / `policy upload` for server-side CRUD
-      - Keep current naming but add strong help text distinguishing them
-      - Use a different grouping (e.g., `policy remote create` vs `policy generate`)
+- [x] Add `generate` subcommand group under `policy`
+- [x] Add `sign`, `verify-signature`, `validate`, `convert` subcommands under `policy`
+- [x] Add `verify` top-level command with `evidence` subcommand
+- [x] Ensure no naming conflicts with existing `policy create` (CRUD) and
+      `policy generate` (local generation) subcommands. Kept current naming
+      with clear help text distinguishing server-side CRUD from local operations.
+- [x] Local-only policy commands (`generate`, `sign`, `verify-signature`,
+      `validate`, `convert`) bypass strict TLS config validation, allowing
+      them to work without configured certificates.
 - [ ] Apply the same pattern to `measured-boot`: add `measured-boot generate`
       for local policy creation vs `measured-boot create` for verifier upload
 - [ ] Add `policy diff <OLD_FILE> <NEW_FILE>`: show added/removed digests,
-      changed excludes, etc. between two policy files. Useful when updating
-      policies to see what changed.
+      changed excludes, etc. between two policy files.
 
 ### 6.10 Testing
 
 **Unit tests (per feature, merged with the implementation):**
 
-- [ ] Runtime policy generation: parse known IMA log entries (ima, ima-ng,
+- [x] Runtime policy generation: parse known IMA log entries (ima, ima-ng,
       ima-sig templates) and verify output matches expected policy structure
-- [ ] Runtime policy generation: test multi-algorithm digest extraction
-- [ ] Runtime policy generation: test allowlist parsing (flat-text and JSON)
-- [ ] Runtime policy generation: test base policy merging (digests, excludes,
+- [x] Runtime policy generation: test multi-algorithm digest extraction
+- [x] Runtime policy generation: test allowlist parsing (flat-text and JSON)
+- [x] Runtime policy generation: test base policy merging (digests, excludes,
       keyrings are correctly merged)
-- [ ] Runtime policy generation: test exclude list validation (valid and invalid
+- [x] Runtime policy generation: test exclude list validation (valid and invalid
       patterns)
-- [ ] Measured boot policy generation: parse a known binary UEFI event log and
-      verify extracted Secure Boot variables, kernel digests, etc.
-- [ ] TPM policy generation: test PCR mask and value formatting
-- [ ] Policy signing: DSSE sign/verify round-trip (ECDSA backend)
-- [ ] Policy signing: DSSE sign/verify round-trip (X.509 backend)
-- [ ] Policy signing: verify that signing with an existing key produces a
+- [x] Measured boot policy generation: EFI variable name parsing tests (PK,
+      SecureBoot, empty, too-short data)
+- [x] TPM policy generation: test PCR mask and value formatting, PCR index
+      parsing, file generation with filtering
+- [x] Policy signing: DSSE sign/verify round-trip (ECDSA backend)
+- [x] Policy signing: DSSE sign/verify round-trip (X.509 backend)
+- [x] Policy signing: verify that signing with an existing key produces a
       verifiable signature
-- [ ] Legacy policy conversion: convert known JSON allowlist and verify output
-- [ ] Legacy policy conversion: convert known flat-text allowlist and verify output
-- [ ] Policy validation: valid policies pass, invalid policies fail with
+- [x] Legacy policy conversion: convert known JSON allowlist and verify output
+- [x] Legacy policy conversion: convert known flat-text allowlist and verify output
+- [x] Policy validation: valid policies pass, invalid policies fail with
       actionable error messages
-- [ ] Policy validation: each policy type (runtime, measured boot, TPM)
+- [x] Policy validation: each policy type (runtime, measured boot, TPM)
 
-**Integration tests:**
+**Integration tests (23 tests in `tests/policy_tools.rs`):**
 
-- [ ] Evidence verification: send known-good evidence to a mocked verifier and
-      verify the response is parsed correctly
-- [ ] Evidence verification: send evidence that fails attestation and verify
-      failure details are displayed
-- [ ] Policy generation end-to-end: generate a runtime policy from a test IMA
-      log, sign it, validate it, and verify the signature
+- [x] Help output: all new subcommands visible in `--help`
+- [x] Runtime generation: from IMA log, from allowlist, to stdout, with excludes
+- [x] TPM generation: from file, to stdout, `--from-tpm` fails without feature
+- [x] Policy validation: valid runtime, invalid runtime, valid TPM, nonexistent
+- [x] Policy signing: ECDSA sign + verify, X.509 sign
+- [x] Policy conversion: flat allowlist, JSON allowlist, with excludes, requires output
+- [x] End-to-end pipeline: generate -> validate -> sign -> verify
+- [ ] Evidence verification: send evidence to mocked verifier (deferred to
+      Phase 8 mock infrastructure)
 
 **Fuzz testing:**
 
