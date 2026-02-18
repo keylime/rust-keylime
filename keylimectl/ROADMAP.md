@@ -257,10 +257,13 @@ Phase 9 removal is just deleting `#[cfg(feature = "api-v2")]` blocks.
       `#[cfg(feature = "api-v2")]`
 - [x] Restructure 6 public methods (`get_agent`, `delete_agent`, `reactivate_agent`,
       `list_agents`, `get_bulk_info`, `add_runtime_policy`) with `#[cfg]` blocks
-- [ ] Apply the same pattern to `client/registrar.rs`
-- [ ] Ensure methods that currently lack v3 fallback (`update_runtime_policy`,
-      `delete_runtime_policy`, `list_runtime_policies`, MB policy equivalents) are
-      properly gated
+- [x] Apply the same pattern to `client/registrar.rs`: split `test_api_version`
+      into v2/v3 variants, restructure `detect_api_version` with 410 Gone handler
+      and cfg-conditional version probing
+- [x] ~~Ensure methods that currently lack v3 fallback are properly gated~~ —
+      `update_runtime_policy`, `delete_runtime_policy`, `list_runtime_policies`,
+      and MB policy methods are version-agnostic (use `self.api_version` in URLs),
+      so no gating is needed; callers in command modules remain version-independent
 
 ### 2.4 Separate command-level logic
 
@@ -275,7 +278,8 @@ Phase 9 removal is just deleting `#[cfg(feature = "api-v2")]` blocks.
 
 - [x] In `client/verifier.rs`: make version detection conditional -- 410 Gone
       match arm gated behind `api-v3`, version probing uses cfg-conditional blocks
-- [ ] Apply the same pattern to `client/registrar.rs`
+- [x] Apply the same pattern to `client/registrar.rs`: 410 Gone match arm,
+      cfg-conditional version probing with `test_api_version` / `test_api_version_v3`
 - [x] When only `api-v3` is enabled, skip v2.x detection (uses `false` fallback)
 - [x] When only `api-v2` is enabled, skip v3.x detection (uses `false` fallback)
 
@@ -287,7 +291,9 @@ Phase 9 removal is just deleting `#[cfg(feature = "api-v2")]` blocks.
 - [x] Ensure `cargo test` passes for all combinations (302, 301, 290)
 - [x] Ensure `cargo clippy` passes for all combinations
 - [x] Verify `compile_error!` triggers when neither feature is enabled
-- [ ] Test that gated code is absent from the binary when its feature is disabled
+- [x] Test that gated code is absent from the binary when its feature is disabled
+      (verified: no `attestation`, `agent_client`, or `test_api_version` v2 symbols
+      in api-v3 binary; no `*_v3` symbols in api-v2 binary)
 
 ---
 
