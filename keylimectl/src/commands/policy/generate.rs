@@ -39,6 +39,8 @@ pub async fn execute(
             add_ima_signature_verification_key: _, // Step 5
             hash_alg,
             ramdisk_dir,
+            local_rpm_repo,
+            remote_rpm_repo,
         } => generate_runtime(
             ima_measurement_list.as_deref(),
             allowlist.as_deref(),
@@ -52,6 +54,8 @@ pub async fn execute(
             ignored_keyrings,
             hash_alg.as_deref(),
             ramdisk_dir.as_deref(),
+            local_rpm_repo.as_deref(),
+            remote_rpm_repo.as_deref(),
             output,
         )
         .await
@@ -102,6 +106,8 @@ async fn generate_runtime(
     ignored_keyrings: &[String],
     hash_alg: Option<&str>,
     ramdisk_dir: Option<&str>,
+    local_rpm_repo: Option<&str>,
+    remote_rpm_repo: Option<&str>,
     output: &OutputHandler,
 ) -> Result<Value, CommandError> {
     let mut policy = if let Some(base_path) = base_policy {
@@ -267,6 +273,95 @@ async fn generate_runtime(
             "Extracted {} file digests from initramfs",
             initrd_digests.len()
         ));
+    }
+
+    // Analyze local RPM repository
+    if let Some(rpm_dir) = local_rpm_repo {
+        #[cfg(feature = "rpm-repo")]
+        {
+            use crate::policy_tools::rpm_repo;
+
+            output.info(format!("Analyzing local RPM repository: {rpm_dir}"));
+
+            let rpm_dir_path = std::path::PathBuf::from(rpm_dir);
+
+            crate::policy_tools::privilege::check_dir_readable(
+                &rpm_dir_path,
+                &format!(
+                    "policy generate runtime --local-rpm-repo {rpm_dir}"
+                ),
+            )?;
+
+            let rpm_digests = tokio::task::spawn_blocking({
+                move || rpm_repo::analyze_local_repo(&rpm_dir_path)
+            })
+            .await
+            .map_err(|e| {
+                CommandError::from(
+                    crate::commands::error::PolicyGenerationError::RpmParse {
+                        path: std::path::PathBuf::from(rpm_dir),
+                        reason: format!("Task join error: {e}"),
+                    },
+                )
+            })??;
+
+            for (file_path, digests) in &rpm_digests {
+                for digest in digests {
+                    policy.add_digest(file_path.clone(), digest.clone());
+                }
+            }
+
+            output.info(format!(
+                "Extracted {} file digests from local RPM repository",
+                rpm_digests.len()
+            ));
+        }
+
+        #[cfg(not(feature = "rpm-repo"))]
+        {
+            let _ = rpm_dir;
+            return Err(CommandError::from(
+                crate::commands::error::PolicyGenerationError::UnsupportedAlgorithm {
+                    algorithm: "--local-rpm-repo requires the 'rpm-repo' feature flag. \
+                        Rebuild with: cargo build --features rpm-repo".to_string(),
+                },
+            ));
+        }
+    }
+
+    // Analyze remote RPM repository
+    if let Some(rpm_url) = remote_rpm_repo {
+        #[cfg(feature = "rpm-repo")]
+        {
+            use crate::policy_tools::rpm_repo;
+
+            output
+                .info(format!("Analyzing remote RPM repository: {rpm_url}"));
+
+            let rpm_digests = rpm_repo::analyze_remote_repo(rpm_url).await?;
+
+            for (file_path, digests) in &rpm_digests {
+                for digest in digests {
+                    policy.add_digest(file_path.clone(), digest.clone());
+                }
+            }
+
+            output.info(format!(
+                "Extracted {} file digests from remote RPM repository",
+                rpm_digests.len()
+            ));
+        }
+
+        #[cfg(not(feature = "rpm-repo"))]
+        {
+            let _ = rpm_url;
+            return Err(CommandError::from(
+                crate::commands::error::PolicyGenerationError::UnsupportedAlgorithm {
+                    algorithm: "--remote-rpm-repo requires the 'rpm-repo' feature flag. \
+                        Rebuild with: cargo build --features rpm-repo".to_string(),
+                },
+            ));
+        }
     }
 
     // Parse exclude list

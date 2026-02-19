@@ -518,6 +518,14 @@ enum GenerateSubcommand {
         /// Directory containing initramfs files (e.g., /boot)
         #[arg(long, value_name = "DIR")]
         ramdisk_dir: Option<String>,
+
+        /// Local RPM repository directory (requires rpm-repo feature)
+        #[arg(long, value_name = "DIR")]
+        local_rpm_repo: Option<String>,
+
+        /// Remote RPM repository URL (requires rpm-repo feature)
+        #[arg(long, value_name = "URL")]
+        remote_rpm_repo: Option<String>,
     },
 
     /// Generate a measured boot policy from a UEFI event log
