@@ -69,13 +69,14 @@ pub async fn execute(
             from_tpm,
             pcrs,
             mask,
-            hash_alg: _,
+            hash_alg,
             output: output_file,
         } => generate_tpm(
             pcr_file.as_deref(),
             *from_tpm,
             pcrs,
             mask.as_deref(),
+            hash_alg,
             output_file.as_deref(),
             output,
         )
@@ -325,15 +326,67 @@ fn generate_tpm(
     from_tpm: bool,
     pcrs_str: &str,
     mask: Option<&str>,
+    hash_alg: &str,
     output_file: Option<&str>,
     output: &OutputHandler,
 ) -> Result<Value, CommandError> {
     if from_tpm {
-        return Err(CommandError::from(
-            crate::commands::error::PolicyGenerationError::UnsupportedAlgorithm {
-                algorithm: "Reading from local TPM requires the tpm-local feature flag".to_string(),
-            },
-        ));
+        // Determine PCR indices first (needed for both paths)
+        let pcr_indices = if let Some(mask_str) = mask {
+            crate::policy_tools::tpm_policy::TpmPolicy::parse_mask(mask_str)
+                .map_err(|e| {
+                CommandError::from(
+                    crate::commands::error::PolicyGenerationError::Output {
+                        path: "<mask>".into(),
+                        reason: e,
+                    },
+                )
+            })?
+        } else {
+            tpm_policy_gen::parse_pcr_indices(pcrs_str)?
+        };
+
+        #[cfg(any(feature = "tpm-local", feature = "tpm-quote-validation"))]
+        {
+            output.info(format!(
+                "Reading PCR values from local TPM (algorithm: {hash_alg})"
+            ));
+            output.info(format!("PCR indices: {:?}", pcr_indices));
+
+            let policy =
+                tpm_policy_gen::generate_from_tpm(&pcr_indices, hash_alg)?;
+
+            output.info(format!(
+                "Generated TPM policy with mask: {}",
+                policy.mask
+            ));
+            output.info(format!("  {} PCR values", policy.pcr_values.len()));
+
+            let policy_json = serde_json::to_value(&policy)?;
+
+            if let Some(out_path) = output_file {
+                let json_str = serde_json::to_string_pretty(&policy_json)?;
+                std::fs::write(out_path, &json_str)?;
+                output.info(format!("TPM policy written to {out_path}"));
+            }
+
+            return Ok(policy_json);
+        }
+
+        #[cfg(not(any(
+            feature = "tpm-local",
+            feature = "tpm-quote-validation"
+        )))]
+        {
+            // Suppress unused variable warnings
+            let _ = (hash_alg, pcr_indices);
+            return Err(CommandError::from(
+                crate::commands::error::PolicyGenerationError::UnsupportedAlgorithm {
+                    algorithm: "Reading from local TPM requires the 'tpm-local' or 'tpm-quote-validation' feature flag. \
+                        Rebuild with: cargo build --features tpm-local".to_string(),
+                },
+            ));
+        }
     }
 
     let pcr_file = pcr_file.ok_or_else(|| {
