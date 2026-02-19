@@ -159,6 +159,16 @@ pub enum PolicyGenerationError {
     /// Output write error
     #[error("Failed to write output to {path}: {reason}")]
     Output { path: PathBuf, reason: String },
+
+    /// Insufficient privileges
+    #[error(
+        "Insufficient privileges for {operation} on {path}\n  Hint: {hint}"
+    )]
+    PrivilegeRequired {
+        operation: String,
+        path: PathBuf,
+        hint: String,
+    },
 }
 
 /// DSSE (Dead Simple Signing Envelope) errors
