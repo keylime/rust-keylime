@@ -169,6 +169,10 @@ pub enum PolicyGenerationError {
         path: PathBuf,
         hint: String,
     },
+
+    /// RPM parsing error
+    #[error("RPM parse error at {path}: {reason}")]
+    RpmParse { path: PathBuf, reason: String },
 }
 
 /// DSSE (Dead Simple Signing Envelope) errors
