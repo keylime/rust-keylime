@@ -16,6 +16,7 @@ pub mod ima_parser;
 pub mod measured_boot_gen;
 pub mod measured_boot_policy;
 pub mod merge;
+pub mod privilege;
 pub mod runtime_policy;
 pub mod tpm_policy;
 pub mod tpm_policy_gen;
