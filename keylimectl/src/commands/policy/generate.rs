@@ -11,6 +11,7 @@ use crate::error::KeylimectlError;
 use crate::output::OutputHandler;
 use crate::policy_tools::filesystem;
 use crate::policy_tools::ima_parser;
+use crate::policy_tools::initrd;
 use crate::policy_tools::measured_boot_gen;
 use crate::policy_tools::runtime_policy::RuntimePolicy;
 use crate::policy_tools::tpm_policy_gen;
@@ -37,6 +38,7 @@ pub async fn execute(
             ignored_keyrings,
             add_ima_signature_verification_key: _, // Step 5
             hash_alg,
+            ramdisk_dir,
         } => generate_runtime(
             ima_measurement_list.as_deref(),
             allowlist.as_deref(),
@@ -49,6 +51,7 @@ pub async fn execute(
             *ima_buf,
             ignored_keyrings,
             hash_alg.as_deref(),
+            ramdisk_dir.as_deref(),
             output,
         )
         .await
@@ -98,6 +101,7 @@ async fn generate_runtime(
     get_ima_buf: bool,
     ignored_keyrings: &[String],
     hash_alg: Option<&str>,
+    ramdisk_dir: Option<&str>,
     output: &OutputHandler,
 ) -> Result<Value, CommandError> {
     let mut policy = if let Some(base_path) = base_policy {
@@ -221,6 +225,47 @@ async fn generate_runtime(
         output.info(format!(
             "Scanned {} files from filesystem",
             fs_digests.len()
+        ));
+    }
+
+    // Extract initramfs digests
+    if let Some(ramdisk_path) = ramdisk_dir {
+        let algorithm = detected_algorithm.as_deref().unwrap_or("sha256");
+
+        output
+            .info(format!("Extracting initramfs files from: {ramdisk_path}"));
+
+        let ramdisk_dir_path = std::path::PathBuf::from(ramdisk_path);
+
+        // Check read access (may require root for /boot)
+        crate::policy_tools::privilege::check_dir_readable(
+            &ramdisk_dir_path,
+            &format!("policy generate runtime --ramdisk-dir {ramdisk_path}"),
+        )?;
+
+        let initrd_digests = tokio::task::spawn_blocking({
+            let alg = algorithm.to_string();
+            move || initrd::process_ramdisk_dir(&ramdisk_dir_path, &alg)
+        })
+        .await
+        .map_err(|e| {
+            CommandError::from(
+                crate::commands::error::PolicyGenerationError::Output {
+                    path: std::path::PathBuf::from(ramdisk_path),
+                    reason: format!("Task join error: {e}"),
+                },
+            )
+        })??;
+
+        for (file_path, digests) in &initrd_digests {
+            for digest in digests {
+                policy.add_digest(file_path.clone(), digest.clone());
+            }
+        }
+
+        output.info(format!(
+            "Extracted {} file digests from initramfs",
+            initrd_digests.len()
         ));
     }
 
