@@ -97,6 +97,10 @@ pub struct KernelEntry {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub initrd_plain_sha256: Option<String>,
 
+    /// Kernel vmlinuz plain SHA-256 digest (used when Secure Boot is disabled).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vmlinuz_plain_sha256: Option<String>,
+
     /// Kernel command line.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kernel_cmdline: Option<String>,
@@ -145,6 +149,7 @@ mod tests {
             grub_authcode_sha256: None,
             kernel_authcode_sha256: Some("0x123456".to_string()),
             initrd_plain_sha256: None,
+            vmlinuz_plain_sha256: None,
             kernel_cmdline: Some("root=/dev/sda1".to_string()),
         });
 
@@ -173,6 +178,7 @@ mod tests {
                 "grub_authcode_sha256": "0xgrub",
                 "kernel_authcode_sha256": "0xkernel",
                 "initrd_plain_sha256": "0xinitrd",
+                "vmlinuz_plain_sha256": "0xvmlinuz",
                 "kernel_cmdline": "root=/dev/sda1 quiet"
             }],
             "mokdig": [],
