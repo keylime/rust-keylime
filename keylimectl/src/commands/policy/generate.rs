@@ -301,6 +301,12 @@ fn generate_measured_boot(
         policy.kernels.len(),
         policy.scrtm_and_bios.len()
     ));
+    output.info(format!(
+        "  MOK digests: {}, MOKx digests: {}, vendor_db entries: {}",
+        policy.mokdig.len(),
+        policy.mokxdig.len(),
+        policy.vendor_db.len()
+    ));
 
     let policy_json = serde_json::to_value(&policy)?;
 
