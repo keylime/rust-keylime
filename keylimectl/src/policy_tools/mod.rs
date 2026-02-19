@@ -13,6 +13,7 @@ pub mod digest;
 pub mod dsse;
 pub mod filesystem;
 pub mod ima_parser;
+pub mod initrd;
 pub mod measured_boot_gen;
 pub mod measured_boot_policy;
 pub mod merge;
