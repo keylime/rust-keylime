@@ -18,6 +18,8 @@ pub mod measured_boot_gen;
 pub mod measured_boot_policy;
 pub mod merge;
 pub mod privilege;
+#[cfg(feature = "rpm-repo")]
+pub mod rpm_repo;
 pub mod runtime_policy;
 pub mod tpm_policy;
 pub mod tpm_policy_gen;
