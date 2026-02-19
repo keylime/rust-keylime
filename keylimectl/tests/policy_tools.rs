@@ -889,3 +889,83 @@ fn test_generate_validate_sign_verify_pipeline() {
         .assert()
         .success();
 }
+
+// ── Phase 6b: Privileged operations tests ────────────────────
+
+#[test]
+fn test_generate_runtime_help_shows_ramdisk_dir() {
+    let tmpdir = tempfile::tempdir().unwrap(); //#[allow_ci]
+    keylimectl_in_clean_dir(&tmpdir)
+        .args(["policy", "generate", "runtime", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("--ramdisk-dir"));
+}
+
+#[test]
+fn test_generate_runtime_help_shows_rpm_options() {
+    let tmpdir = tempfile::tempdir().unwrap(); //#[allow_ci]
+    keylimectl_in_clean_dir(&tmpdir)
+        .args(["policy", "generate", "runtime", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("--local-rpm-repo"))
+        .stdout(predicate::str::contains("--remote-rpm-repo"));
+}
+
+#[test]
+fn test_generate_runtime_ramdisk_nonexistent() {
+    let tmpdir = tempfile::tempdir().unwrap(); //#[allow_ci]
+    keylimectl_in_clean_dir(&tmpdir)
+        .args([
+            "policy",
+            "generate",
+            "runtime",
+            "--ramdisk-dir",
+            "/nonexistent/ramdisk/dir",
+        ])
+        .assert()
+        .failure();
+}
+
+#[test]
+fn test_generate_tpm_help_shows_from_tpm() {
+    let tmpdir = tempfile::tempdir().unwrap(); //#[allow_ci]
+    keylimectl_in_clean_dir(&tmpdir)
+        .args(["policy", "generate", "tpm", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("--from-tpm"));
+}
+
+#[test]
+fn test_generate_runtime_ramdisk_empty_dir() {
+    let tmpdir = tempfile::tempdir().unwrap(); //#[allow_ci]
+    let ramdisk_dir = tmpdir.path().join("empty_ramdisk");
+    std::fs::create_dir(&ramdisk_dir).unwrap(); //#[allow_ci]
+
+    let output_path = tmpdir.path().join("policy.json");
+
+    // An empty ramdisk dir should succeed
+    // (just produces no initrd digests)
+    keylimectl_in_clean_dir(&tmpdir)
+        .args([
+            "policy",
+            "generate",
+            "runtime",
+            "--ramdisk-dir",
+            ramdisk_dir.to_str().unwrap(), //#[allow_ci]
+            "--output",
+            output_path.to_str().unwrap(), //#[allow_ci]
+        ])
+        .assert()
+        .success();
+
+    let content = std::fs::read_to_string(&output_path).unwrap(); //#[allow_ci]
+    let policy: serde_json::Value = serde_json::from_str(&content).unwrap(); //#[allow_ci]
+
+    assert!(
+        policy.get("digests").is_some(),
+        "Expected 'digests' field in policy"
+    );
+}
