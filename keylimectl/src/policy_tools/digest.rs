@@ -61,7 +61,7 @@ pub fn calculate_file_digest(
 }
 
 /// Map algorithm name string to OpenSSL MessageDigest.
-fn algorithm_to_message_digest(
+pub fn algorithm_to_message_digest(
     algorithm: &str,
 ) -> Result<MessageDigest, PolicyGenerationError> {
     match algorithm {

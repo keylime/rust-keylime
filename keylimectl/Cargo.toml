@@ -39,6 +39,10 @@ tokio = {workspace = true, features = ["rt-multi-thread"]}
 tss-esapi = {workspace = true, optional = true}
 uuid.workspace = true
 dialoguer = { version = "0.12", optional = true }
+flate2 = "1"
+xz2 = "0.1"
+bzip2 = "0.5"
+zstd = { version = "0.13", default-features = false }
 toml = "0.8"
 zeroize = "1"
 
