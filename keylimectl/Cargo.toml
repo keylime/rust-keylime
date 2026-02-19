@@ -15,6 +15,7 @@ path = "src/main.rs"
 default = ["api-v2", "api-v3", "wizard"]
 api-v2 = []
 api-v3 = []
+tpm-local = ["dep:tss-esapi"]
 tpm-quote-validation = ["dep:tss-esapi"]
 wizard = ["dep:dialoguer"]
 
