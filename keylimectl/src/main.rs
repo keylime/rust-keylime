@@ -514,6 +514,10 @@ enum GenerateSubcommand {
         /// Hash algorithm (auto-detected if omitted)
         #[arg(long, value_name = "ALG")]
         hash_alg: Option<String>,
+
+        /// Directory containing initramfs files (e.g., /boot)
+        #[arg(long, value_name = "DIR")]
+        ramdisk_dir: Option<String>,
     },
 
     /// Generate a measured boot policy from a UEFI event log
