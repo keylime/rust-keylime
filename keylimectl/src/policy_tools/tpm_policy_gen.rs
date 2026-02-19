@@ -8,6 +8,8 @@
 
 use crate::commands::error::PolicyGenerationError;
 use crate::policy_tools::tpm_policy::TpmPolicy;
+#[cfg(any(feature = "tpm-local", feature = "tpm-quote-validation"))]
+use std::env;
 use std::path::Path;
 
 /// Generate a TPM policy from a PCR values file.
@@ -108,6 +110,163 @@ pub fn parse_pcr_indices(
         indices.push(idx);
     }
     Ok(indices)
+}
+
+/// Map a hash algorithm name to `tss_esapi::interface_types::algorithm::HashingAlgorithm`.
+#[cfg(any(feature = "tpm-local", feature = "tpm-quote-validation"))]
+fn map_hash_algorithm(
+    alg: &str,
+) -> Result<
+    tss_esapi::interface_types::algorithm::HashingAlgorithm,
+    PolicyGenerationError,
+> {
+    use tss_esapi::interface_types::algorithm::HashingAlgorithm;
+    match alg.to_lowercase().as_str() {
+        "sha1" => Ok(HashingAlgorithm::Sha1),
+        "sha256" => Ok(HashingAlgorithm::Sha256),
+        "sha384" => Ok(HashingAlgorithm::Sha384),
+        "sha512" => Ok(HashingAlgorithm::Sha512),
+        other => Err(PolicyGenerationError::UnsupportedAlgorithm {
+            algorithm: format!("Unsupported TPM hash algorithm: {other}"),
+        }),
+    }
+}
+
+/// Map a u32 PCR index to a `tss_esapi::structures::PcrSlot`.
+#[cfg(any(feature = "tpm-local", feature = "tpm-quote-validation"))]
+fn map_pcr_slot(
+    index: u32,
+) -> Result<tss_esapi::structures::PcrSlot, PolicyGenerationError> {
+    use tss_esapi::structures::PcrSlot;
+    match index {
+        0 => Ok(PcrSlot::Slot0),
+        1 => Ok(PcrSlot::Slot1),
+        2 => Ok(PcrSlot::Slot2),
+        3 => Ok(PcrSlot::Slot3),
+        4 => Ok(PcrSlot::Slot4),
+        5 => Ok(PcrSlot::Slot5),
+        6 => Ok(PcrSlot::Slot6),
+        7 => Ok(PcrSlot::Slot7),
+        8 => Ok(PcrSlot::Slot8),
+        9 => Ok(PcrSlot::Slot9),
+        10 => Ok(PcrSlot::Slot10),
+        11 => Ok(PcrSlot::Slot11),
+        12 => Ok(PcrSlot::Slot12),
+        13 => Ok(PcrSlot::Slot13),
+        14 => Ok(PcrSlot::Slot14),
+        15 => Ok(PcrSlot::Slot15),
+        16 => Ok(PcrSlot::Slot16),
+        17 => Ok(PcrSlot::Slot17),
+        18 => Ok(PcrSlot::Slot18),
+        19 => Ok(PcrSlot::Slot19),
+        20 => Ok(PcrSlot::Slot20),
+        21 => Ok(PcrSlot::Slot21),
+        22 => Ok(PcrSlot::Slot22),
+        23 => Ok(PcrSlot::Slot23),
+        _ => Err(PolicyGenerationError::Output {
+            path: "<pcrs>".into(),
+            reason: format!("PCR index {index} out of range (0-23)"),
+        }),
+    }
+}
+
+/// Generate a TPM policy by reading PCR values from the local TPM.
+///
+/// Requires the `tpm-local` or `tpm-quote-validation` feature flag.
+#[cfg(any(feature = "tpm-local", feature = "tpm-quote-validation"))]
+pub fn generate_from_tpm(
+    pcr_indices: &[u32],
+    hash_alg: &str,
+) -> Result<TpmPolicy, PolicyGenerationError> {
+    use crate::policy_tools::privilege;
+    use tss_esapi::structures::PcrSelectionListBuilder;
+    use tss_esapi::tcti_ldr::TctiNameConf;
+
+    let hashing_alg = map_hash_algorithm(hash_alg)?;
+
+    // Map indices to PcrSlots
+    let slots: Vec<tss_esapi::structures::PcrSlot> = pcr_indices
+        .iter()
+        .map(|&idx| map_pcr_slot(idx))
+        .collect::<Result<Vec<_>, _>>()?;
+
+    // Build PCR selection list
+    let pcr_selection = PcrSelectionListBuilder::new()
+        .with_selection(hashing_alg, &slots)
+        .build()
+        .map_err(|e| PolicyGenerationError::Output {
+            path: "<tpm>".into(),
+            reason: format!("Failed to build PCR selection: {e}"),
+        })?;
+
+    // Determine TCTI path
+    let tcti_str = env::var("TPM2TOOLS_TCTI")
+        .or_else(|_| env::var("TCTI"))
+        .unwrap_or_else(|_| "device:/dev/tpmrm0".to_string());
+
+    let tcti: TctiNameConf =
+        tcti_str
+            .parse()
+            .map_err(|e| PolicyGenerationError::Output {
+                path: "<tpm>".into(),
+                reason: format!(
+                    "Failed to parse TCTI configuration '{tcti_str}': {e}"
+                ),
+            })?;
+
+    // Open TPM context
+    let mut context = tss_esapi::Context::new(tcti).map_err(|e| {
+        if privilege::is_permission_error(&std::io::Error::new(
+            if e.to_string().contains("Permission")
+                || e.to_string().contains("EACCES")
+            {
+                std::io::ErrorKind::PermissionDenied
+            } else {
+                std::io::ErrorKind::Other
+            },
+            e.to_string(),
+        )) {
+            PolicyGenerationError::PrivilegeRequired {
+                operation: "policy generate tpm --from-tpm".to_string(),
+                path: std::path::PathBuf::from("/dev/tpmrm0"),
+                hint: privilege::suggest_sudo(
+                    "policy generate tpm --from-tpm",
+                ),
+            }
+        } else {
+            PolicyGenerationError::Output {
+                path: "<tpm>".into(),
+                reason: format!("Failed to open TPM context: {e}"),
+            }
+        }
+    })?;
+
+    // Read PCR values
+    let (_, _, pcr_digests) = context
+        .execute_without_session(|ctx| ctx.pcr_read(pcr_selection.clone()))
+        .map_err(|e| PolicyGenerationError::Output {
+            path: "<tpm>".into(),
+            reason: format!("Failed to read PCR values: {e}"),
+        })?;
+
+    // Extract digest bytes and build PCR value pairs
+    let mut pcrs: Vec<(u32, String)> = Vec::new();
+
+    for (slot_idx, digest) in pcr_digests.value().iter().enumerate() {
+        if slot_idx < pcr_indices.len() {
+            let hex_value = hex::encode(digest.value());
+            pcrs.push((pcr_indices[slot_idx], hex_value));
+        }
+    }
+
+    if pcrs.is_empty() {
+        return Err(PolicyGenerationError::Output {
+            path: "<tpm>".into(),
+            reason: "No PCR values read from TPM".to_string(),
+        });
+    }
+
+    Ok(TpmPolicy::from_pcrs(&pcrs))
 }
 
 #[cfg(test)]
