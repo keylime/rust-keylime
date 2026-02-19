@@ -512,6 +512,7 @@ mod tests {
             grub_authcode_sha256: None,
             kernel_authcode_sha256: Some("0xkernhash".to_string()),
             initrd_plain_sha256: None,
+            vmlinuz_plain_sha256: None,
             kernel_cmdline: Some("root=/dev/sda1".to_string()),
         });
 

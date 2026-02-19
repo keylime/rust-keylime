@@ -20,4 +20,5 @@ pub mod privilege;
 pub mod runtime_policy;
 pub mod tpm_policy;
 pub mod tpm_policy_gen;
+pub mod uefi_event_data;
 pub mod validation;

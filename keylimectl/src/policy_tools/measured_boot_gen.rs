@@ -9,8 +9,9 @@
 
 use crate::commands::error::PolicyGenerationError;
 use crate::policy_tools::measured_boot_policy::{
-    MeasuredBootPolicy, ScrtmBiosEntry,
+    KernelEntry, MeasuredBootPolicy, ScrtmBiosEntry, SecureBootSignature,
 };
+use crate::policy_tools::uefi_event_data;
 use keylime::uefi::UefiLogHandler;
 use std::collections::HashMap;
 use std::path::Path;
@@ -43,6 +44,15 @@ pub fn generate_from_eventlog(
         extract_secureboot_events(&handler, &mut policy);
     }
 
+    // Extract kernel boot chain (PCR 4, 8, 9)
+    extract_kernel_entries(&handler, &mut policy, include_secureboot);
+
+    // Extract MOK (Machine Owner Key) digests
+    extract_mok(&handler, &mut policy);
+
+    // Extract vendor_db from EV_EFI_VARIABLE_AUTHORITY events
+    extract_vendor_db(&handler, &mut policy);
+
     Ok(policy)
 }
 
@@ -68,6 +78,7 @@ fn extract_scrtm_bios(
             }
             "EV_S_CRTM_CONTENTS"
             | "EV_EFI_PLATFORM_FIRMWARE_BLOB"
+            | "EV_EFI_PLATFORM_FIRMWARE_BLOB2"
             | "EV_POST_CODE" => {
                 let mut fw_entry: HashMap<String, String> = HashMap::new();
                 for (alg, digest) in &event.digests {
@@ -100,111 +111,238 @@ fn extract_secureboot_events(
     let pcr7_events = handler.get_events_for_pcr_index(7);
 
     for event in &pcr7_events {
-        // EFI variable events on PCR 7 contain Secure Boot variable
-        // measurements. The event_data contains the variable name and
-        // content but parsing the full UEFI_VARIABLE_DATA structure
-        // requires additional work. For now, we record them as
-        // raw digests in the policy for reference.
-        if event.event_type == "EV_EFI_VARIABLE_DRIVER_CONFIG"
-            || event.event_type == "EV_EFI_VARIABLE_BOOT"
+        if event.event_type != "EV_EFI_VARIABLE_DRIVER_CONFIG"
+            && event.event_type != "EV_EFI_VARIABLE_BOOT"
         {
-            // The event data starts with the EFI variable name
-            // GUID (16 bytes) + name length (8 bytes) + data length (8 bytes)
-            // + Unicode name + data. We extract what we can.
-            let event_data_hex = hex::encode(&event.event_data);
+            continue;
+        }
 
-            // Try to detect variable name from event data
-            let var_name = detect_efi_variable_name(&event.event_data);
+        let var_data =
+            uefi_event_data::parse_efi_variable_data(&event.event_data);
 
-            // Get the digest for the first available algorithm
-            let digest = event
+        let var_name = var_data.as_ref().map(|v| v.variable_name.as_str());
+
+        // Get the digest for the first available algorithm
+        let digest = event
+            .digests
+            .iter()
+            .next()
+            .map(|(_, d)| hex::encode(d))
+            .unwrap_or_default();
+
+        let sig = SecureBootSignature {
+            signature_owner: "uefi-var".to_string(),
+            signature_data: format!("0x{digest}"),
+        };
+
+        match var_name {
+            Some("PK") => policy.pk.push(sig),
+            Some("KEK") => policy.kek.push(sig),
+            Some("db") => policy.db.push(sig),
+            Some("dbx") => policy.dbx.push(sig),
+            _ => {
+                log::debug!("Skipping EFI variable event: {:?}", var_name);
+            }
+        }
+    }
+}
+
+/// Extract kernel boot chain entries from PCRs 4, 8, and 9.
+///
+/// Following the Python `create_mb_policy.get_kernel()` logic:
+/// - PCR 4 `EV_EFI_BOOT_SERVICES_APPLICATION` events: shim (0), grub (1), kernel (2)
+/// - PCR 8 `EV_IPL` events: kernel command line
+/// - PCR 9 `EV_IPL` events: initrd/initramfs and vmlinuz digests
+fn extract_kernel_entries(
+    handler: &UefiLogHandler,
+    policy: &mut MeasuredBootPolicy,
+    has_secureboot: bool,
+) {
+    let mut entry = KernelEntry {
+        shim_authcode_sha256: None,
+        grub_authcode_sha256: None,
+        kernel_authcode_sha256: None,
+        initrd_plain_sha256: None,
+        vmlinuz_plain_sha256: None,
+        kernel_cmdline: None,
+    };
+
+    // --- PCR 4: Boot services applications (shim, grub, kernel) ---
+    let pcr4_boot_apps: Vec<_> = handler
+        .get_events_for_pcr_index(4)
+        .into_iter()
+        .filter(|e| e.event_type == "EV_EFI_BOOT_SERVICES_APPLICATION")
+        .collect();
+
+    // Extract sha256 digests in order: [0]=shim, [1]=grub, [2]=kernel
+    for (idx, event) in pcr4_boot_apps.iter().enumerate() {
+        let sha256_digest = event
+            .digests
+            .get("sha256")
+            .map(|d| format!("0x{}", hex::encode(d)));
+
+        match idx {
+            0 => {
+                entry.shim_authcode_sha256 = sha256_digest;
+            }
+            1 => {
+                entry.grub_authcode_sha256 = sha256_digest;
+            }
+            2 if has_secureboot => {
+                entry.kernel_authcode_sha256 = sha256_digest;
+            }
+            _ => break,
+        }
+    }
+
+    // --- PCR 8: Kernel command line ---
+    let pcr8_ipl: Vec<_> = handler
+        .get_events_for_pcr_index(8)
+        .into_iter()
+        .filter(|e| e.event_type == "EV_IPL")
+        .collect();
+
+    for event in &pcr8_ipl {
+        if let Some(s) = uefi_event_data::parse_ipl_string(&event.event_data)
+        {
+            // GRUB prefixes the command line with "kernel_cmdline: "
+            // or the string itself IS the command line
+            if s.contains("kernel_cmdline") {
+                // Extract the actual command line after the prefix
+                let cmdline = s
+                    .strip_prefix("kernel_cmdline: ")
+                    .or_else(|| s.strip_prefix("kernel_cmdline:"))
+                    .unwrap_or(&s);
+                entry.kernel_cmdline = Some(cmdline.to_string());
+                break;
+            }
+        }
+    }
+
+    // If no "kernel_cmdline" prefix found, try the last PCR 8 EV_IPL event
+    if entry.kernel_cmdline.is_none() {
+        if let Some(event) = pcr8_ipl.last() {
+            if let Some(s) =
+                uefi_event_data::parse_ipl_string(&event.event_data)
+            {
+                if !s.is_empty() {
+                    entry.kernel_cmdline = Some(s);
+                }
+            }
+        }
+    }
+
+    // --- PCR 9: initrd/initramfs and vmlinuz ---
+    let pcr9_ipl: Vec<_> = handler
+        .get_events_for_pcr_index(9)
+        .into_iter()
+        .filter(|e| e.event_type == "EV_IPL")
+        .collect();
+
+    for event in &pcr9_ipl {
+        let event_str = uefi_event_data::parse_ipl_string(&event.event_data);
+
+        let sha256_digest = event
+            .digests
+            .get("sha256")
+            .map(|d| format!("0x{}", hex::encode(d)));
+
+        if let Some(ref s) = event_str {
+            let s_lower = s.to_lowercase();
+            if s_lower.contains("initrd") || s_lower.contains("initramfs") {
+                if entry.initrd_plain_sha256.is_none() {
+                    entry.initrd_plain_sha256 = sha256_digest;
+                }
+            } else if !has_secureboot
+                && s_lower.contains("vmlinuz")
+                && entry.vmlinuz_plain_sha256.is_none()
+            {
+                entry.vmlinuz_plain_sha256 = sha256_digest;
+            }
+        }
+    }
+
+    // Only add the entry if we extracted something meaningful
+    if entry.shim_authcode_sha256.is_some()
+        || entry.grub_authcode_sha256.is_some()
+        || entry.kernel_authcode_sha256.is_some()
+        || entry.initrd_plain_sha256.is_some()
+        || entry.vmlinuz_plain_sha256.is_some()
+        || entry.kernel_cmdline.is_some()
+    {
+        policy.kernels.push(entry);
+    }
+}
+
+/// Extract MOK (Machine Owner Key) digests from EV_IPL events.
+///
+/// Shim measures MokList and MokListX as EV_IPL events.
+/// The event_data contains the string "MokList" or "MokListX".
+fn extract_mok(handler: &UefiLogHandler, policy: &mut MeasuredBootPolicy) {
+    let ipl_events = handler.get_events_by_type("EV_IPL");
+
+    for event in &ipl_events {
+        let event_str = uefi_event_data::parse_ipl_string(&event.event_data);
+
+        if let Some(ref s) = event_str {
+            let sha256_digest = event
                 .digests
-                .iter()
-                .next()
-                .map(|(_, d)| hex::encode(d))
-                .unwrap_or_default();
+                .get("sha256")
+                .map(|d| format!("0x{}", hex::encode(d)));
 
-            // Classify based on variable name
-            match var_name.as_deref() {
-                Some("PK") => {
-                    policy.pk.push(
-                        crate::policy_tools::measured_boot_policy::SecureBootSignature {
-                            signature_owner: "uefi-var".to_string(),
-                            signature_data: format!("0x{digest}"),
-                        },
+            if s == "MokList" || s == "MokListRT" {
+                if let Some(digest) = sha256_digest {
+                    let mut entry = serde_json::Map::new();
+                    let _ = entry.insert(
+                        "sha256".to_string(),
+                        serde_json::Value::String(digest),
                     );
+                    policy.mokdig.push(serde_json::Value::Object(entry));
                 }
-                Some("KEK") => {
-                    policy.kek.push(
-                        crate::policy_tools::measured_boot_policy::SecureBootSignature {
-                            signature_owner: "uefi-var".to_string(),
-                            signature_data: format!("0x{digest}"),
-                        },
+            } else if s == "MokListX" || s == "MokListXRT" {
+                if let Some(digest) = sha256_digest {
+                    let mut entry = serde_json::Map::new();
+                    let _ = entry.insert(
+                        "sha256".to_string(),
+                        serde_json::Value::String(digest),
                     );
-                }
-                Some("db") => {
-                    policy.db.push(
-                        crate::policy_tools::measured_boot_policy::SecureBootSignature {
-                            signature_owner: "uefi-var".to_string(),
-                            signature_data: format!("0x{digest}"),
-                        },
-                    );
-                }
-                Some("dbx") => {
-                    policy.dbx.push(
-                        crate::policy_tools::measured_boot_policy::SecureBootSignature {
-                            signature_owner: "uefi-var".to_string(),
-                            signature_data: format!("0x{digest}"),
-                        },
-                    );
-                }
-                _ => {
-                    // Other Secure Boot variable - skip for now
-                    log::debug!(
-                        "Skipping EFI variable event: data=0x{}...",
-                        &event_data_hex
-                            [..std::cmp::min(32, event_data_hex.len())]
-                    );
+                    policy.mokxdig.push(serde_json::Value::Object(entry));
                 }
             }
         }
     }
 }
 
-/// Try to extract the EFI variable name from event data.
+/// Extract vendor_db signatures from `EV_EFI_VARIABLE_AUTHORITY` events.
 ///
-/// UEFI_VARIABLE_DATA structure:
-/// - VariableName (GUID, 16 bytes)
-/// - UnicodeNameLength (u64, 8 bytes)
-/// - VariableDataLength (u64, 8 bytes)
-/// - UnicodeName (UnicodeNameLength * 2 bytes, UTF-16LE)
-/// - VariableData (VariableDataLength bytes)
-fn detect_efi_variable_name(event_data: &[u8]) -> Option<String> {
-    // Need at least GUID (16) + name_len (8) + data_len (8) = 32 bytes
-    if event_data.len() < 32 {
-        return None;
+/// These events on PCR 7 contain the variable name and signature data
+/// used to verify boot components against vendor-provided databases.
+fn extract_vendor_db(
+    handler: &UefiLogHandler,
+    policy: &mut MeasuredBootPolicy,
+) {
+    let authority_events =
+        handler.get_events_by_type("EV_EFI_VARIABLE_AUTHORITY");
+
+    for event in &authority_events {
+        if let Some(var_data) =
+            uefi_event_data::parse_efi_variable_data(&event.event_data)
+        {
+            if var_data.variable_name == "vendor_db" {
+                let digest = event
+                    .digests
+                    .iter()
+                    .next()
+                    .map(|(_, d)| hex::encode(d))
+                    .unwrap_or_default();
+
+                policy.vendor_db.push(SecureBootSignature {
+                    signature_owner: "vendor".to_string(),
+                    signature_data: format!("0x{digest}"),
+                });
+            }
+        }
     }
-
-    // Read UnicodeNameLength at offset 16
-    let name_len_bytes: [u8; 8] = event_data[16..24].try_into().ok()?;
-    let name_len = u64::from_le_bytes(name_len_bytes) as usize;
-
-    if name_len == 0 || event_data.len() < 32 + name_len * 2 {
-        return None;
-    }
-
-    // Read Unicode name starting at offset 32
-    let name_bytes = &event_data[32..32 + name_len * 2];
-
-    // Decode UTF-16LE
-    let u16_chars: Vec<u16> = name_bytes
-        .chunks_exact(2)
-        .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]))
-        .collect();
-
-    String::from_utf16(&u16_chars)
-        .ok()
-        .map(|s| s.trim_end_matches('\0').to_string())
 }
 
 /// Summary statistics for a generated measured boot policy.
@@ -249,59 +387,78 @@ pub fn get_eventlog_stats(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::policy_tools::uefi_event_data::{
+        parse_efi_variable_data, parse_ipl_string,
+    };
 
-    #[test]
-    fn test_detect_efi_variable_name_pk() {
-        // Build a fake UEFI_VARIABLE_DATA for "PK"
-        let mut data = Vec::new();
-        // GUID (16 bytes) - EFI_GLOBAL_VARIABLE_GUID
-        data.extend_from_slice(&[
+    /// Helper: build a UEFI_VARIABLE_DATA byte buffer for testing.
+    fn build_variable_data(name: &str, data: &[u8]) -> Vec<u8> {
+        let mut buf = Vec::new();
+        // GUID (16 bytes)
+        buf.extend_from_slice(&[
             0x61, 0xdf, 0xe4, 0x8b, 0xca, 0x93, 0xd2, 0x11, 0xaa, 0x0d, 0x00,
             0xe0, 0x98, 0x03, 0x2b, 0x8c,
         ]);
-        // UnicodeNameLength = 2 (for "PK")
-        data.extend_from_slice(&2u64.to_le_bytes());
-        // VariableDataLength = 0
-        data.extend_from_slice(&0u64.to_le_bytes());
-        // UnicodeName "PK" in UTF-16LE
-        data.extend_from_slice(&[b'P', 0, b'K', 0]);
-
-        let name = detect_efi_variable_name(&data);
-        assert_eq!(name, Some("PK".to_string()));
-    }
-
-    #[test]
-    fn test_detect_efi_variable_name_secureboot() {
-        let mut data = Vec::new();
-        // GUID
-        data.extend_from_slice(&[0u8; 16]);
-        // Name "SecureBoot" = 10 chars
-        data.extend_from_slice(&10u64.to_le_bytes());
-        data.extend_from_slice(&0u64.to_le_bytes());
-        // UTF-16LE "SecureBoot"
-        for c in "SecureBoot".chars() {
-            data.push(c as u8);
-            data.push(0);
+        // UnicodeNameLength
+        buf.extend_from_slice(&(name.len() as u64).to_le_bytes());
+        // VariableDataLength
+        buf.extend_from_slice(&(data.len() as u64).to_le_bytes());
+        // UnicodeName in UTF-16LE
+        for c in name.chars() {
+            buf.push(c as u8);
+            buf.push(0);
         }
-
-        let name = detect_efi_variable_name(&data);
-        assert_eq!(name, Some("SecureBoot".to_string()));
+        // VariableData
+        buf.extend_from_slice(data);
+        buf
     }
 
     #[test]
-    fn test_detect_efi_variable_name_too_short() {
-        let data = vec![0u8; 16]; // Too short
-        assert!(detect_efi_variable_name(&data).is_none());
+    fn test_parse_efi_variable_name_pk() {
+        let data = build_variable_data("PK", &[]);
+        let parsed = parse_efi_variable_data(&data).unwrap(); //#[allow_ci]
+        assert_eq!(parsed.variable_name, "PK");
     }
 
     #[test]
-    fn test_detect_efi_variable_name_empty_name() {
+    fn test_parse_efi_variable_name_secureboot() {
+        let data = build_variable_data("SecureBoot", &[0x01]);
+        let parsed = parse_efi_variable_data(&data).unwrap(); //#[allow_ci]
+        assert_eq!(parsed.variable_name, "SecureBoot");
+        assert_eq!(parsed.variable_data, vec![0x01]);
+    }
+
+    #[test]
+    fn test_parse_efi_variable_too_short() {
+        let data = vec![0u8; 16];
+        assert!(parse_efi_variable_data(&data).is_none());
+    }
+
+    #[test]
+    fn test_parse_efi_variable_empty_name() {
         let mut data = Vec::new();
-        data.extend_from_slice(&[0u8; 16]); // GUID
-        data.extend_from_slice(&0u64.to_le_bytes()); // name len = 0
-        data.extend_from_slice(&0u64.to_le_bytes()); // data len = 0
+        data.extend_from_slice(&[0u8; 16]);
+        data.extend_from_slice(&0u64.to_le_bytes());
+        data.extend_from_slice(&0u64.to_le_bytes());
+        assert!(parse_efi_variable_data(&data).is_none());
+    }
 
-        assert!(detect_efi_variable_name(&data).is_none());
+    #[test]
+    fn test_parse_ipl_string_cmdline() {
+        let data = b"kernel_cmdline: root=/dev/sda1 ro quiet";
+        let result = parse_ipl_string(data);
+        assert_eq!(
+            result.as_deref(),
+            Some("kernel_cmdline: root=/dev/sda1 ro quiet")
+        );
+    }
+
+    #[test]
+    fn test_parse_ipl_string_moklist() {
+        let mut data = b"MokList".to_vec();
+        data.push(0);
+        let result = parse_ipl_string(&data);
+        assert_eq!(result, Some("MokList".to_string()));
     }
 
     #[test]
