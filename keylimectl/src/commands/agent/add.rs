@@ -271,17 +271,18 @@ pub(super) async fn add_agent(
                     .or_else(|| Some("".to_string())),
             ) // Use agent revocation key or default
             .with_accept_tpm_hash_algs(Some(vec![
+                "sha512".to_string(),
+                "sha384".to_string(),
                 "sha256".to_string(),
-                "sha1".to_string(),
-            ])) // Add required TPM hash algorithms
+            ]))
             .with_accept_tpm_encryption_algs(Some(vec![
-                "rsa".to_string(),
                 "ecc".to_string(),
-            ])) // Add required TPM encryption algorithms
-            .with_accept_tpm_signing_algs(Some(vec![
                 "rsa".to_string(),
-                "ecdsa".to_string(),
-            ])) // Add required TPM signing algorithms
+            ]))
+            .with_accept_tpm_signing_algs(Some(vec![
+                "ecschnorr".to_string(),
+                "rsassa".to_string(),
+            ]))
             .with_supported_version(
                 agent_data
                     .get("supported_version")
