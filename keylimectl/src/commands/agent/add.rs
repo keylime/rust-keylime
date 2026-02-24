@@ -591,6 +591,10 @@ async fn poll_attestation_status(
     let timeout = std::time::Duration::from_secs(timeout_secs);
     let poll_interval = std::time::Duration::from_secs(2);
 
+    let wait_handle = output.start_wait(format!(
+        "Waiting for attestation of agent {agent_id}..."
+    ));
+
     loop {
         if start.elapsed() > timeout {
             return Err(CommandError::agent_operation_failed(
@@ -642,13 +646,21 @@ async fn poll_attestation_status(
                         ));
                     }
                     Some("PASS") => {
+                        drop(wait_handle);
                         output.info(format!(
                             "Agent {agent_id} attestation successful"
                         ));
                         return Ok("PASS".to_string());
                     }
                     _ => {
-                        // PENDING or missing — keep polling
+                        // PENDING or missing — update spinner and keep polling
+                        let elapsed = start.elapsed().as_secs();
+                        let state_str =
+                            operational_state.as_deref().unwrap_or("pending");
+                        wait_handle.set_message(format!(
+                            "Waiting for attestation of agent {agent_id} \
+                             ({state_str}, {elapsed}s elapsed)"
+                        ));
                         debug!(
                             "Agent attestation status: {:?}, operational_state: {:?}, waiting...",
                             attestation_status, operational_state

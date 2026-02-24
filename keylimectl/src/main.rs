@@ -111,19 +111,34 @@ struct Cli {
     #[arg(long, value_enum, default_value = "json")]
     format: OutputFormat,
 
+    /// Color output mode
+    #[arg(long, value_enum, default_value = "auto")]
+    color: ColorMode,
+
     #[command(subcommand)]
     command: Option<Commands>,
 }
 
 /// Available output formats
-#[derive(Clone, clap::ValueEnum)]
-enum OutputFormat {
+#[derive(Clone, Copy, Debug, clap::ValueEnum)]
+pub enum OutputFormat {
     /// JSON output (default)
     Json,
     /// Human-readable table format
     Table,
     /// YAML output
     Yaml,
+}
+
+/// Color output mode
+#[derive(Clone, Copy, Debug, clap::ValueEnum)]
+pub enum ColorMode {
+    /// Auto-detect based on terminal
+    Auto,
+    /// Always use colors
+    Always,
+    /// Never use colors
+    Never,
 }
 
 /// Available commands
@@ -720,7 +735,7 @@ async fn main() {
     let cli = Cli::parse();
 
     // Initialize logging based on verbosity
-    init_logging(cli.verbose, cli.quiet);
+    init_logging(cli.verbose, cli.quiet, &cli.color);
 
     // Load configuration
     let config = match Config::load(cli.config.as_deref()) {
@@ -744,7 +759,7 @@ async fn main() {
         Some(ref command @ Commands::Configure { .. }) => {
             // Configure command does not require config validation
             // or the singleton — it creates/updates configuration.
-            let output = OutputHandler::new(cli.format, cli.quiet);
+            let output = OutputHandler::new(cli.format, cli.quiet, cli.color);
 
             let result = execute_command(command, &output).await;
 
@@ -780,7 +795,7 @@ async fn main() {
                 process::exit(1);
             }
 
-            let output = OutputHandler::new(cli.format, cli.quiet);
+            let output = OutputHandler::new(cli.format, cli.quiet, cli.color);
 
             let result = execute_command(command, &output).await;
 
@@ -809,7 +824,7 @@ async fn main() {
                 process::exit(1);
             }
 
-            let output = OutputHandler::new(cli.format, cli.quiet);
+            let output = OutputHandler::new(cli.format, cli.quiet, cli.color);
 
             let result = execute_command(command, &output).await;
 
@@ -839,7 +854,7 @@ async fn main() {
             }
 
             // Initialize output handler
-            let output = OutputHandler::new(cli.format, cli.quiet);
+            let output = OutputHandler::new(cli.format, cli.quiet, cli.color);
 
             // Execute command
             let result = execute_command(command, &output).await;
@@ -866,8 +881,12 @@ async fn main() {
     }
 }
 
-/// Initialize logging based on verbosity level
-fn init_logging(verbose: u8, quiet: bool) {
+/// Initialize logging based on verbosity level and color mode
+///
+/// Wraps the logger in a [`SpinnerAwareLogger`] so that log messages
+/// suspend active progress bars before writing to stderr, preventing
+/// garbled output.
+fn init_logging(verbose: u8, quiet: bool, color: &ColorMode) {
     if quiet {
         return;
     }
@@ -879,10 +898,51 @@ fn init_logging(verbose: u8, quiet: bool) {
         _ => log::LevelFilter::Trace,
     };
 
-    pretty_env_logger::formatted_builder()
+    let write_style = match color {
+        ColorMode::Never => pretty_env_logger::env_logger::WriteStyle::Never,
+        ColorMode::Always => {
+            pretty_env_logger::env_logger::WriteStyle::Always
+        }
+        ColorMode::Auto => pretty_env_logger::env_logger::WriteStyle::Auto,
+    };
+
+    let logger = pretty_env_logger::formatted_builder()
         .filter_level(log_level)
         .target(pretty_env_logger::env_logger::Target::Stderr)
-        .init();
+        .write_style(write_style)
+        .build();
+
+    let max_level = logger.filter();
+
+    // Wrap the logger so log output suspends any active spinners
+    log::set_boxed_logger(Box::new(SpinnerAwareLogger { inner: logger }))
+        .expect("failed to set logger"); //#[allow_ci]
+    log::set_max_level(max_level);
+}
+
+/// Logger wrapper that suspends progress bar rendering during log writes.
+///
+/// Without this, `log::warn!()` and other log macros write directly to
+/// stderr, which collides with indicatif's spinner rendering and produces
+/// garbled output.
+struct SpinnerAwareLogger {
+    inner: pretty_env_logger::env_logger::Logger,
+}
+
+impl log::Log for SpinnerAwareLogger {
+    fn enabled(&self, metadata: &log::Metadata) -> bool {
+        self.inner.enabled(metadata)
+    }
+
+    fn log(&self, record: &log::Record) {
+        if self.inner.enabled(record.metadata()) {
+            output::get_multi_progress().suspend(|| self.inner.log(record));
+        }
+    }
+
+    fn flush(&self) {
+        self.inner.flush();
+    }
 }
 
 /// Handle the case when no subcommand is provided.
