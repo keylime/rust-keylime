@@ -285,7 +285,8 @@ pub(super) async fn perform_key_delivery(
 /// Verify key derivation using HMAC challenge
 ///
 /// Sends a challenge to the agent to verify that it can correctly
-/// derive keys using the delivered U key.
+/// derive keys using the delivered U key. Retries with backoff
+/// because the agent may not yet have received V from the verifier.
 pub(super) async fn verify_key_derivation(
     agent_client: &AgentClient,
     attestation: &Value,
@@ -319,32 +320,76 @@ pub(super) async fn verify_key_derivation(
                 )
             },
         )?;
-    let expected_hmac_b64 = STANDARD.encode(&expected_hmac);
+    // Agent returns HMAC as hex string (matching Python's do_hmac hexdigest)
+    let expected_hmac_hex = hex::encode(&expected_hmac);
 
-    output.progress("Sending verification challenge to agent");
+    // Retry loop: the agent may not have received V from the verifier yet,
+    // so K = U XOR V is not available until both parts arrive.
+    let max_retries = 12;
+    let base_interval = std::time::Duration::from_secs(1);
 
-    // Send challenge to agent and verify response
-    let is_valid = agent_client
-        .verify_key_derivation(&challenge, &expected_hmac_b64)
-        .await
-        .map_err(|e| {
-            CommandError::agent_operation_failed(
-                "agent".to_string(),
-                "key_derivation_verification",
-                format!("Failed to verify key derivation: {e}"),
-            )
-        })?;
+    for attempt in 0..max_retries {
+        output.progress(format!(
+            "Verifying key derivation (attempt {}/{})",
+            attempt + 1,
+            max_retries
+        ));
 
-    if is_valid {
-        output.info("Key derivation verification successful");
-        Ok(())
-    } else {
-        Err(CommandError::agent_operation_failed(
-            "agent".to_string(),
-            "key_derivation_verification",
-            "Agent HMAC does not match expected value",
-        ))
+        match agent_client
+            .verify_key_derivation(&challenge, &expected_hmac_hex)
+            .await
+        {
+            Ok(true) => {
+                output.info("Key derivation verification successful");
+                return Ok(());
+            }
+            Ok(false) => {
+                // HMAC mismatch — agent likely hasn't received V yet
+                if attempt + 1 >= max_retries {
+                    return Err(CommandError::agent_operation_failed(
+                        "agent".to_string(),
+                        "key_derivation_verification",
+                        format!(
+                            "Agent HMAC does not match expected value \
+                             after {max_retries} attempts"
+                        ),
+                    ));
+                }
+                let wait = base_interval
+                    * 2u32.saturating_pow(attempt.min(4) as u32);
+                debug!(
+                    "Key derivation not yet complete (attempt {}/{}), \
+                     retrying in {:?}",
+                    attempt + 1,
+                    max_retries,
+                    wait
+                );
+                tokio::time::sleep(wait).await;
+            }
+            Err(e) => {
+                // Network/protocol error — also retry
+                if attempt + 1 >= max_retries {
+                    return Err(CommandError::agent_operation_failed(
+                        "agent".to_string(),
+                        "key_derivation_verification",
+                        format!("Failed to verify key derivation: {e}"),
+                    ));
+                }
+                let wait = base_interval
+                    * 2u32.saturating_pow(attempt.min(4) as u32);
+                debug!(
+                    "Verification request failed (attempt {}/{}): {e}, \
+                     retrying in {:?}",
+                    attempt + 1,
+                    max_retries,
+                    wait
+                );
+                tokio::time::sleep(wait).await;
+            }
+        }
     }
+
+    unreachable!()
 }
 
 /// Generate a cryptographically secure random nonce
