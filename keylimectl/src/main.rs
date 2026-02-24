@@ -291,7 +291,7 @@ enum AgentAction {
         verifier_only: bool,
 
         /// Check registrar only
-        #[arg(long)]
+        #[arg(long = "registrar")]
         registrar_only: bool,
     },
 
@@ -309,7 +309,7 @@ enum AgentAction {
         detailed: bool,
 
         /// List agents from registrar only
-        #[arg(long)]
+        #[arg(long = "registrar")]
         registrar_only: bool,
     },
 }
