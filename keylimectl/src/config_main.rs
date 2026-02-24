@@ -653,6 +653,7 @@ mod tests {
             timeout: None,
             verbose: 0,
             quiet: false,
+            color: crate::ColorMode::Never,
             format: crate::OutputFormat::Json,
             command: Some(crate::Commands::Agent {
                 action: crate::AgentAction::List {
