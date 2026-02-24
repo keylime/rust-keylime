@@ -22,10 +22,27 @@ pub(super) fn load_policy_file(path: &str) -> Result<String, CommandError> {
     })
 }
 
-/// Load payload file contents
+/// Load payload file contents as string
 #[must_use = "payload content must be used after loading"]
 pub(super) fn load_payload_file(path: &str) -> Result<String, CommandError> {
     fs::read_to_string(path).map_err(|e| {
+        CommandError::policy_file_error(
+            path,
+            format!("Failed to read payload file: {e}"),
+        )
+    })
+}
+
+/// Load payload file contents as raw bytes
+///
+/// Used for payload encryption where the file content needs to be
+/// encrypted before being sent to the agent. Reads as bytes to
+/// support both text and binary payloads.
+#[must_use = "payload bytes must be used after loading"]
+pub(super) fn load_payload_bytes(
+    path: &str,
+) -> Result<Vec<u8>, CommandError> {
+    fs::read(path).map_err(|e| {
         CommandError::policy_file_error(
             path,
             format!("Failed to read payload file: {e}"),
