@@ -184,8 +184,6 @@ pub(super) async fn perform_agent_attestation(
                 )
             })?;
 
-    output.info("TPM quote verification completed successfully");
-
     Ok(Some(json!({
         "quote": quote,
         "public_key": public_key,
@@ -328,8 +326,11 @@ pub(super) async fn verify_key_derivation(
     let max_retries = 12;
     let base_interval = std::time::Duration::from_secs(1);
 
+    let wait_handle =
+        output.start_wait("Verifying key derivation (attempt 1/12)");
+
     for attempt in 0..max_retries {
-        output.progress(format!(
+        wait_handle.set_message(format!(
             "Verifying key derivation (attempt {}/{})",
             attempt + 1,
             max_retries
@@ -340,6 +341,7 @@ pub(super) async fn verify_key_derivation(
             .await
         {
             Ok(true) => {
+                drop(wait_handle);
                 output.info("Key derivation verification successful");
                 return Ok(());
             }
@@ -355,16 +357,16 @@ pub(super) async fn verify_key_derivation(
                         ),
                     ));
                 }
-                let wait = base_interval
+                let delay = base_interval
                     * 2u32.saturating_pow(attempt.min(4) as u32);
                 debug!(
                     "Key derivation not yet complete (attempt {}/{}), \
                      retrying in {:?}",
                     attempt + 1,
                     max_retries,
-                    wait
+                    delay
                 );
-                tokio::time::sleep(wait).await;
+                tokio::time::sleep(delay).await;
             }
             Err(e) => {
                 // Network/protocol error — also retry
@@ -375,16 +377,16 @@ pub(super) async fn verify_key_derivation(
                         format!("Failed to verify key derivation: {e}"),
                     ));
                 }
-                let wait = base_interval
+                let delay = base_interval
                     * 2u32.saturating_pow(attempt.min(4) as u32);
                 debug!(
                     "Verification request failed (attempt {}/{}): {e}, \
                      retrying in {:?}",
                     attempt + 1,
                     max_retries,
-                    wait
+                    delay
                 );
-                tokio::time::sleep(wait).await;
+                tokio::time::sleep(delay).await;
             }
         }
     }

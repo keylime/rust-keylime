@@ -223,7 +223,11 @@ mod tests {
             }
         });
 
-        let output = OutputHandler::new(crate::OutputFormat::Json, false);
+        let output = OutputHandler::new(
+            crate::OutputFormat::Json,
+            false,
+            crate::ColorMode::Never,
+        );
         let result = format_evidence_result(&response, &output).unwrap(); //#[allow_ci]
         assert_eq!(result.get("valid"), Some(&Value::Bool(true)));
     }
@@ -245,7 +249,11 @@ mod tests {
             }
         });
 
-        let output = OutputHandler::new(crate::OutputFormat::Json, false);
+        let output = OutputHandler::new(
+            crate::OutputFormat::Json,
+            false,
+            crate::ColorMode::Never,
+        );
         let result = format_evidence_result(&response, &output).unwrap(); //#[allow_ci]
         assert_eq!(result.get("valid"), Some(&Value::Bool(false)));
     }
