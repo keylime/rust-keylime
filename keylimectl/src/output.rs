@@ -4,29 +4,35 @@
 //! Output formatting and handling for keylimectl
 //!
 //! This module provides flexible output formatting capabilities for the keylimectl CLI tool.
-//! It supports multiple output formats and handles both success and error cases.
+//! It supports multiple output formats, animated progress spinners, and optional colors.
 //!
 //! # Features
 //!
 //! - **Multiple formats**: JSON, human-readable tables, and YAML-like output
 //! - **Structured output**: JSON to stdout, logs to stderr for scriptability
-//! - **Progress reporting**: Step-by-step progress indicators for multi-step operations
-//! - **Error formatting**: Consistent error display across all formats
-//!
-//! # Examples
-//!
-//! ```rust
-//! use keylimectl::output::{OutputHandler, Format};
-//! use serde_json::json;
-//!
-//! let handler = OutputHandler::new(crate::OutputFormat::Json, false);
-//! let data = json!({"status": "success", "message": "Operation completed"});
-//! handler.success(data);
-//! ```
+//! - **Progress spinners**: Animated spinners for long-running operations (TTY only)
+//! - **Optional colors**: `--color=auto|always|never` for stderr messages
+//! - **Wait handles**: RAII spinners for polling loops with auto-cleanup
 
 use crate::error::KeylimectlError;
-use log::info;
+use console::Style;
+use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use serde_json::Value;
+use std::cell::RefCell;
+use std::sync::OnceLock;
+use std::time::Duration;
+
+/// Global `MultiProgress` that coordinates all spinner rendering with log output.
+///
+/// All progress bars are created through this instance so that `log` messages
+/// (routed via [`SpinnerAwareLogger`](crate::SpinnerAwareLogger)) can suspend
+/// rendering before writing, preventing garbled output.
+static MULTI_PROGRESS: OnceLock<MultiProgress> = OnceLock::new();
+
+/// Get the global `MultiProgress` instance (lazily initialized).
+pub fn get_multi_progress() -> &'static MultiProgress {
+    MULTI_PROGRESS.get_or_init(MultiProgress::new)
+}
 
 /// Output format options
 ///
@@ -53,84 +59,68 @@ impl From<crate::OutputFormat> for Format {
 
 /// Output handler for formatting and displaying results
 ///
-/// The OutputHandler manages all output formatting and display for keylimectl.
-/// It ensures consistent formatting across different output modes and provides
-/// utilities for progress reporting and error display.
+/// The OutputHandler manages all output formatting, progress spinners, and
+/// color styling for keylimectl. Spinners are only shown when stderr is a
+/// terminal; piped or redirected output falls back to plain text.
 ///
 /// # Design Principles
 ///
 /// - JSON output goes to stdout for machine processing
-/// - Human-readable messages go to stderr for logging
+/// - Human-readable messages and spinners go to stderr
 /// - Quiet mode suppresses non-essential output
-/// - Structured error reporting with consistent format
-///
-/// # Examples
-///
-/// ```rust
-/// use keylimectl::output::OutputHandler;
-/// use serde_json::json;
-///
-/// let handler = OutputHandler::new(crate::OutputFormat::Json, false);
-///
-/// // Success output
-/// handler.success(json!({"result": "success"}));
-///
-/// // Progress reporting
-/// handler.step(1, 3, "Connecting to verifier");
-/// handler.step(2, 3, "Validating agent data");
-/// handler.step(3, 3, "Adding agent");
-///
-/// // Information messages
-/// handler.info("Operation completed successfully");
-/// ```
+/// - Spinners auto-detect TTY; plain text fallback when piped
+/// - Colors apply to stderr only; stdout stays plain
 #[derive(Debug)]
 pub struct OutputHandler {
     format: Format,
     quiet: bool,
+    use_spinner: bool,
+    use_color: bool,
+    active_spinner: RefCell<Option<ProgressBar>>,
+    /// Whether the active spinner should leave a permanent trace when finished.
+    /// `step()` spinners leave a trace; `progress()` spinners are transient.
+    spinner_is_step: RefCell<bool>,
 }
 
 impl OutputHandler {
     /// Create a new output handler
     ///
-    /// # Arguments
-    ///
-    /// * `format` - The output format to use
-    /// * `quiet` - Whether to suppress non-essential output
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// use keylimectl::output::OutputHandler;
-    ///
-    /// let handler = OutputHandler::new(crate::OutputFormat::Json, false);
-    /// let quiet_handler = OutputHandler::new(crate::OutputFormat::Table, true);
-    /// ```
-    pub fn new(format: crate::OutputFormat, quiet: bool) -> Self {
+    /// Resolves spinner and color settings based on the color mode and
+    /// whether stderr is a terminal.
+    pub fn new(
+        format: crate::OutputFormat,
+        quiet: bool,
+        color: crate::ColorMode,
+    ) -> Self {
+        let is_tty = console::Term::stderr().is_term();
+        let use_color = match color {
+            crate::ColorMode::Auto => is_tty,
+            crate::ColorMode::Always => true,
+            crate::ColorMode::Never => false,
+        };
+        let use_spinner = is_tty && !quiet;
+
+        if !use_color {
+            console::set_colors_enabled_stderr(false);
+        }
+
         Self {
             format: format.into(),
             quiet,
+            use_spinner,
+            use_color,
+            active_spinner: RefCell::new(None),
+            spinner_is_step: RefCell::new(false),
         }
     }
 
     /// Output a successful result
     ///
-    /// This method formats and displays successful operation results.
-    /// The output goes to stdout to support piping and scripting.
-    ///
-    /// # Arguments
-    ///
-    /// * `value` - The result data to display
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// use keylimectl::output::OutputHandler;
-    /// use serde_json::json;
-    ///
-    /// let handler = OutputHandler::new(crate::OutputFormat::Json, false);
-    /// handler.success(json!({"agents": [{"uuid": "12345", "status": "active"}]}));
-    /// ```
+    /// Finishes any active spinner then formats and displays the result.
+    /// Output goes to stdout.
     pub fn success(&self, value: Value) {
+        self.finish_spinner();
+
         let output = match self.format {
             Format::Json => self.format_json(value),
             Format::Table => self.format_table(value),
@@ -142,25 +132,10 @@ impl OutputHandler {
 
     /// Output an error
     ///
-    /// This method formats and displays error information consistently
-    /// across all output formats. JSON errors go to stdout, while
-    /// human-readable errors go to stderr.
-    ///
-    /// # Arguments
-    ///
-    /// * `error` - The error to display
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// use keylimectl::output::OutputHandler;
-    /// use keylimectl::error::KeylimectlError;
-    ///
-    /// let handler = OutputHandler::new(crate::OutputFormat::Json, false);
-    /// let error = KeylimectlError::validation("Invalid UUID format");
-    /// handler.error(error);
-    /// ```
+    /// Finishes any active spinner then formats and displays the error.
     pub fn error(&self, error: KeylimectlError) {
+        self.finish_spinner();
+
         let error_json = error.to_json();
 
         match self.format {
@@ -172,8 +147,12 @@ impl OutputHandler {
                 );
             }
             Format::Table | Format::Yaml => {
-                // For non-JSON formats, show user-friendly error messages
-                eprintln!("Error: {error}");
+                let prefix = if self.use_color {
+                    format!("{}", Style::new().red().bold().apply_to("Error"))
+                } else {
+                    "Error".to_string()
+                };
+                eprintln!("{prefix}: {error}");
                 if let Some(details) =
                     error_json.get("error").and_then(|e| e.get("details"))
                 {
@@ -191,116 +170,131 @@ impl OutputHandler {
 
     /// Display informational message (only if not quiet)
     ///
-    /// Information messages are logged to stderr and are suppressed in quiet mode.
-    /// These messages provide context about what the tool is doing.
-    ///
-    /// # Arguments
-    ///
-    /// * `message` - The message to display
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// use keylimectl::output::OutputHandler;
-    ///
-    /// let handler = OutputHandler::new(crate::OutputFormat::Json, false);
-    /// handler.info("Connecting to verifier at https://localhost:8881");
-    /// ```
+    /// Prints directly to stderr (not through `log::info!`) so that
+    /// user-facing status messages always appear regardless of log level.
+    /// If a spinner is active, it is finished first.
     pub fn info<T: AsRef<str>>(&self, message: T) {
-        if !self.quiet {
-            info!("{}", message.as_ref());
+        if self.quiet {
+            return;
+        }
+        self.finish_spinner();
+        let msg = message.as_ref();
+        let _ = get_multi_progress().println(format!("  {msg}"));
+    }
+
+    /// Display a progress message with animated spinner
+    ///
+    /// When stderr is a TTY, shows an animated spinner. When piped or
+    /// in quiet mode, falls back to plain text or suppresses output.
+    pub fn progress<T: Into<String>>(&self, message: T) {
+        if self.quiet {
+            return;
+        }
+
+        let msg = message.into();
+
+        if self.use_spinner {
+            self.finish_spinner();
+            let pb = get_multi_progress().add(ProgressBar::new_spinner());
+            pb.set_style(self.spinner_style());
+            pb.set_message(msg);
+            pb.enable_steady_tick(Duration::from_millis(80));
+            *self.active_spinner.borrow_mut() = Some(pb);
+            *self.spinner_is_step.borrow_mut() = false;
+        } else {
+            let _ = get_multi_progress().println(format!("  {msg}"));
         }
     }
 
-    /// Display a progress message
+    /// Display a step in a multi-step operation with animated spinner
     ///
-    /// Progress messages show the current operation status and are useful
-    /// for long-running operations.
-    ///
-    /// # Arguments
-    ///
-    /// * `message` - The progress message to display
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// use keylimectl::output::OutputHandler;
-    ///
-    /// let handler = OutputHandler::new(crate::OutputFormat::Json, false);
-    /// handler.progress("Downloading agent certificate");
-    /// ```
-    pub fn progress<T: AsRef<str>>(&self, message: T) {
-        if !self.quiet {
-            eprintln!("● {}", message.as_ref());
-        }
-    }
-
-    /// Display a step in a multi-step operation
-    ///
-    /// Step messages provide numbered progress indicators for operations
-    /// that involve multiple stages.
-    ///
-    /// # Arguments
-    ///
-    /// * `step` - Current step number (1-based)
-    /// * `total` - Total number of steps
-    /// * `message` - Description of the current step
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// use keylimectl::output::OutputHandler;
-    ///
-    /// let handler = OutputHandler::new(crate::OutputFormat::Json, false);
-    /// handler.step(1, 3, "Validating agent UUID");
-    /// handler.step(2, 3, "Connecting to verifier");
-    /// handler.step(3, 3, "Adding agent to verifier");
-    /// ```
+    /// Shows `[N/TOTAL] message` with a spinner when on a TTY.
     pub fn step<T: AsRef<str>>(&self, step: u8, total: u8, message: T) {
-        if !self.quiet {
-            eprintln!("[{step}/{total}] {}", message.as_ref());
+        if self.quiet {
+            return;
         }
+
+        let msg = format!("[{step}/{total}] {}", message.as_ref());
+
+        if self.use_spinner {
+            self.finish_spinner();
+            let pb = get_multi_progress().add(ProgressBar::new_spinner());
+            pb.set_style(self.spinner_style());
+            pb.set_message(msg);
+            pb.enable_steady_tick(Duration::from_millis(80));
+            *self.active_spinner.borrow_mut() = Some(pb);
+            *self.spinner_is_step.borrow_mut() = true;
+        } else {
+            let _ = get_multi_progress().println(format!("  {msg}"));
+        }
+    }
+
+    /// Start a spinner for an indeterminate wait
+    ///
+    /// Returns a `WaitHandle` that keeps the spinner alive until dropped.
+    /// The spinner message can be updated via `WaitHandle::set_message()`.
+    /// Useful for polling loops where the wait duration is unknown.
+    pub fn start_wait<T: Into<String>>(&self, message: T) -> WaitHandle {
+        if self.quiet || !self.use_spinner {
+            if !self.quiet {
+                let _ = get_multi_progress()
+                    .println(format!("  {}", message.into()));
+            }
+            return WaitHandle { spinner: None };
+        }
+
+        self.finish_spinner();
+        let pb = get_multi_progress().add(ProgressBar::new_spinner());
+        pb.set_style(self.spinner_style());
+        pb.set_message(message.into());
+        pb.enable_steady_tick(Duration::from_millis(80));
+
+        WaitHandle { spinner: Some(pb) }
+    }
+
+    /// Finish any active spinner
+    ///
+    /// For step spinners, prints the message as a permanent line so that
+    /// completed steps always leave a trace even if they finish faster
+    /// than a single frame can render. Progress spinners are transient
+    /// and disappear silently when replaced.
+    pub fn finish_spinner(&self) {
+        if let Some(pb) = self.active_spinner.borrow_mut().take() {
+            let is_step = *self.spinner_is_step.borrow();
+            let msg = pb.message();
+            pb.finish_and_clear();
+            if is_step && !msg.is_empty() {
+                let _ = get_multi_progress().println(format!("  {msg}"));
+            }
+        }
+    }
+
+    /// Build the spinner progress style
+    fn spinner_style(&self) -> ProgressStyle {
+        let template = if self.use_color {
+            "{spinner:.cyan} {msg}"
+        } else {
+            "{spinner} {msg}"
+        };
+        ProgressStyle::with_template(template)
+            .expect("valid spinner template") //#[allow_ci]
     }
 
     /// Format value as JSON
-    ///
-    /// Converts a JSON value to a pretty-printed JSON string.
-    ///
-    /// # Arguments
-    ///
-    /// * `value` - The JSON value to format
-    ///
-    /// # Returns
-    ///
-    /// Pretty-printed JSON string
     fn format_json(&self, value: Value) -> String {
         serde_json::to_string_pretty(&value)
             .unwrap_or_else(|_| "{}".to_string())
     }
 
     /// Format value as human-readable table
-    ///
-    /// Converts structured data into a human-readable table format.
-    /// This method handles common Keylime response structures and formats
-    /// them in an intuitive way.
-    ///
-    /// # Arguments
-    ///
-    /// * `value` - The JSON value to format as a table
-    ///
-    /// # Returns
-    ///
-    /// Human-readable table string
     fn format_table(&self, value: Value) -> String {
         match value {
             Value::Object(map) => {
                 let mut output = String::new();
 
-                // Handle common response structures
                 if let Some(results) = map.get("results") {
                     match results {
                         Value::Object(results_map) => {
-                            // Single agent result
                             if results_map.len() == 1 {
                                 let (uuid, agent_data) =
                                     results_map.iter().next().unwrap(); //#[allow_ci]
@@ -309,7 +303,6 @@ impl OutputHandler {
                                     &self.format_agent_table(agent_data),
                                 );
                             } else {
-                                // Multiple agents
                                 output.push_str("Agents:\n");
                                 for (uuid, agent_data) in results_map {
                                     output.push_str(&format!("  {uuid}:\n"));
@@ -322,7 +315,6 @@ impl OutputHandler {
                             }
                         }
                         Value::Array(results_array) => {
-                            // List of items
                             if results_array.is_empty() {
                                 output.push_str("(no results)\n");
                             } else {
@@ -345,17 +337,14 @@ impl OutputHandler {
                             );
                         }
                     }
+                } else if map.is_empty() {
+                    output.push_str("(empty)\n");
                 } else {
-                    // Generic object formatting
-                    if map.is_empty() {
-                        output.push_str("(empty)\n");
-                    } else {
-                        for (key, value) in map {
-                            output.push_str(&format!(
-                                "{key}: {}\n",
-                                self.format_value_brief(&value)
-                            ));
-                        }
+                    for (key, value) in map {
+                        output.push_str(&format!(
+                            "{key}: {}\n",
+                            self.format_value_brief(&value)
+                        ));
                     }
                 }
 
@@ -366,41 +355,15 @@ impl OutputHandler {
     }
 
     /// Format value as YAML
-    ///
-    /// Converts a JSON value to a YAML-like format for human readability.
-    /// This is a simplified YAML formatter - for production use, consider
-    /// using the serde_yaml crate.
-    ///
-    /// # Arguments
-    ///
-    /// * `value` - The JSON value to format as YAML
-    ///
-    /// # Returns
-    ///
-    /// YAML-like formatted string
     fn format_yaml(&self, value: Value) -> String {
-        // Simple YAML-like formatting
-        // For a more complete implementation, could use serde_yaml crate
         self.value_to_yaml(&value, 0)
     }
 
     /// Format agent data as a table
-    ///
-    /// Formats agent information in a structured table with important
-    /// fields (like operational state and network info) displayed first.
-    ///
-    /// # Arguments
-    ///
-    /// * `agent_data` - The agent data to format
-    ///
-    /// # Returns
-    ///
-    /// Formatted agent table string
     fn format_agent_table(&self, agent_data: &Value) -> String {
         let mut output = String::new();
 
         if let Value::Object(map) = agent_data {
-            // Format important fields first
             let important_fields = [
                 "operational_state",
                 "ip",
@@ -418,7 +381,6 @@ impl OutputHandler {
                 }
             }
 
-            // Format remaining fields
             for (key, value) in map {
                 if !important_fields.contains(&key.as_str()) {
                     output.push_str(&format!(
@@ -433,16 +395,6 @@ impl OutputHandler {
     }
 
     /// Format agent data as indented table
-    ///
-    /// Formats agent data with additional indentation for nested display.
-    ///
-    /// # Arguments
-    ///
-    /// * `agent_data` - The agent data to format
-    ///
-    /// # Returns
-    ///
-    /// Indented agent table string
     fn format_agent_table_indented(&self, agent_data: &Value) -> String {
         self.format_agent_table(agent_data)
             .lines()
@@ -453,16 +405,6 @@ impl OutputHandler {
     }
 
     /// Format a table item
-    ///
-    /// Formats a single item for table display.
-    ///
-    /// # Arguments
-    ///
-    /// * `item` - The item to format
-    ///
-    /// # Returns
-    ///
-    /// Formatted item string
     fn format_table_item(&self, item: &Value) -> String {
         match item {
             Value::Object(map) => {
@@ -480,18 +422,6 @@ impl OutputHandler {
     }
 
     /// Format a value briefly for table display
-    ///
-    /// Converts values to brief, human-readable representations suitable
-    /// for table display. Complex objects are summarized rather than
-    /// displayed in full.
-    ///
-    /// # Arguments
-    ///
-    /// * `value` - The value to format briefly
-    ///
-    /// # Returns
-    ///
-    /// Brief string representation
     #[allow(clippy::only_used_in_recursion)]
     fn format_value_brief(&self, value: &Value) -> String {
         match value {
@@ -519,18 +449,6 @@ impl OutputHandler {
     }
 
     /// Convert value to YAML-like format
-    ///
-    /// Recursively converts a JSON value to a YAML-like string representation
-    /// with proper indentation.
-    ///
-    /// # Arguments
-    ///
-    /// * `value` - The value to convert
-    /// * `indent` - Current indentation level
-    ///
-    /// # Returns
-    ///
-    /// YAML-like formatted string
     fn value_to_yaml(&self, value: &Value, indent: usize) -> String {
         let indent_str = "  ".repeat(indent);
 
@@ -585,10 +503,48 @@ impl OutputHandler {
     }
 }
 
+/// Handle for a long-lived wait spinner
+///
+/// Created by [`OutputHandler::start_wait()`]. The spinner runs until
+/// the handle is dropped (RAII). Use `set_message()` to update the
+/// spinner text during polling loops.
+pub struct WaitHandle {
+    spinner: Option<ProgressBar>,
+}
+
+impl WaitHandle {
+    /// Update the spinner message
+    pub fn set_message(&self, message: impl Into<String>) {
+        if let Some(pb) = &self.spinner {
+            pb.set_message(message.into());
+        }
+    }
+}
+
+impl Drop for WaitHandle {
+    fn drop(&mut self) {
+        if let Some(pb) = self.spinner.take() {
+            pb.finish_and_clear();
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
+
+    /// Create a test handler (no TTY, no spinners, no color)
+    fn test_handler(format: crate::OutputFormat) -> OutputHandler {
+        OutputHandler {
+            format: format.into(),
+            quiet: false,
+            use_spinner: false,
+            use_color: false,
+            active_spinner: RefCell::new(None),
+            spinner_is_step: RefCell::new(false),
+        }
+    }
 
     #[test]
     fn test_format_conversion() {
@@ -599,19 +555,26 @@ mod tests {
 
     #[test]
     fn test_output_handler_creation() {
-        let handler = OutputHandler::new(crate::OutputFormat::Json, false);
+        let handler = OutputHandler::new(
+            crate::OutputFormat::Json,
+            false,
+            crate::ColorMode::Never,
+        );
         assert_eq!(handler.format, Format::Json);
         assert!(!handler.quiet);
 
-        let quiet_handler =
-            OutputHandler::new(crate::OutputFormat::Table, true);
+        let quiet_handler = OutputHandler::new(
+            crate::OutputFormat::Table,
+            true,
+            crate::ColorMode::Never,
+        );
         assert_eq!(quiet_handler.format, Format::Table);
         assert!(quiet_handler.quiet);
     }
 
     #[test]
     fn test_format_json() {
-        let handler = OutputHandler::new(crate::OutputFormat::Json, false);
+        let handler = test_handler(crate::OutputFormat::Json);
         let value = json!({"status": "success", "count": 42});
         let result = handler.format_json(value);
 
@@ -621,7 +584,7 @@ mod tests {
 
     #[test]
     fn test_format_value_brief() {
-        let handler = OutputHandler::new(crate::OutputFormat::Table, false);
+        let handler = test_handler(crate::OutputFormat::Table);
 
         assert_eq!(handler.format_value_brief(&json!("test")), "test");
         assert_eq!(handler.format_value_brief(&json!(42)), "42");
@@ -641,7 +604,7 @@ mod tests {
 
     #[test]
     fn test_format_agent_table() {
-        let handler = OutputHandler::new(crate::OutputFormat::Table, false);
+        let handler = test_handler(crate::OutputFormat::Table);
         let agent_data = json!({
             "operational_state": "active",
             "ip": "192.168.1.100",
@@ -654,20 +617,18 @@ mod tests {
 
         let result = handler.format_agent_table(&agent_data);
 
-        // Important fields should come first
         let lines: Vec<&str> = result.lines().collect();
         assert!(lines[0].contains("operational_state: active"));
         assert!(lines[1].contains("ip: 192.168.1.100"));
         assert!(lines[2].contains("port: 9002"));
 
-        // Should contain all fields
         assert!(result.contains("uuid: 12345-67890"));
         assert!(result.contains("additional_field: some_value"));
     }
 
     #[test]
     fn test_format_table_single_agent() {
-        let handler = OutputHandler::new(crate::OutputFormat::Table, false);
+        let handler = test_handler(crate::OutputFormat::Table);
         let value = json!({
             "results": {
                 "12345": {
@@ -684,7 +645,7 @@ mod tests {
 
     #[test]
     fn test_format_table_multiple_agents() {
-        let handler = OutputHandler::new(crate::OutputFormat::Table, false);
+        let handler = test_handler(crate::OutputFormat::Table);
         let value = json!({
             "results": {
                 "12345": {"operational_state": "active"},
@@ -700,7 +661,7 @@ mod tests {
 
     #[test]
     fn test_format_table_generic_object() {
-        let handler = OutputHandler::new(crate::OutputFormat::Table, false);
+        let handler = test_handler(crate::OutputFormat::Table);
         let value = json!({
             "status": "success",
             "message": "Operation completed",
@@ -715,7 +676,7 @@ mod tests {
 
     #[test]
     fn test_value_to_yaml() {
-        let handler = OutputHandler::new(crate::OutputFormat::Yaml, false);
+        let handler = test_handler(crate::OutputFormat::Yaml);
         let value = json!({
             "simple": "value",
             "nested": {
@@ -736,7 +697,7 @@ mod tests {
 
     #[test]
     fn test_format_yaml() {
-        let handler = OutputHandler::new(crate::OutputFormat::Yaml, false);
+        let handler = test_handler(crate::OutputFormat::Yaml);
         let value = json!({"key": "value", "number": 42});
         let result = handler.format_yaml(value);
 
@@ -746,15 +707,13 @@ mod tests {
 
     #[test]
     fn test_format_table_item() {
-        let handler = OutputHandler::new(crate::OutputFormat::Table, false);
+        let handler = test_handler(crate::OutputFormat::Table);
 
-        // Test object item
         let obj_item = json!({"name": "test", "value": 123});
         let result = handler.format_table_item(&obj_item);
         assert!(result.contains("name: test"));
         assert!(result.contains("value: 123"));
 
-        // Test non-object item
         let simple_item = json!("simple_value");
         let result = handler.format_table_item(&simple_item);
         assert_eq!(result, "simple_value\n");
@@ -762,7 +721,7 @@ mod tests {
 
     #[test]
     fn test_format_agent_table_indented() {
-        let handler = OutputHandler::new(crate::OutputFormat::Table, false);
+        let handler = test_handler(crate::OutputFormat::Table);
         let agent_data = json!({
             "operational_state": "active",
             "ip": "192.168.1.100"
@@ -770,44 +729,67 @@ mod tests {
 
         let result = handler.format_agent_table_indented(&agent_data);
 
-        // All lines should be indented with two additional spaces
         for line in result.lines() {
             if !line.is_empty() {
-                assert!(line.starts_with("    ")); // 2 spaces from format_agent_table + 2 more
+                assert!(line.starts_with("    "));
             }
         }
     }
 
     #[test]
     fn test_format_json_error_handling() {
-        let handler = OutputHandler::new(crate::OutputFormat::Json, false);
+        let handler = test_handler(crate::OutputFormat::Json);
 
-        // Test with valid JSON
         let valid_json = json!({"test": "value"});
         let result = handler.format_json(valid_json);
         assert!(result.contains("\"test\": \"value\""));
-
-        // format_json should not fail with any valid serde_json::Value
-        // since we're already working with parsed JSON
     }
 
     #[test]
     fn test_edge_cases() {
-        let handler = OutputHandler::new(crate::OutputFormat::Table, false);
+        let handler = test_handler(crate::OutputFormat::Table);
 
-        // Empty object
         let empty_obj = json!({});
         let result = handler.format_table(empty_obj);
         assert!(!result.is_empty());
 
-        // Empty array in results
         let empty_results = json!({"results": []});
         let result = handler.format_table(empty_results);
         assert!(!result.is_empty());
 
-        // Non-object, non-array value
         let simple_value = json!("simple");
         let result = handler.format_table(simple_value);
         assert_eq!(result, "\"simple\"");
+    }
+
+    #[test]
+    fn test_wait_handle_drop() {
+        // WaitHandle with no spinner should not panic on drop
+        let handle = WaitHandle { spinner: None };
+        drop(handle);
+    }
+
+    #[test]
+    fn test_wait_handle_set_message_no_spinner() {
+        // set_message with no spinner should not panic
+        let handle = WaitHandle { spinner: None };
+        handle.set_message("test");
+    }
+
+    #[test]
+    fn test_quiet_mode_suppresses_output() {
+        let handler = OutputHandler {
+            format: Format::Json,
+            quiet: true,
+            use_spinner: false,
+            use_color: false,
+            active_spinner: RefCell::new(None),
+            spinner_is_step: RefCell::new(false),
+        };
+
+        // These should not panic in quiet mode
+        handler.progress("test");
+        handler.step(1, 3, "test");
+        handler.info("test");
     }
 }

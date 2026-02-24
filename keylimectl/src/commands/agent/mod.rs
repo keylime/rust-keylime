@@ -354,7 +354,11 @@ mod tests {
 
     /// Create a test output handler
     fn _create_test_output() -> OutputHandler {
-        OutputHandler::new(crate::OutputFormat::Json, true) // Quiet mode for tests
+        OutputHandler::new(
+            crate::OutputFormat::Json,
+            true,
+            crate::ColorMode::Never,
+        ) // Quiet mode for tests
     }
 
     #[test]
