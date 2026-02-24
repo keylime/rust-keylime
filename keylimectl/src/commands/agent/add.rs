@@ -524,20 +524,53 @@ fn build_push_model_request(
     Ok(request)
 }
 
-/// Extract operational state from verifier agent data
+/// Extract operational state from verifier agent data as a human-readable string.
 ///
-/// The verifier response structure may nest the state under "results" or
-/// return it at the top level depending on API version.
-fn extract_operational_state(data: &Value) -> Option<&str> {
-    data.get("results")
-        .and_then(|r| r.get("operational_state"))
-        .and_then(|s| s.as_str())
-        .or_else(|| data.get("operational_state").and_then(|s| s.as_str()))
+/// The verifier returns `operational_state` as an integer (0-10) or
+/// occasionally as a string. This function handles both and converts
+/// integers to their string representation.
+fn extract_operational_state(data: &Value) -> Option<String> {
+    let raw = data
+        .pointer("/results/operational_state")
+        .or_else(|| data.get("operational_state"));
+
+    match raw {
+        Some(Value::String(s)) => Some(s.clone()),
+        Some(Value::Number(n)) => n.as_u64().map(operational_state_to_str),
+        _ => None,
+    }
 }
 
-/// Poll verifier for agent attestation status until it progresses past initial states
+/// Convert an operational state integer to a human-readable string.
 ///
-/// Returns the operational state once attestation has started or completed.
+/// State values are defined in keylime/common/states.py.
+fn operational_state_to_str(state: u64) -> String {
+    match state {
+        0 => "Registered".to_string(),
+        1 => "Start".to_string(),
+        2 => "Saved".to_string(),
+        3 => "Get Quote".to_string(),
+        4 => "Get Quote (retry)".to_string(),
+        5 => "Provide V".to_string(),
+        6 => "Provide V (retry)".to_string(),
+        7 => "Failed".to_string(),
+        8 => "Terminated".to_string(),
+        9 => "Invalid Quote".to_string(),
+        10 => "Tenant Failed".to_string(),
+        _ => format!("Unknown ({state})"),
+    }
+}
+
+/// Poll verifier for agent attestation status until it reaches PASS or FAIL.
+///
+/// The verifier response includes an `attestation_status` field that is
+/// computed from the agent's operational state (for pull mode) or from
+/// attestation history (for push mode). The possible values are:
+/// - `"PENDING"`: attestation has not yet completed
+/// - `"PASS"`: agent has been successfully attested
+/// - `"FAIL"`: attestation failed
+///
+/// Returns the attestation status string on success ("PASS").
 /// Returns an error if the agent enters a failure state or the timeout expires.
 async fn poll_attestation_status(
     verifier_client: &VerifierClient,
@@ -549,15 +582,11 @@ async fn poll_attestation_status(
     let timeout = std::time::Duration::from_secs(timeout_secs);
     let poll_interval = std::time::Duration::from_secs(2);
 
-    // States that indicate attestation has not yet started
-    let initial_states = ["Start", "Tenant Start", "Registered"];
-    // States that indicate attestation has failed
-    let failure_states = ["Failed", "Terminated", "Invalid Quote"];
-
     loop {
         if start.elapsed() > timeout {
-            return Err(CommandError::resource_error(
-                "verifier",
+            return Err(CommandError::agent_operation_failed(
+                agent_id,
+                "attestation",
                 format!(
                     "Timed out waiting for attestation after {timeout_secs}s. \
                      The agent may still complete attestation. \
@@ -568,23 +597,54 @@ async fn poll_attestation_status(
 
         match verifier_client.get_agent(agent_id).await {
             Ok(Some(data)) => {
-                if let Some(state) = extract_operational_state(&data) {
-                    if failure_states.contains(&state) {
+                let attestation_status = extract_attestation_status(&data);
+                let operational_state = extract_operational_state(&data);
+
+                match attestation_status {
+                    Some("FAIL") => {
+                        // Collect failure details from the response
+                        let severity = data
+                            .pointer("/results/severity_level")
+                            .or_else(|| data.get("severity_level"))
+                            .and_then(|v| v.as_u64());
+                        let last_event = data
+                            .pointer("/results/last_event_id")
+                            .or_else(|| data.get("last_event_id"))
+                            .and_then(|v| v.as_str());
+
+                        let mut reason =
+                            String::from("Agent attestation failed");
+                        if let Some(state) = operational_state {
+                            reason.push_str(&format!(" (state: {state})"));
+                        }
+                        if let Some(severity) = severity {
+                            reason
+                                .push_str(&format!(", severity: {severity}"));
+                        }
+                        if let Some(event) = last_event {
+                            reason
+                                .push_str(&format!(", last event: {event}"));
+                        }
+
                         return Err(CommandError::agent_operation_failed(
                             agent_id,
                             "attestation",
-                            format!("Agent entered failure state: {state}"),
+                            reason,
                         ));
                     }
-                    if !initial_states.contains(&state) {
+                    Some("PASS") => {
                         output.info(format!(
-                            "Attestation progressed to state: {state}"
+                            "Agent {agent_id} attestation successful"
                         ));
-                        return Ok(state.to_string());
+                        return Ok("PASS".to_string());
                     }
-                    debug!(
-                        "Agent in state '{state}', waiting for attestation..."
-                    );
+                    _ => {
+                        // PENDING or missing — keep polling
+                        debug!(
+                            "Agent attestation status: {:?}, operational_state: {:?}, waiting...",
+                            attestation_status, operational_state
+                        );
+                    }
                 }
             }
             Ok(None) => {
@@ -599,26 +659,56 @@ async fn poll_attestation_status(
     }
 }
 
+/// Extract attestation_status from verifier agent data
+///
+/// The verifier computes this field based on operational_state (pull mode)
+/// or attestation history (push mode). Values: "PENDING", "PASS", "FAIL".
+fn extract_attestation_status(data: &Value) -> Option<&str> {
+    data.get("results")
+        .and_then(|r| r.get("attestation_status"))
+        .and_then(|s| s.as_str())
+        .or_else(|| data.get("attestation_status").and_then(|s| s.as_str()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn test_extract_operational_state_nested() {
+    fn test_extract_operational_state_nested_integer() {
+        let data = json!({
+            "results": {
+                "operational_state": 3
+            }
+        });
+        assert_eq!(
+            extract_operational_state(&data),
+            Some("Get Quote".to_string())
+        );
+    }
+
+    #[test]
+    fn test_extract_operational_state_nested_string() {
         let data = json!({
             "results": {
                 "operational_state": "Get Quote"
             }
         });
-        assert_eq!(extract_operational_state(&data), Some("Get Quote"));
+        assert_eq!(
+            extract_operational_state(&data),
+            Some("Get Quote".to_string())
+        );
     }
 
     #[test]
     fn test_extract_operational_state_top_level() {
         let data = json!({
-            "operational_state": "Failed"
+            "operational_state": 7
         });
-        assert_eq!(extract_operational_state(&data), Some("Failed"));
+        assert_eq!(
+            extract_operational_state(&data),
+            Some("Failed".to_string())
+        );
     }
 
     #[test]
@@ -637,58 +727,50 @@ mod tests {
 
     #[test]
     fn test_extract_operational_state_prefers_nested() {
-        // When both exist, nested (under "results") should be preferred
         let data = json!({
-            "operational_state": "Start",
+            "operational_state": 1,
             "results": {
-                "operational_state": "Get Quote"
+                "operational_state": 3
             }
         });
-        assert_eq!(extract_operational_state(&data), Some("Get Quote"));
+        assert_eq!(
+            extract_operational_state(&data),
+            Some("Get Quote".to_string())
+        );
     }
 
     #[test]
-    fn test_attestation_state_classification() {
-        // Test the state classification used by poll_attestation_status
-        let initial_states = ["Start", "Tenant Start", "Registered"];
-        let failure_states = ["Failed", "Terminated", "Invalid Quote"];
+    fn test_operational_state_to_str() {
+        assert_eq!(operational_state_to_str(0), "Registered");
+        assert_eq!(operational_state_to_str(1), "Start");
+        assert_eq!(operational_state_to_str(2), "Saved");
+        assert_eq!(operational_state_to_str(3), "Get Quote");
+        assert_eq!(operational_state_to_str(4), "Get Quote (retry)");
+        assert_eq!(operational_state_to_str(5), "Provide V");
+        assert_eq!(operational_state_to_str(6), "Provide V (retry)");
+        assert_eq!(operational_state_to_str(7), "Failed");
+        assert_eq!(operational_state_to_str(8), "Terminated");
+        assert_eq!(operational_state_to_str(9), "Invalid Quote");
+        assert_eq!(operational_state_to_str(10), "Tenant Failed");
+        assert_eq!(operational_state_to_str(99), "Unknown (99)");
+    }
 
-        // Initial states
-        for state in &initial_states {
-            assert!(
-                initial_states.contains(state),
-                "{state} should be initial"
-            );
-            assert!(
-                !failure_states.contains(state),
-                "{state} should not be failure"
-            );
-        }
+    #[test]
+    fn test_extract_attestation_status() {
+        let data = json!({
+            "results": {
+                "attestation_status": "PASS"
+            }
+        });
+        assert_eq!(extract_attestation_status(&data), Some("PASS"));
 
-        // Failure states
-        for state in &failure_states {
-            assert!(
-                failure_states.contains(state),
-                "{state} should be failure"
-            );
-            assert!(
-                !initial_states.contains(state),
-                "{state} should not be initial"
-            );
-        }
+        let data = json!({
+            "attestation_status": "FAIL"
+        });
+        assert_eq!(extract_attestation_status(&data), Some("FAIL"));
 
-        // Progress states (not initial, not failure)
-        let progress_states = ["Get Quote", "Provide V", "Provide V (Retry)"];
-        for state in &progress_states {
-            assert!(
-                !initial_states.contains(state),
-                "{state} should not be initial"
-            );
-            assert!(
-                !failure_states.contains(state),
-                "{state} should not be failure"
-            );
-        }
+        let data = json!({});
+        assert_eq!(extract_attestation_status(&data), None);
     }
 
     #[test]
