@@ -7,7 +7,7 @@
 //! where the tenant communicates directly with the agent for TPM quote
 //! verification and key exchange.
 
-use super::helpers::load_payload_file;
+use super::helpers::load_payload_bytes;
 use crate::client::agent::AgentClient;
 use crate::client::factory;
 use crate::client::registrar::RegistrarClient;
@@ -19,6 +19,7 @@ use log::debug;
 #[cfg(not(feature = "tpm-quote-validation"))]
 use log::warn;
 use openssl::rand;
+use openssl::symm::{self, Cipher};
 use serde_json::{json, Value};
 use zeroize::Zeroizing;
 
@@ -223,9 +224,32 @@ pub(super) async fn perform_key_delivery(
         CommandError::resource_error("crypto", "Missing auth tag")
     })?;
 
-    // Load payload if provided
-    let payload = if let Some(path) = payload_path {
-        Some(load_payload_file(path)?)
+    // Load and encrypt payload if provided
+    // The agent expects the payload as base64-encoded AES-256-GCM ciphertext:
+    //   base64(iv || ciphertext || tag)
+    // where the encryption key is K (= U XOR V).
+    let encrypted_payload = if let Some(path) = payload_path {
+        let payload_bytes = load_payload_bytes(path)?;
+
+        let k_key_b64 = attestation
+            .get("k_key")
+            .and_then(|k| k.as_str())
+            .ok_or_else(|| {
+                CommandError::resource_error(
+                    "crypto",
+                    "Missing K key for payload encryption",
+                )
+            })?;
+        let k_key =
+            Zeroizing::new(STANDARD.decode(k_key_b64).map_err(|e| {
+                CommandError::resource_error(
+                    "crypto",
+                    format!("Failed to decode K key: {e}"),
+                )
+            })?);
+
+        output.progress("Encrypting payload for agent");
+        Some(encrypt_payload(k_key.as_ref(), &payload_bytes)?)
     } else {
         None
     };
@@ -240,7 +264,11 @@ pub(super) async fn perform_key_delivery(
     })?;
 
     let _delivery_result = agent_client
-        .deliver_key(&encrypted_u_bytes, auth_tag, payload.as_deref())
+        .deliver_key(
+            &encrypted_u_bytes,
+            auth_tag,
+            encrypted_payload.as_deref(),
+        )
         .await
         .map_err(|e| {
             CommandError::agent_operation_failed(
@@ -336,6 +364,52 @@ fn generate_secure_nonce(num_bytes: usize) -> Result<String, CommandError> {
         )
     })?;
     Ok(hex::encode(buf))
+}
+
+/// Encrypt payload using AES-256-GCM and return base64-encoded ciphertext
+///
+/// Matches the format produced by Python keylime's `crypto.encrypt()`:
+///   base64(iv || ciphertext || tag)
+///
+/// where:
+/// - iv: 16-byte random initialization vector
+/// - ciphertext: AES-256-GCM encrypted data
+/// - tag: 16-byte GCM authentication tag
+///
+/// The agent decrypts this using `crypto::decrypt_aead()` after
+/// base64-decoding.
+fn encrypt_payload(
+    key: &[u8],
+    plaintext: &[u8],
+) -> Result<String, CommandError> {
+    const AES_BLOCK_SIZE: usize = 16;
+
+    let mut iv = [0u8; AES_BLOCK_SIZE];
+    rand::rand_bytes(&mut iv).map_err(|e| {
+        CommandError::resource_error(
+            "crypto",
+            format!("Failed to generate IV: {e}"),
+        )
+    })?;
+
+    let cipher = Cipher::aes_256_gcm();
+    let mut tag = vec![0u8; AES_BLOCK_SIZE];
+    let ciphertext =
+        symm::encrypt_aead(cipher, key, Some(&iv), &[], plaintext, &mut tag)
+            .map_err(|e| {
+                CommandError::resource_error(
+                    "crypto",
+                    format!("Payload encryption failed: {e}"),
+                )
+            })?;
+
+    let mut result =
+        Vec::with_capacity(iv.len() + ciphertext.len() + tag.len());
+    result.extend_from_slice(&iv);
+    result.extend_from_slice(&ciphertext);
+    result.extend_from_slice(&tag);
+
+    Ok(STANDARD.encode(&result))
 }
 
 /// Validate TPM quote structure (default: structural checks only)
@@ -1141,6 +1215,58 @@ mod tests {
 
         // Empty plaintext — verifies no panic regardless of result
         let _ = encrypt_u_key_with_agent_pubkey(&[], &pem);
+    }
+
+    // Payload encryption tests
+
+    #[test]
+    fn test_encrypt_payload_roundtrip() {
+        // Verify encrypt_payload produces output compatible with
+        // keylime::crypto::decrypt_aead
+        let key = [0x42u8; 32]; // AES-256 key
+        let plaintext = b"test payload data for the agent";
+
+        let b64_ciphertext =
+            encrypt_payload(&key, plaintext).expect("encryption"); //#[allow_ci]
+
+        // Base64 decode
+        let raw = STANDARD.decode(&b64_ciphertext).expect("base64 decode"); //#[allow_ci]
+
+        // Decrypt using the same function the agent uses
+        let decrypted = crypto::decrypt_aead(&key, &raw).expect("decryption"); //#[allow_ci]
+
+        assert_eq!(decrypted, plaintext);
+    }
+
+    #[test]
+    fn test_encrypt_payload_empty() {
+        let key = [0xAAu8; 32];
+        let plaintext = b"";
+
+        let b64_ciphertext =
+            encrypt_payload(&key, plaintext).expect("encryption"); //#[allow_ci]
+        let raw = STANDARD.decode(&b64_ciphertext).expect("base64 decode"); //#[allow_ci]
+        let decrypted = crypto::decrypt_aead(&key, &raw).expect("decryption"); //#[allow_ci]
+
+        assert_eq!(decrypted, plaintext);
+    }
+
+    #[test]
+    fn test_encrypt_payload_produces_valid_base64() {
+        let key = [0xBBu8; 32];
+        let plaintext = b"hello world";
+
+        let b64_ciphertext =
+            encrypt_payload(&key, plaintext).expect("encryption"); //#[allow_ci]
+
+        // Must be valid base64
+        assert!(STANDARD.decode(&b64_ciphertext).is_ok());
+
+        // Must not contain whitespace (which caused the original bug)
+        assert!(
+            !b64_ciphertext.contains(' '),
+            "Encrypted payload contains spaces"
+        );
     }
 
     // Negative security tests: malformed TPM quote parsing
