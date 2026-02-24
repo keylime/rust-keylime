@@ -91,7 +91,7 @@ pub(super) async fn add_agent(
                 format!(
                     "Agent not found in registrar. \
                      Ensure the agent is running and has completed TPM registration. \
-                     Check with: keylimectl agent status --registrar-only {}",
+                     Check with: keylimectl agent status --registrar {}",
                     params.agent_id
                 ),
             ));
