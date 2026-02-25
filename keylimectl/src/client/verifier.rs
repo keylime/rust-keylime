@@ -292,7 +292,7 @@ impl VerifierClient {
         config: &Config,
     ) -> Result<Self, KeylimectlError> {
         let base_url = config.verifier_base_url();
-        let base = BaseClient::new(base_url, config)
+        let base = BaseClient::new(base_url, config, None)
             .map_err(KeylimectlError::from)?;
 
         Ok(Self {

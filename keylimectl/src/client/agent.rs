@@ -163,6 +163,7 @@ pub struct AgentClientBuilder<'a> {
     agent_ip: Option<String>,
     agent_port: Option<u16>,
     config: Option<&'a Config>,
+    agent_cert_pem: Option<String>,
 }
 
 impl<'a> AgentClientBuilder<'a> {
@@ -172,6 +173,7 @@ impl<'a> AgentClientBuilder<'a> {
             agent_ip: None,
             agent_port: None,
             config: None,
+            agent_cert_pem: None,
         }
     }
 
@@ -190,6 +192,19 @@ impl<'a> AgentClientBuilder<'a> {
     /// Set the configuration for the client
     pub fn config(mut self, config: &'a Config) -> Self {
         self.config = Some(config);
+        self
+    }
+
+    /// Set the agent's mTLS certificate (PEM) from the registrar.
+    ///
+    /// When provided, this certificate is added as a trusted root CA
+    /// so the agent's self-signed TLS certificate can be verified
+    /// without disabling certificate verification globally.
+    ///
+    /// A value of `"disabled"` is treated as `None`.
+    pub fn agent_cert(mut self, cert_pem: Option<&str>) -> Self {
+        self.agent_cert_pem =
+            cert_pem.filter(|c| *c != "disabled").map(|c| c.to_string());
         self
     }
 
@@ -215,7 +230,13 @@ impl<'a> AgentClientBuilder<'a> {
             )
         })?;
 
-        AgentClient::new(&agent_ip, agent_port, config).await
+        AgentClient::new(
+            &agent_ip,
+            agent_port,
+            config,
+            self.agent_cert_pem.as_deref(),
+        )
+        .await
     }
 }
 
@@ -291,9 +312,13 @@ impl AgentClient {
         agent_ip: &str,
         agent_port: u16,
         config: &Config,
+        agent_cert_pem: Option<&str>,
     ) -> Result<Self, KeylimectlError> {
         let mut client = Self::new_without_version_detection(
-            agent_ip, agent_port, config,
+            agent_ip,
+            agent_port,
+            config,
+            agent_cert_pem,
         )?;
 
         // Attempt to detect API version
@@ -323,6 +348,7 @@ impl AgentClient {
         agent_ip: &str,
         agent_port: u16,
         config: &Config,
+        agent_cert_pem: Option<&str>,
     ) -> Result<Self, KeylimectlError> {
         let base_url = if agent_ip.contains(':') && !agent_ip.starts_with('[')
         {
@@ -336,7 +362,7 @@ impl AgentClient {
             format!("https://{agent_ip}:{agent_port}")
         };
 
-        let base = BaseClient::new(base_url, config)
+        let base = BaseClient::new(base_url, config, agent_cert_pem)
             .map_err(KeylimectlError::from)?;
 
         Ok(Self {
@@ -782,6 +808,7 @@ mod tests {
             "127.0.0.1",
             9002,
             &config,
+            None,
         );
 
         assert!(result.is_ok());
@@ -797,8 +824,9 @@ mod tests {
         let config = create_test_config();
 
         // Test IPv6 without brackets
-        let result =
-            AgentClient::new_without_version_detection("::1", 9002, &config);
+        let result = AgentClient::new_without_version_detection(
+            "::1", 9002, &config, None,
+        );
         assert!(result.is_ok());
         let client = result.unwrap(); //#[allow_ci]
         assert_eq!(client.base.base_url, "https://[::1]:9002");
@@ -808,6 +836,7 @@ mod tests {
             "[2001:db8::1]",
             9002,
             &config,
+            None,
         );
         assert!(result.is_ok());
         let client = result.unwrap(); //#[allow_ci]
@@ -821,6 +850,7 @@ mod tests {
             "127.0.0.1",
             9002,
             &config,
+            None,
         )
         .unwrap(); //#[allow_ci]
 
@@ -878,6 +908,7 @@ mod tests {
             "192.168.1.100",
             9002,
             &config,
+            None,
         )
         .unwrap(); //#[allow_ci]
         assert_eq!(client.base.base_url, "https://192.168.1.100:9002");
@@ -887,6 +918,7 @@ mod tests {
             "2001:db8::1",
             9002,
             &config,
+            None,
         )
         .unwrap(); //#[allow_ci]
         assert_eq!(client.base.base_url, "https://[2001:db8::1]:9002");
@@ -896,6 +928,7 @@ mod tests {
             "[2001:db8::1]",
             9002,
             &config,
+            None,
         )
         .unwrap(); //#[allow_ci]
         assert_eq!(client.base.base_url, "https://[2001:db8::1]:9002");
@@ -905,6 +938,7 @@ mod tests {
             "agent.example.com",
             9002,
             &config,
+            None,
         )
         .unwrap(); //#[allow_ci]
         assert_eq!(client.base.base_url, "https://agent.example.com:9002");
@@ -959,6 +993,7 @@ mod tests {
             "127.0.0.1",
             9002,
             &config,
+            None,
         )
         .unwrap(); //#[allow_ci]
 

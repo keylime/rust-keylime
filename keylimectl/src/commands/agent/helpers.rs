@@ -38,6 +38,7 @@ pub(super) fn load_payload_file(path: &str) -> Result<String, CommandError> {
 /// Used for payload encryption where the file content needs to be
 /// encrypted before being sent to the agent. Reads as bytes to
 /// support both text and binary payloads.
+#[cfg(feature = "api-v2")]
 #[must_use = "payload bytes must be used after loading"]
 pub(super) fn load_payload_bytes(
     path: &str,
