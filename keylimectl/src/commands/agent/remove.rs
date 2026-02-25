@@ -12,7 +12,7 @@ use serde_json::{json, Value};
 /// Remove an agent from the verifier (and optionally registrar)
 pub(super) async fn remove_agent(
     agent_id: &str,
-    from_registrar: bool,
+    registrar: bool,
     force: bool,
     output: &OutputHandler,
 ) -> Result<Value, CommandError> {
@@ -34,7 +34,7 @@ pub(super) async fn remove_agent(
     if !force {
         output.step(
             1,
-            if from_registrar { 3 } else { 2 },
+            if registrar { 3 } else { 2 },
             "Checking agent status on verifier",
         );
 
@@ -59,7 +59,7 @@ pub(super) async fn remove_agent(
 
     // Remove from verifier
     let step_num = if force { 1 } else { 2 };
-    let total_steps = if from_registrar {
+    let total_steps = if registrar {
         if force {
             2
         } else {
@@ -86,7 +86,7 @@ pub(super) async fn remove_agent(
     });
 
     // Remove from registrar if requested
-    if from_registrar {
+    if registrar {
         output.step(
             total_steps,
             total_steps,
