@@ -87,12 +87,32 @@ impl BaseClient {
     pub fn new(
         base_url: String,
         config: &Config,
+        agent_cert_pem: Option<&str>,
     ) -> Result<Self, ClientError> {
         debug!("Creating BaseClient for {base_url} with TLS config: verify_server_cert={}, client_cert={:?}, client_key={:?}",
                config.tls.verify_server_cert, config.tls.client_cert, config.tls.client_key);
 
         // Create HTTP client with TLS configuration
-        let http_client = Self::create_http_client(config)?;
+        let mut builder = Self::create_http_client_builder(config)?;
+
+        // Add agent's self-signed cert as trusted CA for pull-model
+        // connections.  The cert comes from the registrar database.
+        if let Some(pem) = agent_cert_pem {
+            let cert = reqwest::Certificate::from_pem(pem.as_bytes())
+                .map_err(|e| {
+                    ClientError::Tls(TlsError::configuration(format!(
+                        "Failed to parse agent mTLS certificate: {e}"
+                    )))
+                })?;
+            builder = builder.add_root_certificate(cert);
+            debug!("Added agent mTLS certificate as trusted root");
+        }
+
+        let http_client = builder.build().map_err(|e| {
+            ClientError::configuration(format!(
+                "Failed to create HTTP client: {e}"
+            ))
+        })?;
 
         // Create resilient client with retry logic
         let client = ResilientClient::new(
@@ -111,46 +131,14 @@ impl BaseClient {
         Ok(Self { client, base_url })
     }
 
-    /// Create HTTP client with TLS configuration
+    /// Build a `reqwest::ClientBuilder` with TLS settings from config.
     ///
-    /// Initializes a reqwest HTTP client with the TLS settings specified
-    /// in the configuration. This includes client certificates, server
-    /// certificate verification, and connection timeouts.
-    ///
-    /// # Arguments
-    ///
-    /// * `config` - Configuration containing TLS and client settings
-    ///
-    /// # Returns
-    ///
-    /// Returns a configured `reqwest::Client` ready for HTTPS communication.
-    ///
-    /// # TLS Configuration
-    ///
-    /// The client is configured with:
-    /// - Client certificate and key (if specified)
-    /// - Server certificate verification (can be disabled for testing)
-    /// - Connection timeout from config
-    /// - Hostname verification disabled (required for Keylime certificates)
-    /// - HTTP/2 and connection pooling
-    ///
-    /// # Security Notes
-    ///
-    /// - Client certificates enable mutual TLS authentication
-    /// - Hostname verification is disabled for Keylime certificate compatibility
-    /// - Server certificate verification should only be disabled for testing
-    /// - Invalid certificates will cause connection failures
-    ///
-    /// # Errors
-    ///
-    /// This method can fail if:
-    /// - Certificate files cannot be read
-    /// - Certificate/key files are invalid or malformed
-    /// - Certificate and key don't match
-    /// - HTTP client builder configuration fails
-    pub fn create_http_client(
+    /// Returns the builder *before* calling `.build()` so callers can
+    /// inject extra root certificates (e.g. the agent's self-signed
+    /// mTLS cert) before finalizing the client.
+    fn create_http_client_builder(
         config: &Config,
-    ) -> Result<reqwest::Client, ClientError> {
+    ) -> Result<reqwest::ClientBuilder, ClientError> {
         debug!("Creating HTTP client with TLS config: verify_server_cert={}, client_cert={:?}, client_key={:?}, trusted_ca={:?}",
                config.tls.verify_server_cert, config.tls.client_cert, config.tls.client_key, config.tls.trusted_ca);
 
@@ -238,11 +226,23 @@ impl BaseClient {
             builder = builder.identity(identity);
         }
 
-        builder.build().map_err(|e| {
-            ClientError::configuration(format!(
-                "Failed to create HTTP client: {e}"
-            ))
-        })
+        Ok(builder)
+    }
+
+    /// Create HTTP client with TLS configuration (convenience wrapper).
+    ///
+    /// Equivalent to `create_http_client_builder(config)?.build()`.
+    #[cfg(test)]
+    pub fn create_http_client(
+        config: &Config,
+    ) -> Result<reqwest::Client, ClientError> {
+        Self::create_http_client_builder(config)?
+            .build()
+            .map_err(|e| {
+                ClientError::configuration(format!(
+                    "Failed to create HTTP client: {e}"
+                ))
+            })
     }
 
     /// Handle HTTP response and convert to JSON
@@ -366,7 +366,7 @@ mod tests {
     fn test_base_client_new() {
         let config = create_test_config();
         let base_url = "https://127.0.0.1:8881".to_string();
-        let result = BaseClient::new(base_url.clone(), &config);
+        let result = BaseClient::new(base_url.clone(), &config, None);
 
         assert!(result.is_ok());
         let client = result.unwrap(); //#[allow_ci]

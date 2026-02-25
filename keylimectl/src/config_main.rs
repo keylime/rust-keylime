@@ -224,7 +224,7 @@ impl Default for RegistrarConfig {
 ///     trusted_ca: vec!["/path/to/ca.crt".to_string()],
 ///     verify_server_cert: true,
 ///     enable_agent_mtls: true,
-///     accept_invalid_hostnames: true,
+///     accept_invalid_hostnames: false,
 /// };
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -244,16 +244,16 @@ pub struct TlsConfig {
     pub enable_agent_mtls: bool,
     /// Accept invalid hostnames in server certificates
     ///
-    /// Keylime auto-generated certificates may not include the correct
-    /// hostname/IP in the SAN extension. Set to `true` to skip hostname
-    /// verification (default). Set to `false` for stricter security when
-    /// using properly issued certificates.
+    /// Set to `true` to skip hostname verification when certificates
+    /// lack proper SAN extensions. Set to `false` (default) for strict
+    /// hostname verification — certificates must include the correct
+    /// hostname/IP in the SAN extension.
     #[serde(default = "default_accept_invalid_hostnames")]
     pub accept_invalid_hostnames: bool,
 }
 
 fn default_accept_invalid_hostnames() -> bool {
-    true
+    false
 }
 
 impl Default for TlsConfig {
@@ -269,7 +269,7 @@ impl Default for TlsConfig {
             trusted_ca: vec!["/var/lib/keylime/cv_ca/cacert.crt".to_string()],
             verify_server_cert: true,
             enable_agent_mtls: true,
-            accept_invalid_hostnames: true,
+            accept_invalid_hostnames: false,
         }
     }
 }
