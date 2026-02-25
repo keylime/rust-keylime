@@ -272,8 +272,8 @@ enum AgentAction {
         uuid: String,
 
         /// Also remove from registrar
-        #[arg(long)]
-        from_registrar: bool,
+        #[arg(long = "registrar")]
+        registrar: bool,
 
         /// Skip verifier checks (force removal)
         #[arg(long)]
@@ -302,8 +302,8 @@ enum AgentAction {
         uuid: String,
 
         /// Check verifier only
-        #[arg(long)]
-        verifier_only: bool,
+        #[arg(long = "verifier")]
+        verifier: bool,
 
         /// Check registrar only
         #[arg(long = "registrar")]
