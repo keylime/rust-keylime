@@ -15,7 +15,7 @@ use serde_json::{json, Value};
 /// Get agent status from verifier and/or registrar
 pub(super) async fn get_agent_status(
     agent_id: &str,
-    verifier_only: bool,
+    verifier: bool,
     registrar_only: bool,
     output: &OutputHandler,
 ) -> Result<Value, CommandError> {
@@ -31,8 +31,8 @@ pub(super) async fn get_agent_status(
 
     let mut results = json!({});
 
-    // Get status from registrar (unless verifier_only is set)
-    if !verifier_only {
+    // Get status from registrar (unless verifier is set)
+    if !verifier {
         output.progress("Checking registrar status");
 
         let registrar_client =
