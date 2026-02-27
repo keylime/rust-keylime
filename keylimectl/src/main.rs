@@ -691,25 +691,45 @@ enum InfoSubcommand {
 enum VerifyAction {
     /// Verify TPM or TEE attestation evidence
     Evidence {
+        /// Run the interactive wizard to guide evidence verification
+        #[arg(long, short = 'I')]
+        interactive: bool,
+
         /// Nonce used for the quote
-        #[arg(long, value_name = "NONCE")]
-        nonce: String,
+        #[arg(
+            long,
+            value_name = "NONCE",
+            required_unless_present = "interactive"
+        )]
+        nonce: Option<String>,
 
         /// TPM quote file
-        #[arg(long, value_name = "FILE")]
-        quote: String,
+        #[arg(
+            long,
+            value_name = "FILE",
+            required_unless_present = "interactive"
+        )]
+        quote: Option<String>,
 
         /// Hash algorithm
         #[arg(long, value_name = "ALG", default_value = "sha256")]
         hash_alg: String,
 
         /// TPM Attestation Key (AK) file
-        #[arg(long, value_name = "FILE")]
-        tpm_ak: String,
+        #[arg(
+            long,
+            value_name = "FILE",
+            required_unless_present = "interactive"
+        )]
+        tpm_ak: Option<String>,
 
         /// TPM Endorsement Key (EK) file
-        #[arg(long, value_name = "FILE")]
-        tpm_ek: String,
+        #[arg(
+            long,
+            value_name = "FILE",
+            required_unless_present = "interactive"
+        )]
+        tpm_ek: Option<String>,
 
         /// Runtime policy file
         #[arg(long, value_name = "FILE")]

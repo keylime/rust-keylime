@@ -4,6 +4,8 @@
 //! Attestation verification commands.
 
 mod evidence;
+#[cfg(feature = "wizard")]
+mod wizard_evidence;
 
 use crate::error::KeylimectlError;
 use crate::output::OutputHandler;
