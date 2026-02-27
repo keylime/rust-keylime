@@ -15,6 +15,8 @@ mod validate;
 mod wizard_measured_boot;
 #[cfg(feature = "wizard")]
 mod wizard_runtime;
+#[cfg(feature = "wizard")]
+mod wizard_tpm;
 
 use crate::client::factory;
 use crate::error::{ErrorContext, KeylimectlError};
