@@ -127,22 +127,54 @@ pub async fn execute(
             .map_err(KeylimectlError::from)
         }
         GenerateSubcommand::Tpm {
+            interactive,
             pcr_file,
             from_tpm,
             pcrs,
             mask,
             hash_alg,
             output: output_file,
-        } => generate_tpm(
-            pcr_file.as_deref(),
-            *from_tpm,
-            pcrs,
-            mask.as_deref(),
-            hash_alg,
-            output_file.as_deref(),
-            output,
-        )
-        .map_err(KeylimectlError::from),
+        } => {
+            if *interactive {
+                #[cfg(feature = "wizard")]
+                {
+                    use crate::policy_tools::tpm_policy_gen;
+                    let pcr_indices = if let Some(mask_str) = mask.as_deref() {
+                        crate::policy_tools::tpm_policy::TpmPolicy::parse_mask(mask_str)
+                            .unwrap_or_else(|_| vec![0, 1, 2, 3, 4, 5, 6, 7])
+                    } else {
+                        tpm_policy_gen::parse_pcr_indices(pcrs)
+                            .unwrap_or_else(|_| vec![0, 1, 2, 3, 4, 5, 6, 7])
+                    };
+                    let defaults = super::wizard_tpm::Defaults {
+                        pcr_file: pcr_file.as_deref(),
+                        from_tpm: *from_tpm,
+                        pcr_indices,
+                        hash_alg,
+                        output_file: output_file.as_deref(),
+                    };
+                    return super::wizard_tpm::run(&defaults, output);
+                }
+                #[cfg(not(feature = "wizard"))]
+                {
+                    return Err(KeylimectlError::Validation(
+                        "Interactive mode requires the 'wizard' feature. \
+                         Rebuild with: cargo build --features wizard"
+                            .into(),
+                    ));
+                }
+            }
+            generate_tpm(
+                pcr_file.as_deref(),
+                *from_tpm,
+                pcrs,
+                mask.as_deref(),
+                hash_alg,
+                output_file.as_deref(),
+                output,
+            )
+            .map_err(KeylimectlError::from)
+        }
     }
 }
 
@@ -516,7 +548,7 @@ pub(super) fn generate_measured_boot(
 }
 
 /// Generate a TPM policy from PCR values.
-fn generate_tpm(
+pub(super) fn generate_tpm(
     pcr_file: Option<&str>,
     from_tpm: bool,
     pcrs_str: &str,
