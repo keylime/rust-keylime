@@ -4,20 +4,97 @@
 //! Filesystem scanning for policy generation.
 //!
 //! Walks a filesystem tree to calculate file digests, skipping
-//! symlinks, non-regular files, and excluded paths.
+//! symlinks, non-regular files, and excluded paths.  Digest
+//! calculation is parallelised with Rayon.
 
 use crate::commands::error::PolicyGenerationError;
 use crate::policy_tools::digest::calculate_file_digest;
 use crate::policy_tools::ima_parser::DigestMap;
+use rayon::prelude::*;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+/// Directories excluded by default during root filesystem scans.
+///
+/// These directories contain volatile, virtual, or temporary data
+/// that is not expected to be stable across boots and therefore has
+/// no meaningful integrity to verify.
+///
+/// Matches the `BASE_EXCLUDE_DIRS` used by Python `keylime-policy`.
+pub const BASE_EXCLUDE_DIRS: &[&str] = &[
+    "/sys",
+    "/run",
+    "/proc",
+    "/lost+found",
+    "/dev",
+    "/media",
+    "/snap",
+    "/mnt",
+    "/var",
+    "/tmp",
+];
+
+/// Build the effective list of skip paths by merging user-provided
+/// paths with the default excluded directories.
+///
+/// Each default directory is resolved relative to `rootfs` so that
+/// scanning `/mnt/image` correctly skips `/mnt/image/sys`, etc.
+///
+/// Returns `(effective_paths, redundant_user_paths)` where
+/// `redundant_user_paths` lists any user-supplied paths that are
+/// already covered by the defaults.
+pub fn build_effective_skip_paths(
+    rootfs: &Path,
+    user_paths: &[String],
+) -> (Vec<String>, Vec<String>) {
+    // Build default paths relative to rootfs
+    let default_paths: Vec<PathBuf> = BASE_EXCLUDE_DIRS
+        .iter()
+        .map(|d| {
+            // Strip leading '/' so join works correctly:
+            //   rootfs=/mnt/img, d=/sys  → /mnt/img/sys
+            //   rootfs=/,       d=/sys  → /sys
+            let relative = d.strip_prefix('/').unwrap_or(d);
+            rootfs.join(relative)
+        })
+        .collect();
+
+    // Detect user paths that are already covered by a default
+    let mut redundant = Vec::new();
+    for user in user_paths {
+        let user_pb = PathBuf::from(user);
+        let is_covered = default_paths
+            .iter()
+            .any(|dp| user_pb == *dp || user_pb.starts_with(dp));
+        if is_covered {
+            redundant.push(user.clone());
+        }
+    }
+
+    // Merge: defaults first, then user paths that add something new
+    let mut effective: Vec<String> = default_paths
+        .iter()
+        .map(|p| p.to_string_lossy().into_owned())
+        .collect();
+
+    for user in user_paths {
+        if !redundant.contains(user) {
+            effective.push(user.clone());
+        }
+    }
+
+    (effective, redundant)
+}
+
 /// Scan a filesystem tree and calculate digests for all regular files.
+///
+/// File discovery is sequential (I/O-bound) but digest calculation
+/// is parallelised across available CPU cores using Rayon.
 ///
 /// # Arguments
 ///
 /// * `root` - Root directory to scan
-/// * `skip_paths` - Absolute paths to skip (directories)
+/// * `skip_paths` - Absolute paths to skip (directories and their contents)
 /// * `algorithm` - Hash algorithm name (e.g., "sha256")
 ///
 /// # Returns
@@ -36,29 +113,61 @@ pub fn scan_filesystem(
         }
     })?;
 
-    let mut digests: DigestMap = HashMap::new();
     let skip_set: Vec<PathBuf> =
         skip_paths.iter().map(PathBuf::from).collect();
 
-    walk_directory(&root, &root, &skip_set, algorithm, &mut digests)?;
+    // Phase 1: collect all file paths (sequential, I/O-bound)
+    let mut files: Vec<PathBuf> = Vec::new();
+    collect_files(&root, &skip_set, &mut files)?;
+
+    // Phase 2: calculate digests in parallel (CPU-bound)
+    let results: Vec<_> = files
+        .par_iter()
+        .filter_map(|path| match calculate_file_digest(path, algorithm) {
+            Ok(digest) => {
+                let relative = make_policy_path(path, &root);
+                Some((relative, digest))
+            }
+            Err(e) => {
+                log::warn!("Skipping {}: {e}", path.display());
+                None
+            }
+        })
+        .collect();
+
+    // Phase 3: merge into DigestMap (sequential, fast)
+    let mut digests: DigestMap = HashMap::new();
+    for (path, digest) in results {
+        let entry = digests.entry(path).or_default();
+        if !entry.contains(&digest) {
+            entry.push(digest);
+        }
+    }
 
     Ok(digests)
 }
 
-/// Recursively walk a directory tree.
-fn walk_directory(
+/// Recursively collect all regular file paths, skipping symlinks
+/// and excluded directories.
+fn collect_files(
     dir: &Path,
-    root: &Path,
     skip_paths: &[PathBuf],
-    algorithm: &str,
-    digests: &mut DigestMap,
+    files: &mut Vec<PathBuf>,
 ) -> Result<(), PolicyGenerationError> {
-    let entries = std::fs::read_dir(dir).map_err(|e| {
-        PolicyGenerationError::FilesystemScan {
-            path: dir.to_path_buf(),
-            reason: format!("Failed to read directory: {e}"),
+    let entries = match std::fs::read_dir(dir) {
+        Ok(e) => e,
+        Err(e) => {
+            // Permission denied on a subdirectory is not fatal
+            if e.kind() == std::io::ErrorKind::PermissionDenied {
+                log::warn!("Skipping directory {}: {}", dir.display(), e);
+                return Ok(());
+            }
+            return Err(PolicyGenerationError::FilesystemScan {
+                path: dir.to_path_buf(),
+                reason: format!("Failed to read directory: {e}"),
+            });
         }
-    })?;
+    };
 
     for entry in entries {
         let entry =
@@ -81,22 +190,9 @@ fn walk_directory(
         }
 
         if path.is_dir() {
-            walk_directory(&path, root, skip_paths, algorithm, digests)?;
+            collect_files(&path, skip_paths, files)?;
         } else if path.is_file() {
-            // Calculate digest and store with path relative to root
-            match calculate_file_digest(&path, algorithm) {
-                Ok(digest) => {
-                    let relative_path = make_policy_path(&path, root);
-                    let entry = digests.entry(relative_path).or_default();
-                    if !entry.contains(&digest) {
-                        entry.push(digest);
-                    }
-                }
-                Err(e) => {
-                    // Log and skip files we can't read (permission denied, etc.)
-                    log::warn!("Skipping {}: {}", path.display(), e);
-                }
-            }
+            files.push(path);
         }
     }
 
@@ -245,5 +341,71 @@ mod tests {
         assert!(should_skip(Path::new("/tmp/foo"), &skip));
         assert!(should_skip(Path::new("/proc/1"), &skip));
         assert!(!should_skip(Path::new("/usr/bin/bash"), &skip));
+    }
+
+    #[test]
+    fn test_build_effective_skip_paths_root() {
+        let (effective, redundant) =
+            build_effective_skip_paths(Path::new("/"), &[]);
+
+        // All base dirs should be present
+        assert!(effective.contains(&"/sys".to_string()));
+        assert!(effective.contains(&"/run".to_string()));
+        assert!(effective.contains(&"/proc".to_string()));
+        assert!(effective.contains(&"/tmp".to_string()));
+        assert!(effective.contains(&"/var".to_string()));
+        assert!(redundant.is_empty());
+    }
+
+    #[test]
+    fn test_build_effective_skip_paths_custom_rootfs() {
+        let (effective, _) =
+            build_effective_skip_paths(Path::new("/mnt/rootfs"), &[]);
+
+        assert!(effective.contains(&"/mnt/rootfs/sys".to_string()));
+        assert!(effective.contains(&"/mnt/rootfs/run".to_string()));
+        assert!(effective.contains(&"/mnt/rootfs/tmp".to_string()));
+    }
+
+    #[test]
+    fn test_build_effective_skip_paths_redundant() {
+        let user = vec!["/var/log".to_string(), "/home".to_string()];
+        let (effective, redundant) =
+            build_effective_skip_paths(Path::new("/"), &user);
+
+        // /var/log is under /var (a default) so it's redundant
+        assert_eq!(redundant, vec!["/var/log".to_string()]);
+        // /home is NOT a default so it should be added
+        assert!(effective.contains(&"/home".to_string()));
+        // /var/log should NOT be in effective (it's redundant)
+        assert!(!effective.contains(&"/var/log".to_string()));
+    }
+
+    #[test]
+    fn test_build_effective_skip_paths_exact_match() {
+        let user = vec!["/tmp".to_string()];
+        let (_, redundant) =
+            build_effective_skip_paths(Path::new("/"), &user);
+
+        // /tmp exactly matches a default
+        assert_eq!(redundant, vec!["/tmp".to_string()]);
+    }
+
+    #[test]
+    fn test_scan_filesystem_parallel_produces_correct_results() {
+        let dir = TempDir::new().unwrap(); //#[allow_ci]
+        let root = dir.path();
+
+        // Create many files to exercise parallel paths
+        for i in 0..50 {
+            fs::write(
+                root.join(format!("file_{i}.txt")),
+                format!("content {i}"),
+            )
+            .unwrap(); //#[allow_ci]
+        }
+
+        let result = scan_filesystem(root, &[], "sha256").unwrap(); //#[allow_ci]
+        assert_eq!(result.len(), 50);
     }
 }

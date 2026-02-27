@@ -62,7 +62,8 @@ pub async fn execute(
                         local_rpm_repo: local_rpm_repo.as_deref(),
                         remote_rpm_repo: remote_rpm_repo.as_deref(),
                     };
-                    return super::wizard_runtime::run(&defaults, output).await;
+                    return super::wizard_runtime::run(&defaults, output)
+                        .await;
                 }
                 #[cfg(not(feature = "wizard"))]
                 {
@@ -107,7 +108,9 @@ pub async fn execute(
                         without_secureboot: *without_secureboot,
                         output_file: output_file.as_deref(),
                     };
-                    return super::wizard_measured_boot::run(&defaults, output);
+                    return super::wizard_measured_boot::run(
+                        &defaults, output,
+                    );
                 }
                 #[cfg(not(feature = "wizard"))]
                 {
@@ -139,7 +142,8 @@ pub async fn execute(
                 #[cfg(feature = "wizard")]
                 {
                     use crate::policy_tools::tpm_policy_gen;
-                    let pcr_indices = if let Some(mask_str) = mask.as_deref() {
+                    let pcr_indices = if let Some(mask_str) = mask.as_deref()
+                    {
                         crate::policy_tools::tpm_policy::TpmPolicy::parse_mask(mask_str)
                             .unwrap_or_else(|_| vec![0, 1, 2, 3, 4, 5, 6, 7])
                     } else {
@@ -284,18 +288,35 @@ pub(super) async fn generate_runtime(
     if let Some(rootfs_path) = rootfs {
         let algorithm = detected_algorithm.as_deref().unwrap_or("sha256");
 
+        let root = Path::new(rootfs_path);
+
+        // Merge user-provided skip paths with built-in defaults.
+        let (effective_skip, redundant) =
+            filesystem::build_effective_skip_paths(root, skip_path);
+
+        // Inform the user about default excluded paths.
+        output.info(format!(
+            "Default excluded directories (volatile/virtual data): {}",
+            filesystem::BASE_EXCLUDE_DIRS.join(", ")
+        ));
+
+        // Warn about user-provided paths already covered by defaults.
+        for path in &redundant {
+            output.info(format!(
+                "Note: --skip-path '{path}' is already excluded by default (no additional effect)"
+            ));
+        }
+
         output.info(format!(
             "Scanning filesystem: {rootfs_path} (algorithm: {algorithm})"
         ));
 
-        let root = Path::new(rootfs_path);
         let fs_digests = tokio::task::spawn_blocking({
             let root = root.to_path_buf();
-            let skip = skip_path.to_vec();
             let alg = algorithm.to_string();
             move || {
                 filesystem::scan_filesystem(
-                    &root, &skip, &alg,
+                    &root, &effective_skip, &alg,
                 )
             }
         })
