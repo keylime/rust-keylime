@@ -549,6 +549,10 @@ enum GenerateSubcommand {
 
     /// Generate a measured boot policy from a UEFI event log
     MeasuredBoot {
+        /// Run the interactive wizard to guide policy creation
+        #[arg(long, short = 'I')]
+        interactive: bool,
+
         /// UEFI event log file
         #[arg(
             long,
