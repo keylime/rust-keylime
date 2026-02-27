@@ -26,6 +26,7 @@ pub async fn execute(
 ) -> Result<Value, KeylimectlError> {
     match subcommand {
         GenerateSubcommand::Runtime {
+            interactive,
             ima_measurement_list,
             allowlist,
             rootfs,
@@ -41,26 +42,60 @@ pub async fn execute(
             ramdisk_dir,
             local_rpm_repo,
             remote_rpm_repo,
-        } => generate_runtime(
-            ima_measurement_list.as_deref(),
-            allowlist.as_deref(),
-            rootfs.as_deref(),
-            skip_path,
-            base_policy.as_deref(),
-            excludelist.as_deref(),
-            output_file.as_deref(),
-            *keyrings,
-            *ima_buf,
-            ignored_keyrings,
-            hash_alg.as_deref(),
-            ramdisk_dir.as_deref(),
-            local_rpm_repo.as_deref(),
-            remote_rpm_repo.as_deref(),
-            add_ima_signature_verification_key,
-            output,
-        )
-        .await
-        .map_err(KeylimectlError::from),
+        } => {
+            if *interactive {
+                #[cfg(feature = "wizard")]
+                {
+                    let defaults = super::wizard_runtime::Defaults {
+                        ima_measurement_list: ima_measurement_list.as_deref(),
+                        allowlist: allowlist.as_deref(),
+                        rootfs: rootfs.as_deref(),
+                        skip_path,
+                        base_policy: base_policy.as_deref(),
+                        excludelist: excludelist.as_deref(),
+                        output_file: output_file.as_deref(),
+                        keyrings: *keyrings,
+                        ima_buf: *ima_buf,
+                        ignored_keyrings,
+                        hash_alg: hash_alg.as_deref(),
+                        ramdisk_dir: ramdisk_dir.as_deref(),
+                        local_rpm_repo: local_rpm_repo.as_deref(),
+                        remote_rpm_repo: remote_rpm_repo.as_deref(),
+                        add_ima_signature_verification_key,
+                    };
+                    return super::wizard_runtime::run(&defaults, output)
+                        .await;
+                }
+                #[cfg(not(feature = "wizard"))]
+                {
+                    return Err(KeylimectlError::Validation(
+                        "Interactive mode requires the 'wizard' feature. \
+                         Rebuild with: cargo build --features wizard"
+                            .into(),
+                    ));
+                }
+            }
+            generate_runtime(
+                ima_measurement_list.as_deref(),
+                allowlist.as_deref(),
+                rootfs.as_deref(),
+                skip_path,
+                base_policy.as_deref(),
+                excludelist.as_deref(),
+                output_file.as_deref(),
+                *keyrings,
+                *ima_buf,
+                ignored_keyrings,
+                hash_alg.as_deref(),
+                ramdisk_dir.as_deref(),
+                local_rpm_repo.as_deref(),
+                remote_rpm_repo.as_deref(),
+                add_ima_signature_verification_key,
+                output,
+            )
+            .await
+            .map_err(KeylimectlError::from)
+        }
         GenerateSubcommand::MeasuredBoot {
             eventlog_file,
             without_secureboot,
@@ -94,7 +129,7 @@ pub async fn execute(
 
 /// Generate a runtime policy from IMA logs, allowlists, and other sources.
 #[allow(clippy::too_many_arguments)]
-async fn generate_runtime(
+pub(super) async fn generate_runtime(
     ima_measurement_list: Option<&str>,
     allowlist: Option<&str>,
     rootfs: Option<&str>,
@@ -107,12 +142,9 @@ async fn generate_runtime(
     ignored_keyrings: &[String],
     hash_alg: Option<&str>,
     ramdisk_dir: Option<&str>,
-<<<<<<< HEAD
-    add_ima_signature_verification_key: &[String],
-=======
     local_rpm_repo: Option<&str>,
     remote_rpm_repo: Option<&str>,
->>>>>>> a8bf8d3 (keylimectl: implement policy generation from RPM repo)
+    add_ima_signature_verification_key: &[String],
     output: &OutputHandler,
 ) -> Result<Value, CommandError> {
     let mut policy = if let Some(base_path) = base_policy {
