@@ -49,6 +49,7 @@ zstd = { version = "0.13", default-features = false }
 toml = "0.8"
 zeroize = "1"
 indicatif = "0.17"
+rayon = "1"
 console = "0.15"
 
 [lints.clippy]

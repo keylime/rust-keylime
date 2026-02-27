@@ -288,18 +288,35 @@ pub(super) async fn generate_runtime(
     if let Some(rootfs_path) = rootfs {
         let algorithm = detected_algorithm.as_deref().unwrap_or("sha256");
 
+        let root = Path::new(rootfs_path);
+
+        // Merge user-provided skip paths with built-in defaults.
+        let (effective_skip, redundant) =
+            filesystem::build_effective_skip_paths(root, skip_path);
+
+        // Inform the user about default excluded paths.
+        output.info(format!(
+            "Default excluded directories (volatile/virtual data): {}",
+            filesystem::BASE_EXCLUDE_DIRS.join(", ")
+        ));
+
+        // Warn about user-provided paths already covered by defaults.
+        for path in &redundant {
+            output.info(format!(
+                "Note: --skip-path '{path}' is already excluded by default (no additional effect)"
+            ));
+        }
+
         output.info(format!(
             "Scanning filesystem: {rootfs_path} (algorithm: {algorithm})"
         ));
 
-        let root = Path::new(rootfs_path);
         let fs_digests = tokio::task::spawn_blocking({
             let root = root.to_path_buf();
-            let skip = skip_path.to_vec();
             let alg = algorithm.to_string();
             move || {
                 filesystem::scan_filesystem(
-                    &root, &skip, &alg,
+                    &root, &effective_skip, &alg,
                 )
             }
         })
