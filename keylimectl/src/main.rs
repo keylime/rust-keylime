@@ -475,6 +475,10 @@ impl PolicyAction {
 enum GenerateSubcommand {
     /// Generate a runtime policy from IMA logs, allowlists, or filesystem
     Runtime {
+        /// Run the interactive wizard to guide policy creation
+        #[arg(long, short = 'I')]
+        interactive: bool,
+
         /// IMA measurement list path. If -m is given without a value, uses the
         /// default: /sys/kernel/security/ima/ascii_runtime_measurements
         #[arg(
