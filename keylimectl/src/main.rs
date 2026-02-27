@@ -572,6 +572,10 @@ enum GenerateSubcommand {
 
     /// Generate a TPM policy from PCR values
     Tpm {
+        /// Run the interactive wizard to guide policy creation
+        #[arg(long, short = 'I')]
+        interactive: bool,
+
         /// Read PCR values from file (one per line)
         #[arg(long, value_name = "FILE", group = "pcr_source")]
         pcr_file: Option<String>,
