@@ -346,7 +346,7 @@ fn extract_vendor_db(
 }
 
 /// Summary statistics for a generated measured boot policy.
-#[allow(dead_code)]
+#[cfg_attr(not(feature = "wizard"), allow(dead_code))]
 pub struct MeasuredBootStats {
     /// Total number of events processed.
     pub total_events: usize,
@@ -359,7 +359,7 @@ pub struct MeasuredBootStats {
 }
 
 /// Get statistics from the UEFI event log.
-#[allow(dead_code)]
+#[cfg_attr(not(feature = "wizard"), allow(dead_code))]
 pub fn get_eventlog_stats(
     path: &Path,
 ) -> Result<MeasuredBootStats, PolicyGenerationError> {

@@ -12,6 +12,8 @@ mod generate;
 mod sign;
 mod validate;
 #[cfg(feature = "wizard")]
+mod wizard_measured_boot;
+#[cfg(feature = "wizard")]
 mod wizard_runtime;
 
 use crate::client::factory;

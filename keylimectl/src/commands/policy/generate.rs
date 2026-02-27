@@ -94,16 +94,38 @@ pub async fn execute(
             .map_err(KeylimectlError::from)
         }
         GenerateSubcommand::MeasuredBoot {
+            interactive,
             eventlog_file,
             without_secureboot,
             output: output_file,
-        } => generate_measured_boot(
-            eventlog_file,
-            *without_secureboot,
-            output_file.as_deref(),
-            output,
-        )
-        .map_err(KeylimectlError::from),
+        } => {
+            if *interactive {
+                #[cfg(feature = "wizard")]
+                {
+                    let defaults = super::wizard_measured_boot::Defaults {
+                        eventlog_file,
+                        without_secureboot: *without_secureboot,
+                        output_file: output_file.as_deref(),
+                    };
+                    return super::wizard_measured_boot::run(&defaults, output);
+                }
+                #[cfg(not(feature = "wizard"))]
+                {
+                    return Err(KeylimectlError::Validation(
+                        "Interactive mode requires the 'wizard' feature. \
+                         Rebuild with: cargo build --features wizard"
+                            .into(),
+                    ));
+                }
+            }
+            generate_measured_boot(
+                eventlog_file,
+                *without_secureboot,
+                output_file.as_deref(),
+                output,
+            )
+            .map_err(KeylimectlError::from)
+        }
         GenerateSubcommand::Tpm {
             pcr_file,
             from_tpm,
@@ -446,7 +468,7 @@ pub(super) async fn generate_runtime(
 }
 
 /// Generate a measured boot policy from a UEFI event log.
-fn generate_measured_boot(
+pub(super) fn generate_measured_boot(
     eventlog_file: &str,
     without_secureboot: bool,
     output_file: Option<&str>,
