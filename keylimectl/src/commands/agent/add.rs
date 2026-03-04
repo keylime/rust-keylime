@@ -226,9 +226,30 @@ pub(super) async fn add_agent(
     #[cfg(feature = "api-v2")]
     let cv_agent_ip = params.verifier_ip.unwrap_or(&agent_ip);
 
-    // Resolve TPM policy with enhanced precedence handling
-    let tpm_policy =
-        resolve_tpm_policy_enhanced(params.tpm_policy, params.mb_policy)?;
+    // Validate that at least one attestation policy is provided.
+    // Without a policy, the verifier has nothing to attest and will not
+    // generate TPM challenges, causing attestation to fail.
+    if params.runtime_policy.is_none()
+        && params.mb_policy.is_none()
+        && params.tpm_policy.is_none()
+    {
+        return Err(CommandError::invalid_parameter(
+            "policy",
+            "At least one attestation policy must be provided: \
+             --runtime-policy, --mb-policy, or --tpm-policy"
+                .to_string(),
+        ));
+    }
+
+    // Resolve TPM policy with enhanced precedence handling.
+    // Auto-enables PCRs in the mask based on which policies are attached
+    // (matching the Python tenant's process_policy() behavior).
+    let tpm_policy = resolve_tpm_policy_enhanced(
+        params.tpm_policy,
+        params.mb_policy,
+        params.runtime_policy.is_some(),
+        params.mb_policy.is_some(),
+    )?;
 
     // Build enrollment request with version-appropriate fields
     #[allow(unused_mut)]
