@@ -51,10 +51,23 @@ pub(super) fn load_payload_bytes(
     })
 }
 
+/// IMA PCR index (matches keylime config.IMA_PCR)
+const IMA_PCR: u32 = 10;
+
+/// Measured boot PCR indices (matches keylime config.MEASUREDBOOT_PCRS)
+const MEASUREDBOOT_PCRS: &[u32] =
+    &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 12, 13, 14, 15];
+
 /// Enhanced TPM policy resolution with measured boot policy extraction
 ///
 /// This function implements the full precedence chain for TPM policy resolution,
 /// matching the behavior of the Python keylime_tenant implementation.
+///
+/// After resolving the base policy, it auto-enables PCRs based on which
+/// attestation policies are provided (matching `process_policy()` in the
+/// Python tenant):
+/// - runtime policy → enables IMA PCR (10)
+/// - measured boot policy → enables measured boot PCRs (0-9, 11-15)
 ///
 /// # Precedence Order:
 /// 1. Explicit CLI --tpm_policy argument (highest priority)
@@ -64,58 +77,99 @@ pub(super) fn load_payload_bytes(
 /// # Arguments
 /// * `explicit_policy` - Policy provided via CLI --tpm_policy argument
 /// * `mb_policy_path` - Path to measured boot policy file (for extraction)
+/// * `has_runtime_policy` - Whether a runtime (IMA) policy is being provided
+/// * `has_mb_policy` - Whether a measured boot policy is being provided
 ///
 /// # Returns
 /// Returns the resolved TPM policy as a JSON string
-///
-/// # Examples
-/// ```
-/// // With explicit policy (highest priority)
-/// let policy = resolve_tpm_policy_enhanced(Some("{\"pcr\": [15]}"), Some("/path/to/mb.json"));
-/// assert_eq!(policy, "{\"pcr\": [15]}");
-///
-/// // With measured boot policy extraction
-/// let policy = resolve_tpm_policy_enhanced(None, Some("/path/to/mb_with_tpm_policy.json"));
-/// // Returns extracted TPM policy from measured boot policy
-///
-/// // With default fallback (empty policy with no PCRs)
-/// let policy = resolve_tpm_policy_enhanced(None, None);
-/// assert_eq!(policy, r#"{"mask":"0x0"}"#);
-/// ```
 #[must_use = "resolved policy must be used in the request"]
 pub(super) fn resolve_tpm_policy_enhanced(
     explicit_policy: Option<&str>,
     mb_policy_path: Option<&str>,
+    has_runtime_policy: bool,
+    has_mb_policy: bool,
 ) -> Result<String, CommandError> {
     // Priority 1: Explicit CLI argument
-    if let Some(policy) = explicit_policy {
+    let mut tpm_policy: Value = if let Some(policy) = explicit_policy {
         debug!("Using explicit TPM policy from CLI: {policy}");
-        return Ok(policy.to_string());
-    }
-
-    // Priority 2: Extract from measured boot policy
-    if let Some(mb_path) = mb_policy_path {
-        debug!("Attempting to extract TPM policy from measured boot policy: {mb_path}");
-        match extract_tpm_policy_from_mb_policy(mb_path) {
-            Ok(Some(extracted_policy)) => {
-                debug!("Extracted TPM policy from measured boot policy: {extracted_policy}");
-                return Ok(extracted_policy);
-            }
-            Ok(None) => {
-                debug!("No TPM policy found in measured boot policy, using default");
-            }
-            Err(e) => {
-                warn!("Failed to extract TPM policy from measured boot policy: {e}");
-                debug!(
-                    "Continuing with default policy due to extraction error"
-                );
+        serde_json::from_str(policy).map_err(|e| {
+            CommandError::invalid_parameter(
+                "tpm_policy",
+                format!("Invalid JSON in TPM policy: {e}"),
+            )
+        })?
+    } else {
+        // Priority 2: Extract from measured boot policy
+        let mut resolved = None;
+        if let Some(mb_path) = mb_policy_path {
+            debug!("Attempting to extract TPM policy from measured boot policy: {mb_path}");
+            match extract_tpm_policy_from_mb_policy(mb_path) {
+                Ok(Some(extracted_policy)) => {
+                    debug!("Extracted TPM policy from measured boot policy: {extracted_policy}");
+                    resolved = Some(
+                        serde_json::from_str(&extracted_policy)
+                            .unwrap_or(serde_json::json!({"mask": "0x0"})),
+                    );
+                }
+                Ok(None) => {
+                    debug!("No TPM policy found in measured boot policy, using default");
+                }
+                Err(e) => {
+                    warn!("Failed to extract TPM policy from measured boot policy: {e}");
+                    debug!(
+                        "Continuing with default policy due to extraction error"
+                    );
+                }
             }
         }
+
+        // Priority 3: Default empty policy with zeroed mask (no PCRs)
+        resolved.unwrap_or_else(|| {
+            debug!("Using default empty TPM policy with zeroed mask");
+            serde_json::json!({"mask": "0x0"})
+        })
+    };
+
+    // Auto-enable PCRs based on provided policies (matching Python tenant)
+    let obj = tpm_policy.as_object_mut().ok_or_else(|| {
+        CommandError::invalid_parameter(
+            "tpm_policy",
+            "TPM policy must be a JSON object".to_string(),
+        )
+    })?;
+
+    let mut mask: u32 = obj
+        .get("mask")
+        .and_then(|v| v.as_str())
+        .and_then(|s| {
+            u32::from_str_radix(s.trim_start_matches("0x"), 16).ok()
+        })
+        .unwrap_or(0);
+
+    if has_runtime_policy {
+        mask |= 1 << IMA_PCR;
+        debug!("Auto-enabled IMA PCR {IMA_PCR} in TPM policy mask");
     }
 
-    // Priority 3: Default empty policy with zeroed mask (no PCRs)
-    debug!("Using default empty TPM policy with zeroed mask");
-    Ok(r#"{"mask":"0x0"}"#.to_string())
+    if has_mb_policy {
+        for &pcr in MEASUREDBOOT_PCRS {
+            mask |= 1 << pcr;
+        }
+        debug!("Auto-enabled measured boot PCRs in TPM policy mask");
+    }
+
+    let _ = obj
+        .insert("mask".to_string(), serde_json::json!(format!("0x{mask:x}")));
+
+    let policy_str = serde_json::to_string(&tpm_policy).map_err(|e| {
+        CommandError::invalid_parameter(
+            "tpm_policy",
+            format!("Failed to serialize TPM policy: {e}"),
+        )
+    })?;
+
+    debug!("Resolved TPM policy: {policy_str}");
+    Ok(policy_str)
 }
 
 /// Extract TPM policy from a measured boot policy file
@@ -203,19 +257,26 @@ mod tests {
 
     #[test]
     fn test_resolve_tpm_policy_explicit_priority() {
-        // Explicit policy should have highest priority
+        // Explicit policy should have highest priority.
+        // The mask is updated by auto-enable logic even for explicit policies.
         let result = resolve_tpm_policy_enhanced(
-            Some("{\"pcr\": [15]}"),
+            Some("{\"pcr\": [15], \"mask\": \"0x0\"}"),
             Some("/path/to/mb.json"),
+            true,
+            false,
         )
         .unwrap(); //#[allow_ci]
-        assert_eq!(result, "{\"pcr\": [15]}");
+        let parsed: Value = serde_json::from_str(&result).unwrap(); //#[allow_ci]
+        assert_eq!(parsed["pcr"], json!([15]));
+        // IMA PCR 10 should be auto-enabled (has_runtime_policy=true)
+        assert_eq!(parsed["mask"], "0x400");
     }
 
     #[test]
     fn test_resolve_tpm_policy_default_fallback() {
         // Should fallback to default when no policies provided (empty policy with no PCRs)
-        let result = resolve_tpm_policy_enhanced(None, None).unwrap(); //#[allow_ci]
+        let result =
+            resolve_tpm_policy_enhanced(None, None, false, false).unwrap(); //#[allow_ci]
         assert_eq!(result, r#"{"mask":"0x0"}"#);
     }
 
@@ -339,6 +400,8 @@ mod tests {
         let result = resolve_tpm_policy_enhanced(
             None,
             Some(policy_file.to_str().unwrap()), //#[allow_ci]
+            false,
+            false,
         )
         .unwrap(); //#[allow_ci]
 
@@ -350,9 +413,13 @@ mod tests {
     #[test]
     fn test_resolve_tpm_policy_enhanced_extraction_error_fallback() {
         // When extraction fails, should fallback to default (empty policy with no PCRs)
-        let result =
-            resolve_tpm_policy_enhanced(None, Some("/nonexistent/file.json"))
-                .unwrap(); //#[allow_ci]
+        let result = resolve_tpm_policy_enhanced(
+            None,
+            Some("/nonexistent/file.json"),
+            false,
+            false,
+        )
+        .unwrap(); //#[allow_ci]
 
         assert_eq!(result, r#"{"mask":"0x0"}"#);
     }
@@ -370,13 +437,83 @@ mod tests {
 
         // Explicit policy should override extracted policy
         let result = resolve_tpm_policy_enhanced(
-            Some("{\"pcr\": [15]}"),
+            Some("{\"pcr\": [15], \"mask\": \"0x0\"}"),
             Some(policy_file.to_str().unwrap()), //#[allow_ci]
+            false,
+            false,
         )
         .unwrap(); //#[allow_ci]
 
         // Should use explicit policy, not extracted one
         let parsed: Value = serde_json::from_str(&result).unwrap(); //#[allow_ci]
         assert_eq!(parsed["pcr"], json!([15]));
+    }
+
+    #[test]
+    fn test_resolve_tpm_policy_auto_enable_ima_pcr() {
+        // When has_runtime_policy=true, IMA PCR 10 should be auto-enabled
+        let has_runtime_policy = true;
+        let has_mb_policy = false;
+        let result = resolve_tpm_policy_enhanced(
+            None,
+            None,
+            has_runtime_policy,
+            has_mb_policy,
+        )
+        .unwrap(); //#[allow_ci]
+
+        let parsed: Value = serde_json::from_str(&result).unwrap(); //#[allow_ci]
+        assert_eq!(parsed["mask"], "0x400"); // IMA PCR 10: 1 << 10 = 0x400
+    }
+
+    #[test]
+    fn test_resolve_tpm_policy_auto_enable_mb_pcrs() {
+        // When has_mb_policy=true, measured boot PCRs (0-9,11-15) should be auto-enabled
+        let has_runtime_policy = false;
+        let has_mb_policy = true;
+        let result = resolve_tpm_policy_enhanced(
+            None,
+            None,
+            has_runtime_policy,
+            has_mb_policy,
+        )
+        .unwrap(); //#[allow_ci]
+
+        let parsed: Value = serde_json::from_str(&result).unwrap(); //#[allow_ci]
+        assert_eq!(parsed["mask"], "0xfbff"); // MB PCRs 0-9,11-15: 0xfbff
+    }
+
+    #[test]
+    fn test_resolve_tpm_policy_auto_enable_both() {
+        // When both policies are provided, both IMA and MB PCRs should be enabled
+        let has_runtime_policy = true;
+        let has_mb_policy = true;
+        let result = resolve_tpm_policy_enhanced(
+            None,
+            None,
+            has_runtime_policy,
+            has_mb_policy,
+        )
+        .unwrap(); //#[allow_ci]
+
+        let parsed: Value = serde_json::from_str(&result).unwrap(); //#[allow_ci]
+        assert_eq!(parsed["mask"], "0xffff"); // IMA + MB PCRs: 0xffff
+    }
+
+    #[test]
+    fn test_resolve_tpm_policy_auto_enable_preserves_existing_mask() {
+        // Existing mask bits should be preserved when auto-enabling
+        let has_runtime_policy = true;
+        let has_mb_policy = false;
+        let result = resolve_tpm_policy_enhanced(
+            Some("{\"mask\": \"0x800000\"}"), // PCR 23
+            None,
+            has_runtime_policy,
+            has_mb_policy,
+        )
+        .unwrap(); //#[allow_ci]
+
+        let parsed: Value = serde_json::from_str(&result).unwrap(); //#[allow_ci]
+        assert_eq!(parsed["mask"], "0x800400"); // PCR 23 | PCR 10
     }
 }
