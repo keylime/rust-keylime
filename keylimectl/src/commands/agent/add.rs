@@ -244,9 +244,25 @@ pub(super) async fn add_agent(
     #[cfg(feature = "api-v2")]
     let cv_agent_ip = params.verifier_ip.unwrap_or(&agent_ip);
 
-    // Resolve TPM policy with enhanced precedence handling
-    let tpm_policy =
-        resolve_tpm_policy_enhanced(params.tpm_policy, params.mb_policy)?;
+    if !has_attestation_policy(&params) {
+        return Err(CommandError::invalid_parameter(
+            "policy",
+            "At least one attestation policy must be provided: \
+             --runtime-policy, --runtime-policy-name, --mb-policy, \
+             or --tpm-policy"
+                .to_string(),
+        ));
+    }
+
+    // Resolve TPM policy with enhanced precedence handling.
+    // Auto-enables PCRs in the mask based on which policies are attached
+    // (matching the Python tenant's process_policy() behavior).
+    let tpm_policy = resolve_tpm_policy_enhanced(
+        params.tpm_policy,
+        params.mb_policy,
+        params.runtime_policy.is_some(),
+        params.mb_policy.is_some(),
+    )?;
 
     // Build enrollment request with version-appropriate fields
     #[allow(unused_mut)]
@@ -492,6 +508,18 @@ pub(super) async fn add_agent(
     }
 
     Ok(result)
+}
+
+/// Check whether at least one attestation policy is specified.
+///
+/// A named runtime policy (`--runtime-policy-name`) that references a
+/// policy already stored in the verifier counts as a valid policy
+/// specification, alongside inline file-based policies.
+fn has_attestation_policy(params: &AddAgentParams) -> bool {
+    params.runtime_policy.is_some()
+        || params.runtime_policy_name.is_some()
+        || params.mb_policy.is_some()
+        || params.tpm_policy.is_some()
 }
 
 /// Build enrollment request for push model (API 3.0+)
@@ -895,5 +923,69 @@ mod tests {
             pull_model: false,
             api_version: 3.1,
         }));
+    }
+
+    fn empty_params<'a>() -> AddAgentParams<'a> {
+        AddAgentParams {
+            agent_id: "test-agent",
+            ip: None,
+            port: None,
+            verifier_ip: None,
+            runtime_policy: None,
+            runtime_policy_name: None,
+            runtime_policy_sig_key: None,
+            mb_policy: None,
+            payload: None,
+            cert_dir: None,
+            verify: false,
+            push_model: false,
+            pull_model: false,
+            tpm_policy: None,
+            allow_unverified_quote: false,
+            wait_for_attestation: false,
+            attestation_timeout: 60,
+        }
+    }
+
+    #[test]
+    fn test_has_attestation_policy_none() {
+        let params = empty_params();
+        assert!(!has_attestation_policy(&params));
+    }
+
+    #[test]
+    fn test_has_attestation_policy_runtime_policy_only() {
+        let mut params = empty_params();
+        params.runtime_policy = Some("policy.json");
+        assert!(has_attestation_policy(&params));
+    }
+
+    #[test]
+    fn test_has_attestation_policy_runtime_policy_name_only() {
+        let mut params = empty_params();
+        params.runtime_policy_name = Some("my-named-policy");
+        assert!(has_attestation_policy(&params));
+    }
+
+    #[test]
+    fn test_has_attestation_policy_mb_policy_only() {
+        let mut params = empty_params();
+        params.mb_policy = Some("mb-policy.json");
+        assert!(has_attestation_policy(&params));
+    }
+
+    #[test]
+    fn test_has_attestation_policy_tpm_policy_only() {
+        let mut params = empty_params();
+        params.tpm_policy = Some("{}");
+        assert!(has_attestation_policy(&params));
+    }
+
+    #[test]
+    fn test_has_attestation_policy_multiple() {
+        let mut params = empty_params();
+        params.runtime_policy = Some("policy.json");
+        params.mb_policy = Some("mb-policy.json");
+        assert!(has_attestation_policy(&params));
     }
 }
