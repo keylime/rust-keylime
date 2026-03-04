@@ -77,9 +77,9 @@ fn json_api_resource(
     // Strip null values from attributes — the Python JSON:API validator
     // rejects None (only allows dict, list, str, int, float, bool).
     let cleaned_attrs = match attributes {
-        Value::Object(map) => {
-            Value::Object(map.into_iter().filter(|(_, v)| !v.is_null()).collect())
-        }
+        Value::Object(map) => Value::Object(
+            map.into_iter().filter(|(_, v)| !v.is_null()).collect(),
+        ),
         other => other,
     };
 
