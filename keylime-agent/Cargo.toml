@@ -15,7 +15,7 @@ clap.workspace = true
 config.workspace = true
 futures.workspace = true
 hex.workspace = true
-keylime.workspace = true
+keylime = { workspace = true, features = [] }
 log.workspace = true
 openssl.workspace = true
 pretty_env_logger.workspace = true
@@ -36,7 +36,7 @@ actix-rt.workspace = true
 [features]
 # The features enabled by default
 default = []
-testing = []
+testing = ["keylime/testing"]
 # Whether the agent should be compiled with support to listen for notification
 # messages on ZeroMQ
 #

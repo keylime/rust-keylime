@@ -378,6 +378,8 @@ impl UefiLogHandler {
             "EV_EFI_PLATFORM_FIRMWARE_BLOB" => 0x80000008,
             "EV_EFI_HANDOFF_TABLES" => 0x80000009,
             "EV_EFI_HCRTM_EVENT" => 0x8000000A,
+            "EV_EFI_PLATFORM_FIRMWARE_BLOB2" => 0x8000000B,
+            "EV_EFI_VARIABLE_AUTHORITY" => 0x800000E0,
             _ => 0xFFFFFFFF, // Default for EV_UNKNOWN_TYPE
         }
     }
@@ -413,6 +415,8 @@ impl UefiLogHandler {
             0x80000008 => "EV_EFI_PLATFORM_FIRMWARE_BLOB",
             0x80000009 => "EV_EFI_HANDOFF_TABLES",
             0x8000000A => "EV_EFI_HCRTM_EVENT",
+            0x8000000B => "EV_EFI_PLATFORM_FIRMWARE_BLOB2",
+            0x800000E0 => "EV_EFI_VARIABLE_AUTHORITY",
             _ => "EV_UNKNOWN_TYPE",
         }
     }
@@ -548,6 +552,8 @@ mod tests {
             (0x80000008, "EV_EFI_PLATFORM_FIRMWARE_BLOB"),
             (0x80000009, "EV_EFI_HANDOFF_TABLES"),
             (0x8000000A, "EV_EFI_HCRTM_EVENT"),
+            (0x8000000B, "EV_EFI_PLATFORM_FIRMWARE_BLOB2"),
+            (0x800000E0, "EV_EFI_VARIABLE_AUTHORITY"),
             (0xFFFFFFFF, "EV_UNKNOWN_TYPE"),
         ];
         for (event_type, expected_str) in event_tuples {
