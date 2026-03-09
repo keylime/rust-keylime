@@ -156,6 +156,10 @@ pub enum PolicyGenerationError {
     #[error("Unsupported hash algorithm: {algorithm}")]
     UnsupportedAlgorithm { algorithm: String },
 
+    /// Event log parse error
+    #[error("Failed to parse event log {path}: {reason}")]
+    EventLogParse { path: PathBuf, reason: String },
+
     /// Output write error
     #[error("Failed to write output to {path}: {reason}")]
     Output { path: PathBuf, reason: String },

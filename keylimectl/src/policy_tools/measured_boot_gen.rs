@@ -21,16 +21,17 @@ pub fn generate_from_eventlog(
     path: &Path,
     include_secureboot: bool,
 ) -> Result<MeasuredBootPolicy, PolicyGenerationError> {
-    let path_str =
-        path.to_str().ok_or_else(|| PolicyGenerationError::Output {
+    let path_str = path.to_str().ok_or_else(|| {
+        PolicyGenerationError::EventLogParse {
             path: path.to_path_buf(),
             reason: "Invalid path encoding".to_string(),
-        })?;
+        }
+    })?;
 
     let handler = UefiLogHandler::new(path_str).map_err(|e| {
-        PolicyGenerationError::Output {
+        PolicyGenerationError::EventLogParse {
             path: path.to_path_buf(),
-            reason: format!("Failed to parse UEFI event log: {e}"),
+            reason: format!("{e}"),
         }
     })?;
 
@@ -363,16 +364,17 @@ pub struct MeasuredBootStats {
 pub fn get_eventlog_stats(
     path: &Path,
 ) -> Result<MeasuredBootStats, PolicyGenerationError> {
-    let path_str =
-        path.to_str().ok_or_else(|| PolicyGenerationError::Output {
+    let path_str = path.to_str().ok_or_else(|| {
+        PolicyGenerationError::EventLogParse {
             path: path.to_path_buf(),
             reason: "Invalid path encoding".to_string(),
-        })?;
+        }
+    })?;
 
     let handler = UefiLogHandler::new(path_str).map_err(|e| {
-        PolicyGenerationError::Output {
+        PolicyGenerationError::EventLogParse {
             path: path.to_path_buf(),
-            reason: format!("Failed to parse UEFI event log: {e}"),
+            reason: format!("{e}"),
         }
     })?;
 
