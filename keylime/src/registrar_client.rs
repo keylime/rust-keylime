@@ -700,7 +700,10 @@ impl RegistrarClient {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{agent_identity::AgentIdentityBuilder, crypto};
+    use crate::{
+        agent_identity::AgentIdentityBuilder,
+        config::DEFAULT_REGISTRAR_TLS_PORT, crypto,
+    };
     use wiremock::matchers::{method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -1407,7 +1410,7 @@ mod tests {
             }
 
             if to_add.contains(&"registrar_port") {
-                builder = builder.registrar_port(8891);
+                builder = builder.registrar_port(DEFAULT_REGISTRAR_TLS_PORT);
             }
 
             let result = builder.build().await;
@@ -1475,13 +1478,13 @@ mod tests {
     async fn test_builder_chaining_with_tls() {
         let builder = RegistrarClientBuilder::new()
             .registrar_address("127.0.0.1".to_string())
-            .registrar_port(8891)
+            .registrar_port(DEFAULT_REGISTRAR_TLS_PORT)
             .ca_certificate("/path/to/ca.pem".to_string())
             .disable_tls(false)
             .timeout(5000);
 
         assert_eq!(builder.registrar_address, Some("127.0.0.1".to_string()));
-        assert_eq!(builder.registrar_port, Some(8891));
+        assert_eq!(builder.registrar_port, Some(DEFAULT_REGISTRAR_TLS_PORT));
         assert_eq!(
             builder.ca_certificate,
             Some("/path/to/ca.pem".to_string())
