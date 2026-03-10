@@ -70,6 +70,7 @@ pub struct PushModelConfig {
     registrar_api_versions: Vec<&str>,
     registrar_ip: String,
     registrar_port: u32,
+    registrar_tls_port: u32,
     registrar_tls_enabled: bool,
     registrar_tls_ca_cert: String,
     tpm_encryption_alg: String,
@@ -113,6 +114,7 @@ mod tests {
         assert_eq!(config.enable_iak_idevid(), DEFAULT_ENABLE_IAK_IDEVID);
         assert_eq!(config.registrar_ip(), DEFAULT_REGISTRAR_IP);
         assert_eq!(config.registrar_port(), DEFAULT_REGISTRAR_PORT);
+        assert_eq!(config.registrar_tls_port(), DEFAULT_REGISTRAR_TLS_PORT);
         assert_eq!(
             config.uefi_logs_evidence_version(),
             DEFAULT_UEFI_LOGS_EVIDENCE_VERSION

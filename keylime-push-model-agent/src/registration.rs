@@ -9,10 +9,15 @@ use keylime::{
 
 /// TLS configuration for registrar communication in push model.
 /// Push model uses server-only TLS verification (no client certificates/mTLS).
+///
+/// When this struct is `Some`, TLS is considered active: the registrar client
+/// will use HTTPS, and `registrar_tls_port` will be used instead of the
+/// plaintext port.
 pub struct RegistrarTlsConfig {
     pub ca_cert: Option<String>,
     pub disable_tls: Option<bool>,
     pub timeout: Option<u64>,
+    pub registrar_tls_port: u32,
 }
 
 pub async fn check_registration(
@@ -55,18 +60,26 @@ pub async fn register_agent(
     // Resolve agent UUID using the centralized helper
     let agent_uuid = context_info.resolve_agent_id(config.uuid());
 
-    // Extract TLS config values; push model doesn't use client certs (no mTLS)
-    let (ca_cert, disable_tls, timeout) = if let Some(tls) = tls_config {
-        (tls.ca_cert, tls.disable_tls, tls.timeout)
-    } else {
-        (None, None, None)
-    };
+    // Extract TLS config values; push model doesn't use client certs (no mTLS).
+    // When tls_config is Some, TLS is active: use the TLS port and CA cert.
+    // When None, TLS is not active: use the plaintext port.
+    let (ca_cert, disable_tls, timeout, registrar_port) =
+        if let Some(tls) = tls_config {
+            (
+                tls.ca_cert,
+                tls.disable_tls,
+                tls.timeout,
+                tls.registrar_tls_port,
+            )
+        } else {
+            (None, None, None, config.registrar_port())
+        };
 
     let ac = AgentRegistrationConfig {
         contact_ip: config.contact_ip().to_string(),
         contact_port: config.contact_port(),
         registrar_ip: config.registrar_ip().to_string(),
-        registrar_port: config.registrar_port(),
+        registrar_port,
         enable_iak_idevid: config.enable_iak_idevid(),
         ek_handle: config
             .ek_handle()
@@ -114,7 +127,10 @@ mod tests {
     use super::*;
 
     use keylime::{
-        config::get_testing_config,
+        config::{
+            get_testing_config, DEFAULT_REGISTRAR_PORT,
+            DEFAULT_REGISTRAR_TLS_PORT,
+        },
         context_info::{AlgorithmConfigurationString, ContextInfo},
         tpm::testing,
     };
@@ -164,6 +180,7 @@ mod tests {
             ca_cert: Some("/path/to/ca.pem".to_string()),
             disable_tls: Some(false),
             timeout: Some(5000),
+            registrar_tls_port: DEFAULT_REGISTRAR_TLS_PORT,
         };
 
         assert_eq!(tls_config.ca_cert, Some("/path/to/ca.pem".to_string()));
@@ -177,6 +194,7 @@ mod tests {
             ca_cert: None,
             disable_tls: None,
             timeout: None,
+            registrar_tls_port: DEFAULT_REGISTRAR_TLS_PORT,
         };
 
         assert_eq!(tls_config.ca_cert, None);
@@ -190,6 +208,7 @@ mod tests {
             ca_cert: Some("/path/to/ca.pem".to_string()),
             disable_tls: Some(true),
             timeout: Some(10000),
+            registrar_tls_port: DEFAULT_REGISTRAR_TLS_PORT,
         };
 
         assert_eq!(tls_config.ca_cert, Some("/path/to/ca.pem".to_string()));
@@ -203,6 +222,7 @@ mod tests {
             ca_cert: Some("".to_string()),
             disable_tls: Some(false),
             timeout: Some(0),
+            registrar_tls_port: DEFAULT_REGISTRAR_TLS_PORT,
         };
 
         assert_eq!(tls_config.ca_cert, Some("".to_string()));
@@ -233,6 +253,7 @@ mod tests {
             ca_cert: Some("/path/to/ca.pem".to_string()),
             disable_tls: Some(false),
             timeout: Some(5000),
+            registrar_tls_port: DEFAULT_REGISTRAR_TLS_PORT,
         };
 
         // Test with None context_info but Some tls_config (should not register)
@@ -268,6 +289,7 @@ mod tests {
             ca_cert: Some("/path/to/ca.pem".to_string()),
             disable_tls: Some(false),
             timeout: Some(5000),
+            registrar_tls_port: DEFAULT_REGISTRAR_TLS_PORT,
         };
 
         let result =
@@ -305,6 +327,7 @@ mod tests {
             ca_cert: Some("/path/to/ca.pem".to_string()),
             disable_tls: None,
             timeout: Some(5000),
+            registrar_tls_port: DEFAULT_REGISTRAR_TLS_PORT,
         };
 
         let result =
@@ -342,6 +365,7 @@ mod tests {
             ca_cert: Some("/path/to/ca.pem".to_string()),
             disable_tls: Some(true),
             timeout: Some(5000),
+            registrar_tls_port: DEFAULT_REGISTRAR_TLS_PORT,
         };
 
         let result =
@@ -413,6 +437,7 @@ mod tests {
             ca_cert: Some("/path/to/ca.pem".to_string()),
             disable_tls: None,
             timeout: Some(0),
+            registrar_tls_port: DEFAULT_REGISTRAR_TLS_PORT,
         };
         assert_eq!(tls_config_zero.timeout, Some(0));
 
@@ -421,6 +446,7 @@ mod tests {
             ca_cert: Some("/path/to/ca.pem".to_string()),
             disable_tls: None,
             timeout: Some(300000),
+            registrar_tls_port: DEFAULT_REGISTRAR_TLS_PORT,
         };
         assert_eq!(tls_config_large.timeout, Some(300000));
 
@@ -429,6 +455,7 @@ mod tests {
             ca_cert: Some("/path/to/ca.pem".to_string()),
             disable_tls: None,
             timeout: None,
+            registrar_tls_port: DEFAULT_REGISTRAR_TLS_PORT,
         };
         assert_eq!(tls_config_none.timeout, None);
     }
@@ -439,32 +466,47 @@ mod tests {
             ca_cert: Some("/ca.pem".to_string()),
             disable_tls: Some(false),
             timeout: Some(5000),
+            registrar_tls_port: DEFAULT_REGISTRAR_TLS_PORT,
         });
 
-        let (ca_cert, disable_tls, timeout) = if let Some(tls) = tls_config {
-            (tls.ca_cert, tls.disable_tls, tls.timeout)
-        } else {
-            (None, None, None)
-        };
+        let (ca_cert, disable_tls, timeout, registrar_port) =
+            if let Some(tls) = tls_config {
+                (
+                    tls.ca_cert,
+                    tls.disable_tls,
+                    tls.timeout,
+                    tls.registrar_tls_port,
+                )
+            } else {
+                (None, None, None, DEFAULT_REGISTRAR_PORT)
+            };
 
         assert_eq!(ca_cert, Some("/ca.pem".to_string()));
         assert_eq!(disable_tls, Some(false));
         assert_eq!(timeout, Some(5000));
+        assert_eq!(registrar_port, DEFAULT_REGISTRAR_TLS_PORT);
     }
 
     #[actix_rt::test]
     async fn test_tls_config_extraction_none() {
         let tls_config: Option<RegistrarTlsConfig> = None;
 
-        let (ca_cert, disable_tls, timeout) = if let Some(tls) = tls_config {
-            (tls.ca_cert, tls.disable_tls, tls.timeout)
-        } else {
-            (None, None, None)
-        };
+        let (ca_cert, disable_tls, timeout, registrar_port) =
+            if let Some(tls) = tls_config {
+                (
+                    tls.ca_cert,
+                    tls.disable_tls,
+                    tls.timeout,
+                    tls.registrar_tls_port,
+                )
+            } else {
+                (None, None, None, DEFAULT_REGISTRAR_PORT)
+            };
 
         assert_eq!(ca_cert, None);
         assert_eq!(disable_tls, None);
         assert_eq!(timeout, None);
+        assert_eq!(registrar_port, DEFAULT_REGISTRAR_PORT);
     }
 
     #[tokio::test]
@@ -503,6 +545,7 @@ mod tests {
             ca_cert: Some(ca_path.to_string_lossy().to_string()),
             disable_tls: Some(false),
             timeout: Some(5000),
+            registrar_tls_port: DEFAULT_REGISTRAR_TLS_PORT,
         };
 
         // Should fail due to invalid port, but TLS config should be processed
@@ -529,7 +572,7 @@ mod tests {
         config.exponential_backoff_max_retries = None;
         config.exponential_backoff_max_delay = None;
         config.registrar_ip = "127.0.0.1".to_string();
-        config.registrar_port = 8891;
+        config.registrar_port = DEFAULT_REGISTRAR_TLS_PORT;
 
         let _guard = keylime::config::TestConfigGuard::new(config);
 
@@ -541,6 +584,7 @@ mod tests {
             ca_cert: Some("/nonexistent/ca.pem".to_string()),
             disable_tls: Some(false),
             timeout: Some(5000),
+            registrar_tls_port: DEFAULT_REGISTRAR_TLS_PORT,
         };
 
         // Should fail due to missing certificate files
@@ -562,6 +606,7 @@ mod tests {
             ca_cert: Some(ca_path.to_string_lossy().to_string()),
             disable_tls: Some(false),
             timeout: Some(10000),
+            registrar_tls_port: DEFAULT_REGISTRAR_TLS_PORT,
         };
 
         // Verify all fields are set correctly
@@ -571,6 +616,7 @@ mod tests {
         );
         assert_eq!(tls_config.disable_tls, Some(false));
         assert_eq!(tls_config.timeout, Some(10000));
+        assert_eq!(tls_config.registrar_tls_port, DEFAULT_REGISTRAR_TLS_PORT);
     }
 
     #[tokio::test]
@@ -602,6 +648,7 @@ mod tests {
             ca_cert: Some("".to_string()),
             disable_tls: Some(false),
             timeout: Some(5000),
+            registrar_tls_port: DEFAULT_REGISTRAR_TLS_PORT,
         };
 
         let result =
