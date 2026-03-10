@@ -36,6 +36,7 @@ pub static DEFAULT_IP: &str = "127.0.0.1";
 pub static DEFAULT_PORT: u32 = 9002;
 pub static DEFAULT_REGISTRAR_IP: &str = "127.0.0.1";
 pub static DEFAULT_REGISTRAR_PORT: u32 = 8890;
+pub static DEFAULT_REGISTRAR_TLS_PORT: u32 = 8891;
 pub static DEFAULT_REGISTRAR_TLS_ENABLED: bool = false;
 pub static DEFAULT_REGISTRAR_TLS_CA_CERT: &str = "cv_ca/cacert.crt";
 pub static DEFAULT_KEYLIME_DIR: &str = "/var/lib/keylime";
@@ -140,6 +141,7 @@ pub struct AgentConfig {
     pub port: u32,
     pub registrar_ip: String,
     pub registrar_port: u32,
+    pub registrar_tls_port: u32,
     pub registrar_tls_enabled: bool,
     pub registrar_tls_ca_cert: String,
     pub run_as: String,
@@ -318,6 +320,7 @@ impl Default for AgentConfig {
             port: DEFAULT_PORT,
             registrar_ip: DEFAULT_REGISTRAR_IP.to_string(),
             registrar_port: DEFAULT_REGISTRAR_PORT,
+            registrar_tls_port: DEFAULT_REGISTRAR_TLS_PORT,
             registrar_tls_enabled: DEFAULT_REGISTRAR_TLS_ENABLED,
             registrar_tls_ca_cert: "default".to_string(),
             revocation_actions: DEFAULT_REVOCATION_ACTIONS.to_string(),

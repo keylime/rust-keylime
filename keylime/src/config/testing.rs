@@ -58,7 +58,7 @@ fn apply_config_overrides(
 ) {
     use crate::config::{
         DEFAULT_CONTACT_PORT, DEFAULT_PORT, DEFAULT_REGISTRAR_PORT,
-        DEFAULT_REVOCATION_NOTIFICATION_PORT,
+        DEFAULT_REGISTRAR_TLS_PORT, DEFAULT_REVOCATION_NOTIFICATION_PORT,
     };
 
     for (key, value) in overrides {
@@ -99,6 +99,10 @@ fn apply_config_overrides(
             "registrar_port" => {
                 config.registrar_port =
                     value.parse().unwrap_or(DEFAULT_REGISTRAR_PORT);
+            }
+            "registrar_tls_port" => {
+                config.registrar_tls_port =
+                    value.parse().unwrap_or(DEFAULT_REGISTRAR_TLS_PORT);
             }
             "run_as" => config.run_as = value,
             "tpm_encryption_alg" => config.tpm_encryption_alg = value,

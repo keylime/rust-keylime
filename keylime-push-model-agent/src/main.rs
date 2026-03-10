@@ -117,6 +117,7 @@ fn create_registrar_tls_config<T: PushModelConfigTrait>(
             ca_cert: Some(ca_cert.to_string()),
             disable_tls: None,
             timeout: Some(timeout),
+            registrar_tls_port: config.registrar_tls_port(),
         });
     }
 
@@ -346,10 +347,12 @@ async fn main() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use keylime::config::DEFAULT_REGISTRAR_TLS_PORT;
 
     // Mock config for testing
     struct MockConfig {
         tls_enabled: bool,
+        tls_port: u32,
         ca_cert: String,
         backoff_max_delay: Option<u64>,
         backoff_max_retries: Option<u32>,
@@ -421,6 +424,9 @@ mod tests {
         fn registrar_port(&self) -> u32 {
             0
         }
+        fn registrar_tls_port(&self) -> u32 {
+            self.tls_port
+        }
         fn tpm_encryption_alg(&self) -> &str {
             ""
         }
@@ -446,6 +452,7 @@ mod tests {
         // Test when TLS is disabled
         let config = MockConfig {
             tls_enabled: false,
+            tls_port: DEFAULT_REGISTRAR_TLS_PORT,
             ca_cert: "".to_string(),
             backoff_max_delay: None,
             backoff_max_retries: None,
@@ -461,6 +468,7 @@ mod tests {
         // Test when TLS is enabled with CA certificate (push model doesn't use client certs)
         let config = MockConfig {
             tls_enabled: true,
+            tls_port: DEFAULT_REGISTRAR_TLS_PORT,
             ca_cert: "/path/to/ca.crt".to_string(),
             backoff_max_delay: None,
             backoff_max_retries: None,
@@ -474,6 +482,7 @@ mod tests {
         assert_eq!(tls_config.ca_cert, Some("/path/to/ca.crt".to_string()));
         assert_eq!(tls_config.timeout, Some(5000));
         assert_eq!(tls_config.disable_tls, None);
+        assert_eq!(tls_config.registrar_tls_port, DEFAULT_REGISTRAR_TLS_PORT);
     }
 
     #[test]
@@ -481,6 +490,7 @@ mod tests {
         // Test when TLS is enabled but no CA certificate path is provided
         let config = MockConfig {
             tls_enabled: true,
+            tls_port: DEFAULT_REGISTRAR_TLS_PORT,
             ca_cert: "".to_string(),
             backoff_max_delay: None,
             backoff_max_retries: None,
@@ -496,6 +506,7 @@ mod tests {
         // Test that custom timeout is properly set
         let config = MockConfig {
             tls_enabled: true,
+            tls_port: DEFAULT_REGISTRAR_TLS_PORT,
             ca_cert: "/path/to/ca.crt".to_string(),
             backoff_max_delay: None,
             backoff_max_retries: None,
