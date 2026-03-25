@@ -284,6 +284,7 @@ mod tests {
             ima_ml_file: None,
             ima_ml: Mutex::new(MeasurementList::new()),
             measuredboot_ml_file: None,
+            measuredboot_ml_bytes: None,
         }
     }
 

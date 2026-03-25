@@ -679,13 +679,31 @@ impl ContextInfo {
         })
     }
 
+    /// Generate a UEFI event-log evidence entry.
+    ///
+    /// The raw bytes are base64-encoded and returned as
+    /// [`EvidenceData::UefiLog`].
+    ///
+    /// # Source priority
+    ///
+    /// 1. **`cached_uefi_bytes`** – if `Some`, the bytes are encoded directly
+    ///    without any file I/O.  This is the path used by the push-model agent
+    ///    after it has dropped root privileges: the bytes are read once at
+    ///    startup (see `PrivilegedResources`) and passed in here.
+    /// 2. **`log_path`** – if `cached_uefi_bytes` is `None` and a path is
+    ///    provided, the file is opened and read from disk (pull-model agent
+    ///    behaviour).
+    /// 3. If both are `None`, an empty string is returned (measured boot not
+    ///    available).
     pub async fn generate_uefi_log_evidence(
         &mut self,
         log_path: Option<&str>,
+        cached_uefi_bytes: Option<&[u8]>,
     ) -> Result<EvidenceData, ContextInfoError> {
-        let content = if let Some(uefi_log_path) = log_path {
-            // Read raw bytes directly without parsing/reconstructing
-            // to match pull-model agent behavior
+        let content = if let Some(bytes) = cached_uefi_bytes {
+            use base64::Engine;
+            base64::engine::general_purpose::STANDARD.encode(bytes)
+        } else if let Some(uefi_log_path) = log_path {
             UefiLogHandler::read_raw_base64(uefi_log_path).map_err(|e| {
                 ContextInfoError::Keylime(format!(
                     "Failed to read UEFI log: {e:?}",
@@ -701,11 +719,18 @@ impl ContextInfo {
         })
     }
 
+    /// Collect evidence for all requested subjects in one pass.
+    ///
+    /// `cached_uefi_bytes` is forwarded to every
+    /// [`generate_uefi_log_evidence`](Self::generate_uefi_log_evidence) call
+    /// so that the push-model agent can supply bytes that were captured with
+    /// root privileges before the privilege drop.
     pub async fn collect_evidences(
         &mut self,
         evidence_requests: &[EvidenceRequest],
         ima_ml: Option<&std::sync::Mutex<crate::ima::MeasurementList>>,
         ima_file: Option<&std::sync::Mutex<std::fs::File>>,
+        cached_uefi_bytes: Option<&[u8]>,
     ) -> Result<Vec<EvidenceData>, ContextInfoError> {
         let mut evidence_results = Vec::new();
 
@@ -747,7 +772,10 @@ impl ContextInfo {
                 }
                 EvidenceRequest::UefiLog { log_path, .. } => {
                     let evidence = self
-                        .generate_uefi_log_evidence(log_path.as_deref())
+                        .generate_uefi_log_evidence(
+                            log_path.as_deref(),
+                            cached_uefi_bytes,
+                        )
                         .await?;
                     evidence_results.push(evidence);
                 }
@@ -1020,7 +1048,7 @@ mod tests {
         ];
         let mut context_info = context_result.unwrap(); //#[allow_ci]
         let result = context_info
-            .collect_evidences(&evidence_requests, None, None)
+            .collect_evidences(&evidence_requests, None, None, None)
             .await;
         assert!(result.is_ok());
         let evidence_results = result.unwrap(); //#[allow_ci]
@@ -1065,7 +1093,7 @@ mod tests {
         }];
 
         let result = context_info
-            .collect_evidences(&evidence_requests, None, None)
+            .collect_evidences(&evidence_requests, None, None, None)
             .await;
         assert!(result.is_err());
         assert!(matches!(
@@ -1102,7 +1130,7 @@ mod tests {
         }];
 
         let result = context_info
-            .collect_evidences(&evidence_requests, None, None)
+            .collect_evidences(&evidence_requests, None, None, None)
             .await;
         assert!(result.is_err());
         assert!(matches!(
@@ -1159,7 +1187,7 @@ mod tests {
             },
         ];
         let result = context_info
-            .collect_evidences(&evidence_requests, None, None)
+            .collect_evidences(&evidence_requests, None, None, None)
             .await;
         assert!(result.is_ok());
         context_info.flush_context().unwrap(); //#[allow_ci]

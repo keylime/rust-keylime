@@ -48,7 +48,16 @@ pub struct PrivilegedResources {
     /// This file requires root access to `/sys/kernel/security/tpm0/`.
     /// If the file doesn't exist or can't be opened, this will be None
     /// and measured boot attestation will be unavailable.
+    /// Still used by `UefiLogHandler::from_file()` for event parsing.
     pub measuredboot_ml_file: Option<Mutex<File>>,
+
+    /// Cached raw bytes of the measured boot (UEFI) event log, read
+    /// once at startup with root privileges.  The UEFI event log only
+    /// contains boot-time events (up to ExitBootServices) so the
+    /// cached content is always valid for this boot.  Used by
+    /// `generate_uefi_log_evidence()` to avoid re-opening the
+    /// securityfs file after privilege drop.
+    pub measuredboot_ml_bytes: Option<Vec<u8>>,
 }
 
 impl PrivilegedResources {
@@ -135,10 +144,27 @@ impl PrivilegedResources {
             None
         };
 
+        // Cache the UEFI event log bytes while still running as root.
+        let measuredboot_ml_bytes = if measuredboot_ml_path.exists() {
+            match std::fs::read(measuredboot_ml_path) {
+                Ok(bytes) => {
+                    info!("Cached measured boot log ({} bytes)", bytes.len());
+                    Some(bytes)
+                }
+                Err(e) => {
+                    warn!("Failed to read measured boot log: {}", e);
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
         Ok(PrivilegedResources {
             ima_ml_file,
             ima_ml: Mutex::new(MeasurementList::new()),
             measuredboot_ml_file,
+            measuredboot_ml_bytes,
         })
     }
 }
