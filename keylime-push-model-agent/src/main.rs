@@ -547,6 +547,7 @@ mod tests {
                     keylime::ima::MeasurementList::new(),
                 ),
                 measuredboot_ml_file: None,
+                measuredboot_ml_bytes: None,
             };
         let res = run(&args, privileged_resources);
         assert!(res.await.is_err());

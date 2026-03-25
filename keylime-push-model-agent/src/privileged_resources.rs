@@ -19,6 +19,7 @@ use anyhow::Result;
 use keylime::ima::MeasurementList;
 use log::{info, warn};
 use std::fs::File;
+use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
 use std::sync::Mutex;
 
@@ -48,7 +49,16 @@ pub struct PrivilegedResources {
     /// This file requires root access to `/sys/kernel/security/tpm0/`.
     /// If the file doesn't exist or can't be opened, this will be None
     /// and measured boot attestation will be unavailable.
+    /// Still used by `UefiLogHandler::from_file()` for event parsing.
     pub measuredboot_ml_file: Option<Mutex<File>>,
+
+    /// Cached raw bytes of the measured boot (UEFI) event log, read
+    /// once at startup with root privileges.  The UEFI event log only
+    /// contains boot-time events (up to ExitBootServices) so the
+    /// cached content is always valid for this boot.  Used by
+    /// `generate_uefi_log_evidence()` to avoid re-opening the
+    /// securityfs file after privilege drop.
+    pub measuredboot_ml_bytes: Option<Vec<u8>>,
 }
 
 impl PrivilegedResources {
@@ -104,41 +114,71 @@ impl PrivilegedResources {
             None
         };
 
-        // Open measured boot log (requires root for /sys/kernel/security/tpm0/)
+        // Open the measured boot log once, read its bytes into a cache, then
+        // seek back to the start so the same handle can be reused by
+        // UefiLogHandler::from_file.  Opening only once eliminates the TOCTOU
+        // race.  The byte cache is always populated when the file is
+        // readable; the file handle may be None if the seek-back fails
+        // (unlikely on securityfs seq_files, but harmless).
         let measuredboot_ml_path =
             Path::new(config.measuredboot_ml_path.as_str());
-        let measuredboot_ml_file = if measuredboot_ml_path.exists() {
-            match File::open(measuredboot_ml_path) {
-                Ok(file) => {
-                    info!(
-                        "Opened measured boot log: {}",
-                        measuredboot_ml_path.display()
-                    );
-                    Some(Mutex::new(file))
+        let (measuredboot_ml_file, measuredboot_ml_bytes) =
+            if measuredboot_ml_path.exists() {
+                let open_and_cache =
+                    || -> std::io::Result<(File, Vec<u8>)> {
+                        let mut file = File::open(measuredboot_ml_path)?;
+                        let mut bytes = Vec::new();
+                        file.read_to_end(&mut bytes)?;
+                        Ok((file, bytes))
+                    };
+                match open_and_cache() {
+                    Ok((mut file, bytes)) => {
+                        let file_handle = match file.seek(SeekFrom::Start(0))
+                        {
+                            Ok(_) => Some(Mutex::new(file)),
+                            Err(e) => {
+                                warn!(
+                                        "Measured boot log rewind failed: {} - {}; \
+                                         using cached bytes only",
+                                        measuredboot_ml_path.display(),
+                                        e
+                                    );
+                                None
+                            }
+                        };
+                        info!(
+                            "Opened and cached measured boot log: {} ({} bytes)",
+                            measuredboot_ml_path.display(),
+                            bytes.len()
+                        );
+                        (file_handle, Some(bytes))
+                    }
+                    Err(e) => {
+                        warn!(
+                            "Measured boot measurement list not accessible: {} - {}",
+                            measuredboot_ml_path.display(),
+                            e
+                        );
+                        warn!(
+                            "Measured boot attestation will be unavailable"
+                        );
+                        (None, None)
+                    }
                 }
-                Err(e) => {
-                    warn!(
-                        "Measured boot measurement list not accessible: {} - {}",
-                        measuredboot_ml_path.display(),
-                        e
-                    );
-                    warn!("Measured boot attestation will be unavailable");
-                    None
-                }
-            }
-        } else {
-            warn!(
-                "Measured boot measurement list not available: {}",
-                measuredboot_ml_path.display()
-            );
-            warn!("Measured boot attestation will be unavailable");
-            None
-        };
+            } else {
+                warn!(
+                    "Measured boot measurement list not available: {}",
+                    measuredboot_ml_path.display()
+                );
+                warn!("Measured boot attestation will be unavailable");
+                (None, None)
+            };
 
         Ok(PrivilegedResources {
             ima_ml_file,
             ima_ml: Mutex::new(MeasurementList::new()),
             measuredboot_ml_file,
+            measuredboot_ml_bytes,
         })
     }
 }
@@ -164,6 +204,10 @@ mod tests {
 
         assert!(resources.ima_ml_file.is_none());
         assert!(resources.measuredboot_ml_file.is_none());
+        assert!(
+            resources.measuredboot_ml_bytes.is_none(),
+            "bytes cache should be None when the file doesn't exist"
+        );
         // IMA MeasurementList should always be initialized
         assert!(resources.ima_ml.lock().is_ok());
     }
@@ -198,6 +242,11 @@ mod tests {
 
         assert!(resources.ima_ml_file.is_some());
         assert!(resources.measuredboot_ml_file.is_some());
+        assert_eq!(
+            resources.measuredboot_ml_bytes.as_deref(),
+            Some(b"test uefi data" as &[u8]),
+            "bytes cache should contain the file contents"
+        );
         assert!(resources.ima_ml.lock().is_ok());
     }
 
@@ -221,6 +270,8 @@ mod tests {
 
         assert!(resources.ima_ml_file.is_some());
         assert!(resources.measuredboot_ml_file.is_none());
+        assert!(resources.measuredboot_ml_bytes.is_none(),
+            "bytes cache should be None when measuredboot_ml_path doesn't exist");
         assert!(resources.ima_ml.lock().is_ok());
     }
 }
