@@ -25,7 +25,7 @@ jobs:
     - name: List downloaded files.
       run: ls 
     - name: Upload e2e_coverage report to Codecov with GitHub Action.
-      uses: codecov/codecov-action@v5
+      uses: codecov/codecov-action@v6
       env:
         CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
       with:
@@ -33,7 +33,7 @@ jobs:
         disable_search: true
         flags: e2e-testsuite
     - name: Upload upstream_coverage report to Codecov with GitHub Action.
-      uses: codecov/codecov-action@v5
+      uses: codecov/codecov-action@v6
       env:
         CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
       with:
