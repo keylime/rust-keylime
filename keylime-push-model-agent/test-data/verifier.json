@@ -13,7 +13,7 @@
       "type": "http",
       "documentation": "",
       "method": "post",
-      "endpoint": "v3.0/agents/[0-9,a-f]*/attestations",
+      "endpoint": "v3.0/agents/:agentId/attestations",
       "responses": [
         {
           "uuid": "092c6acf-331d-415a-ae80-24f806146a50",
@@ -65,7 +65,7 @@
       "type": "http",
       "documentation": "",
       "method": "patch",
-      "endpoint": "v3.0/agents/[0-9]*/attestations/[0-9]*",
+      "endpoint": "v3.0/agents/:agentId/attestations/:attestationId",
       "responses": [
         {
           "uuid": "b016ac12-b67d-4bc7-b9f7-bc17c38d5e2a",
@@ -149,7 +149,7 @@
       "type": "http",
       "documentation": "",
       "method": "patch",
-      "endpoint": "v3.0/sessions/[0-9]*",
+      "endpoint": "v3.0/sessions/:sessionId",
       "responses": [
         {
           "uuid": "243033ba-e5a9-40bc-b441-c9565189d8e1",
