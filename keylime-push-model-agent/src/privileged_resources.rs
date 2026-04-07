@@ -190,6 +190,10 @@ mod tests {
 
         assert!(resources.ima_ml_file.is_none());
         assert!(resources.measuredboot_ml_file.is_none());
+        assert!(
+            resources.measuredboot_ml_bytes.is_none(),
+            "bytes cache should be None when the file doesn't exist"
+        );
         // IMA MeasurementList should always be initialized
         assert!(resources.ima_ml.lock().is_ok());
     }
@@ -224,6 +228,11 @@ mod tests {
 
         assert!(resources.ima_ml_file.is_some());
         assert!(resources.measuredboot_ml_file.is_some());
+        assert_eq!(
+            resources.measuredboot_ml_bytes.as_deref(),
+            Some(b"test uefi data" as &[u8]),
+            "bytes cache should contain the file contents"
+        );
         assert!(resources.ima_ml.lock().is_ok());
     }
 
@@ -247,6 +256,8 @@ mod tests {
 
         assert!(resources.ima_ml_file.is_some());
         assert!(resources.measuredboot_ml_file.is_none());
+        assert!(resources.measuredboot_ml_bytes.is_none(),
+            "bytes cache should be None when measuredboot_ml_path doesn't exist");
         assert!(resources.ima_ml.lock().is_ok());
     }
 }

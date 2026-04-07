@@ -103,6 +103,34 @@ pub struct ContextInfo {
     pub ak_handle: KeyHandle,
 }
 
+/// Select and return the base64-encoded UEFI event log content.
+///
+/// This is the pure, allocation-only core of
+/// [`ContextInfo::generate_uefi_log_evidence`]: it does not touch the TPM
+/// and can be called (and tested) without a [`ContextInfo`].
+///
+/// # Source priority
+/// 1. `cached_uefi_bytes` – encoded directly, no file I/O.
+/// 2. `log_path` – file read from disk.
+/// 3. Both `None` – returns an empty string.
+fn uefi_log_content(
+    log_path: Option<&str>,
+    cached_uefi_bytes: Option<&[u8]>,
+) -> Result<String, ContextInfoError> {
+    use base64::Engine;
+    if let Some(bytes) = cached_uefi_bytes {
+        Ok(base64::engine::general_purpose::STANDARD.encode(bytes))
+    } else if let Some(path) = log_path {
+        UefiLogHandler::read_raw_base64(path).map_err(|e| {
+            ContextInfoError::Keylime(format!(
+                "Failed to read UEFI log: {e:?}"
+            ))
+        })
+    } else {
+        Ok(String::new())
+    }
+}
+
 impl ContextInfo {
     pub fn new_from_str(
         config: AlgorithmConfigurationString,
@@ -679,42 +707,15 @@ impl ContextInfo {
         })
     }
 
-    /// Generate a UEFI event-log evidence entry.
-    ///
-    /// The raw bytes are base64-encoded and returned as
-    /// [`EvidenceData::UefiLog`].
-    ///
-    /// # Source priority
-    ///
-    /// 1. **`cached_uefi_bytes`** – if `Some`, the bytes are encoded directly
-    ///    without any file I/O.  This is the path used by the push-model agent
-    ///    after it has dropped root privileges: the bytes are read once at
-    ///    startup (see `PrivilegedResources`) and passed in here.
-    /// 2. **`log_path`** – if `cached_uefi_bytes` is `None` and a path is
-    ///    provided, the file is opened and read from disk (pull-model agent
-    ///    behaviour).
-    /// 3. If both are `None`, an empty string is returned (measured boot not
-    ///    available).
+    /// Generate a UEFI event-log evidence entry; see [`uefi_log_content`] for
+    /// source-priority details.
     pub async fn generate_uefi_log_evidence(
         &mut self,
         log_path: Option<&str>,
         cached_uefi_bytes: Option<&[u8]>,
     ) -> Result<EvidenceData, ContextInfoError> {
-        let content = if let Some(bytes) = cached_uefi_bytes {
-            use base64::Engine;
-            base64::engine::general_purpose::STANDARD.encode(bytes)
-        } else if let Some(uefi_log_path) = log_path {
-            UefiLogHandler::read_raw_base64(uefi_log_path).map_err(|e| {
-                ContextInfoError::Keylime(format!(
-                    "Failed to read UEFI log: {e:?}",
-                ))
-            })?
-        } else {
-            String::new()
-        };
-
         Ok(EvidenceData::UefiLog {
-            entries: Some(content),
+            entries: Some(uefi_log_content(log_path, cached_uefi_bytes)?),
             meta: None,
         })
     }
@@ -783,6 +784,57 @@ impl ContextInfo {
         }
 
         Ok(evidence_results)
+    }
+}
+
+#[cfg(test)]
+mod uefi_log_tests {
+    use super::*;
+    use base64::Engine;
+
+    /// Cached bytes are preferred over the on-disk file.
+    ///
+    /// RED without the commit: `uefi_log_content` had no `cached_uefi_bytes`
+    /// branch, so it read the real log file whose content differs from the
+    /// cache bytes below.
+    #[test]
+    fn test_cache_preferred_over_file() {
+        let cache = b"hello from cache";
+        let expected =
+            base64::engine::general_purpose::STANDARD.encode(cache);
+
+        // log_path points at a real file; if the cache is ignored the
+        // returned content would be the file's bytes, not `expected`.
+        let result =
+            uefi_log_content(Some("test-data/uefi_log.bin"), Some(cache));
+        assert_eq!(result.unwrap(), expected); //#[allow_ci]
+    }
+
+    /// Without a cache the file is read and correctly base64-encoded.
+    #[test]
+    fn test_file_fallback() {
+        let expected_bytes =
+            std::fs::read("test-data/uefi_log.bin").expect("fixture missing");
+        let expected =
+            base64::engine::general_purpose::STANDARD.encode(&expected_bytes);
+
+        let result = uefi_log_content(Some("test-data/uefi_log.bin"), None);
+        assert_eq!(result.unwrap(), expected); //#[allow_ci]
+    }
+
+    /// Cache is used even when log_path does not exist on disk.
+    ///
+    /// RED without the commit: without caching, opening a nonexistent path
+    /// returns an error and the assertion on `Ok` fails.
+    #[test]
+    fn test_cache_used_when_path_nonexistent() {
+        let cache = b"cached uefi payload";
+        let expected =
+            base64::engine::general_purpose::STANDARD.encode(cache);
+
+        let result =
+            uefi_log_content(Some("/nonexistent/uefi_log.bin"), Some(cache));
+        assert_eq!(result.unwrap(), expected); //#[allow_ci]
     }
 }
 
