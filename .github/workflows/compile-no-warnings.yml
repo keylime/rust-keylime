@@ -18,6 +18,8 @@ jobs:
       image: quay.io/keylime/keylime-ci:latest
     steps:
       - uses: actions/checkout@v6
+      - name: Set git safe.directory for the working directory
+        run: git config --system --add safe.directory "$PWD"
       - name: Check compilation (no warnings)
         run: RUSTFLAGS="-D warnings" cargo build
       - name: Check test compilation (no warnings)
