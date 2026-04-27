@@ -25,4 +25,4 @@ jobs:
       - name: Check test compilation (no warnings)
         run: RUSTFLAGS="-D warnings" cargo test --no-run
       - name: Check clippy errors (no warnings included)
-        run: cargo clippy --all-features --all-targets  -- -D clippy::all -D warnings
+        run: cargo clippy --all-features --all-targets -- -D clippy::all -D warnings
