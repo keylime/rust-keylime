@@ -15,7 +15,8 @@ jobs:
     name: Compilation with no warnings
     runs-on: ubuntu-latest
     container:
-      image: quay.io/keylime/keylime-ci:latest
+      # To refresh: skopeo inspect --no-tags docker://quay.io/keylime/keylime-ci:latest | jq -r '.Digest'
+      image: quay.io/keylime/keylime-ci@sha256:973f36045d0dd0b1a219dd88f06625c65a77f267842ee23d955e0c095ef09ff2
     steps:
       - uses: actions/checkout@v6
       - name: Set git safe.directory for the working directory
