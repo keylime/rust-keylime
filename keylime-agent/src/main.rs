@@ -87,7 +87,7 @@ use tss_esapi::{
     handles::KeyHandle,
     interface_types::algorithm::{AsymmetricAlgorithm, HashingAlgorithm},
     interface_types::resource_handles::Hierarchy,
-    structures::{Auth, Data, Digest, MaxBuffer, PublicBuffer},
+    structures::{Auth, Digest, MaxBuffer, PublicBuffer},
     traits::Marshall,
     Context,
 };
@@ -494,24 +494,6 @@ async fn main() -> Result<()> {
         None
     };
 
-    let (attest, signature) = if let Some(dev_id) = &mut device_id {
-        let qualifying_data = Data::try_from(agent_uuid.as_bytes())?;
-        let (attest, signature) =
-            dev_id.certify(qualifying_data, ak_handle, &mut ctx)?;
-
-        info!("AK certified with IAK.");
-
-        // // For debugging certify(), the following checks the generated signature
-        // let max_b = MaxBuffer::try_from(attest.clone().marshall()?)?;
-        // let (hashed_attest, _) = ctx.inner.hash(max_b, HashingAlgorithm::Sha256, Hierarchy::Endorsement,)?;
-        // println!("{:?}", hashed_attest);
-        // println!("{:?}", signature);
-        // println!("{:?}", ctx.inner.verify_signature(iak.as_ref().unwrap().handle, hashed_attest, signature.clone())?); //#[allow_ci]
-        (Some(attest), Some(signature))
-    } else {
-        (None, None)
-    };
-
     // Load or generate RSA key pair for secure transmission of u, v keys.
     // The u, v keys are two halves of the key used to decrypt the workload after
     // the Identity and Integrity Quotes sent by the agent are validated
@@ -645,8 +627,6 @@ async fn main() -> Result<()> {
         agent_uuid: agent_uuid.clone(),
         mtls_cert,
         device_id,
-        attest,
-        signature,
         ak_handle,
         retry_config: Some(get_retry_config(&config)),
     };

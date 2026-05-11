@@ -20,7 +20,7 @@ use uuid::Uuid;
 
 pub static CONFIG_VERSION: &str = "2.0";
 pub static SUPPORTED_API_VERSIONS: &[&str] =
-    &["2.1", "2.2", "2.3", "2.4", "2.5"];
+    &["2.1", "2.2", "2.3", "2.4", "2.5", "2.6"];
 pub static DEFAULT_REGISTRAR_API_VERSIONS: &str = "default";
 
 pub static DEFAULT_CONFIG: &str = "/etc/keylime/agent.conf";

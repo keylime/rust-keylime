@@ -109,8 +109,6 @@ pub async fn register_agent(
         agent_uuid,
         mtls_cert: None,
         device_id: None, // TODO: Check how to proceed with device ID
-        attest: None, // TODO: Check how to proceed with attestation, normally, no device ID means no attest
-        signature: None, // TODO: Normally, no device ID means no signature
         ak_handle: context_info.ak_handle,
         retry_config,
     };

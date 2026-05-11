@@ -9,10 +9,12 @@ use crate::{
     tpm::{self},
 };
 use base64::{engine::general_purpose, Engine as _};
-use log::{error, info};
+use log::{error, info, warn};
 use openssl::x509::X509;
 use tss_esapi::{
-    handles::KeyHandle, structures::PublicBuffer, traits::Marshall,
+    handles::KeyHandle,
+    structures::{Data, PublicBuffer},
+    traits::Marshall,
 };
 
 #[derive(Debug)]
@@ -44,14 +46,12 @@ pub struct AgentRegistration {
     pub agent_uuid: String,
     pub mtls_cert: Option<X509>,
     pub device_id: Option<device_id::DeviceID>,
-    pub attest: Option<tss_esapi::structures::Attest>,
-    pub signature: Option<tss_esapi::structures::Signature>,
     pub ak_handle: KeyHandle,
     pub retry_config: Option<RetryConfig>,
 }
 
 pub async fn register_agent(
-    aa: AgentRegistration,
+    mut aa: AgentRegistration,
     ctx: &mut tpm::Context<'_>,
 ) -> Result<()> {
     let iak_pub;
@@ -59,6 +59,28 @@ pub async fn register_agent(
     let ak_pub = &PublicBuffer::try_from(aa.ak.public)?.marshall()?;
     let ek_pub =
         &PublicBuffer::try_from(aa.ek_result.public.clone())?.marshall()?;
+
+    let ac = &aa.agent_registration_config;
+
+    // Build the registrar client first so we can query its supported API
+    // versions before performing TPM operations that depend on that version.
+    // Uses HTTPS if CA certificate is provided, otherwise plain HTTP.
+    let mut builder = RegistrarClientBuilder::new()
+        .registrar_address(ac.registrar_ip.clone())
+        .registrar_port(ac.registrar_port)
+        .retry_config(aa.retry_config.clone());
+
+    if let Some(ca_cert) = &ac.registrar_ca_cert {
+        builder = builder.ca_certificate(ca_cert.clone());
+    }
+    if let Some(disable_tls) = ac.registrar_disable_tls {
+        builder = builder.disable_tls(disable_tls);
+    }
+    if let Some(timeout) = ac.registrar_timeout {
+        builder = builder.timeout(timeout);
+    }
+
+    let mut registrar_client = builder.build().await?;
 
     let mut ai_builder = AgentIdentityBuilder::new()
         .ak_pub(ak_pub)
@@ -81,15 +103,43 @@ pub async fn register_agent(
 
     // Set the IAK/IDevID related fields, if enabled
     if aa.agent_registration_config.enable_iak_idevid {
-        let (Some(dev_id), Some(attest), Some(signature)) =
-            (&aa.device_id, aa.attest, aa.signature)
-        else {
+        let Some(dev_id) = aa.device_id.as_mut() else {
             error!("IDevID and IAK are enabled but could not be generated");
             return Err(Error::ConfigurationGenericError(
                 "IDevID and IAK are enabled but could not be generated"
                     .to_string(),
             ));
         };
+
+        // Hash the agent UUID (SHA-256) when the registrar supports API 2.6+.
+        // This keeps qualifying data within the TPM2B_DATA size limit on
+        // SHA-256-only TPMs (34 bytes). For registrars that only support 2.5
+        // or earlier, fall back to the raw UUID bytes for backward compat.
+        let qualifying_data = if registrar_client.supports_api_version("2.6")
+        {
+            let hash = crypto::hash(
+                aa.agent_uuid.as_bytes(),
+                openssl::hash::MessageDigest::sha256(),
+            )?;
+            Data::try_from(hash.as_slice())?
+        } else {
+            let uuid_bytes = aa.agent_uuid.as_bytes();
+            if uuid_bytes.len() > 34 {
+                // TPM2B_DATA limit on SHA-256-only TPMs is 34 bytes.
+                // Raw UUID won't fit; the registrar must support 2.6+.
+                warn!(
+                        "Agent UUID is {} bytes (max 34 for pre-2.6 registrar); \
+                         registration will likely fail. Update the registrar to 2.6+.",
+                        uuid_bytes.len()
+                    );
+            }
+            Data::try_from(uuid_bytes)?
+        };
+
+        let (attest, signature) =
+            dev_id.certify(qualifying_data, aa.ak_handle, ctx)?;
+
+        info!("AK certified with IAK.");
 
         iak_pub =
             PublicBuffer::try_from(dev_id.iak_pubkey.clone())?.marshall()?;
@@ -114,28 +164,6 @@ pub async fn register_agent(
 
     // Build the Agent Identity
     let ai = ai_builder.build().await?;
-
-    let ac = &aa.agent_registration_config;
-
-    // Build the registrar client
-    // Uses HTTPS if CA certificate is provided, otherwise plain HTTP
-    let mut builder = RegistrarClientBuilder::new()
-        .registrar_address(ac.registrar_ip.clone())
-        .registrar_port(ac.registrar_port)
-        .retry_config(aa.retry_config.clone());
-
-    // Add TLS configuration if CA certificate is provided
-    if let Some(ca_cert) = &ac.registrar_ca_cert {
-        builder = builder.ca_certificate(ca_cert.clone());
-    }
-    if let Some(disable_tls) = ac.registrar_disable_tls {
-        builder = builder.disable_tls(disable_tls);
-    }
-    if let Some(timeout) = ac.registrar_timeout {
-        builder = builder.timeout(timeout);
-    }
-
-    let mut registrar_client = builder.build().await?;
 
     // Request keyblob material
     let keyblob = registrar_client.register_agent(&ai).await?;

@@ -400,6 +400,16 @@ struct Register<'a> {
 }
 
 impl RegistrarClient {
+    /// Check if the registrar supports the given API version.
+    ///
+    /// Returns `false` if the registrar did not advertise supported versions
+    /// (e.g., it does not expose a `/version` endpoint).
+    pub fn supports_api_version(&self, version: &str) -> bool {
+        self.supported_api_versions
+            .as_ref()
+            .is_some_and(|versions| versions.iter().any(|v| v == version))
+    }
+
     async fn try_register_agent(
         &self,
         ai: &AgentIdentity<'_>,

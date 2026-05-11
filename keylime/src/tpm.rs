@@ -3291,14 +3291,25 @@ pub mod tests {
             .expect("failed to create IAK")
             .handle;
 
-        let qualifying_data = "some_uuid".as_bytes();
+        // Use a realistic UUID string (36 bytes) — the exact input size that
+        // triggers TPM_RC_SIZE on SHA-256-only TPMs without the hash fix.
+        let agent_uuid = "d432fbb3-d2f1-4a97-9ef7-75bd81c00000";
+        let qualifying_data = crate::crypto::hash(
+            agent_uuid.as_bytes(),
+            openssl::hash::MessageDigest::sha256(),
+        )
+        .unwrap(); //#[allow_ci]
 
-        let r = ctx.certify_credential_with_iak(
-            Data::try_from(qualifying_data).unwrap(), //#[allow_ci]
-            ak_handle,
-            iak_handle,
+        let data = Data::try_from(qualifying_data.as_slice()).unwrap(); //#[allow_ci]
+        let (attest, _signature) = ctx
+            .certify_credential_with_iak(data, ak_handle, iak_handle)
+            .expect("certify_credential_with_iak failed");
+
+        assert_eq!(
+            attest.extra_data().value(),
+            qualifying_data.as_slice(),
+            "extra_data in Attest must equal the SHA-256 hash of the agent UUID"
         );
-        assert!(r.is_ok(), "Result: {r:?}");
 
         // Flush context to free TPM memory
         let r = ctx.flush_context(ek_handle.into());

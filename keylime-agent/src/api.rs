@@ -188,6 +188,25 @@ fn configure_api_v2_5(cfg: &mut web::ServiceConfig) {
     )
 }
 
+/// Configure the endpoints supported by API version 2.6
+///
+/// Version 2.6 has the same agent-side endpoints as 2.5. The version bump
+/// reflects a protocol change: the agent now SHA-256 hashes the agent ID
+/// before using it as qualifying data in TPM2_Certify (IAK-based AK
+/// certification). This ensures the qualifying data fits within the
+/// TPM2B_DATA size limit on SHA-256-only TPMs (34 bytes). The certify
+/// operation is deferred until after API version negotiation so the agent
+/// can fall back to raw UUID bytes when the registrar only supports 2.5.
+fn configure_api_v2_6(cfg: &mut web::ServiceConfig) {
+    let version = Version::from_str("2.6").expect("Invalid API version");
+    _ = cfg.app_data(web::Data::new(version));
+    configure_base_endpoints(cfg);
+    _ = cfg.service(
+        web::scope("/agent")
+            .configure(agent_handler::configure_agent_endpoints),
+    )
+}
+
 /// Get a scope configured for the given API version
 pub(crate) fn get_api_scope(version: &str) -> Result<Scope, APIError> {
     match version {
@@ -201,6 +220,8 @@ pub(crate) fn get_api_scope(version: &str) -> Result<Scope, APIError> {
             .configure(configure_api_v2_4)),
         "2.5" => Ok(web::scope(format!("v{version}").as_ref())
             .configure(configure_api_v2_5)),
+        "2.6" => Ok(web::scope(format!("v{version}").as_ref())
+            .configure(configure_api_v2_6)),
         _ => Err(APIError::UnsupportedVersion(version.into())),
     }
 }
