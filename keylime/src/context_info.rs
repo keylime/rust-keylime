@@ -790,7 +790,6 @@ impl ContextInfo {
 mod uefi_log_tests {
     use super::base64_standard;
     use super::*;
-    use base64::Engine as _;
 
     /// Cached bytes are preferred over the on-disk file.
     ///
