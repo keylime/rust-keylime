@@ -12,6 +12,8 @@ pub mod conversion;
 pub mod digest;
 pub mod dsse;
 pub mod filesystem;
+#[cfg(feature = "rpm-repo")]
+pub mod gpg_verify;
 pub mod ima_parser;
 pub mod initrd;
 pub mod measured_boot_gen;
