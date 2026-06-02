@@ -42,6 +42,7 @@ pub async fn execute(
             ramdisk_dir,
             local_rpm_repo,
             remote_rpm_repo,
+            gpg_key,
         } => {
             if *interactive {
                 #[cfg(feature = "wizard")]
@@ -61,6 +62,7 @@ pub async fn execute(
                         ramdisk_dir: ramdisk_dir.as_deref(),
                         local_rpm_repo: local_rpm_repo.as_deref(),
                         remote_rpm_repo: remote_rpm_repo.as_deref(),
+                        gpg_key: gpg_key.as_deref(),
                         add_ima_signature_verification_key,
                     };
                     return super::wizard_runtime::run(&defaults, output)
@@ -90,6 +92,7 @@ pub async fn execute(
                 ramdisk_dir.as_deref(),
                 local_rpm_repo.as_deref(),
                 remote_rpm_repo.as_deref(),
+                gpg_key.as_deref(),
                 add_ima_signature_verification_key,
                 output,
             )
@@ -201,6 +204,7 @@ pub(super) async fn generate_runtime(
     ramdisk_dir: Option<&str>,
     local_rpm_repo: Option<&str>,
     remote_rpm_repo: Option<&str>,
+    gpg_key: Option<&str>,
     add_ima_signature_verification_key: &[String],
     output: &OutputHandler,
 ) -> Result<Value, CommandError> {
@@ -411,8 +415,14 @@ pub(super) async fn generate_runtime(
                 ),
             )?;
 
+            let gpg_key_path = gpg_key.map(std::path::PathBuf::from);
             let rpm_digests = tokio::task::spawn_blocking({
-                move || rpm_repo::analyze_local_repo(&rpm_dir_path)
+                move || {
+                    rpm_repo::analyze_local_repo(
+                        &rpm_dir_path,
+                        gpg_key_path.as_deref(),
+                    )
+                }
             })
             .await
             .map_err(|e| {
@@ -439,6 +449,7 @@ pub(super) async fn generate_runtime(
         #[cfg(not(feature = "rpm-repo"))]
         {
             let _ = rpm_dir;
+            let _ = gpg_key;
             return Err(CommandError::from(
                 crate::commands::error::PolicyGenerationError::UnsupportedAlgorithm {
                     algorithm: "--local-rpm-repo requires the 'rpm-repo' feature flag. \
@@ -457,7 +468,9 @@ pub(super) async fn generate_runtime(
             output
                 .info(format!("Analyzing remote RPM repository: {rpm_url}"));
 
-            let rpm_digests = rpm_repo::analyze_remote_repo(rpm_url).await?;
+            let gpg_key_path = gpg_key.map(Path::new);
+            let rpm_digests =
+                rpm_repo::analyze_remote_repo(rpm_url, gpg_key_path).await?;
 
             for (file_path, digests) in &rpm_digests {
                 for digest in digests {
@@ -474,6 +487,7 @@ pub(super) async fn generate_runtime(
         #[cfg(not(feature = "rpm-repo"))]
         {
             let _ = rpm_url;
+            let _ = gpg_key;
             return Err(CommandError::from(
                 crate::commands::error::PolicyGenerationError::UnsupportedAlgorithm {
                     algorithm: "--remote-rpm-repo requires the 'rpm-repo' feature flag. \

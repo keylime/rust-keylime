@@ -177,6 +177,10 @@ pub enum PolicyGenerationError {
     /// RPM parsing error
     #[error("RPM parse error at {path}: {reason}")]
     RpmParse { path: PathBuf, reason: String },
+
+    /// GPG signature verification failed
+    #[error("GPG signature verification failed for {path}: {reason}")]
+    GpgVerification { path: PathBuf, reason: String },
 }
 
 /// DSSE (Dead Simple Signing Envelope) errors

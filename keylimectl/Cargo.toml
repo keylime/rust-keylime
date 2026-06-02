@@ -17,7 +17,7 @@ api-v2 = []
 api-v3 = []
 tpm-local = ["dep:tss-esapi"]
 tpm-quote-validation = ["dep:tss-esapi"]
-rpm-repo = ["dep:rpm", "dep:quick-xml"]
+rpm-repo = ["dep:rpm", "dep:quick-xml", "dep:sequoia-openpgp"]
 wizard = ["dep:dialoguer"]
 
 [dependencies]
@@ -42,6 +42,7 @@ uuid.workspace = true
 dialoguer = { version = "0.12", optional = true }
 rpm = { version = "0.19", optional = true, default-features = false }
 quick-xml = { version = "0.37", optional = true }
+sequoia-openpgp = { version = "2", optional = true, default-features = false, features = ["crypto-openssl"] }
 flate2 = "1"
 xz2 = "0.1"
 bzip2 = "0.5"

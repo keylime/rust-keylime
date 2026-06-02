@@ -73,9 +73,12 @@ fn extract_digests_from_metadata(
 /// Analyze all RPM packages in a local repository directory.
 ///
 /// Scans for `*.rpm` files recursively and extracts file digests
-/// from each package's header.
+/// from each package's header. If `repodata/repomd.xml.asc` exists,
+/// the signature is verified using `gpg_key_path` or
+/// `repodata/repomd.xml.key`.
 pub fn analyze_local_repo(
     repo_dir: &Path,
+    gpg_key_path: Option<&Path>,
 ) -> Result<DigestMap, PolicyGenerationError> {
     if !repo_dir.is_dir() {
         return Err(PolicyGenerationError::RpmParse {
@@ -90,6 +93,55 @@ pub fn analyze_local_repo(
             "No repodata/ directory found in {}; scanning for RPM files anyway",
             repo_dir.display()
         );
+    } else {
+        let repomd_path = repodata_dir.join("repomd.xml");
+        let sig_path = repodata_dir.join("repomd.xml.asc");
+        if sig_path.exists() {
+            let repomd_bytes = std::fs::read(&repomd_path).map_err(|e| {
+                PolicyGenerationError::RpmParse {
+                    path: repomd_path.clone(),
+                    reason: format!("Failed to read repomd.xml: {e}"),
+                }
+            })?;
+            let sig_bytes = std::fs::read(&sig_path).map_err(|e| {
+                PolicyGenerationError::RpmParse {
+                    path: sig_path.clone(),
+                    reason: format!("Failed to read repomd.xml.asc: {e}"),
+                }
+            })?;
+            let key_bytes = match gpg_key_path {
+                Some(p) => crate::policy_tools::gpg_verify::load_key_file(p)?,
+                None => {
+                    let key_path = repodata_dir.join("repomd.xml.key");
+                    if !key_path.exists() {
+                        return Err(PolicyGenerationError::GpgVerification {
+                            path: sig_path.clone(),
+                            reason: format!(
+                                "Signature file exists but no key found at \
+                                 {}; provide one with --gpg-key",
+                                key_path.display()
+                            ),
+                        });
+                    }
+                    crate::policy_tools::gpg_verify::load_key_file(&key_path)?
+                }
+            };
+            crate::policy_tools::gpg_verify::verify_detached_signature(
+                &key_bytes,
+                &sig_bytes,
+                &repomd_bytes,
+                &repomd_path,
+            )?;
+            log::info!(
+                "Repository metadata signature verified: {}",
+                repomd_path.display()
+            );
+        } else {
+            log::warn!(
+                "Unsigned repository metadata (no repomd.xml.asc found); \
+                 continuing anyway"
+            );
+        }
     }
 
     // Find all RPM files
@@ -127,8 +179,11 @@ pub fn analyze_local_repo(
 /// Attempts the fast path using `filelists-ext.xml` metadata
 /// first. Falls back to parsing `primary.xml` and downloading
 /// individual RPM files if extended file lists are not available.
+/// If `repodata/repomd.xml.asc` is present the signature is verified
+/// using `gpg_key_path` or the bundled `repodata/repomd.xml.key`.
 pub async fn analyze_remote_repo(
     repo_url: &str,
+    gpg_key_path: Option<&Path>,
 ) -> Result<DigestMap, PolicyGenerationError> {
     let base_url = if repo_url.ends_with('/') {
         repo_url.to_string()
@@ -138,12 +193,52 @@ pub async fn analyze_remote_repo(
 
     // Download repomd.xml
     let repomd_url = format!("{base_url}repodata/repomd.xml");
-    let repomd_xml = fetch_text(&repomd_url).await.map_err(|e| {
+    let repomd_bytes = fetch_bytes(&repomd_url).await.map_err(|e| {
         PolicyGenerationError::RpmParse {
             path: PathBuf::from(&repomd_url),
             reason: format!("Failed to download repomd.xml: {e}"),
         }
     })?;
+
+    // Verify signature if present
+    let sig_url = format!("{base_url}repodata/repomd.xml.asc");
+    match fetch_optional_bytes(&sig_url).await? {
+        Some(sig_bytes) => {
+            let key_bytes = match gpg_key_path {
+                Some(p) => crate::policy_tools::gpg_verify::load_key_file(p)?,
+                None => {
+                    let key_url =
+                        format!("{base_url}repodata/repomd.xml.key");
+                    fetch_optional_bytes(&key_url).await?.ok_or_else(
+                        || PolicyGenerationError::GpgVerification {
+                            path: PathBuf::from(&sig_url),
+                            reason: format!(
+                                "Signature file exists but no key found \
+                                 at {key_url}; provide one with --gpg-key"
+                            ),
+                        },
+                    )?
+                }
+            };
+            crate::policy_tools::gpg_verify::verify_detached_signature(
+                &key_bytes,
+                &sig_bytes,
+                &repomd_bytes,
+                &PathBuf::from(&repomd_url),
+            )?;
+            log::info!(
+                "Repository metadata signature verified: {repomd_url}"
+            );
+        }
+        None => {
+            log::warn!(
+                "Unsigned repository metadata (no repomd.xml.asc found); \
+                 continuing anyway"
+            );
+        }
+    }
+
+    let repomd_xml = String::from_utf8_lossy(&repomd_bytes);
 
     // Try fast path: filelists-ext.xml
     if let Some(filelists_href) =
@@ -408,8 +503,8 @@ fn parse_primary_rpm_urls(
     Ok(urls)
 }
 
-/// Fetch text content from a URL.
-async fn fetch_text(url: &str) -> Result<String, PolicyGenerationError> {
+/// Fetch raw bytes from a URL, returning an error for any non-2xx response.
+async fn fetch_bytes(url: &str) -> Result<Vec<u8>, PolicyGenerationError> {
     let response = reqwest::get(url).await.map_err(|e| {
         PolicyGenerationError::RpmParse {
             path: PathBuf::from(url),
@@ -423,13 +518,41 @@ async fn fetch_text(url: &str) -> Result<String, PolicyGenerationError> {
             reason: format!("HTTP {status}"),
         });
     }
-    response
-        .text()
-        .await
-        .map_err(|e| PolicyGenerationError::RpmParse {
+    response.bytes().await.map(|b| b.to_vec()).map_err(|e| {
+        PolicyGenerationError::RpmParse {
             path: PathBuf::from(url),
             reason: format!("Failed to read response body: {e}"),
-        })
+        }
+    })
+}
+
+/// Fetch raw bytes from a URL, returning `Ok(None)` on 404.
+async fn fetch_optional_bytes(
+    url: &str,
+) -> Result<Option<Vec<u8>>, PolicyGenerationError> {
+    let response = reqwest::get(url).await.map_err(|e| {
+        PolicyGenerationError::RpmParse {
+            path: PathBuf::from(url),
+            reason: format!("HTTP request failed: {e}"),
+        }
+    })?;
+    if response.status() == reqwest::StatusCode::NOT_FOUND {
+        return Ok(None);
+    }
+    let status = response.status();
+    if !status.is_success() {
+        return Err(PolicyGenerationError::RpmParse {
+            path: PathBuf::from(url),
+            reason: format!("HTTP {status}"),
+        });
+    }
+    let data = response.bytes().await.map(|b| b.to_vec()).map_err(|e| {
+        PolicyGenerationError::RpmParse {
+            path: PathBuf::from(url),
+            reason: format!("Failed to read response body: {e}"),
+        }
+    })?;
+    Ok(Some(data))
 }
 
 /// Fetch data from a URL and decompress if needed (gzip, xz,
