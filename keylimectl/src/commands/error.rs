@@ -176,6 +176,11 @@ pub enum PolicyGenerationError {
     #[cfg(feature = "rpm-repo")]
     #[error("RPM parse error at {path}: {reason}")]
     RpmParse { path: PathBuf, reason: String },
+
+    /// GPG signature verification failed
+    #[cfg(feature = "rpm-repo")]
+    #[error("GPG signature verification failed for {path}: {reason}")]
+    GpgVerification { path: PathBuf, reason: String },
 }
 
 impl CommandError {

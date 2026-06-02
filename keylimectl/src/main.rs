@@ -352,6 +352,7 @@ enum AgentAction {
 
 /// Policy management actions
 #[derive(Subcommand)]
+#[allow(clippy::large_enum_variant)]
 enum PolicyAction {
     /// Push a runtime policy to the verifier
     Push {
@@ -513,6 +514,7 @@ impl PolicyAction {
 
 /// Policy generation subcommands
 #[derive(Subcommand)]
+#[allow(clippy::large_enum_variant)]
 enum GenerateSubcommand {
     /// Generate a runtime policy from IMA logs, allowlists, or filesystem
     Runtime {
@@ -586,6 +588,15 @@ enum GenerateSubcommand {
         /// Remote RPM repository URL (requires rpm-repo feature)
         #[arg(long, value_name = "URL")]
         remote_rpm_repo: Option<String>,
+
+        /// GPG public key file for verifying RPM repository metadata signatures
+        #[arg(long, value_name = "FILE")]
+        gpg_key: Option<String>,
+
+        /// Allow unsigned remote RPM repository metadata
+        #[cfg(feature = "rpm-repo")]
+        #[arg(long)]
+        allow_unsigned_repo: bool,
     },
 
     /// Generate a measured boot policy from a UEFI event log
