@@ -377,6 +377,7 @@ fn test_generate_tpm_to_stdout() {
 }
 
 #[test]
+#[cfg(not(any(feature = "tpm-local", feature = "tpm-quote-validation")))]
 fn test_generate_tpm_from_tpm_fails_without_feature() {
     let tmpdir = tempfile::tempdir().unwrap(); //#[allow_ci]
     keylimectl_in_clean_dir(&tmpdir)
@@ -901,6 +902,7 @@ fn test_generate_runtime_help_shows_ramdisk_dir() {
         .stdout(predicate::str::contains("--ramdisk-dir"));
 }
 
+#[cfg(feature = "rpm-repo")]
 #[test]
 fn test_generate_runtime_help_shows_rpm_options() {
     let tmpdir = tempfile::tempdir().unwrap(); //#[allow_ci]
@@ -927,6 +929,7 @@ fn test_generate_runtime_ramdisk_nonexistent() {
         .failure();
 }
 
+#[cfg(any(feature = "tpm-local", feature = "tpm-quote-validation"))]
 #[test]
 fn test_generate_tpm_help_shows_from_tpm() {
     let tmpdir = tempfile::tempdir().unwrap(); //#[allow_ci]

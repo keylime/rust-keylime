@@ -16,6 +16,7 @@ pub async fn execute(
     output: &OutputHandler,
 ) -> Result<Value, KeylimectlError> {
     let VerifyAction::Evidence {
+        #[cfg(feature = "wizard")]
         interactive,
         nonce,
         quote,
@@ -30,32 +31,22 @@ pub async fn execute(
         evidence_type,
     } = action;
 
+    #[cfg(feature = "wizard")]
     if *interactive {
-        #[cfg(feature = "wizard")]
-        {
-            let defaults = super::wizard_evidence::Defaults {
-                evidence_type,
-                nonce: nonce.as_deref(),
-                quote: quote.as_deref(),
-                hash_alg,
-                tpm_ak: tpm_ak.as_deref(),
-                tpm_ek: tpm_ek.as_deref(),
-                runtime_policy: runtime_policy.as_deref(),
-                ima_measurement_list: ima_measurement_list.as_deref(),
-                mb_policy: mb_policy.as_deref(),
-                mb_log: mb_log.as_deref(),
-                tpm_policy: tpm_policy.as_deref(),
-            };
-            return super::wizard_evidence::run(&defaults, output).await;
-        }
-        #[cfg(not(feature = "wizard"))]
-        {
-            return Err(KeylimectlError::Validation(
-                "Interactive mode requires the 'wizard' feature. \
-                 Rebuild with: cargo build --features wizard"
-                    .into(),
-            ));
-        }
+        let defaults = super::wizard_evidence::Defaults {
+            evidence_type,
+            nonce: nonce.as_deref(),
+            quote: quote.as_deref(),
+            hash_alg,
+            tpm_ak: tpm_ak.as_deref(),
+            tpm_ek: tpm_ek.as_deref(),
+            runtime_policy: runtime_policy.as_deref(),
+            ima_measurement_list: ima_measurement_list.as_deref(),
+            mb_policy: mb_policy.as_deref(),
+            mb_log: mb_log.as_deref(),
+            tpm_policy: tpm_policy.as_deref(),
+        };
+        return super::wizard_evidence::run(&defaults, output).await;
     }
 
     // Validate required fields in non-interactive mode
