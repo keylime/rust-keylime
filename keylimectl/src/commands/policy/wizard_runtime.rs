@@ -333,7 +333,10 @@ pub async fn run(
         ramdisk_path.as_deref(),
         local_rpm_path.as_deref(),
         remote_rpm_url.as_deref(),
+        #[cfg(feature = "rpm-repo")]
         defaults.gpg_key,
+        #[cfg(not(feature = "rpm-repo"))]
+        None,
         defaults.add_ima_signature_verification_key,
         output,
     )
@@ -368,13 +371,13 @@ pub struct Defaults<'a> {
     /// Ramdisk directory.
     pub ramdisk_dir: Option<&'a str>,
     /// Local RPM repository.
-    #[cfg_attr(not(feature = "rpm-repo"), allow(dead_code))]
+    #[cfg(feature = "rpm-repo")]
     pub local_rpm_repo: Option<&'a str>,
     /// Remote RPM repository.
-    #[cfg_attr(not(feature = "rpm-repo"), allow(dead_code))]
+    #[cfg(feature = "rpm-repo")]
     pub remote_rpm_repo: Option<&'a str>,
     /// GPG public key for verifying RPM repository metadata signatures.
-    #[cfg_attr(not(feature = "rpm-repo"), allow(dead_code))]
+    #[cfg(feature = "rpm-repo")]
     pub gpg_key: Option<&'a str>,
     /// IMA signature verification key files.
     pub add_ima_signature_verification_key: &'a [String],

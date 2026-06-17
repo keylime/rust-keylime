@@ -26,6 +26,7 @@ pub async fn execute(
 ) -> Result<Value, KeylimectlError> {
     match subcommand {
         GenerateSubcommand::Runtime {
+            #[cfg(feature = "wizard")]
             interactive,
             ima_measurement_list,
             allowlist,
@@ -40,42 +41,37 @@ pub async fn execute(
             add_ima_signature_verification_key,
             hash_alg,
             ramdisk_dir,
+            #[cfg(feature = "rpm-repo")]
             local_rpm_repo,
+            #[cfg(feature = "rpm-repo")]
             remote_rpm_repo,
+            #[cfg(feature = "rpm-repo")]
             gpg_key,
         } => {
+            #[cfg(feature = "wizard")]
             if *interactive {
-                #[cfg(feature = "wizard")]
-                {
-                    let defaults = super::wizard_runtime::Defaults {
-                        ima_measurement_list: ima_measurement_list.as_deref(),
-                        allowlist: allowlist.as_deref(),
-                        rootfs: rootfs.as_deref(),
-                        skip_path,
-                        base_policy: base_policy.as_deref(),
-                        excludelist: excludelist.as_deref(),
-                        output_file: output_file.as_deref(),
-                        keyrings: *keyrings,
-                        ima_buf: *ima_buf,
-                        ignored_keyrings,
-                        hash_alg: hash_alg.as_deref(),
-                        ramdisk_dir: ramdisk_dir.as_deref(),
-                        local_rpm_repo: local_rpm_repo.as_deref(),
-                        remote_rpm_repo: remote_rpm_repo.as_deref(),
-                        gpg_key: gpg_key.as_deref(),
-                        add_ima_signature_verification_key,
-                    };
-                    return super::wizard_runtime::run(&defaults, output)
-                        .await;
-                }
-                #[cfg(not(feature = "wizard"))]
-                {
-                    return Err(KeylimectlError::Validation(
-                        "Interactive mode requires the 'wizard' feature. \
-                         Rebuild with: cargo build --features wizard"
-                            .into(),
-                    ));
-                }
+                let defaults = super::wizard_runtime::Defaults {
+                    ima_measurement_list: ima_measurement_list.as_deref(),
+                    allowlist: allowlist.as_deref(),
+                    rootfs: rootfs.as_deref(),
+                    skip_path,
+                    base_policy: base_policy.as_deref(),
+                    excludelist: excludelist.as_deref(),
+                    output_file: output_file.as_deref(),
+                    keyrings: *keyrings,
+                    ima_buf: *ima_buf,
+                    ignored_keyrings,
+                    hash_alg: hash_alg.as_deref(),
+                    ramdisk_dir: ramdisk_dir.as_deref(),
+                    #[cfg(feature = "rpm-repo")]
+                    local_rpm_repo: local_rpm_repo.as_deref(),
+                    #[cfg(feature = "rpm-repo")]
+                    remote_rpm_repo: remote_rpm_repo.as_deref(),
+                    #[cfg(feature = "rpm-repo")]
+                    gpg_key: gpg_key.as_deref(),
+                    add_ima_signature_verification_key,
+                };
+                return super::wizard_runtime::run(&defaults, output).await;
             }
             generate_runtime(
                 ima_measurement_list.as_deref(),
@@ -90,9 +86,18 @@ pub async fn execute(
                 ignored_keyrings,
                 hash_alg.as_deref(),
                 ramdisk_dir.as_deref(),
+                #[cfg(feature = "rpm-repo")]
                 local_rpm_repo.as_deref(),
+                #[cfg(not(feature = "rpm-repo"))]
+                None,
+                #[cfg(feature = "rpm-repo")]
                 remote_rpm_repo.as_deref(),
+                #[cfg(not(feature = "rpm-repo"))]
+                None,
+                #[cfg(feature = "rpm-repo")]
                 gpg_key.as_deref(),
+                #[cfg(not(feature = "rpm-repo"))]
+                None,
                 add_ima_signature_verification_key,
                 output,
             )
@@ -100,31 +105,20 @@ pub async fn execute(
             .map_err(KeylimectlError::from)
         }
         GenerateSubcommand::MeasuredBoot {
+            #[cfg(feature = "wizard")]
             interactive,
             eventlog_file,
             without_secureboot,
             output: output_file,
         } => {
+            #[cfg(feature = "wizard")]
             if *interactive {
-                #[cfg(feature = "wizard")]
-                {
-                    let defaults = super::wizard_measured_boot::Defaults {
-                        eventlog_file,
-                        without_secureboot: *without_secureboot,
-                        output_file: output_file.as_deref(),
-                    };
-                    return super::wizard_measured_boot::run(
-                        &defaults, output,
-                    );
-                }
-                #[cfg(not(feature = "wizard"))]
-                {
-                    return Err(KeylimectlError::Validation(
-                        "Interactive mode requires the 'wizard' feature. \
-                         Rebuild with: cargo build --features wizard"
-                            .into(),
-                    ));
-                }
+                let defaults = super::wizard_measured_boot::Defaults {
+                    eventlog_file,
+                    without_secureboot: *without_secureboot,
+                    output_file: output_file.as_deref(),
+                };
+                return super::wizard_measured_boot::run(&defaults, output);
             }
             generate_measured_boot(
                 eventlog_file,
@@ -135,47 +129,61 @@ pub async fn execute(
             .map_err(KeylimectlError::from)
         }
         GenerateSubcommand::Tpm {
+            #[cfg(feature = "wizard")]
             interactive,
             pcr_file,
+            #[cfg(any(
+                feature = "tpm-local",
+                feature = "tpm-quote-validation"
+            ))]
             from_tpm,
             pcrs,
             mask,
             hash_alg,
             output: output_file,
         } => {
+            #[cfg(feature = "wizard")]
             if *interactive {
-                #[cfg(feature = "wizard")]
-                {
-                    use crate::policy_tools::tpm_policy_gen;
-                    let pcr_indices = if let Some(mask_str) = mask.as_deref()
-                    {
-                        crate::policy_tools::tpm_policy::TpmPolicy::parse_mask(mask_str)
-                            .unwrap_or_else(|_| vec![0, 1, 2, 3, 4, 5, 6, 7])
-                    } else {
-                        tpm_policy_gen::parse_pcr_indices(pcrs)
-                            .unwrap_or_else(|_| vec![0, 1, 2, 3, 4, 5, 6, 7])
-                    };
-                    let defaults = super::wizard_tpm::Defaults {
-                        pcr_file: pcr_file.as_deref(),
-                        from_tpm: *from_tpm,
-                        pcr_indices,
-                        hash_alg,
-                        output_file: output_file.as_deref(),
-                    };
-                    return super::wizard_tpm::run(&defaults, output);
-                }
-                #[cfg(not(feature = "wizard"))]
-                {
-                    return Err(KeylimectlError::Validation(
-                        "Interactive mode requires the 'wizard' feature. \
-                         Rebuild with: cargo build --features wizard"
-                            .into(),
-                    ));
-                }
+                use crate::policy_tools::tpm_policy_gen;
+                let pcr_indices = if let Some(mask_str) = mask.as_deref() {
+                    crate::policy_tools::tpm_policy::TpmPolicy::parse_mask(
+                        mask_str,
+                    )
+                    .unwrap_or_else(|_| vec![0, 1, 2, 3, 4, 5, 6, 7])
+                } else {
+                    tpm_policy_gen::parse_pcr_indices(pcrs)
+                        .unwrap_or_else(|_| vec![0, 1, 2, 3, 4, 5, 6, 7])
+                };
+                let defaults = super::wizard_tpm::Defaults {
+                    pcr_file: pcr_file.as_deref(),
+                    #[cfg(any(
+                        feature = "tpm-local",
+                        feature = "tpm-quote-validation"
+                    ))]
+                    from_tpm: *from_tpm,
+                    #[cfg(not(any(
+                        feature = "tpm-local",
+                        feature = "tpm-quote-validation"
+                    )))]
+                    from_tpm: false,
+                    pcr_indices,
+                    hash_alg,
+                    output_file: output_file.as_deref(),
+                };
+                return super::wizard_tpm::run(&defaults, output);
             }
             generate_tpm(
                 pcr_file.as_deref(),
+                #[cfg(any(
+                    feature = "tpm-local",
+                    feature = "tpm-quote-validation"
+                ))]
                 *from_tpm,
+                #[cfg(not(any(
+                    feature = "tpm-local",
+                    feature = "tpm-quote-validation"
+                )))]
+                false,
                 pcrs,
                 mask.as_deref(),
                 hash_alg,

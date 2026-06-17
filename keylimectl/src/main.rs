@@ -478,6 +478,7 @@ enum GenerateSubcommand {
     /// Generate a runtime policy from IMA logs, allowlists, or filesystem
     Runtime {
         /// Run the interactive wizard to guide policy creation
+        #[cfg(feature = "wizard")]
         #[arg(long, short = 'I')]
         interactive: bool,
 
@@ -540,15 +541,18 @@ enum GenerateSubcommand {
         #[arg(long, value_name = "DIR")]
         ramdisk_dir: Option<String>,
 
-        /// Local RPM repository directory (requires rpm-repo feature)
+        /// Local RPM repository directory
+        #[cfg(feature = "rpm-repo")]
         #[arg(long, value_name = "DIR")]
         local_rpm_repo: Option<String>,
 
-        /// Remote RPM repository URL (requires rpm-repo feature)
+        /// Remote RPM repository URL
+        #[cfg(feature = "rpm-repo")]
         #[arg(long, value_name = "URL")]
         remote_rpm_repo: Option<String>,
 
         /// GPG public key file for verifying RPM repository metadata signatures
+        #[cfg(feature = "rpm-repo")]
         #[arg(long, value_name = "FILE")]
         gpg_key: Option<String>,
     },
@@ -556,6 +560,7 @@ enum GenerateSubcommand {
     /// Generate a measured boot policy from a UEFI event log
     MeasuredBoot {
         /// Run the interactive wizard to guide policy creation
+        #[cfg(feature = "wizard")]
         #[arg(long, short = 'I')]
         interactive: bool,
 
@@ -579,6 +584,7 @@ enum GenerateSubcommand {
     /// Generate a TPM policy from PCR values
     Tpm {
         /// Run the interactive wizard to guide policy creation
+        #[cfg(feature = "wizard")]
         #[arg(long, short = 'I')]
         interactive: bool,
 
@@ -586,7 +592,8 @@ enum GenerateSubcommand {
         #[arg(long, value_name = "FILE", group = "pcr_source")]
         pcr_file: Option<String>,
 
-        /// Read PCR values from local TPM (requires tpm-local feature)
+        /// Read PCR values from local TPM
+        #[cfg(any(feature = "tpm-local", feature = "tpm-quote-validation"))]
         #[arg(long, group = "pcr_source")]
         from_tpm: bool,
 
@@ -698,6 +705,7 @@ enum VerifyAction {
     /// Verify TPM or TEE attestation evidence
     Evidence {
         /// Run the interactive wizard to guide evidence verification
+        #[cfg(feature = "wizard")]
         #[arg(long, short = 'I')]
         interactive: bool,
 
