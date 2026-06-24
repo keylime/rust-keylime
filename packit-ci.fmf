@@ -81,6 +81,7 @@
        - /regression/issue-1380-agent-removed-and-re-added
        - /regression/keylime-agent-option-override-through-envvar
        - /regression/cannot-use-mTLS-cert-on-verifier-api-endpoint
+       - /regression/push-tenant_cannot_access_agent_endpoint
        - /sanity/keylime-secure_mount
        - /upstream/run_rust_keylime_tests
        - /setup/generate_upstream_rust_keylime_code_coverage
