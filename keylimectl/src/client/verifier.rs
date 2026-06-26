@@ -893,10 +893,17 @@ impl VerifierClient {
                         .to_string()
                 })?;
 
-            self.base
+            let http_status = response.status().as_u16();
+            let mut result = self
+                .base
                 .handle_response(response)
                 .await
-                .map_err(KeylimectlError::from)
+                .map_err(KeylimectlError::from)?;
+            if let Some(obj) = result.as_object_mut() {
+                let _ =
+                    obj.insert("http_status".to_string(), json!(http_status));
+            }
+            Ok(result)
         }
 
         #[cfg(not(feature = "api-v2"))]
@@ -929,10 +936,16 @@ impl VerifierClient {
                     .to_string()
             })?;
 
-        self.base
+        let http_status = response.status().as_u16();
+        let mut result = self
+            .base
             .handle_response(response)
             .await
-            .map_err(KeylimectlError::from)
+            .map_err(KeylimectlError::from)?;
+        if let Some(obj) = result.as_object_mut() {
+            let _ = obj.insert("http_status".to_string(), json!(http_status));
+        }
+        Ok(result)
     }
 
     /// Reactivate an agent on the verifier
