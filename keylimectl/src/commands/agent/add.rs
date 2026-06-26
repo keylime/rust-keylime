@@ -105,8 +105,8 @@ pub(super) async fn add_agent(
         CommandError::resource_error("verifier", e.to_string())
     })?;
 
-    let api_version =
-        verifier_client.api_version().parse::<f32>().unwrap_or(2.1);
+    let api_version_str = verifier_client.api_version().to_string();
+    let api_version: f32 = api_version_str.parse().unwrap_or(2.1);
 
     // Determine enrollment model based on flags and API version:
     // 1. Explicit --push-model flag: always push
@@ -408,7 +408,9 @@ pub(super) async fn add_agent(
                 "verifier",
                 format!(
                     "Failed to enroll agent ({model} model): {e}. \
-                     Retry with: keylimectl agent add {agent_id}",
+                     If the agent already exists on the verifier, use \
+                     'keylimectl agent update {agent_id}' to re-enroll, or \
+                     'keylimectl agent remove {agent_id}' first to start fresh.",
                     agent_id = params.agent_id
                 ),
             )
@@ -483,7 +485,7 @@ pub(super) async fn add_agent(
         "status": "success",
         "message": format!("Agent {} enrolled successfully ({})", params.agent_id, enrollment_type),
         "agent_id": params.agent_id,
-        "api_version": api_version,
+        "api_version": api_version_str,
         "push_model": is_push_model,
         "results": response
     });

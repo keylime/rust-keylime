@@ -15,7 +15,13 @@ use serde_json::{json, Value};
 ///
 /// This function implements a proper update that preserves existing configuration
 /// and only modifies the specified fields. Since Keylime doesn't provide a direct
-/// update API, we implement this as: get existing config -> remove -> add with merged config.
+/// update API, we implement this as: get existing config -> remove -> add with
+/// merged config.
+///
+/// The remove step blocks until the agent is fully gone from the verifier,
+/// handling the case where DELETE returns 202 (async deletion while an in-flight
+/// attestation cycle is still completing). Only then is the agent re-added to
+/// avoid a 409 Conflict.
 pub(super) async fn update_agent(
     agent_id: &str,
     runtime_policy: Option<&str>,
@@ -99,7 +105,7 @@ pub(super) async fn update_agent(
         }
     };
 
-    // Step 2: Remove existing agent configuration
+    // Step 2: Remove existing agent; blocks until fully gone (handles 202)
     output.step(2, 3, "Removing existing agent configuration");
     let _remove_result = remove_agent(agent_id, false, false, output).await?;
 
