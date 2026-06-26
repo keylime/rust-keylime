@@ -47,6 +47,19 @@ pub const DEFAULT_API_VERSION: &str = if cfg!(feature = "api-v2") {
     "3.0"
 };
 
+/// Parse a `"major.minor"` version string into a `(major, minor)` tuple.
+///
+/// Returns `(2, 1)` as the fallback when the string is malformed, matching
+/// `DEFAULT_API_VERSION`. Using integer tuples avoids floating-point
+/// representation issues (e.g. `"2.10"` must compare greater than `"2.9"`).
+#[must_use]
+pub fn parse_version(s: &str) -> (u32, u32) {
+    let mut parts = s.splitn(2, '.');
+    let major = parts.next().and_then(|p| p.parse().ok()).unwrap_or(2);
+    let minor = parts.next().and_then(|p| p.parse().ok()).unwrap_or(1);
+    (major, minor)
+}
+
 /// Check if a version string represents a v3.0+ API version.
 ///
 /// When the `api-v3` feature is disabled, this always returns `false`
@@ -55,7 +68,7 @@ pub const DEFAULT_API_VERSION: &str = if cfg!(feature = "api-v2") {
 #[must_use]
 pub fn is_v3(version: &str) -> bool {
     if cfg!(feature = "api-v3") {
-        version.parse::<f32>().unwrap_or(2.0) >= 3.0 //#[allow_ci]
+        parse_version(version).0 >= 3
     } else {
         let _ = version; // suppress unused warning
         false
@@ -77,8 +90,8 @@ mod tests {
     #[test]
     fn test_supported_versions_ascending_order() {
         for i in 1..SUPPORTED_API_VERSIONS.len() {
-            let prev: f32 = SUPPORTED_API_VERSIONS[i - 1].parse().unwrap(); //#[allow_ci]
-            let curr: f32 = SUPPORTED_API_VERSIONS[i].parse().unwrap(); //#[allow_ci]
+            let prev = parse_version(SUPPORTED_API_VERSIONS[i - 1]);
+            let curr = parse_version(SUPPORTED_API_VERSIONS[i]);
             assert!(
                 prev < curr,
                 "Versions must be in ascending order: {} >= {}",
