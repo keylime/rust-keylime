@@ -95,9 +95,10 @@ pub(super) async fn update_agent(
     let existing_push_model = {
         #[cfg(feature = "api-v3")]
         {
-            let api_version =
-                verifier_client.api_version().parse::<f32>().unwrap_or(2.1);
-            existing_port == 0 || api_version >= 3.0
+            let (api_major, _) = crate::api_versions::parse_version(
+                verifier_client.api_version(),
+            );
+            existing_port == 0 || api_major >= 3
         }
         #[cfg(not(feature = "api-v3"))]
         {

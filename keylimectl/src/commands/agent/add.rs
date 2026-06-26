@@ -106,7 +106,8 @@ pub(super) async fn add_agent(
     })?;
 
     let api_version_str = verifier_client.api_version().to_string();
-    let api_version: f32 = api_version_str.parse().unwrap_or(2.1);
+    let (api_major, _api_minor) =
+        crate::api_versions::parse_version(&api_version_str);
 
     // Determine enrollment model based on flags and API version:
     // 1. Explicit --push-model flag: always push
@@ -115,9 +116,9 @@ pub(super) async fn add_agent(
     let is_push_model = if params.push_model {
         true
     } else if params.pull_model {
-        if api_version >= 3.0 {
+        if api_major >= 3 {
             log::warn!(
-                "Pull model is deprecated for API v{api_version} verifiers. \
+                "Pull model is deprecated for API v{api_version_str} verifiers. \
                  Consider using push model (default) instead."
             );
         }
@@ -126,7 +127,7 @@ pub(super) async fn add_agent(
         // Auto-detect based on API version
         #[cfg(feature = "api-v3")]
         {
-            api_version >= 3.0
+            api_major >= 3
         }
         #[cfg(not(feature = "api-v3"))]
         {
@@ -135,7 +136,7 @@ pub(super) async fn add_agent(
     };
 
     debug!(
-        "Detected API version: {api_version}, push model: {is_push_model}"
+        "Detected API version: {api_version_str}, push model: {is_push_model}"
     );
 
     // Determine agent connection details
@@ -820,12 +821,12 @@ mod tests {
     #[test]
     fn test_model_auto_detection_logic() {
         // Test the auto-detection logic that determines push vs pull model
-        // This tests the decision matrix without requiring async/network calls
+        // Uses (major, minor) tuples to mirror the production code.
 
         struct ModelParams {
             push_model: bool,
             pull_model: bool,
-            api_version: f32,
+            api_major: u32,
         }
 
         fn determine_model(params: &ModelParams) -> bool {
@@ -834,7 +835,7 @@ mod tests {
             } else if params.pull_model {
                 false
             } else {
-                params.api_version >= 3.0
+                params.api_major >= 3
             }
         }
 
@@ -842,46 +843,41 @@ mod tests {
         assert!(determine_model(&ModelParams {
             push_model: true,
             pull_model: false,
-            api_version: 2.1,
+            api_major: 2,
         }));
         assert!(determine_model(&ModelParams {
             push_model: true,
             pull_model: false,
-            api_version: 3.0,
+            api_major: 3,
         }));
 
         // Explicit --pull-model forces pull
         assert!(!determine_model(&ModelParams {
             push_model: false,
             pull_model: true,
-            api_version: 2.1,
+            api_major: 2,
         }));
         assert!(!determine_model(&ModelParams {
             push_model: false,
             pull_model: true,
-            api_version: 3.0,
+            api_major: 3,
         }));
 
         // Auto-detect: push for v3.x, pull for v2.x
         assert!(!determine_model(&ModelParams {
             push_model: false,
             pull_model: false,
-            api_version: 2.0,
-        }));
-        assert!(!determine_model(&ModelParams {
-            push_model: false,
-            pull_model: false,
-            api_version: 2.1,
+            api_major: 2,
         }));
         assert!(determine_model(&ModelParams {
             push_model: false,
             pull_model: false,
-            api_version: 3.0,
+            api_major: 3,
         }));
         assert!(determine_model(&ModelParams {
             push_model: false,
             pull_model: false,
-            api_version: 3.1,
+            api_major: 4,
         }));
     }
 }
