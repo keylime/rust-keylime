@@ -1401,13 +1401,17 @@ impl VerifierClient {
     #[cfg(feature = "api-v3")]
     async fn add_runtime_policy_v3(
         &self,
-        _policy_name: &str,
-        policy_data: Value,
+        policy_name: &str,
+        mut policy_data: Value,
     ) -> Result<Value, KeylimectlError> {
         let url = format!(
             "{}/v{}/policies/ima",
             self.base.base_url, self.api_version
         );
+
+        if let Some(obj) = policy_data.as_object_mut() {
+            let _ = obj.entry("name").or_insert(json!(policy_name));
+        }
 
         let body = json_api_resource("ima_policy", None, policy_data);
 
@@ -1619,13 +1623,16 @@ impl VerifierClient {
     pub async fn add_mb_policy(
         &self,
         policy_name: &str,
-        policy_data: Value,
+        mut policy_data: Value,
     ) -> Result<Value, KeylimectlError> {
         debug!("Adding measured boot policy {policy_name} to verifier");
 
         // v3: POST /refstates/uefi with JSON:API body (name in attributes)
         // v2: POST /mbpolicies/:name with plain JSON
         let (url, body, content_type) = if is_v3(&self.api_version) {
+            if let Some(obj) = policy_data.as_object_mut() {
+                let _ = obj.entry("name").or_insert(json!(policy_name));
+            }
             (
                 format!(
                     "{}/v{}/refstates/uefi",
