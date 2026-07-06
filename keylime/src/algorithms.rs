@@ -113,15 +113,32 @@ impl From<HashAlgorithm> for HashingAlgorithm {
     }
 }
 
-impl From<HashAlgorithm> for MessageDigest {
-    fn from(hash_algorithm: HashAlgorithm) -> Self {
-        match hash_algorithm {
-            HashAlgorithm::Sha1 => MessageDigest::sha1(),
-            HashAlgorithm::Sha256 => MessageDigest::sha256(),
-            HashAlgorithm::Sha384 => MessageDigest::sha384(),
-            HashAlgorithm::Sha512 => MessageDigest::sha512(),
-            HashAlgorithm::Sm3_256 => MessageDigest::sm3(),
+impl HashAlgorithm {
+    fn openssl_name(&self) -> &'static str {
+        match self {
+            HashAlgorithm::Sha1 => "sha1",
+            HashAlgorithm::Sha256 => "sha256",
+            HashAlgorithm::Sha384 => "sha384",
+            HashAlgorithm::Sha512 => "sha512",
+            HashAlgorithm::Sm3_256 => "sm3",
         }
+    }
+
+    pub fn is_supported(&self) -> bool {
+        MessageDigest::from_name(self.openssl_name()).is_some()
+    }
+}
+
+impl TryFrom<HashAlgorithm> for MessageDigest {
+    type Error = AlgorithmError;
+
+    fn try_from(hash_algorithm: HashAlgorithm) -> Result<Self, Self::Error> {
+        let name = hash_algorithm.openssl_name();
+        MessageDigest::from_name(name).ok_or_else(|| {
+            AlgorithmError::UnsupportedHashingAlgorithm(format!(
+                "{name} (not supported by this OpenSSL build)"
+            ))
+        })
     }
 }
 
@@ -471,6 +488,17 @@ mod tests {
     fn test_unsupported_sign_tryfrom() {
         let result = SignAlgorithm::try_from("unsupported");
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_hash_to_message_digest() {
+        assert!(MessageDigest::try_from(HashAlgorithm::Sha1).is_ok());
+        assert!(MessageDigest::try_from(HashAlgorithm::Sha256).is_ok());
+        assert!(MessageDigest::try_from(HashAlgorithm::Sha384).is_ok());
+        assert!(MessageDigest::try_from(HashAlgorithm::Sha512).is_ok());
+        // SM3 may or may not be available depending on OpenSSL build;
+        // just verify it does not panic
+        let _ = MessageDigest::try_from(HashAlgorithm::Sm3_256);
     }
 
     #[test]

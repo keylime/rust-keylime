@@ -160,6 +160,16 @@ impl ContextInfo {
         let tpm_hash_alg = config.tpm_hash_alg;
         let tpm_signing_alg = config.tpm_signing_alg;
 
+        if !tpm_hash_alg.is_supported() {
+            return Err(ContextInfoError::InvalidAlgorithm(
+                algorithms::AlgorithmError::UnsupportedHashingAlgorithm(
+                    format!(
+                        "{tpm_hash_alg} (not supported by this OpenSSL build)"
+                    ),
+                ),
+            ));
+        }
+
         let ek_result = tpm_context.create_ek(tpm_encryption_alg, None)?;
         let ek_handle = ek_result.key_handle;
         let ek_hash = hash_ek::hash_ek_pubkey(ek_result.public.clone())
@@ -372,7 +382,8 @@ impl ContextInfo {
         let keylime_hash_alg: KeylimeInternalHashAlgorithm =
             name_h_alg_tss.try_into()?;
         let name_alg_id_value: u16 = name_h_alg_tss.into();
-        let openssl_message_digest: MessageDigest = keylime_hash_alg.into();
+        let openssl_message_digest: MessageDigest =
+            MessageDigest::try_from(keylime_hash_alg)?;
         let mut hasher = Hasher::new(openssl_message_digest)?;
         hasher.update(&marshalled_tpmt_public)?;
         let digest_bytes_vec = hasher.finish()?;

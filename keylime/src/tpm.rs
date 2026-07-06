@@ -1818,6 +1818,16 @@ impl Context<'_> {
                 }
             }
         }
+        usable_algs.retain(|alg| {
+            let supported = alg.is_supported();
+            if !supported {
+                log::warn!(
+                    "Hash algorithm {alg} supported by TPM but not by \
+                     this OpenSSL build; excluding"
+                );
+            }
+            supported
+        });
         Ok(usable_algs)
     }
 
@@ -2329,14 +2339,14 @@ fn make_pcr_blob(
 fn hash_alg_to_message_digest(
     hash_alg: HashingAlgorithm,
 ) -> Result<MessageDigest> {
-    match hash_alg {
-        HashingAlgorithm::Sha256 => Ok(MessageDigest::sha256()),
-        HashingAlgorithm::Sha1 => Ok(MessageDigest::sha1()),
-        HashingAlgorithm::Sha384 => Ok(MessageDigest::sha384()),
-        HashingAlgorithm::Sha512 => Ok(MessageDigest::sha512()),
-        HashingAlgorithm::Sm3_256 => Ok(MessageDigest::sm3()),
-        other => Err(TpmError::UnsupportedHashingAlgorithm { alg: other }),
-    }
+    let keylime_alg = KeylimeInternalHashAlgorithm::try_from(hash_alg)
+        .map_err(|_| TpmError::UnsupportedHashingAlgorithm {
+            alg: hash_alg,
+        })?;
+    MessageDigest::try_from(keylime_alg).map_err(|e| {
+        log::debug!("OpenSSL digest lookup failed for {hash_alg:?}: {e}");
+        TpmError::UnsupportedHashingAlgorithm { alg: hash_alg }
+    })
 }
 
 /// Check if the data attested in the quote matches the data read from the TPM PCRs

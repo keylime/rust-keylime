@@ -62,11 +62,11 @@ fn ml_extend(
 ) -> Result<usize> {
     let f = File::open(ml)?;
     let mut reader = BufReader::new(f);
-    let ima_digest: MessageDigest = ima_hash_alg.into();
-    let ima_start_hash = ima::Digest::start(ima_hash_alg);
-    let pcr_digest: MessageDigest = pcr_hash_alg.into();
-    let mut running_hash = ima::Digest::start(pcr_hash_alg);
-    let ff_hash = ima::Digest::ff(pcr_hash_alg);
+    let ima_digest: MessageDigest = MessageDigest::try_from(ima_hash_alg)?;
+    let ima_start_hash = ima::Digest::start(ima_hash_alg)?;
+    let pcr_digest: MessageDigest = MessageDigest::try_from(pcr_hash_alg)?;
+    let mut running_hash = ima::Digest::start(pcr_hash_alg)?;
+    let ff_hash = ima::Digest::ff(pcr_hash_alg)?;
     for line in reader.by_ref().lines().skip(position) {
         let line = line?;
         if line.is_empty() {
@@ -198,7 +198,8 @@ fn main() -> std::result::Result<(), ImaEmulatorError> {
                 )
             })?;
 
-        let pcr_digest: MessageDigest = (*pcr_hash_alg).into();
+        let pcr_digest: MessageDigest =
+            MessageDigest::try_from(*pcr_hash_alg)?;
         let pcr_start_hash = vec![0x00u8; pcr_digest.size()];
         if digest.value() != pcr_start_hash {
             log::warn!("IMA PCR is not empty, trying to find the last updated file in the measurement list...");

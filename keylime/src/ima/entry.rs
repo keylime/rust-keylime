@@ -32,7 +32,8 @@ pub struct Digest {
 impl Digest {
     /// Creates a new `Digest` with `algorithm` and `value`.
     pub fn new(algorithm: HashAlgorithm, value: &[u8]) -> Result<Self> {
-        let digest: MessageDigest = algorithm.into();
+        let digest: MessageDigest =
+            MessageDigest::try_from(algorithm).map_err(Error::other)?;
         if value.len() != digest.size() {
             return Err(Error::new(
                 ErrorKind::InvalidInput,
@@ -54,22 +55,24 @@ impl Digest {
 
     /// Returns a pre-defined digest value used to indicate the start
     /// of the IMA measurement list.
-    pub fn start(algorithm: HashAlgorithm) -> Self {
-        let digest: MessageDigest = algorithm.into();
-        Self {
+    pub fn start(algorithm: HashAlgorithm) -> Result<Self> {
+        let digest: MessageDigest =
+            MessageDigest::try_from(algorithm).map_err(Error::other)?;
+        Ok(Self {
             algorithm,
             value: vec![0x00u8; digest.size()],
-        }
+        })
     }
 
     /// Returns a pre-defined digest value used to indicate the ToMToU
     /// error in the IMA measurement list.
-    pub fn ff(algorithm: HashAlgorithm) -> Self {
-        let digest: MessageDigest = algorithm.into();
-        Self {
+    pub fn ff(algorithm: HashAlgorithm) -> Result<Self> {
+        let digest: MessageDigest =
+            MessageDigest::try_from(algorithm).map_err(Error::other)?;
+        Ok(Self {
             algorithm,
             value: vec![0xffu8; digest.size()],
-        }
+        })
     }
 }
 
