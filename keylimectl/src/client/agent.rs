@@ -68,9 +68,6 @@ use serde_json::{json, Value};
 
 use crate::api_versions::SUPPORTED_AGENT_API_VERSIONS;
 
-/// Unknown API version constant for when version detection fails
-const UNKNOWN_API_VERSION: &str = "unknown";
-
 /// Response structure for agent version endpoint
 #[derive(serde::Deserialize, Debug)]
 struct AgentVersionResponse {
@@ -743,39 +740,6 @@ impl AgentClient {
             "Invalid verification response format from agent",
         ))
     }
-
-    /// Check if the agent is using API version < 3.0 (pull model)
-    ///
-    /// Returns `true` if the detected/configured API version is less than 3.0,
-    /// indicating that agent communication should be used.
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// # use keylimectl::client::agent::AgentClient;
-    /// # fn example(client: &AgentClient) {
-    /// if client.is_pull_model() {
-    ///     println!("Using pull model - will communicate directly with agent");
-    /// } else {
-    ///     println!("Using push model - agent will connect to verifier");
-    /// }
-    /// # }
-    /// ```
-    #[allow(dead_code)] // Will be used when agent model detection is enabled
-    pub fn is_pull_model(&self) -> bool {
-        if self.api_version == UNKNOWN_API_VERSION {
-            // Default to pull model for unknown versions to be safe
-            return true;
-        }
-
-        // Parse version as float for comparison
-        if let Ok(version) = self.api_version.parse::<f32>() {
-            version < 3.0
-        } else {
-            // If we can't parse, assume pull model
-            true
-        }
-    }
 }
 
 #[cfg(test)]
@@ -848,41 +812,6 @@ mod tests {
         assert!(result.is_ok());
         let client = result.unwrap(); //#[allow_ci]
         assert_eq!(client.base.base_url, "https://[2001:db8::1]:9002");
-    }
-
-    #[test]
-    fn test_is_pull_model() {
-        let config = create_test_config();
-        let mut client = AgentClient::new_without_version_detection(
-            "127.0.0.1",
-            9002,
-            &config,
-            None,
-        )
-        .unwrap(); //#[allow_ci]
-
-        // Test default version (2.1 < 3.0)
-        assert!(client.is_pull_model());
-
-        // Test version 2.0
-        client.api_version = "2.0".to_string();
-        assert!(client.is_pull_model());
-
-        // Test version 2.2
-        client.api_version = "2.2".to_string();
-        assert!(client.is_pull_model());
-
-        // Test version 3.0 (should be push model)
-        client.api_version = "3.0".to_string();
-        assert!(!client.is_pull_model());
-
-        // Test unknown version (should default to pull model)
-        client.api_version = UNKNOWN_API_VERSION.to_string();
-        assert!(client.is_pull_model());
-
-        // Test invalid version (should default to pull model)
-        client.api_version = "invalid".to_string();
-        assert!(client.is_pull_model());
     }
 
     #[test]

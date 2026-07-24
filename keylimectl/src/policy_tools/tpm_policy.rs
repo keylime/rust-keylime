@@ -53,12 +53,6 @@ impl TpmPolicy {
         }
     }
 
-    /// Calculate the PCR mask from a set of PCR indices.
-    pub fn calculate_mask(indices: &[u32]) -> String {
-        let mask: u32 = indices.iter().fold(0u32, |acc, &i| acc | (1 << i));
-        format!("0x{mask:x}")
-    }
-
     /// Parse a PCR mask string to get the set of selected indices.
     pub fn parse_mask(mask: &str) -> Result<Vec<u32>, String> {
         let hex_str = mask
@@ -114,13 +108,6 @@ mod tests {
     }
 
     #[test]
-    fn test_calculate_mask() {
-        assert_eq!(TpmPolicy::calculate_mask(&[0, 1, 2, 7]), "0x87");
-        assert_eq!(TpmPolicy::calculate_mask(&[]), "0x0");
-        assert_eq!(TpmPolicy::calculate_mask(&[0]), "0x1");
-    }
-
-    #[test]
     fn test_parse_mask() {
         assert_eq!(TpmPolicy::parse_mask("0x87").unwrap(), vec![0, 1, 2, 7]); //#[allow_ci]
         assert_eq!(TpmPolicy::parse_mask("0x0").unwrap(), Vec::<u32>::new()); //#[allow_ci]
@@ -148,13 +135,5 @@ mod tests {
             serde_json::from_str(&json_str).unwrap(); //#[allow_ci]
 
         assert_eq!(policy, deserialized);
-    }
-
-    #[test]
-    fn test_mask_roundtrip() {
-        let indices = vec![0, 1, 2, 3, 4, 5, 6, 7];
-        let mask = TpmPolicy::calculate_mask(&indices);
-        let parsed = TpmPolicy::parse_mask(&mask).unwrap(); //#[allow_ci]
-        assert_eq!(indices, parsed);
     }
 }

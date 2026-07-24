@@ -90,7 +90,6 @@
 //! let registrar_url = config.registrar_base_url();
 //! ```
 
-pub mod error;
 pub mod singleton;
 pub mod validation;
 

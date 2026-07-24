@@ -128,7 +128,6 @@ pub enum ResourceError {
 /// These errors represent issues with local policy generation,
 /// including IMA log parsing, filesystem scanning, and digest calculation.
 #[derive(Error, Debug)]
-#[allow(dead_code)] // Variants used as features are implemented
 pub enum PolicyGenerationError {
     /// IMA measurement list parse error
     #[error("Failed to parse IMA measurement list {path}: {reason}")]
@@ -145,10 +144,6 @@ pub enum PolicyGenerationError {
     /// Digest calculation error
     #[error("Failed to calculate digest for {path}: {reason}")]
     Digest { path: PathBuf, reason: String },
-
-    /// Policy merge error
-    #[error("Failed to merge policies: {reason}")]
-    Merge { reason: String },
 
     /// Unsupported hash algorithm
     #[error("Unsupported hash algorithm: {algorithm}")]
