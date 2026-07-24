@@ -8,14 +8,11 @@
 //! to extract file digests. Remote repos use `repomd.xml` metadata,
 //! with `filelists-ext.xml` as a fast path when available.
 
-use std::collections::HashMap;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use crate::commands::error::PolicyGenerationError;
-
-/// Map of file paths to their digests.
-type DigestMap = HashMap<String, Vec<String>>;
+use crate::policy_tools::{merge_digest_maps, DigestMap};
 
 /// Check if a hex digest string is all zeros (empty/unset digest).
 fn is_empty_digest(hex: &str) -> bool {
@@ -383,18 +380,6 @@ fn find_rpm_files_recursive(
     }
 
     Ok(())
-}
-
-/// Merge src DigestMap into dst, deduplicating digest values.
-fn merge_digest_maps(dst: &mut DigestMap, src: &DigestMap) {
-    for (path, digests) in src {
-        let entry = dst.entry(path.clone()).or_default();
-        for digest in digests {
-            if !entry.contains(digest) {
-                entry.push(digest.clone());
-            }
-        }
-    }
 }
 
 /// Parse repomd.xml to find the location of a specific data type.

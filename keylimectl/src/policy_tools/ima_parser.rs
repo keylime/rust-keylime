@@ -11,8 +11,7 @@ use crate::commands::error::PolicyGenerationError;
 use std::collections::HashMap;
 use std::path::Path;
 
-/// Map from file path (or entry name) to list of digest strings.
-pub type DigestMap = HashMap<String, Vec<String>>;
+pub use super::DigestMap;
 
 /// Parsed data from an IMA measurement list.
 pub struct ParsedImaData {
@@ -323,19 +322,6 @@ pub fn detect_algorithm_from_hex(hex_digest: &str) -> Option<String> {
         96 => Some("sha384".to_string()),
         128 => Some("sha512".to_string()),
         _ => None,
-    }
-}
-
-/// Merge two digest maps, appending new digests without duplicates.
-#[allow(dead_code)] // Used in later steps (filesystem scanning, policy merging)
-pub fn merge_digest_maps(base: &mut DigestMap, other: &DigestMap) {
-    for (path, new_digests) in other {
-        let entry = base.entry(path.clone()).or_default();
-        for digest in new_digests {
-            if !entry.contains(digest) {
-                entry.push(digest.clone());
-            }
-        }
     }
 }
 
@@ -690,7 +676,7 @@ boot_aggregate
         let _ =
             other.insert("/usr/bin/ls".to_string(), vec!["cccc".to_string()]);
 
-        merge_digest_maps(&mut base, &other);
+        crate::policy_tools::merge_digest_maps(&mut base, &other);
 
         assert_eq!(base.len(), 2);
         // Duplicate should not be added

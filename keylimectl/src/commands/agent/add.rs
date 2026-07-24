@@ -14,7 +14,6 @@ use super::helpers::{
     load_payload_file, load_policy_file, resolve_tpm_policy_enhanced,
 };
 use super::types::AddAgentParams;
-#[cfg(feature = "api-v2")]
 use super::types::AddAgentRequest;
 #[cfg(feature = "api-v2")]
 use crate::client::agent::AgentClient;
@@ -265,55 +264,121 @@ pub(super) async fn add_agent(
         params.mb_policy.is_some(),
     )?;
 
-    // Build enrollment request with version-appropriate fields
-    #[allow(unused_mut)]
-    let mut request = if is_push_model {
-        // API 3.0+: Simplified enrollment for push model
-        build_push_model_request(
-            params.agent_id,
-            &tpm_policy,
-            &agent_data,
+    // Build enrollment request with version-appropriate fields.
+    // File loading (policies, payload) happens before serialization for
+    // early input validation — file errors surface before any network calls.
+    let request = if is_push_model {
+        // API 3.0+: Push model enrollment. The verifier expects all policy
+        // fields to be present; defaults are set in AddAgentRequest::new().
+        debug!(
+            "Building push model enrollment request for agent {}",
+            params.agent_id
+        );
+        let mut req = AddAgentRequest::new(
+            Some(agent_ip.clone()),
+            Some(agent_port),
+            None, // push model: agent connects to verifier, no verifier fields
+            None,
+            tpm_policy,
+        )
+        .with_v_key(agent_data.get("v").cloned())
+        .with_ak_tpm(agent_data.get("aik_tpm").cloned())
+        .with_mtls_cert(agent_data.get("mtls_cert").cloned())
+        .with_ima_sign_verification_keys(Some(
+            agent_data
+                .get("ima_sign_verification_keys")
+                .and_then(|v| v.as_str())
+                .unwrap_or("[]")
+                .to_string(),
+        ))
+        .with_metadata(Some(
+            agent_data
+                .get("metadata")
+                .and_then(|v| v.as_str())
+                .unwrap_or("{}")
+                .to_string(),
+        ))
+        .with_revocation_key(Some(
+            agent_data
+                .get("revocation_key")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string(),
+        ))
+        .with_accept_tpm_hash_algs(Some(vec![
+            "sha512".to_string(),
+            "sha384".to_string(),
+            "sha256".to_string(),
+        ]))
+        .with_accept_tpm_encryption_algs(Some(vec![
+            "ecc".to_string(),
+            "rsa".to_string(),
+        ]))
+        .with_accept_tpm_signing_algs(Some(vec![
+            "ecschnorr".to_string(),
+            "rsassa".to_string(),
+        ]))
+        .with_supported_version(Some(
+            agent_data
+                .get("supported_version")
+                .and_then(|v| v.as_str())
+                .unwrap_or("2.0")
+                .to_string(),
+        ))
+        .with_mb_policy(Some(String::new()))
+        .with_mb_policy_name(Some(
+            agent_data
+                .get("mb_policy_name")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string(),
+        ))
+        .with_mb_refstate(Some("null".to_string()));
+
+        req = apply_file_policies(
+            req,
             params.runtime_policy,
             params.runtime_policy_name,
             params.runtime_policy_sig_key,
             params.mb_policy,
-            &agent_ip,
-            agent_port,
-        )?
+            params.payload,
+            params.cert_dir,
+        )?;
+        serde_json::to_value(req)?
     } else {
         #[cfg(feature = "api-v2")]
         {
-            // API 2.x: Full enrollment with direct agent communication
-            let mut request = AddAgentRequest::new(
+            // API 2.x: Pull model with direct agent communication
+            let mut req = AddAgentRequest::new(
                 Some(cv_agent_ip.to_string()),
                 Some(agent_port),
-                get_config().verifier.ip.clone(),
-                get_config().verifier.port,
+                Some(get_config().verifier.ip.clone()),
+                Some(get_config().verifier.port),
                 tpm_policy,
             )
             .with_ak_tpm(agent_data.get("aik_tpm").cloned())
             .with_mtls_cert(agent_data.get("mtls_cert").cloned())
-            .with_metadata(
+            .with_metadata(Some(
                 agent_data
                     .get("metadata")
                     .and_then(|v| v.as_str())
-                    .map(|s| s.to_string())
-                    .or_else(|| Some("{}".to_string())),
-            ) // Use agent metadata or default
-            .with_ima_sign_verification_keys(
+                    .unwrap_or("{}")
+                    .to_string(),
+            ))
+            .with_ima_sign_verification_keys(Some(
                 agent_data
                     .get("ima_sign_verification_keys")
                     .and_then(|v| v.as_str())
-                    .map(|s| s.to_string())
-                    .or_else(|| Some("".to_string())),
-            ) // Use agent IMA keys or default
-            .with_revocation_key(
+                    .unwrap_or("")
+                    .to_string(),
+            ))
+            .with_revocation_key(Some(
                 agent_data
                     .get("revocation_key")
                     .and_then(|v| v.as_str())
-                    .map(|s| s.to_string())
-                    .or_else(|| Some("".to_string())),
-            ) // Use agent revocation key or default
+                    .unwrap_or("")
+                    .to_string(),
+            ))
             .with_accept_tpm_hash_algs(Some(vec![
                 "sha512".to_string(),
                 "sha384".to_string(),
@@ -327,36 +392,45 @@ pub(super) async fn add_agent(
                 "ecschnorr".to_string(),
                 "rsassa".to_string(),
             ]))
-            .with_supported_version(
+            .with_supported_version(Some(
                 agent_data
                     .get("supported_version")
                     .and_then(|v| v.as_str())
-                    .map(|s| s.to_string())
-                    .or_else(|| Some("2.1".to_string())),
-            ) // Use agent supported version or default
-            .with_mb_policy_name(
+                    .unwrap_or("2.1")
+                    .to_string(),
+            ))
+            .with_mb_policy_name(Some(
                 agent_data
                     .get("mb_policy_name")
                     .and_then(|v| v.as_str())
-                    .map(|s| s.to_string())
-                    .or_else(|| Some("".to_string())),
-            ) // Use agent MB policy name or default
-            .with_mb_policy(
+                    .unwrap_or("")
+                    .to_string(),
+            ))
+            .with_mb_policy(Some(
                 agent_data
                     .get("mb_policy")
                     .and_then(|v| v.as_str())
-                    .map(|s| s.to_string())
-                    .or_else(|| Some("".to_string())),
-            ); // Use agent MB policy or default
+                    .unwrap_or("")
+                    .to_string(),
+            ));
 
             // Add V key from attestation if available
             if let Some(attestation) = &attestation_result {
-                request = request.with_v_key(Some(Value::String(
+                req = req.with_v_key(Some(Value::String(
                     STANDARD.encode(attestation.v_key.as_slice()),
                 )));
             }
 
-            serde_json::to_value(request)?
+            req = apply_file_policies(
+                req,
+                params.runtime_policy,
+                params.runtime_policy_name,
+                params.runtime_policy_sig_key,
+                params.mb_policy,
+                params.payload,
+                params.cert_dir,
+            )?;
+            serde_json::to_value(req)?
         }
         #[cfg(not(feature = "api-v2"))]
         {
@@ -368,52 +442,6 @@ pub(super) async fn add_agent(
             ));
         }
     };
-
-    // Ensure policy fields always have defaults (the Python verifier
-    // expects these fields to be present as strings, not absent/null)
-    if let Some(obj) = request.as_object_mut() {
-        let _ = obj.entry("runtime_policy").or_insert(json!(""));
-        let _ = obj.entry("runtime_policy_name").or_insert(json!(""));
-        let _ = obj.entry("runtime_policy_key").or_insert(json!(""));
-        let _ = obj.entry("runtime_policy_sig").or_insert(json!(""));
-        let _ = obj.entry("mb_policy_name").or_insert(json!(""));
-    }
-
-    // Add policies if provided (base64-encoded as expected by verifier)
-    if let Some(policy_path) = params.runtime_policy {
-        let policy_content = load_policy_file(policy_path)?;
-        let policy_b64 = STANDARD.encode(policy_content.as_bytes());
-        if let Some(obj) = request.as_object_mut() {
-            let _ =
-                obj.insert("runtime_policy".to_string(), json!(policy_b64));
-        }
-    }
-
-    if let Some(policy_path) = params.mb_policy {
-        let policy_content = load_policy_file(policy_path)?;
-        let policy_b64 = STANDARD.encode(policy_content.as_bytes());
-        if let Some(obj) = request.as_object_mut() {
-            let _ = obj.insert("mb_policy".to_string(), json!(policy_b64));
-        }
-    }
-
-    // Add payload if provided
-    if let Some(payload_path) = params.payload {
-        let payload_content = load_payload_file(payload_path)?;
-        if let Some(obj) = request.as_object_mut() {
-            let _ = obj.insert("payload".to_string(), json!(payload_content));
-        }
-    }
-
-    if let Some(cert_dir_path) = params.cert_dir {
-        // For now, just pass the path - in future could generate cert package
-        if let Some(obj) = request.as_object_mut() {
-            let _ = obj.insert(
-                "cert_dir".to_string(),
-                json!(cert_dir_path.to_string()),
-            );
-        }
-    }
 
     let response = verifier_client
         .add_agent(params.agent_id, request)
@@ -525,78 +553,51 @@ fn has_attestation_policy(params: &AddAgentParams) -> bool {
         || params.tpm_policy.is_some()
 }
 
-/// Build enrollment request for push model (API 3.0+)
+/// Apply file-based policies to a request before serialization.
 ///
-/// Creates a simplified enrollment request for push model attestation.
-/// In push model, the agent will initiate attestations, so no direct
-/// agent communication or key exchange is needed during enrollment.
-#[allow(clippy::too_many_arguments)]
-fn build_push_model_request(
-    agent_id: &str,
-    tpm_policy: &str,
-    agent_data: &Value,
+/// Loads and base64-encodes policy files, reads the payload file, and sets
+/// the cert_dir path. Doing this before serialization gives early validation
+/// (file not found errors surface before any network calls).
+fn apply_file_policies(
+    mut req: AddAgentRequest,
     runtime_policy: Option<&str>,
     runtime_policy_name: Option<&str>,
     runtime_policy_sig_key: Option<&str>,
     mb_policy: Option<&str>,
-    cloudagent_ip: &str,
-    cloudagent_port: u16,
-) -> Result<Value, CommandError> {
-    debug!("Building push model enrollment request for agent {agent_id}");
-
-    // Load and encode runtime policy (required field, use empty string if not provided)
-    let runtime_policy_b64 = if let Some(policy_path) = runtime_policy {
-        let policy_content = load_policy_file(policy_path)?;
-        STANDARD.encode(policy_content.as_bytes())
-    } else {
-        String::new() // Empty string if no policy provided
-    };
-
-    // Load and encode measured boot policy (use empty string if not provided)
-    let mb_policy_b64 = if let Some(policy_path) = mb_policy {
-        let policy_content = load_policy_file(policy_path)?;
-        STANDARD.encode(policy_content.as_bytes())
-    } else {
-        String::new() // Empty string if no policy provided
-    };
-
-    let runtime_policy_key_b64 =
-        if let Some(key_path) = runtime_policy_sig_key {
-            let key_bytes = std::fs::read(key_path).map_err(|e| {
-                CommandError::invalid_parameter(
-                    "runtime_policy_sig_key",
-                    format!("Failed to read key file '{key_path}': {e}"),
-                )
-            })?;
-            STANDARD.encode(&key_bytes)
-        } else {
-            String::new()
-        };
-
-    let request = json!({
-        "v": agent_data.get("v"),
-        "cloudagent_ip": cloudagent_ip,
-        "cloudagent_port": cloudagent_port,
-        "tpm_policy": tpm_policy,
-        "ak_tpm": agent_data.get("aik_tpm"),
-        "mtls_cert": agent_data.get("mtls_cert"),
-        "runtime_policy_name": runtime_policy_name.unwrap_or(""),
-        "runtime_policy": runtime_policy_b64,
-        "runtime_policy_key": runtime_policy_key_b64,
-        "mb_refstate": "null",
-        "mb_policy_name": null,
-        "mb_policy": mb_policy_b64,
-        "ima_sign_verification_keys": agent_data.get("ima_sign_verification_keys").and_then(|v| v.as_str()).unwrap_or("[]"),
-        "metadata": agent_data.get("metadata").and_then(|v| v.as_str()).unwrap_or("{}"),
-        "revocation_key": agent_data.get("revocation_key").and_then(|v| v.as_str()).unwrap_or(""),
-        "accept_tpm_hash_algs": ["sha512", "sha384", "sha256", "sha1"],
-        "accept_tpm_encryption_algs": ["ecc", "rsa"],
-        "accept_tpm_signing_algs": ["ecschnorr", "rsassa"],
-        "supported_version": agent_data.get("supported_version").and_then(|v| v.as_str()).unwrap_or("2.0")
-    });
-
-    debug!("Push model request built successfully");
-    Ok(request)
+    payload: Option<&str>,
+    cert_dir: Option<&str>,
+) -> Result<AddAgentRequest, CommandError> {
+    if let Some(policy_path) = runtime_policy {
+        let content = load_policy_file(policy_path)?;
+        req = req
+            .with_runtime_policy(Some(STANDARD.encode(content.as_bytes())));
+    }
+    if let Some(name) = runtime_policy_name {
+        req = req.with_runtime_policy_name(Some(name.to_string()));
+    }
+    if let Some(key_path) = runtime_policy_sig_key {
+        let key_bytes = std::fs::read(key_path).map_err(|e| {
+            CommandError::invalid_parameter(
+                "runtime_policy_sig_key",
+                format!("Failed to read key file '{key_path}': {e}"),
+            )
+        })?;
+        req = req.with_runtime_policy_key(Some(Value::String(
+            STANDARD.encode(&key_bytes),
+        )));
+    }
+    if let Some(policy_path) = mb_policy {
+        let content = load_policy_file(policy_path)?;
+        req = req.with_mb_policy(Some(STANDARD.encode(content.as_bytes())));
+    }
+    if let Some(payload_path) = payload {
+        let content = load_payload_file(payload_path)?;
+        req = req.with_payload(Some(content));
+    }
+    if let Some(cert_dir_path) = cert_dir {
+        req = req.with_cert_dir(Some(cert_dir_path.to_string()));
+    }
+    Ok(req)
 }
 
 /// Extract operational state from verifier agent data as a human-readable string.

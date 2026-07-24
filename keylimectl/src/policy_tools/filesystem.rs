@@ -7,9 +7,9 @@
 //! symlinks, non-regular files, and excluded paths.  Digest
 //! calculation is parallelised with Rayon.
 
+use super::DigestMap;
 use crate::commands::error::PolicyGenerationError;
 use crate::policy_tools::digest::calculate_file_digest;
-use crate::policy_tools::ima_parser::DigestMap;
 use rayon::prelude::*;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};

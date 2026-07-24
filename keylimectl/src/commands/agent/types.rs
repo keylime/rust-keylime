@@ -111,8 +111,10 @@ pub struct AddAgentRequest {
     pub cloudagent_ip: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cloudagent_port: Option<u16>,
-    pub verifier_ip: String,
-    pub verifier_port: u16,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub verifier_ip: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub verifier_port: Option<u16>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ak_tpm: Option<Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -130,12 +132,13 @@ pub struct AddAgentRequest {
     pub runtime_policy_name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub runtime_policy_key: Option<Value>,
-
     // Measured boot policy fields
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mb_policy: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mb_policy_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mb_refstate: Option<String>,
 
     // IMA and verification keys
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -162,15 +165,19 @@ pub struct AddAgentRequest {
     pub supported_version: Option<String>,
 }
 
-#[cfg_attr(not(feature = "api-v2"), allow(dead_code))]
 impl AddAgentRequest {
-    /// Create a new agent request with the required fields
+    /// Create a new agent request with the required fields.
+    ///
+    /// Policy-related fields (`runtime_policy`, `runtime_policy_name`,
+    /// `runtime_policy_key`, `mb_policy_name`) are
+    /// initialized to empty strings so the verifier always receives them.
+    /// Use builder methods to override these defaults.
     #[must_use]
     pub fn new(
         cloudagent_ip: Option<String>,
         cloudagent_port: Option<u16>,
-        verifier_ip: String,
-        verifier_port: u16,
+        verifier_ip: Option<String>,
+        verifier_port: Option<u16>,
         tpm_policy: String,
     ) -> Self {
         Self {
@@ -182,11 +189,12 @@ impl AddAgentRequest {
             mtls_cert: None,
             tpm_policy,
             v: None,
-            runtime_policy: None,
-            runtime_policy_name: None,
-            runtime_policy_key: None,
+            runtime_policy: Some(String::new()),
+            runtime_policy_name: Some(String::new()),
+            runtime_policy_key: Some(Value::String(String::new())),
             mb_policy: None,
-            mb_policy_name: None,
+            mb_policy_name: Some(String::new()),
+            mb_refstate: None,
             ima_sign_verification_keys: None,
             revocation_key: None,
             accept_tpm_hash_algs: None,
@@ -222,7 +230,6 @@ impl AddAgentRequest {
 
     /// Set the runtime policy
     #[must_use]
-    #[allow(dead_code)] // Will be used when CLI args are implemented
     pub fn with_runtime_policy(mut self, policy: Option<String>) -> Self {
         self.runtime_policy = policy;
         self
@@ -230,7 +237,6 @@ impl AddAgentRequest {
 
     /// Set the measured boot policy
     #[must_use]
-    #[allow(dead_code)] // Will be used when CLI args are implemented
     pub fn with_mb_policy(mut self, policy: Option<String>) -> Self {
         self.mb_policy = policy;
         self
@@ -238,7 +244,6 @@ impl AddAgentRequest {
 
     /// Set the payload
     #[must_use]
-    #[allow(dead_code)] // Will be used when CLI args are implemented
     pub fn with_payload(mut self, payload: Option<String>) -> Self {
         self.payload = payload;
         self
@@ -246,7 +251,6 @@ impl AddAgentRequest {
 
     /// Set the certificate directory
     #[must_use]
-    #[allow(dead_code)] // Will be used when CLI args are implemented
     pub fn with_cert_dir(mut self, cert_dir: Option<String>) -> Self {
         self.cert_dir = cert_dir;
         self
@@ -254,7 +258,7 @@ impl AddAgentRequest {
 
     /// Set the runtime policy name
     #[must_use]
-    #[allow(dead_code)] // Will be used when CLI args are implemented
+    #[allow(dead_code)] // Used when --runtime-policy-name CLI arg is wired up
     pub fn with_runtime_policy_name(
         mut self,
         policy_name: Option<String>,
@@ -265,7 +269,7 @@ impl AddAgentRequest {
 
     /// Set the runtime policy signature key
     #[must_use]
-    #[allow(dead_code)] // Will be used when CLI args are implemented
+    #[allow(dead_code)] // Used when --runtime-policy-key CLI arg is wired up
     pub fn with_runtime_policy_key(
         mut self,
         policy_key: Option<Value>,
@@ -276,7 +280,6 @@ impl AddAgentRequest {
 
     /// Set the measured boot policy name
     #[must_use]
-    #[allow(dead_code)] // Will be used when CLI args are implemented
     pub fn with_mb_policy_name(
         mut self,
         policy_name: Option<String>,
@@ -287,7 +290,6 @@ impl AddAgentRequest {
 
     /// Set the IMA signature verification keys
     #[must_use]
-    #[allow(dead_code)] // Will be used when CLI args are implemented
     pub fn with_ima_sign_verification_keys(
         mut self,
         keys: Option<String>,
@@ -298,7 +300,6 @@ impl AddAgentRequest {
 
     /// Set the revocation key
     #[must_use]
-    #[allow(dead_code)] // Will be used when CLI args are implemented
     pub fn with_revocation_key(mut self, key: Option<String>) -> Self {
         self.revocation_key = key;
         self
@@ -306,7 +307,6 @@ impl AddAgentRequest {
 
     /// Set the accepted TPM hash algorithms
     #[must_use]
-    #[allow(dead_code)] // Will be used when CLI args are implemented
     pub fn with_accept_tpm_hash_algs(
         mut self,
         algs: Option<Vec<String>>,
@@ -317,7 +317,6 @@ impl AddAgentRequest {
 
     /// Set the accepted TPM encryption algorithms
     #[must_use]
-    #[allow(dead_code)] // Will be used when CLI args are implemented
     pub fn with_accept_tpm_encryption_algs(
         mut self,
         algs: Option<Vec<String>>,
@@ -328,7 +327,6 @@ impl AddAgentRequest {
 
     /// Set the accepted TPM signing algorithms
     #[must_use]
-    #[allow(dead_code)] // Will be used when CLI args are implemented
     pub fn with_accept_tpm_signing_algs(
         mut self,
         algs: Option<Vec<String>>,
@@ -339,7 +337,6 @@ impl AddAgentRequest {
 
     /// Set the metadata
     #[must_use]
-    #[allow(dead_code)] // Will be used when CLI args are implemented
     pub fn with_metadata(mut self, metadata: Option<String>) -> Self {
         self.metadata = metadata;
         self
@@ -347,9 +344,15 @@ impl AddAgentRequest {
 
     /// Set the supported API version
     #[must_use]
-    #[allow(dead_code)] // Will be used when CLI args are implemented
     pub fn with_supported_version(mut self, version: Option<String>) -> Self {
         self.supported_version = version;
+        self
+    }
+
+    /// Set the measured boot refstate
+    #[must_use]
+    pub fn with_mb_refstate(mut self, refstate: Option<String>) -> Self {
+        self.mb_refstate = refstate;
         self
     }
 }
@@ -526,8 +529,8 @@ mod tests {
             let request = AddAgentRequest::new(
                 Some("192.168.1.100".to_string()),
                 Some(9002),
-                "127.0.0.1".to_string(),
-                8881,
+                Some("127.0.0.1".to_string()),
+                Some(8881),
                 "{}".to_string(),
             )
             .with_ak_tpm(Some(json!({"aik": "test_key"})))
@@ -563,8 +566,8 @@ mod tests {
                 Some("192.168.1.100".to_string())
             );
             assert_eq!(request.cloudagent_port, Some(9002));
-            assert_eq!(request.verifier_ip, "127.0.0.1");
-            assert_eq!(request.verifier_port, 8881);
+            assert_eq!(request.verifier_ip, Some("127.0.0.1".to_string()));
+            assert_eq!(request.verifier_port, Some(8881));
             assert_eq!(request.tpm_policy, "{}");
 
             assert!(request.ak_tpm.is_some());
@@ -614,8 +617,8 @@ mod tests {
             let request = AddAgentRequest::new(
                 Some("192.168.1.100".to_string()),
                 Some(9002),
-                "127.0.0.1".to_string(),
-                8881,
+                Some("127.0.0.1".to_string()),
+                Some(8881),
                 "{}".to_string(),
             )
             .with_runtime_policy_name(Some("test_policy".to_string()))
@@ -638,13 +641,14 @@ mod tests {
             assert_eq!(json_value["accept_tpm_hash_algs"], json!(["sha256"]));
             assert_eq!(json_value["metadata"], "{}");
 
-            // Check that None fields are not serialized
-            assert!(json_value.get("runtime_policy").is_none());
+            // Policy fields serialize as empty strings by default
+            assert_eq!(json_value["runtime_policy"], "");
+            // mb_policy is absent when not set
             assert!(json_value.get("mb_policy").is_none());
         }
     }
 
-    // Test Optional cloudagent_ip/cloudagent_port in AddAgentRequest
+    // Test Optional cloudagent_ip/cloudagent_port/verifier_ip/verifier_port
     mod optional_agent_fields {
         use super::*;
 
@@ -653,8 +657,8 @@ mod tests {
             let request = AddAgentRequest::new(
                 None,
                 None,
-                "127.0.0.1".to_string(),
-                8881,
+                Some("127.0.0.1".to_string()),
+                Some(8881),
                 "{}".to_string(),
             );
 
@@ -667,8 +671,8 @@ mod tests {
             let request = AddAgentRequest::new(
                 None,
                 None,
-                "127.0.0.1".to_string(),
-                8881,
+                None,
+                None,
                 "{}".to_string(),
             );
 
@@ -676,13 +680,11 @@ mod tests {
             let json_value: Value =
                 serde_json::from_str(&serialized).unwrap(); //#[allow_ci]
 
-            // cloudagent_ip and cloudagent_port should not be in JSON when None
+            // Optional fields are absent when None
             assert!(json_value.get("cloudagent_ip").is_none());
             assert!(json_value.get("cloudagent_port").is_none());
-
-            // Required fields should be present
-            assert_eq!(json_value["verifier_ip"], "127.0.0.1");
-            assert_eq!(json_value["verifier_port"], 8881);
+            assert!(json_value.get("verifier_ip").is_none());
+            assert!(json_value.get("verifier_port").is_none());
         }
 
         #[test]
@@ -690,8 +692,8 @@ mod tests {
             let request = AddAgentRequest::new(
                 Some("192.168.1.100".to_string()),
                 Some(9002),
-                "127.0.0.1".to_string(),
-                8881,
+                Some("127.0.0.1".to_string()),
+                Some(8881),
                 "{}".to_string(),
             );
 
@@ -701,6 +703,8 @@ mod tests {
 
             assert_eq!(json_value["cloudagent_ip"], "192.168.1.100");
             assert_eq!(json_value["cloudagent_port"], 9002);
+            assert_eq!(json_value["verifier_ip"], "127.0.0.1");
+            assert_eq!(json_value["verifier_port"], 8881);
         }
 
         #[test]

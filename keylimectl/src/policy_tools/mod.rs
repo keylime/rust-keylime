@@ -8,6 +8,24 @@
 //! in `commands::policy` and `commands::verify` but contains no CLI
 //! concerns itself.
 
+use std::collections::HashMap;
+
+/// Map from file path (or entry name) to list of digest strings.
+pub type DigestMap = HashMap<String, Vec<String>>;
+
+/// Merge `src` into `dst`, appending new digests without duplicates.
+#[cfg_attr(not(feature = "rpm-repo"), allow(dead_code))]
+pub fn merge_digest_maps(dst: &mut DigestMap, src: &DigestMap) {
+    for (path, digests) in src {
+        let entry = dst.entry(path.clone()).or_default();
+        for digest in digests {
+            if !entry.contains(digest) {
+                entry.push(digest.clone());
+            }
+        }
+    }
+}
+
 pub mod conversion;
 pub mod digest;
 pub mod dsse;
