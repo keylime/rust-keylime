@@ -118,6 +118,118 @@ fn get_retry_config(config: &config::AgentConfig) -> RetryConfig {
     }
 }
 
+/// On upgrade from a pre-key-separation agent, the payload key file does not
+/// exist yet. If the mTLS server key is RSA, copy it as the payload key so
+/// that PCR 16 stays consistent with what the verifier has cached.
+///
+/// Returns `Ok(())` when the copy succeeds or when a copy is not needed
+/// (key already exists, server key missing, or server key is not RSA).
+/// Returns `Err` if the server key is a valid RSA key but writing the
+/// payload key file fails — continuing in that state could leave a
+/// corrupt or insecure file behind.
+fn ensure_payload_key(
+    payload_key_path: &Path,
+    payload_key_password: &str,
+    server_key_path: &Path,
+    server_key_password: &str,
+) -> std::result::Result<(), Error> {
+    if payload_key_path.exists() {
+        return Ok(());
+    }
+    if !server_key_path.exists() {
+        return Ok(());
+    }
+
+    match crypto::load_key_pair(server_key_path, Some(server_key_password)) {
+        Ok((_, priv_key))
+            if priv_key.id() == Id::RSA && priv_key.bits() >= 2048 =>
+        {
+            crypto::write_key_pair(
+                &priv_key,
+                payload_key_path,
+                Some(payload_key_password),
+            )
+            .map_err(|e| {
+                if matches!(e, crypto::CryptoError::IOSetPermissionError(_)) {
+                    // The key was written successfully but chmod failed.
+                    // Remove the file so the next startup retries the copy
+                    // rather than loading a key with insecure permissions.
+                    // The file did not exist before this call (checked above),
+                    // so removal cannot delete pre-existing user data.
+                    match fs::remove_file(payload_key_path) {
+                        Ok(()) => {
+                            error!(
+                                "Wrote mTLS key to {} but failed to set \
+                                 file permissions: {e}. The file has been \
+                                 removed; the copy will be retried on next \
+                                 startup.",
+                                payload_key_path.display()
+                            );
+                        }
+                        Err(rm_err) => {
+                            error!(
+                                "Wrote mTLS key to {} but failed to set \
+                                 file permissions: {e}. Cleanup also failed: \
+                                 {rm_err}. Remove the file manually before \
+                                 restarting the agent to prevent loading a key \
+                                 with insecure permissions.",
+                                payload_key_path.display()
+                            );
+                        }
+                    }
+                } else {
+                    error!(
+                        "Failed to write mTLS key to {}: {e}. \
+                         If a partial file was left behind, remove \
+                         it manually before restarting the agent.",
+                        payload_key_path.display()
+                    );
+                }
+                Error::Crypto(e)
+            })?;
+
+            warn!(
+                "Payload key not found; wrote mTLS key from {} to {} \
+                 for backward compatibility. The same RSA key will \
+                 be used for both mTLS and payload encryption.",
+                server_key_path.display(),
+                payload_key_path.display()
+            );
+            if !server_key_password.is_empty()
+                && payload_key_password.is_empty()
+            {
+                warn!(
+                    "The mTLS key was encrypted at rest but the \
+                     payload key copy at {} is unencrypted. To \
+                     encrypt it, re-encrypt the file manually and \
+                     set 'payload_key_password' in the agent \
+                     configuration.",
+                    payload_key_path.display()
+                );
+            }
+        }
+        Ok(_) => {
+            warn!(
+                "mTLS key {} is not a supported RSA key (at least 2048 \
+                 bits); a new RSA payload key will be generated, which \
+                 will change PCR 16 and may cause attestation failures \
+                 until the agent is re-enrolled.",
+                server_key_path.display()
+            );
+        }
+        Err(e) => {
+            warn!(
+                "Failed to load mTLS key {}: {e}. \
+                 A new payload key will be generated, which will change \
+                 PCR 16 and may cause attestation failures until the \
+                 agent is re-enrolled.",
+                server_key_path.display()
+            );
+        }
+    }
+    Ok(())
+}
+
 // This data is passed in to the actix httpserver threads that
 // handle quotes.
 #[derive(Debug)]
@@ -500,6 +612,13 @@ async fn main() -> Result<()> {
     // by the Tenant and Cloud Verifier, respectively.
     // The payload key is always persistent, stored at the configured path.
     let key_path = Path::new(&config.payload_key);
+    ensure_payload_key(
+        key_path,
+        config.payload_key_password.as_ref(),
+        Path::new(&config.server_key),
+        config.server_key_password.as_ref(),
+    )?;
+
     let (payload_pub_key, payload_priv_key) = crypto::load_or_generate_key(
         key_path,
         Some(config.payload_key_password.as_ref()),
@@ -1204,5 +1323,202 @@ mod tests {
             retry_config.max_delay_ms,
             Some(config::DEFAULT_EXP_BACKOFF_MAX_DELAY as u64)
         );
+    }
+
+    mod ensure_payload_key_tests {
+        use super::*;
+        use openssl::ec::{EcGroup, EcKey};
+        use openssl::nid::Nid;
+        use openssl::pkey::PKey;
+        use openssl::rsa::Rsa;
+        use tempfile::TempDir;
+
+        type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
+
+        fn write_rsa_key(
+            path: &Path,
+            bits: u32,
+            password: &str,
+        ) -> Result<()> {
+            let rsa = Rsa::generate(bits)?;
+            let key = PKey::from_rsa(rsa)?;
+            crypto::write_key_pair(&key, path, Some(password))?;
+            Ok(())
+        }
+
+        fn write_ec_key(path: &Path, password: &str) -> Result<()> {
+            let group = EcGroup::from_curve_name(Nid::X9_62_PRIME256V1)?;
+            let ec = EcKey::generate(&group)?;
+            let key = PKey::from_ec_key(ec)?;
+            crypto::write_key_pair(&key, path, Some(password))?;
+            Ok(())
+        }
+
+        #[test]
+        fn copies_rsa2048_server_key_as_payload_key() -> Result<()> {
+            let dir = TempDir::new()?;
+            let server = dir.path().join("server-private.pem");
+            let payload = dir.path().join("payload-private.pem");
+
+            write_rsa_key(&server, 2048, "")?;
+
+            ensure_payload_key(&payload, "", &server, "")?;
+
+            assert!(payload.exists());
+            let (_, loaded) = crypto::load_key_pair(&payload, Some(""))?;
+            assert_eq!(loaded.id(), Id::RSA);
+            assert_eq!(loaded.bits(), 2048);
+            Ok(())
+        }
+
+        #[test]
+        fn copies_rsa4096_server_key_as_payload_key() -> Result<()> {
+            let dir = TempDir::new()?;
+            let server = dir.path().join("server-private.pem");
+            let payload = dir.path().join("payload-private.pem");
+
+            write_rsa_key(&server, 4096, "")?;
+
+            ensure_payload_key(&payload, "", &server, "")?;
+
+            assert!(payload.exists());
+            let (_, loaded) = crypto::load_key_pair(&payload, Some(""))?;
+            assert_eq!(loaded.id(), Id::RSA);
+            assert_eq!(loaded.bits(), 4096);
+            Ok(())
+        }
+
+        #[test]
+        fn skips_when_payload_key_already_exists() -> Result<()> {
+            let dir = TempDir::new()?;
+            let server = dir.path().join("server-private.pem");
+            let payload = dir.path().join("payload-private.pem");
+
+            write_rsa_key(&server, 2048, "")?;
+            write_rsa_key(&payload, 2048, "")?;
+
+            let before = fs::read(&payload)?;
+            ensure_payload_key(&payload, "", &server, "")?;
+            let after = fs::read(&payload)?;
+
+            assert_eq!(before, after);
+            Ok(())
+        }
+
+        #[test]
+        fn skips_when_no_server_key() -> Result<()> {
+            let dir = TempDir::new()?;
+            let server = dir.path().join("server-private.pem");
+            let payload = dir.path().join("payload-private.pem");
+
+            ensure_payload_key(&payload, "", &server, "")?;
+
+            assert!(!payload.exists());
+            Ok(())
+        }
+
+        #[test]
+        fn skips_non_rsa_server_key() -> Result<()> {
+            let dir = TempDir::new()?;
+            let server = dir.path().join("server-private.pem");
+            let payload = dir.path().join("payload-private.pem");
+
+            write_ec_key(&server, "")?;
+
+            ensure_payload_key(&payload, "", &server, "")?;
+
+            assert!(!payload.exists());
+            Ok(())
+        }
+
+        #[test]
+        fn skips_rsa_key_below_minimum_size() -> Result<()> {
+            let dir = TempDir::new()?;
+            let server = dir.path().join("server-private.pem");
+            let payload = dir.path().join("payload-private.pem");
+
+            write_rsa_key(&server, 1024, "")?;
+
+            ensure_payload_key(&payload, "", &server, "")?;
+
+            assert!(!payload.exists());
+            Ok(())
+        }
+
+        #[test]
+        fn preserves_key_material_on_copy() -> Result<()> {
+            let dir = TempDir::new()?;
+            let server = dir.path().join("server-private.pem");
+            let payload = dir.path().join("payload-private.pem");
+
+            write_rsa_key(&server, 2048, "")?;
+            let (_, original) = crypto::load_key_pair(&server, Some(""))?;
+
+            ensure_payload_key(&payload, "", &server, "")?;
+
+            let (_, copied) = crypto::load_key_pair(&payload, Some(""))?;
+            assert_eq!(
+                original.private_key_to_pem_pkcs8()?,
+                copied.private_key_to_pem_pkcs8()?,
+            );
+            Ok(())
+        }
+
+        #[test]
+        fn handles_password_mismatch_gracefully() -> Result<()> {
+            let dir = TempDir::new()?;
+            let server = dir.path().join("server-private.pem");
+            let payload = dir.path().join("payload-private.pem");
+
+            write_rsa_key(&server, 2048, "server-pass")?;
+
+            ensure_payload_key(&payload, "payload-pass", &server, "wrong")?;
+
+            assert!(!payload.exists());
+            Ok(())
+        }
+
+        #[test]
+        fn copies_with_different_passwords() -> Result<()> {
+            let dir = TempDir::new()?;
+            let server = dir.path().join("server-private.pem");
+            let payload = dir.path().join("payload-private.pem");
+
+            write_rsa_key(&server, 2048, "server-pass")?;
+            let (_, original) =
+                crypto::load_key_pair(&server, Some("server-pass"))?;
+
+            ensure_payload_key(
+                &payload,
+                "payload-pass",
+                &server,
+                "server-pass",
+            )?;
+
+            let (_, copied) =
+                crypto::load_key_pair(&payload, Some("payload-pass"))?;
+            assert_eq!(
+                original.private_key_to_pem_pkcs8()?,
+                copied.private_key_to_pem_pkcs8()?,
+            );
+            Ok(())
+        }
+
+        #[test]
+        fn returns_err_when_write_fails() -> Result<()> {
+            let dir = TempDir::new()?;
+            let server = dir.path().join("server-private.pem");
+            // Nonexistent parent directory forces FSCreateError in write_key_pair.
+            let payload = dir
+                .path()
+                .join("nonexistent-subdir")
+                .join("payload-private.pem");
+
+            write_rsa_key(&server, 2048, "")?;
+
+            assert!(ensure_payload_key(&payload, "", &server, "").is_err());
+            assert!(!payload.exists());
+            Ok(())
+        }
     }
 }
