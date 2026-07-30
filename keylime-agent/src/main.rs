@@ -66,7 +66,7 @@ use keylime::{
 };
 use log::*;
 use openssl::{
-    pkey::{PKey, Private, Public},
+    pkey::{Id, PKey, Private, Public},
     x509::X509,
 };
 use std::{
@@ -504,7 +504,7 @@ async fn main() -> Result<()> {
         key_path,
         Some(config.payload_key_password.as_ref()),
         keylime::algorithms::EncryptionAlgorithm::Rsa2048,
-        true, // Validate that loaded keys are RSA 2048
+        false, // Don't validate key size (accept any RSA for backward compatibility)
     )
     .map_err(|e| {
         error!(
@@ -516,6 +516,25 @@ async fn main() -> Result<()> {
             key_path.display()
         )))
     })?;
+
+    if payload_priv_key.id() != Id::RSA || payload_priv_key.bits() < 2048 {
+        error!(
+            "Payload key {} must be an RSA key of at least 2048 bits, \
+             found {:?} with {} bits",
+            key_path.display(),
+            payload_priv_key.id(),
+            payload_priv_key.bits()
+        );
+        return Err(Error::Configuration(
+            config::KeylimeConfigError::Generic(format!(
+                "Payload key {} must be an RSA key of at least 2048 \
+                 bits, found {:?} with {} bits",
+                key_path.display(),
+                payload_priv_key.id(),
+                payload_priv_key.bits()
+            )),
+        ));
+    }
 
     // Load or generate mTLS key pair (separate from payload keys)
     // The mTLS key is always persistent, stored at the configured path.
