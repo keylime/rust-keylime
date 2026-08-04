@@ -143,7 +143,7 @@ fn run(dir: &Path, script: &str) -> Result<()> {
     {
         return Err(Error::Other(format!(
             "unable to set {:?} as executable",
-            &script_path
+            script_path
         )));
     }
 
@@ -159,12 +159,12 @@ fn run(dir: &Path, script: &str) -> Result<()> {
         .status()
     {
         Ok(_) => {
-            info!("{:?} ran successfully", &script_path);
+            info!("{:?} ran successfully", script_path);
             Ok(())
         }
         Err(e) => Err(Error::Other(format!(
             "{:?} failed during run: {}",
-            &script_path, e
+            script_path, e
         ))),
     }
 }

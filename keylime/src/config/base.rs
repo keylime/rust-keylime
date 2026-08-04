@@ -726,15 +726,15 @@ fn get_uuid(agent_uuid_config: &str) -> String {
         }
         "generate" => {
             let agent_uuid = Uuid::new_v4();
-            info!("Generated a new UUID: {}", &agent_uuid);
+            info!("Generated a new UUID: {}", agent_uuid);
             agent_uuid.to_string()
         }
         uuid_config => match Uuid::parse_str(uuid_config) {
             Ok(uuid_config) => uuid_config.to_string(),
             Err(_) => {
-                warn!("Misformatted UUID: {}", &uuid_config);
+                warn!("Misformatted UUID: {}", uuid_config);
                 let agent_uuid = Uuid::new_v4();
-                info!("Using generated UUID: {}", &agent_uuid);
+                info!("Using generated UUID: {}", agent_uuid);
                 agent_uuid.to_string()
             }
         },

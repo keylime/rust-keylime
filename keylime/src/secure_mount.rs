@@ -107,7 +107,7 @@ pub fn mount(work_dir: &Path, secure_size: &str) -> Result<PathBuf> {
 
         info!(
             "Mounting secure storage location {:?} on tmpfs.",
-            &secure_dir_path
+            secure_dir_path
         );
 
         // mount tmpfs with secure directory

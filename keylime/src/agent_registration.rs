@@ -168,7 +168,7 @@ pub async fn register_agent(
     // Request keyblob material
     let keyblob = registrar_client.register_agent(&ai).await?;
 
-    info!("SUCCESS: Agent {} registered", &aa.agent_uuid);
+    info!("SUCCESS: Agent {} registered", aa.agent_uuid);
 
     let key = ctx.activate_credential(
         keyblob,
@@ -188,6 +188,6 @@ pub async fn register_agent(
 
     registrar_client.activate_agent(&ai, &auth_tag).await?;
 
-    info!("SUCCESS: Agent {} activated", &aa.agent_uuid);
+    info!("SUCCESS: Agent {} activated", aa.agent_uuid);
     Ok(())
 }

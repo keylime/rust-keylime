@@ -64,7 +64,7 @@ fn lookup_action(
     if !py_action.set_extension("py") {
         return Err(Error::Other(format!(
             "unable to set action {} extension",
-            &action
+            action
         )));
     }
 
@@ -655,7 +655,7 @@ mod tests {
             if #[cfg(feature = "legacy-python-actions")] {
                 // Test local python action
                 let expected =
-                    format!("{}", &actions_dir.join("shim.py").display(),);
+                    format!("{}", actions_dir.join("shim.py").display(),);
 
                 assert_eq!(
                     lookup_action(
@@ -673,7 +673,7 @@ mod tests {
         // Test local non-python action
         let expected = format!(
             "{}",
-            &actions_dir.join("local_action_hello_shell.sh").display()
+            actions_dir.join("local_action_hello_shell.sh").display()
         );
 
         assert_eq!(
@@ -691,7 +691,7 @@ mod tests {
             if #[cfg(feature = "legacy-python-actions")] {
                 // Test payload python action
                 let expected =
-                    format!("{}", &actions_dir.join("shim.py").display(),);
+                    format!("{}", actions_dir.join("shim.py").display(),);
 
                 assert_eq!(
                     lookup_action(
@@ -709,7 +709,7 @@ mod tests {
         // Test payload non-python action
         let expected = format!(
             "{}",
-            &payload_dir.join("local_action_payload_shell.sh").display()
+            payload_dir.join("local_action_payload_shell.sh").display()
         );
 
         assert_eq!(

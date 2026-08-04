@@ -441,7 +441,7 @@ impl RegistrarClient {
 
         info!(
             "Requesting agent registration from {} for {}",
-            &addr, &ai.uuid
+            addr, ai.uuid
         );
 
         let resp = self
@@ -596,10 +596,7 @@ impl RegistrarClient {
             "{scheme}://{registrar_ip}:{registrar_port}/v{api_version}/agents/{uuid}",
         );
 
-        info!(
-            "Requesting agent activation from {} for {}",
-            &addr, &ai.uuid
-        );
+        info!("Requesting agent activation from {} for {}", addr, ai.uuid);
 
         let resp = self
             .resilient_client

@@ -635,7 +635,7 @@ mod tests {
         // Make a request. The test will pass only if the default header is sent correctly.
         let response = resilient_client
             .client
-            .get(format!("{}/test", &mock_server.uri()))
+            .get(format!("{}/test", mock_server.uri()))
             .send()
             .await
             .unwrap(); //#[allow_ci]
@@ -663,7 +663,7 @@ mod tests {
         let response = client
             .get_json_request_from_struct(
                 Method::POST,
-                &format!("{}/submit", &mock_server.uri()),
+                &format!("{}/submit", mock_server.uri()),
                 &json!({}),
                 Some("application/vnd.api+json".to_string()),
             )
@@ -704,7 +704,7 @@ mod tests {
         let response = client
             .get_json_request_from_struct(
                 Method::POST,
-                &format!("{}/submit", &mock_server.uri()),
+                &format!("{}/submit", mock_server.uri()),
                 &json!({}),
                 None,
             )
@@ -740,7 +740,7 @@ mod tests {
         let response = client
             .get_json_request_from_struct(
                 Method::POST,
-                &format!("{}/submit", &mock_server.uri()),
+                &format!("{}/submit", mock_server.uri()),
                 &json!({}),
                 None,
             )
@@ -777,7 +777,7 @@ mod tests {
         let response = client
             .get_json_request_from_struct(
                 Method::POST,
-                &format!("{}/submit", &mock_server.uri()),
+                &format!("{}/submit", mock_server.uri()),
                 &json!({}),
                 None,
             )
@@ -860,7 +860,7 @@ mod tests {
         let response = client
             .get_request(
                 Method::GET,
-                &format!("{}/health", &mock_server.uri()),
+                &format!("{}/health", mock_server.uri()),
             )
             .send()
             .await;
@@ -906,7 +906,7 @@ mod tests {
 
         let start_time = std::time::Instant::now();
         let response = client
-            .get_request(Method::GET, &format!("{}/test", &mock_server.uri()))
+            .get_request(Method::GET, &format!("{}/test", mock_server.uri()))
             .send()
             .await
             .unwrap(); //#[allow_ci]
@@ -957,7 +957,7 @@ mod tests {
 
         let start_time = std::time::Instant::now();
         let response = client
-            .get_request(Method::GET, &format!("{}/test", &mock_server.uri()))
+            .get_request(Method::GET, &format!("{}/test", mock_server.uri()))
             .send()
             .await
             .unwrap(); //#[allow_ci]
@@ -995,7 +995,7 @@ mod tests {
 
         let start_time = std::time::Instant::now();
         let response = client
-            .get_request(Method::GET, &format!("{}/test", &mock_server.uri()))
+            .get_request(Method::GET, &format!("{}/test", mock_server.uri()))
             .send()
             .await
             .unwrap(); //#[allow_ci]
@@ -1087,7 +1087,7 @@ mod tests {
 
         let start_time = std::time::Instant::now();
         let response = client
-            .get_request(Method::GET, &format!("{}/test", &mock_server.uri()))
+            .get_request(Method::GET, &format!("{}/test", mock_server.uri()))
             .send()
             .await
             .unwrap(); //#[allow_ci]

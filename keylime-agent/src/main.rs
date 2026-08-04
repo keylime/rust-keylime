@@ -366,7 +366,7 @@ async fn main() -> Result<()> {
     {
         let message = "The agent mTLS is disabled and 'payload_script' is not empty. To allow the agent to run, 'enable_insecure_payload' has to be set to 'True'".to_string();
 
-        error!("Configuration error: {}", &message);
+        error!("Configuration error: {}", message);
         return Err(Error::Configuration(
             config::KeylimeConfigError::Generic(message),
         ));
@@ -396,7 +396,7 @@ async fn main() -> Result<()> {
         if let Err(e) = permissions::run_as(user_group) {
             let message = "The user running the Keylime agent should be set in keylime-agent.conf, using the parameter `run_as`, with the format `user:group`".to_string();
 
-            error!("Configuration error: {}", &message);
+            error!("Configuration error: {}", message);
             return Err(Error::Configuration(
                 config::KeylimeConfigError::Generic(message),
             ));
@@ -410,10 +410,7 @@ async fn main() -> Result<()> {
         .map(|s| s.to_string())
         .collect::<Vec<_>>();
 
-    info!(
-        "Starting server with API versions: {}",
-        &config.api_versions
-    );
+    info!("Starting server with API versions: {}", config.api_versions);
 
     let mut ctx = tpm::Context::new()?;
 
