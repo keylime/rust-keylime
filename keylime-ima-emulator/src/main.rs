@@ -59,6 +59,7 @@ fn ml_extend(
     ima_hash_alg: HashAlgorithm,
     pcr_hash_alg: HashAlgorithm,
     search_hash: Option<&Digest>,
+    shutdown: &AtomicBool,
 ) -> Result<usize> {
     let f = File::open(ml)?;
     let mut reader = BufReader::new(f);
@@ -68,6 +69,10 @@ fn ml_extend(
     let mut running_hash = ima::Digest::start(pcr_hash_alg)?;
     let ff_hash = ima::Digest::ff(pcr_hash_alg)?;
     for line in reader.by_ref().lines().skip(position) {
+        if shutdown.load(Ordering::SeqCst) {
+            println!("Shutdown requested, interrupting IMA measurement list replay");
+            break;
+        }
         let line = line?;
         if line.is_empty() {
             continue;
@@ -129,7 +134,7 @@ fn ml_extend(
         }
     }
 
-    if search_hash.is_some() {
+    if search_hash.is_some() && !shutdown.load(Ordering::SeqCst) {
         return Err(ImaEmulatorError::Other(
             "Unable to find current measurement list position, Resetting the TPM emulator may be neccesary".to_string()));
     }
@@ -176,6 +181,10 @@ fn main() -> std::result::Result<(), ImaEmulatorError> {
         positions.insert(pcr_hash_alg, 0usize);
     }
 
+    let shutdown_marker = Arc::new(AtomicBool::new(false));
+    signal_hook::flag::register(SIGINT, Arc::clone(&shutdown_marker))?;
+    signal_hook::flag::register(SIGTERM, Arc::clone(&shutdown_marker))?;
+
     for (pcr_hash_alg, position) in positions.iter_mut() {
         // check if pcr is clean
         let pcr_list = PcrSelectionListBuilder::new()
@@ -210,13 +219,11 @@ fn main() -> std::result::Result<(), ImaEmulatorError> {
                 ima_hash_alg,
                 *pcr_hash_alg,
                 Some(digest),
+                &shutdown_marker,
             )?;
         }
     }
 
-    let shutdown_marker = Arc::new(AtomicBool::new(false));
-    signal_hook::flag::register(SIGINT, Arc::clone(&shutdown_marker))?;
-    signal_hook::flag::register(SIGTERM, Arc::clone(&shutdown_marker))?;
     println!("Monitoring {}", args.ima_log.display());
     while !shutdown_marker.load(Ordering::SeqCst) {
         for (pcr_hash_alg, position) in positions.iter_mut() {
@@ -227,6 +234,7 @@ fn main() -> std::result::Result<(), ImaEmulatorError> {
                 ima_hash_alg,
                 *pcr_hash_alg,
                 None,
+                &shutdown_marker,
                 ).expect("Error extending position {position} on PCR bank {pcr_hash_alg}");
         }
 
