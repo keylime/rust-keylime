@@ -1365,6 +1365,7 @@ dependencies = [
  "reqwest-middleware",
  "reqwest-retry",
  "serde",
+ "serde_bytes",
  "serde_json",
  "static_assertions",
  "tempfile",

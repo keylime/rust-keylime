@@ -611,6 +611,34 @@ fn hash_alg_to_string(hash_alg: TssEsapiHashingAlgorithm) -> Result<String> {
 
 static TPM_CTX: OnceLock<Arc<Mutex<tss_esapi::Context>>> = OnceLock::new();
 
+// Some TPMs store the EK cert in NVRAM wrapped in an ASN.1 OCTET STRING
+// (tag 0x04) instead of raw DER (tag 0x30). Unwrap it here so it can be
+// parsed as a normal certificate.
+fn unwrap_octet_string_ek_cert(cert: &[u8]) -> Vec<u8> {
+    if cert.first() != Some(&0x04) {
+        return cert.to_vec();
+    }
+
+    match picky_asn1_der::from_bytes::<serde_bytes::ByteBuf>(cert) {
+        Ok(inner) if inner.first() == Some(&0x30) => inner.into_vec(),
+        Ok(_) => {
+            warn!(
+                "EK certificate is OCTET-STRING-wrapped, but the inner \
+                 content does not start with a SEQUENCE tag; using it \
+                 as-is"
+            );
+            cert.to_vec()
+        }
+        Err(e) => {
+            warn!(
+                "EK certificate looks OCTET-STRING-wrapped, but could \
+                 not be unwrapped: {e}"
+            );
+            cert.to_vec()
+        }
+    }
+}
+
 impl Context<'_> {
     /// Creates a connection context.
     pub fn new() -> Result<Self> {
@@ -722,13 +750,16 @@ impl Context<'_> {
         };
 
         let cert = match ek::retrieve_ek_pubcert(&mut ctx, alg.into()) {
-            Ok(cert) => match self.check_ek_cert(&cert) {
-                Ok(cert_checked) => Some(cert_checked),
-                Err(_) => {
-                    warn!("EK certificate in TPM NVRAM is not ASN.1 DER encoded");
-                    Some(cert)
+            Ok(cert) => {
+                let cert = unwrap_octet_string_ek_cert(&cert);
+                match self.check_ek_cert(&cert) {
+                    Ok(cert_checked) => Some(cert_checked),
+                    Err(_) => {
+                        warn!("EK certificate in TPM NVRAM is not ASN.1 DER encoded");
+                        Some(cert) // now uses the unwrapped cert
+                    }
                 }
-            },
+            }
             Err(_) => {
                 warn!("No EK certificate found in TPM NVRAM");
                 None
@@ -3042,6 +3073,52 @@ pub mod tests {
                 (AsymmetricAlgorithm::Rsa, HashingAlgorithm::Sha256)
             );
         }
+    }
+
+    fn test_cert_der() -> Vec<u8> {
+        use std::path::Path;
+
+        let cert_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("test-data")
+            .join("test-cert.pem");
+        let pem =
+            std::fs::read(cert_path).expect("unable to read test-cert.pem");
+        X509::from_pem(&pem)
+            .expect("unable to parse test-cert.pem")
+            .to_der()
+            .expect("unable to re-encode test cert as DER")
+    }
+
+    #[test]
+    fn test_unwrap_octet_string_ek_cert_wrapped() {
+        let cert_der = test_cert_der();
+        assert_eq!(cert_der[0], 0x30);
+
+        let wrapped = picky_asn1_der::to_vec(&serde_bytes::ByteBuf::from(
+            cert_der.clone(),
+        ))
+        .expect("failed to wrap cert in OCTET STRING");
+        assert_eq!(wrapped[0], 0x04);
+
+        assert_eq!(unwrap_octet_string_ek_cert(&wrapped), cert_der);
+    }
+
+    #[test]
+    fn test_unwrap_octet_string_ek_cert_not_wrapped() {
+        let cert_der = test_cert_der();
+        assert_eq!(unwrap_octet_string_ek_cert(&cert_der), cert_der);
+    }
+
+    #[test]
+    fn test_unwrap_octet_string_ek_cert_invalid_inner() {
+        // wrapped, but inner content isn't a cert
+        let not_a_cert = b"not a certificate".to_vec();
+        let wrapped =
+            picky_asn1_der::to_vec(&serde_bytes::ByteBuf::from(not_a_cert))
+                .expect("failed to wrap non-cert data in OCTET STRING");
+        assert_eq!(wrapped[0], 0x04);
+
+        assert_eq!(unwrap_octet_string_ek_cert(&wrapped), wrapped);
     }
 
     #[test]
