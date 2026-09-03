@@ -36,23 +36,22 @@ async fn revocation(
 }
 
 async fn notifications_default(req: HttpRequest) -> impl Responder {
-    let error;
-    let response;
-    let message;
-
-    match req.head().method {
+    let (error, message, response) = match req.head().method {
         http::Method::POST => {
-            error = 400;
-            message = "URI not supported, only /revocation is supported for POST in /notifications/ interface";
-            response = HttpResponse::BadRequest()
+            let error = 400;
+            let message = "URI not supported, only /revocation is supported for POST in /notifications/ interface";
+            let response = HttpResponse::BadRequest()
                 .json(JsonWrapper::error(error, message));
+            (error, message, response)
         }
         _ => {
-            error = 405;
-            message = "Method is not supported in /notifications/ interface";
-            response = HttpResponse::MethodNotAllowed()
+            let error = 405;
+            let message =
+                "Method is not supported in /notifications/ interface";
+            let response = HttpResponse::MethodNotAllowed()
                 .insert_header(http::header::Allow(vec![http::Method::POST]))
                 .json(JsonWrapper::error(error, message));
+            (error, message, response)
         }
     };
 
