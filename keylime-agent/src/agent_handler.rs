@@ -46,23 +46,21 @@ async fn info(
 
 /// Configure the endpoints for the /agent scope
 async fn agent_default(req: HttpRequest) -> impl Responder {
-    let error;
-    let response;
-    let message;
-
-    match req.head().method {
+    let (error, message, response) = match req.head().method {
         http::Method::GET => {
-            error = 400;
-            message = "URI not supported, only /info is supported for GET in /agent interface";
-            response = HttpResponse::BadRequest()
+            let error = 400;
+            let message = "URI not supported, only /info is supported for GET in /agent interface";
+            let response = HttpResponse::BadRequest()
                 .json(JsonWrapper::error(error, message));
+            (error, message, response)
         }
         _ => {
-            error = 405;
-            message = "Method is not supported in /agent interface";
-            response = HttpResponse::MethodNotAllowed()
+            let error = 405;
+            let message = "Method is not supported in /agent interface";
+            let response = HttpResponse::MethodNotAllowed()
                 .insert_header(http::header::Allow(vec![http::Method::GET]))
                 .json(JsonWrapper::error(error, message));
+            (error, message, response)
         }
     };
 

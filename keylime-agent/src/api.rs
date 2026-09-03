@@ -64,34 +64,33 @@ pub async fn version(
 
 /// Handles the default case for the API version scope
 async fn api_default(req: HttpRequest) -> impl Responder {
-    let error;
-    let response;
-    let message;
-
-    match req.head().method {
+    let (error, message, response) = match req.head().method {
         http::Method::GET => {
-            error = 400;
-            message =
+            let error = 400;
+            let message =
                 "Not Implemented: Use /agent, /keys, or /quotes interfaces";
-            response = HttpResponse::BadRequest()
+            let response = HttpResponse::BadRequest()
                 .json(JsonWrapper::error(error, message));
+            (error, message, response)
         }
         http::Method::POST => {
-            error = 400;
-            message =
+            let error = 400;
+            let message =
                 "Not Implemented: Use /keys or /notifications interfaces";
-            response = HttpResponse::BadRequest()
+            let response = HttpResponse::BadRequest()
                 .json(JsonWrapper::error(error, message));
+            (error, message, response)
         }
         _ => {
-            error = 405;
-            message = "Method is not supported";
-            response = HttpResponse::MethodNotAllowed()
+            let error = 405;
+            let message = "Method is not supported";
+            let response = HttpResponse::MethodNotAllowed()
                 .insert_header(http::header::Allow(vec![
                     http::Method::GET,
                     http::Method::POST,
                 ]))
                 .json(JsonWrapper::error(error, message));
+            (error, message, response)
         }
     };
 
