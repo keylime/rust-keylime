@@ -16,10 +16,6 @@ pub(crate) async fn app_default(
     req: HttpRequest,
     quote_data: web::Data<QuoteData<'_>>,
 ) -> impl Responder {
-    let error;
-    let response;
-    let message;
-
     let api_versions = quote_data
         .api_versions
         .iter()
@@ -27,32 +23,35 @@ pub(crate) async fn app_default(
         .collect::<Vec<_>>()
         .join(", ");
 
-    match req.head().method {
+    let (error, message, response) = match req.head().method {
         http::Method::GET => {
-            error = 400;
-            message = format!(
+            let error = 400;
+            let message = format!(
                 "Not Implemented: Use {api_versions} or /version interfaces"
             );
-            response = HttpResponse::BadRequest()
+            let response = HttpResponse::BadRequest()
                 .json(JsonWrapper::error(error, &message));
+            (error, message, response)
         }
         http::Method::POST => {
-            error = 400;
-            message = format!(
+            let error = 400;
+            let message = format!(
                 "Not Implemented: Use {api_versions} or /version interfaces"
             );
-            response = HttpResponse::BadRequest()
+            let response = HttpResponse::BadRequest()
                 .json(JsonWrapper::error(error, &message));
+            (error, message, response)
         }
         _ => {
-            error = 405;
-            message = "Method is not supported".to_string();
-            response = HttpResponse::MethodNotAllowed()
+            let error = 405;
+            let message = "Method is not supported".to_string();
+            let response = HttpResponse::MethodNotAllowed()
                 .insert_header(http::header::Allow(vec![
                     http::Method::GET,
                     http::Method::POST,
                 ]))
                 .json(JsonWrapper::error(error, &message));
+            (error, message, response)
         }
     };
 

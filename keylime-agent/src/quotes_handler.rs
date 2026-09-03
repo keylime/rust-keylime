@@ -330,23 +330,21 @@ async fn integrity(
 
 /// Handles the default case for the /quotes scope
 async fn quotes_default(req: HttpRequest) -> impl Responder {
-    let error;
-    let response;
-    let message;
-
-    match req.head().method {
+    let (error, message, response) = match req.head().method {
         http::Method::GET => {
-            error = 400;
-            message = "URI not supported, only /identity and /integrity are supported for GET in /quotes/ interface";
-            response = HttpResponse::BadRequest()
+            let error = 400;
+            let message = "URI not supported, only /identity and /integrity are supported for GET in /quotes/ interface";
+            let response = HttpResponse::BadRequest()
                 .json(JsonWrapper::error(error, message));
+            (error, message, response)
         }
         _ => {
-            error = 405;
-            message = "Method is not supported in /quotes/ interface";
-            response = HttpResponse::MethodNotAllowed()
+            let error = 405;
+            let message = "Method is not supported in /quotes/ interface";
+            let response = HttpResponse::MethodNotAllowed()
                 .insert_header(http::header::Allow(vec![http::Method::GET]))
                 .json(JsonWrapper::error(error, message));
+            (error, message, response)
         }
     };
 
