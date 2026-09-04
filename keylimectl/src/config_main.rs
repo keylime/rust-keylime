@@ -131,6 +131,8 @@ pub struct Config {
     pub tls: TlsConfig,
     /// Client configuration
     pub client: ClientConfig,
+    /// Agent enrollment configuration (accepted TPM algorithms)
+    pub agent: AgentConfig,
 }
 
 /// Configuration for the Keylime verifier service
@@ -326,6 +328,63 @@ impl Default for ClientConfig {
             retry_interval: 1.0,
             exponential_backoff: true,
             max_retries: 3,
+        }
+    }
+}
+
+/// Configuration for accepted TPM algorithms during agent enrollment
+///
+/// These settings control which TPM algorithms the verifier will accept
+/// when validating agent quotes. The defaults accept all commonly-used
+/// algorithm variants (excluding known-weak ones like sha1, rsa1024,
+/// ecc192, ecc224).
+///
+/// # Examples
+///
+/// ```rust
+/// use keylimectl::config::AgentConfig;
+///
+/// // Restrict to only RSA-3072 encryption
+/// let config = AgentConfig {
+///     accept_tpm_encryption_algs: vec!["rsa3072".to_string()],
+///     ..AgentConfig::default()
+/// };
+/// ```
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentConfig {
+    /// Accepted TPM hash algorithms for quote validation
+    pub accept_tpm_hash_algs: Vec<String>,
+    /// Accepted TPM encryption algorithms for quote validation
+    pub accept_tpm_encryption_algs: Vec<String>,
+    /// Accepted TPM signing algorithms for quote validation
+    pub accept_tpm_signing_algs: Vec<String>,
+}
+
+impl Default for AgentConfig {
+    fn default() -> Self {
+        Self {
+            accept_tpm_hash_algs: vec![
+                "sha512".to_string(),
+                "sha384".to_string(),
+                "sha256".to_string(),
+            ],
+            accept_tpm_encryption_algs: vec![
+                "rsa".to_string(),
+                "rsa2048".to_string(),
+                "rsa3072".to_string(),
+                "rsa4096".to_string(),
+                "ecc".to_string(),
+                "ecc256".to_string(),
+                "ecc384".to_string(),
+                "ecc521".to_string(),
+            ],
+            accept_tpm_signing_algs: vec![
+                "ecschnorr".to_string(),
+                "rsassa".to_string(),
+                "rsapss".to_string(),
+                "ecdsa".to_string(),
+                "ecdaa".to_string(),
+            ],
         }
     }
 }
@@ -1286,5 +1345,152 @@ retry_interval = 2.0
         assert_eq!(client_config.retry_interval, 1.0);
         assert!(client_config.exponential_backoff);
         assert_eq!(client_config.max_retries, 3);
+    }
+
+    #[test]
+    fn test_agent_config_defaults_include_all_strong_encryption_algs() {
+        let agent = AgentConfig::default();
+
+        assert!(agent
+            .accept_tpm_encryption_algs
+            .contains(&"rsa".to_string()));
+        assert!(agent
+            .accept_tpm_encryption_algs
+            .contains(&"rsa2048".to_string()));
+        assert!(agent
+            .accept_tpm_encryption_algs
+            .contains(&"rsa3072".to_string()));
+        assert!(agent
+            .accept_tpm_encryption_algs
+            .contains(&"rsa4096".to_string()));
+        assert!(agent
+            .accept_tpm_encryption_algs
+            .contains(&"ecc".to_string()));
+        assert!(agent
+            .accept_tpm_encryption_algs
+            .contains(&"ecc256".to_string()));
+        assert!(agent
+            .accept_tpm_encryption_algs
+            .contains(&"ecc384".to_string()));
+        assert!(agent
+            .accept_tpm_encryption_algs
+            .contains(&"ecc521".to_string()));
+    }
+
+    #[test]
+    fn test_agent_config_defaults_exclude_weak_encryption_algs() {
+        let agent = AgentConfig::default();
+
+        assert!(
+            !agent
+                .accept_tpm_encryption_algs
+                .contains(&"rsa1024".to_string()),
+            "rsa1024 is weak and should not be in defaults"
+        );
+        assert!(
+            !agent
+                .accept_tpm_encryption_algs
+                .contains(&"ecc192".to_string()),
+            "ecc192 is weak and should not be in defaults"
+        );
+        assert!(
+            !agent
+                .accept_tpm_encryption_algs
+                .contains(&"ecc224".to_string()),
+            "ecc224 is weak and should not be in defaults"
+        );
+    }
+
+    #[test]
+    fn test_agent_config_defaults_exclude_sha1() {
+        let agent = AgentConfig::default();
+
+        assert!(
+            !agent.accept_tpm_hash_algs.contains(&"sha1".to_string()),
+            "sha1 is weak and should not be in defaults"
+        );
+        assert!(agent.accept_tpm_hash_algs.contains(&"sha256".to_string()));
+        assert!(agent.accept_tpm_hash_algs.contains(&"sha384".to_string()));
+        assert!(agent.accept_tpm_hash_algs.contains(&"sha512".to_string()));
+    }
+
+    #[test]
+    fn test_agent_config_defaults_signing_algs() {
+        let agent = AgentConfig::default();
+
+        assert!(agent
+            .accept_tpm_signing_algs
+            .contains(&"rsassa".to_string()));
+        assert!(agent
+            .accept_tpm_signing_algs
+            .contains(&"rsapss".to_string()));
+        assert!(agent
+            .accept_tpm_signing_algs
+            .contains(&"ecschnorr".to_string()));
+        assert!(agent.accept_tpm_signing_algs.contains(&"ecdsa".to_string()));
+        assert!(agent.accept_tpm_signing_algs.contains(&"ecdaa".to_string()));
+    }
+
+    #[test]
+    fn test_agent_config_from_toml_override() {
+        let toml_str = r#"
+[verifier]
+ip = "127.0.0.1"
+port = 8881
+
+[registrar]
+ip = "127.0.0.1"
+port = 8891
+
+[tls]
+verify_server_cert = true
+enable_agent_mtls = true
+trusted_ca = []
+
+[client]
+timeout = 60
+retry_interval = 1.0
+exponential_backoff = true
+max_retries = 3
+
+[agent]
+accept_tpm_encryption_algs = ["rsa3072"]
+accept_tpm_hash_algs = ["sha512"]
+accept_tpm_signing_algs = ["rsassa"]
+"#;
+
+        let config: Config = toml::from_str(toml_str).unwrap(); //#[allow_ci]
+        assert_eq!(
+            config.agent.accept_tpm_encryption_algs,
+            vec!["rsa3072".to_string()]
+        );
+        assert_eq!(
+            config.agent.accept_tpm_hash_algs,
+            vec!["sha512".to_string()]
+        );
+        assert_eq!(
+            config.agent.accept_tpm_signing_algs,
+            vec!["rsassa".to_string()]
+        );
+    }
+
+    #[test]
+    fn test_agent_config_roundtrips_through_toml() {
+        let config = Config::default();
+        let toml_str = toml::to_string_pretty(&config).unwrap(); //#[allow_ci]
+        let parsed: Config = toml::from_str(&toml_str).unwrap(); //#[allow_ci]
+
+        assert_eq!(
+            parsed.agent.accept_tpm_encryption_algs,
+            config.agent.accept_tpm_encryption_algs
+        );
+        assert_eq!(
+            parsed.agent.accept_tpm_hash_algs,
+            config.agent.accept_tpm_hash_algs
+        );
+        assert_eq!(
+            parsed.agent.accept_tpm_signing_algs,
+            config.agent.accept_tpm_signing_algs
+        );
     }
 }

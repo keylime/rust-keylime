@@ -94,7 +94,7 @@ pub fn is_initialized() -> bool {
 mod tests {
     use super::*;
     use crate::config::{
-        ClientConfig, RegistrarConfig, TlsConfig, VerifierConfig,
+        AgentConfig, ClientConfig, RegistrarConfig, TlsConfig, VerifierConfig,
     };
 
     #[allow(dead_code)]
@@ -126,6 +126,7 @@ mod tests {
                 exponential_backoff: true,
                 max_retries: 3,
             },
+            agent: AgentConfig::default(),
         }
     }
 

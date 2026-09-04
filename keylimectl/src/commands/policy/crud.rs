@@ -340,8 +340,8 @@ async fn list_runtime_policies(
 mod tests {
     use super::*;
     use crate::config::{
-        CliOverrides, ClientConfig, Config, RegistrarConfig, TlsConfig,
-        VerifierConfig,
+        AgentConfig, CliOverrides, ClientConfig, Config, RegistrarConfig,
+        TlsConfig, VerifierConfig,
     };
     use serde_json::json;
     use std::io::Write;
@@ -376,6 +376,7 @@ mod tests {
                 exponential_backoff: true,
                 max_retries: 3,
             },
+            agent: AgentConfig::default(),
         }
     }
 

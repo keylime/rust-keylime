@@ -1930,7 +1930,9 @@ impl VerifierClient {
 mod tests {
     use super::*;
     use crate::client::base::BaseClient;
-    use crate::config::{ClientConfig, TlsConfig, VerifierConfig};
+    use crate::config::{
+        AgentConfig, ClientConfig, TlsConfig, VerifierConfig,
+    };
 
     /// Create a test configuration
     fn create_test_config() -> Config {
@@ -1958,6 +1960,7 @@ mod tests {
                 exponential_backoff: true,
                 max_retries: 3,
             },
+            agent: AgentConfig::default(),
         }
     }
 

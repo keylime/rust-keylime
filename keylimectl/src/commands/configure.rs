@@ -126,6 +126,7 @@ fn build_non_interactive_config(
         },
         tls: defaults.tls,
         client: defaults.client,
+        agent: defaults.agent,
     }
 }
 
@@ -389,6 +390,7 @@ fn run_interactive_wizard(
             timeout,
             ..defaults.client
         },
+        agent: defaults.agent,
     };
 
     // Show summary

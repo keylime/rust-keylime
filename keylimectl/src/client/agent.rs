@@ -745,7 +745,7 @@ impl AgentClient {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{ClientConfig, TlsConfig};
+    use crate::config::{AgentConfig, ClientConfig, TlsConfig};
 
     /// Create a test configuration
     fn create_test_config() -> Config {
@@ -769,6 +769,7 @@ mod tests {
                 exponential_backoff: true,
                 max_retries: 3,
             },
+            agent: AgentConfig::default(),
         }
     }
 

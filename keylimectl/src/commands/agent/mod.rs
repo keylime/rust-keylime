@@ -329,8 +329,8 @@ async fn list_agents(
 mod tests {
     use crate::commands::error::CommandError;
     use crate::config::{
-        CliOverrides, ClientConfig, Config, RegistrarConfig, TlsConfig,
-        VerifierConfig,
+        AgentConfig, CliOverrides, ClientConfig, Config, RegistrarConfig,
+        TlsConfig, VerifierConfig,
     };
     use crate::output::OutputHandler;
     use crate::AgentAction;
@@ -365,6 +365,7 @@ mod tests {
                 exponential_backoff: true,
                 max_retries: 3,
             },
+            agent: AgentConfig::default(),
         }
     }
 

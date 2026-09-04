@@ -810,7 +810,9 @@ impl RegistrarClient {
 mod tests {
     use super::*;
     use crate::client::base::BaseClient;
-    use crate::config::{ClientConfig, RegistrarConfig, TlsConfig};
+    use crate::config::{
+        AgentConfig, ClientConfig, RegistrarConfig, TlsConfig,
+    };
     use serde_json::json;
 
     /// Create a test configuration for registrar
@@ -838,6 +840,7 @@ mod tests {
                 exponential_backoff: true,
                 max_retries: 3,
             },
+            agent: AgentConfig::default(),
         }
     }
 

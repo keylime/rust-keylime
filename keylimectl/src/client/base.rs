@@ -359,7 +359,7 @@ impl BaseClient {
 mod tests {
     use super::*;
     use crate::config::{
-        ClientConfig, RegistrarConfig, TlsConfig, VerifierConfig,
+        AgentConfig, ClientConfig, RegistrarConfig, TlsConfig, VerifierConfig,
     };
 
     /// Create a test configuration for base client testing
@@ -388,6 +388,7 @@ mod tests {
                 exponential_backoff: true,
                 max_retries: 3,
             },
+            agent: AgentConfig::default(),
         }
     }
 

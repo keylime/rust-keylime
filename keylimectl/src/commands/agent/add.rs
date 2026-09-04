@@ -20,7 +20,6 @@ use crate::client::agent::AgentClient;
 use crate::client::factory;
 use crate::client::verifier::VerifierClient;
 use crate::commands::error::CommandError;
-#[cfg(feature = "api-v2")]
 use crate::config::singleton::get_config;
 use crate::output::OutputHandler;
 use base64::{engine::general_purpose::STANDARD, Engine};
@@ -305,19 +304,15 @@ pub(super) async fn add_agent(
                 .unwrap_or("")
                 .to_string(),
         ))
-        .with_accept_tpm_hash_algs(Some(vec![
-            "sha512".to_string(),
-            "sha384".to_string(),
-            "sha256".to_string(),
-        ]))
-        .with_accept_tpm_encryption_algs(Some(vec![
-            "ecc".to_string(),
-            "rsa".to_string(),
-        ]))
-        .with_accept_tpm_signing_algs(Some(vec![
-            "ecschnorr".to_string(),
-            "rsassa".to_string(),
-        ]))
+        .with_accept_tpm_hash_algs(Some(
+            get_config().agent.accept_tpm_hash_algs.clone(),
+        ))
+        .with_accept_tpm_encryption_algs(Some(
+            get_config().agent.accept_tpm_encryption_algs.clone(),
+        ))
+        .with_accept_tpm_signing_algs(Some(
+            get_config().agent.accept_tpm_signing_algs.clone(),
+        ))
         .with_supported_version(Some(
             agent_data
                 .get("supported_version")
@@ -379,19 +374,15 @@ pub(super) async fn add_agent(
                     .unwrap_or("")
                     .to_string(),
             ))
-            .with_accept_tpm_hash_algs(Some(vec![
-                "sha512".to_string(),
-                "sha384".to_string(),
-                "sha256".to_string(),
-            ]))
-            .with_accept_tpm_encryption_algs(Some(vec![
-                "ecc".to_string(),
-                "rsa".to_string(),
-            ]))
-            .with_accept_tpm_signing_algs(Some(vec![
-                "ecschnorr".to_string(),
-                "rsassa".to_string(),
-            ]))
+            .with_accept_tpm_hash_algs(Some(
+                get_config().agent.accept_tpm_hash_algs.clone(),
+            ))
+            .with_accept_tpm_encryption_algs(Some(
+                get_config().agent.accept_tpm_encryption_algs.clone(),
+            ))
+            .with_accept_tpm_signing_algs(Some(
+                get_config().agent.accept_tpm_signing_algs.clone(),
+            ))
             .with_supported_version(Some(
                 agent_data
                     .get("supported_version")
