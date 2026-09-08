@@ -860,9 +860,10 @@ async fn main() {
                     output.success(response);
                 }
                 Err(e) => {
+                    let code = e.exit_code();
                     error!("Command failed: {e}");
                     output.error(e);
-                    process::exit(1);
+                    process::exit(code);
                 }
             }
         }
@@ -897,9 +898,10 @@ async fn main() {
                     output.success(response);
                 }
                 Err(e) => {
+                    let code = e.exit_code();
                     error!("Command failed: {e}");
                     output.error(e);
-                    process::exit(1);
+                    process::exit(code);
                 }
             }
         }
@@ -933,9 +935,10 @@ async fn main() {
                     output.success(response);
                 }
                 Err(e) => {
+                    let code = e.exit_code();
                     error!("Command failed: {e}");
                     output.error(e);
-                    process::exit(1);
+                    process::exit(code);
                 }
             }
         }
@@ -962,9 +965,10 @@ async fn main() {
                     output.success(response);
                 }
                 Err(e) => {
+                    let code = e.exit_code();
                     error!("Command failed: {e}");
                     output.error(e);
-                    process::exit(1);
+                    process::exit(code);
                 }
             }
         }
@@ -993,9 +997,10 @@ async fn main() {
                     output.success(response);
                 }
                 Err(e) => {
+                    let code = e.exit_code();
                     error!("Command failed: {e}");
                     output.error(e);
-                    process::exit(1);
+                    process::exit(code);
                 }
             }
         }

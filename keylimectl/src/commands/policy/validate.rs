@@ -123,18 +123,10 @@ pub async fn execute(
         }
     };
 
-    // If a signature key is provided, also verify the DSSE signature
+    // If a signature key is provided, also verify the DSSE signature.
+    // verify_signature returns Err on failure, so ? propagates it.
     if let Some(key) = signature_key {
-        let sig_result = verify_signature(file, key, output).await?;
-        if sig_result.get("valid") != Some(&Value::Bool(true)) {
-            output.info("Signature verification failed");
-            return Ok(serde_json::json!({
-                "valid": false,
-                "policy_type": policy_type_str,
-                "signature_valid": false,
-                "errors": [{"code": "signature_invalid", "message": "DSSE signature verification failed"}]
-            }));
-        }
+        let _sig_result = verify_signature(file, key, output).await?;
     }
 
     // Format and return results
@@ -186,12 +178,21 @@ fn format_validation_result(
         })
         .collect();
 
-    Ok(serde_json::json!({
+    let details = serde_json::json!({
         "valid": result.valid,
         "policy_type": policy_type,
         "errors": errors_json,
         "warnings": warnings_json
-    }))
+    });
+
+    if result.valid {
+        Ok(details)
+    } else {
+        Err(KeylimectlError::validation_failed(
+            format!("Policy validation failed ({policy_type})"),
+            details,
+        ))
+    }
 }
 
 /// Verify a DSSE signature on a signed policy file.
@@ -255,10 +256,13 @@ pub async fn verify_signature(
         }
         Err(e) => {
             output.info(format!("Signature verification failed: {e}"));
-            Ok(serde_json::json!({
-                "valid": false,
-                "error": e
-            }))
+            Err(KeylimectlError::validation_failed(
+                format!("Signature verification failed: {e}"),
+                serde_json::json!({
+                    "valid": false,
+                    "error": format!("{e}")
+                }),
+            ))
         }
     }
 }

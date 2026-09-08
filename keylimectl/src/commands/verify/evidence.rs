@@ -216,10 +216,19 @@ pub(super) fn format_evidence_result(
         }
     }
 
-    Ok(json!({
+    let details = json!({
         "valid": valid,
         "results": results,
-    }))
+    });
+
+    if valid {
+        Ok(details)
+    } else {
+        Err(KeylimectlError::validation_failed(
+            "Evidence verification failed",
+            details,
+        ))
+    }
 }
 
 #[cfg(test)]
@@ -288,8 +297,10 @@ mod tests {
             false,
             crate::ColorMode::Never,
         );
-        let result = format_evidence_result(&response, &output).unwrap(); //#[allow_ci]
-        assert_eq!(result.get("valid"), Some(&Value::Bool(false)));
+        let err = format_evidence_result(&response, &output).unwrap_err(); //#[allow_ci]
+        assert_eq!(err.error_code(), "VALIDATION_FAILED");
+        let json = err.to_json();
+        assert_eq!(json["error"]["details"]["valid"], Value::Bool(false));
     }
 
     #[test]

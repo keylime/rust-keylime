@@ -449,28 +449,14 @@ fn test_validate_invalid_runtime_policy() {
     )
     .unwrap(); //#[allow_ci]
 
-    let output = keylimectl_in_clean_dir(&tmpdir)
+    keylimectl_in_clean_dir(&tmpdir)
         .args([
             "policy",
             "validate",
             policy_path.to_str().unwrap(), //#[allow_ci]
         ])
-        .output()
-        .unwrap(); //#[allow_ci]
-
-    // The command should succeed but report validation errors in
-    // the JSON output.
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    let combined = format!("{stdout}{stderr}");
-
-    assert!(
-        combined.contains("valid")
-            || combined.contains("error")
-            || combined.contains("invalid")
-            || combined.contains("digest"),
-        "Expected validation feedback, got stdout: {stdout}\nstderr: {stderr}"
-    );
+        .assert()
+        .failure();
 }
 
 #[test]

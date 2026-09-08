@@ -80,6 +80,15 @@ pub enum KeylimectlError {
     #[error("Validation error: {0}")]
     Validation(String),
 
+    /// Validation/verification completed but the result was negative
+    #[error("{message}")]
+    ValidationFailed {
+        /// Human-readable summary
+        message: String,
+        /// Structured details for JSON output
+        details: Value,
+    },
+
     /// File I/O errors
     #[error("File error: {0}")]
     Io(#[from] std::io::Error),
@@ -154,6 +163,17 @@ impl KeylimectlError {
         Self::Validation(message.into())
     }
 
+    /// Create a validation-failed error (validation ran but result was negative)
+    pub fn validation_failed<T: Into<String>>(
+        message: T,
+        details: Value,
+    ) -> Self {
+        Self::ValidationFailed {
+            message: message.into(),
+            details,
+        }
+    }
+
     /// Create a new agent not found error
     ///
     /// # Arguments
@@ -219,6 +239,7 @@ impl KeylimectlError {
             #[cfg(test)]
             Self::PolicyNotFound { .. } => "POLICY_NOT_FOUND",
             Self::Validation(_) => "VALIDATION_ERROR",
+            Self::ValidationFailed { .. } => "VALIDATION_FAILED",
             Self::Io(_) => "IO_ERROR",
             Self::Json(_) => "JSON_ERROR",
             Self::Uuid(_) => "UUID_ERROR",
@@ -226,6 +247,18 @@ impl KeylimectlError {
             Self::Command(_) => "COMMAND_ERROR",
             Self::Generic(_) => "GENERIC_ERROR",
             Self::RequestMiddleware(_) => "REQUEST_MIDDLEWARE_ERROR",
+        }
+    }
+
+    /// Get the process exit code for this error.
+    ///
+    /// Returns 10 for `ValidationFailed` (the operation completed but the
+    /// result was negative — check JSON for details) and 1 for all other
+    /// errors (infrastructure/command failures).
+    pub fn exit_code(&self) -> i32 {
+        match self {
+            Self::ValidationFailed { .. } => 10,
+            _ => 1,
         }
     }
 
@@ -301,6 +334,7 @@ impl KeylimectlError {
             Self::PolicyNotFound { name } => serde_json::json!({
                 "policy_name": name
             }),
+            Self::ValidationFailed { details, .. } => details.clone(),
             _ => Value::Null,
         }
     }
@@ -505,6 +539,39 @@ mod tests {
         assert_eq!(json["error"]["code"], "AGENT_NOT_FOUND");
         assert_eq!(json["error"]["details"]["agent_uuid"], "12345");
         assert_eq!(json["error"]["details"]["service"], "verifier");
+    }
+
+    #[test]
+    fn test_validation_failed() {
+        let details = json!({
+            "valid": false,
+            "policy_type": "runtime",
+            "errors": [{"code": "bad_digest", "message": "Invalid digest"}],
+            "warnings": []
+        });
+        let error = KeylimectlError::validation_failed(
+            "Policy validation failed (runtime)",
+            details.clone(),
+        );
+        assert_eq!(error.error_code(), "VALIDATION_FAILED");
+        assert_eq!(error.to_string(), "Policy validation failed (runtime)");
+        let json_output = error.to_json();
+        assert_eq!(json_output["error"]["code"], "VALIDATION_FAILED");
+        assert_eq!(json_output["error"]["details"], details);
+        assert_eq!(error.exit_code(), 10);
+    }
+
+    #[test]
+    fn test_exit_codes() {
+        assert_eq!(KeylimectlError::validation("bad input").exit_code(), 1);
+        assert_eq!(
+            KeylimectlError::validation_failed(
+                "failed",
+                json!({"valid": false})
+            )
+            .exit_code(),
+            10
+        );
     }
 
     #[test]
