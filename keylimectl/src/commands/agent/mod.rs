@@ -244,9 +244,7 @@ pub async fn execute(
             uuid,
             verifier,
             registrar_only,
-        } => get_agent_status(uuid, *verifier, *registrar_only, output)
-            .await
-            .map_err(KeylimectlError::from),
+        } => get_agent_status(uuid, *verifier, *registrar_only, output).await,
         AgentAction::Reactivate { uuid } => reactivate_agent(uuid, output)
             .await
             .map_err(KeylimectlError::from),

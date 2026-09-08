@@ -9,6 +9,7 @@ use crate::client::factory;
 use crate::commands::error::CommandError;
 #[cfg(feature = "api-v2")]
 use crate::config::singleton::get_config;
+use crate::error::KeylimectlError;
 use crate::output::OutputHandler;
 use serde_json::{json, Value};
 
@@ -18,13 +19,10 @@ pub(super) async fn get_agent_status(
     verifier: bool,
     registrar_only: bool,
     output: &OutputHandler,
-) -> Result<Value, CommandError> {
+) -> Result<Value, KeylimectlError> {
     // Validate agent ID
     if agent_id.is_empty() {
-        return Err(CommandError::invalid_parameter(
-            "agent_id",
-            "Agent ID cannot be empty".to_string(),
-        ));
+        return Err(KeylimectlError::validation("Agent ID cannot be empty"));
     }
 
     output.info(format!("Getting status for agent {agent_id}"));
@@ -184,18 +182,21 @@ pub(super) async fn get_agent_status(
     }
 
     let result_map = results.as_object().expect("results is an object");
-    let all_failed = !result_map.is_empty()
-        && result_map.values().all(|v| {
-            v.get("status")
-                .and_then(|s| s.as_str())
-                .is_some_and(|s| s == "error" || s == "connection_failed")
-        });
+    let failed_statuses =
+        ["error", "connection_failed", "not_found", "unreachable"];
+    let any_failed = result_map.values().any(|v| {
+        v.get("status")
+            .and_then(|s| s.as_str())
+            .is_some_and(|s| failed_statuses.contains(&s))
+    });
 
-    if all_failed {
-        return Err(CommandError::agent_operation_failed(
-            agent_id.to_string(),
-            "status",
-            "All queried services returned errors",
+    if any_failed {
+        return Err(KeylimectlError::validation_failed(
+            format!("Agent {agent_id} status check found issues"),
+            json!({
+                "agent_id": agent_id,
+                "results": results
+            }),
         ));
     }
 
