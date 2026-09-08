@@ -245,7 +245,21 @@ impl BaseClient {
                 ))
             })?;
 
-            let identity = reqwest::Identity::from_pkcs8_pem(&cert, &key)
+            // Parse the private key with OpenSSL (handles PKCS#8, SEC1/EC,
+            // and traditional RSA formats) then re-encode as PKCS#8 PEM
+            // which is what reqwest::Identity::from_pkcs8_pem requires.
+            let pkey = openssl::pkey::PKey::private_key_from_pem(&key)
+                .map_err(|e| {
+                    ClientError::Tls(TlsError::configuration(format!(
+                        "Failed to parse private key from {key_path}: {e}"
+                    )))
+                })?;
+            let pkcs8_key = pkey.private_key_to_pem_pkcs8()
+                .map_err(|e| ClientError::Tls(TlsError::configuration(
+                    format!("Failed to convert private key to PKCS#8 from {key_path}: {e}")
+                )))?;
+
+            let identity = reqwest::Identity::from_pkcs8_pem(&cert, &pkcs8_key)
                 .map_err(|e| ClientError::Tls(TlsError::configuration(
                     format!("Failed to create client identity from cert {cert_path} and key {key_path}: {e}")
                 )))?;
