@@ -35,7 +35,7 @@ pub(super) async fn remove_agent(
     output.info(format!("Removing agent {agent_id} from verifier"));
 
     let verifier_client = factory::get_verifier().await.map_err(|e| {
-        CommandError::resource_error("verifier", e.to_string())
+        CommandError::connection_error("verifier", e.to_string())
     })?;
 
     // Check if agent exists on verifier (unless force is used)
@@ -115,7 +115,7 @@ pub(super) async fn remove_agent(
 
         let registrar_client =
             factory::get_registrar().await.map_err(|e| {
-                CommandError::resource_error("registrar", e.to_string())
+                CommandError::connection_error("registrar", e.to_string())
             })?;
         let registrar_response =
             registrar_client.delete_agent(agent_id).await.map_err(|e| {

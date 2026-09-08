@@ -123,10 +123,7 @@ async fn push_policy(
     }
 
     let verifier_client = factory::get_verifier().await.map_err(|e| {
-        CommandError::resource_error(
-            "verifier",
-            format!("Failed to connect to verifier: {e}"),
-        )
+        CommandError::connection_error("verifier", e.to_string())
     })?;
     let response = verifier_client
         .add_runtime_policy(name, policy_data)
@@ -156,10 +153,7 @@ async fn show_policy(
     output.info(format!("Retrieving runtime policy '{name}'"));
 
     let verifier_client = factory::get_verifier().await.map_err(|e| {
-        CommandError::resource_error(
-            "verifier",
-            format!("Failed to connect to verifier: {e}"),
-        )
+        CommandError::connection_error("verifier", e.to_string())
     })?;
     let policy =
         verifier_client
@@ -261,10 +255,7 @@ async fn update_policy(
     }
 
     let verifier_client = factory::get_verifier().await.map_err(|e| {
-        CommandError::resource_error(
-            "verifier",
-            format!("Failed to connect to verifier: {e}"),
-        )
+        CommandError::connection_error("verifier", e.to_string())
     })?;
     let response = verifier_client
         .update_runtime_policy(name, policy_data)
@@ -294,10 +285,7 @@ async fn delete_policy(
     output.info(format!("Deleting runtime policy '{name}'"));
 
     let verifier_client = factory::get_verifier().await.map_err(|e| {
-        CommandError::resource_error(
-            "verifier",
-            format!("Failed to connect to verifier: {e}"),
-        )
+        CommandError::connection_error("verifier", e.to_string())
     })?;
     let response = verifier_client
         .delete_runtime_policy(name)

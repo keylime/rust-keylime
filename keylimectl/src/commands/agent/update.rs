@@ -44,10 +44,10 @@ pub(super) async fn update_agent(
     output.step(1, 3, "Retrieving existing agent configuration");
 
     let registrar_client = factory::get_registrar().await.map_err(|e| {
-        CommandError::resource_error("registrar", e.to_string())
+        CommandError::connection_error("registrar", e.to_string())
     })?;
     let verifier_client = factory::get_verifier().await.map_err(|e| {
-        CommandError::resource_error("verifier", e.to_string())
+        CommandError::connection_error("verifier", e.to_string())
     })?;
 
     // Get agent info from registrar (contains IP, port, etc.)

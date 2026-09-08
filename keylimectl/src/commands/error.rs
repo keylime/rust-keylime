@@ -121,6 +121,13 @@ pub enum ResourceError {
         resource_type: String,
         reason: String,
     },
+
+    /// Client connection/initialization failed
+    #[error("Failed to connect to {resource_type}: {reason}")]
+    ConnectionFailed {
+        resource_type: String,
+        reason: String,
+    },
 }
 
 /// Policy generation errors
@@ -212,6 +219,17 @@ impl CommandError {
         reason: R,
     ) -> Self {
         Self::Resource(ResourceError::ListingFailed {
+            resource_type: resource_type.into(),
+            reason: reason.into(),
+        })
+    }
+
+    /// Create a connection error for client initialization failures
+    pub fn connection_error<T: Into<String>, R: Into<String>>(
+        resource_type: T,
+        reason: R,
+    ) -> Self {
+        Self::Resource(ResourceError::ConnectionFailed {
             resource_type: resource_type.into(),
             reason: reason.into(),
         })
@@ -336,7 +354,15 @@ mod tests {
                 assert_eq!(resource_type, "policies");
                 assert_eq!(reason, "API unavailable");
             }
+            _ => panic!("Expected ListingFailed error"), //#[allow_ci]
         }
+
+        let conn_failed = ResourceError::ConnectionFailed {
+            resource_type: "verifier".to_string(),
+            reason: "TLS error".to_string(),
+        };
+        assert!(conn_failed.to_string().contains("connect to verifier"));
+        assert!(conn_failed.to_string().contains("TLS error"));
     }
 
     #[test]

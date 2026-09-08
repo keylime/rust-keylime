@@ -69,7 +69,7 @@ pub(super) async fn add_agent(
     output.step(1, 4, "Retrieving agent data from registrar");
 
     let registrar_client = factory::get_registrar().await.map_err(|e| {
-        CommandError::resource_error("registrar", e.to_string())
+        CommandError::connection_error("registrar", e.to_string())
     })?;
     let agent_data = registrar_client
         .get_agent(params.agent_id)
@@ -101,7 +101,7 @@ pub(super) async fn add_agent(
     output.step(2, 4, "Detecting verifier API version");
 
     let verifier_client = factory::get_verifier().await.map_err(|e| {
-        CommandError::resource_error("verifier", e.to_string())
+        CommandError::connection_error("verifier", e.to_string())
     })?;
 
     let api_version_str = verifier_client.api_version().to_string();

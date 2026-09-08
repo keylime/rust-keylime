@@ -24,7 +24,7 @@ pub(super) async fn reactivate_agent(
     output.info(format!("Reactivating agent {agent_id}"));
 
     let verifier_client = factory::get_verifier().await.map_err(|e| {
-        CommandError::resource_error("verifier", e.to_string())
+        CommandError::connection_error("verifier", e.to_string())
     })?;
     let response =
         verifier_client

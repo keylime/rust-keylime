@@ -260,10 +260,7 @@ async fn push_mb_policy(
     }
 
     let verifier_client = factory::get_verifier().await.map_err(|e| {
-        CommandError::resource_error(
-            "verifier",
-            format!("Failed to connect to verifier: {e}"),
-        )
+        CommandError::connection_error("verifier", e.to_string())
     })?;
     let response = verifier_client
         .add_mb_policy(name, policy_data)
@@ -293,10 +290,7 @@ async fn show_mb_policy(
     output.info(format!("Retrieving measured boot policy '{name}'"));
 
     let verifier_client = factory::get_verifier().await.map_err(|e| {
-        CommandError::resource_error(
-            "verifier",
-            format!("Failed to connect to verifier: {e}"),
-        )
+        CommandError::connection_error("verifier", e.to_string())
     })?;
     let policy = verifier_client.get_mb_policy(name).await.map_err(|e| {
         CommandError::resource_error(
@@ -390,10 +384,7 @@ async fn update_mb_policy(
     }
 
     let verifier_client = factory::get_verifier().await.map_err(|e| {
-        CommandError::resource_error(
-            "verifier",
-            format!("Failed to connect to verifier: {e}"),
-        )
+        CommandError::connection_error("verifier", e.to_string())
     })?;
     let response = verifier_client
         .update_mb_policy(name, policy_data)
@@ -427,10 +418,7 @@ async fn delete_mb_policy(
     output.info(format!("Deleting measured boot policy '{name}'"));
 
     let verifier_client = factory::get_verifier().await.map_err(|e| {
-        CommandError::resource_error(
-            "verifier",
-            format!("Failed to connect to verifier: {e}"),
-        )
+        CommandError::connection_error("verifier", e.to_string())
     })?;
     let response =
         verifier_client.delete_mb_policy(name).await.map_err(|e| {
@@ -461,10 +449,7 @@ async fn list_mb_policies(
     output.info("Listing measured boot policies");
 
     let verifier_client = factory::get_verifier().await.map_err(|e| {
-        CommandError::resource_error(
-            "verifier",
-            format!("Failed to connect to verifier: {e}"),
-        )
+        CommandError::connection_error("verifier", e.to_string())
     })?;
     let policies = verifier_client.list_mb_policies().await.map_err(|e| {
         CommandError::resource_error(

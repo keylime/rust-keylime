@@ -35,7 +35,7 @@ pub(super) async fn get_agent_status(
 
         let registrar_client =
             factory::get_registrar().await.map_err(|e| {
-                CommandError::resource_error("registrar", e.to_string())
+                CommandError::connection_error("registrar", e.to_string())
             })?;
         match registrar_client.get_agent(agent_id).await {
             Ok(Some(agent_data)) => {
@@ -63,7 +63,7 @@ pub(super) async fn get_agent_status(
         output.progress("Checking verifier status");
 
         let verifier_client = factory::get_verifier().await.map_err(|e| {
-            CommandError::resource_error("verifier", e.to_string())
+            CommandError::connection_error("verifier", e.to_string())
         })?;
         match verifier_client.get_agent(agent_id).await {
             Ok(Some(agent_data)) => {
@@ -116,7 +116,7 @@ pub(super) async fn get_agent_status(
         if let Some((ip, port)) = agent_connection {
             let verifier_client =
                 factory::get_verifier().await.map_err(|e| {
-                    CommandError::resource_error("verifier", e.to_string())
+                    CommandError::connection_error("verifier", e.to_string())
                 })?;
             let api_version =
                 verifier_client.api_version().parse::<f32>().unwrap_or(2.1);
