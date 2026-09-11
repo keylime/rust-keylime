@@ -2,9 +2,15 @@
 // Copyright 2021 Keylime Authors
 
 pub mod auth_tag;
+pub mod certificate;
 pub mod encrypted_data;
 pub mod symmkey;
 pub mod x509;
+
+pub use certificate::{
+    ensure_payload_key, load_or_generate_payload_key, setup_mtls, MtlsConfig,
+    MtlsContext,
+};
 
 use base64::{engine::general_purpose, Engine as _};
 use log::*;
