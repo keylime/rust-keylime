@@ -118,118 +118,6 @@ fn get_retry_config(config: &config::AgentConfig) -> RetryConfig {
     }
 }
 
-/// On upgrade from a pre-key-separation agent, the payload key file does not
-/// exist yet. If the mTLS server key is RSA, copy it as the payload key so
-/// that PCR 16 stays consistent with what the verifier has cached.
-///
-/// Returns `Ok(())` when the copy succeeds or when a copy is not needed
-/// (key already exists, server key missing, or server key is not RSA).
-/// Returns `Err` if the server key is a valid RSA key but writing the
-/// payload key file fails — continuing in that state could leave a
-/// corrupt or insecure file behind.
-fn ensure_payload_key(
-    payload_key_path: &Path,
-    payload_key_password: &str,
-    server_key_path: &Path,
-    server_key_password: &str,
-) -> std::result::Result<(), Error> {
-    if payload_key_path.exists() {
-        return Ok(());
-    }
-    if !server_key_path.exists() {
-        return Ok(());
-    }
-
-    match crypto::load_key_pair(server_key_path, Some(server_key_password)) {
-        Ok((_, priv_key))
-            if priv_key.id() == Id::RSA && priv_key.bits() >= 2048 =>
-        {
-            crypto::write_key_pair(
-                &priv_key,
-                payload_key_path,
-                Some(payload_key_password),
-            )
-            .map_err(|e| {
-                if matches!(e, crypto::CryptoError::IOSetPermissionError(_)) {
-                    // The key was written successfully but chmod failed.
-                    // Remove the file so the next startup retries the copy
-                    // rather than loading a key with insecure permissions.
-                    // The file did not exist before this call (checked above),
-                    // so removal cannot delete pre-existing user data.
-                    match fs::remove_file(payload_key_path) {
-                        Ok(()) => {
-                            error!(
-                                "Wrote mTLS key to {} but failed to set \
-                                 file permissions: {e}. The file has been \
-                                 removed; the copy will be retried on next \
-                                 startup.",
-                                payload_key_path.display()
-                            );
-                        }
-                        Err(rm_err) => {
-                            error!(
-                                "Wrote mTLS key to {} but failed to set \
-                                 file permissions: {e}. Cleanup also failed: \
-                                 {rm_err}. Remove the file manually before \
-                                 restarting the agent to prevent loading a key \
-                                 with insecure permissions.",
-                                payload_key_path.display()
-                            );
-                        }
-                    }
-                } else {
-                    error!(
-                        "Failed to write mTLS key to {}: {e}. \
-                         If a partial file was left behind, remove \
-                         it manually before restarting the agent.",
-                        payload_key_path.display()
-                    );
-                }
-                Error::Crypto(e)
-            })?;
-
-            warn!(
-                "Payload key not found; wrote mTLS key from {} to {} \
-                 for backward compatibility. The same RSA key will \
-                 be used for both mTLS and payload encryption.",
-                server_key_path.display(),
-                payload_key_path.display()
-            );
-            if !server_key_password.is_empty()
-                && payload_key_password.is_empty()
-            {
-                warn!(
-                    "The mTLS key was encrypted at rest but the \
-                     payload key copy at {} is unencrypted. To \
-                     encrypt it, re-encrypt the file manually and \
-                     set 'payload_key_password' in the agent \
-                     configuration.",
-                    payload_key_path.display()
-                );
-            }
-        }
-        Ok(_) => {
-            warn!(
-                "mTLS key {} is not a supported RSA key (at least 2048 \
-                 bits); a new RSA payload key will be generated, which \
-                 will change PCR 16 and may cause attestation failures \
-                 until the agent is re-enrolled.",
-                server_key_path.display()
-            );
-        }
-        Err(e) => {
-            warn!(
-                "Failed to load mTLS key {}: {e}. \
-                 A new payload key will be generated, which will change \
-                 PCR 16 and may cause attestation failures until the \
-                 agent is re-enrolled.",
-                server_key_path.display()
-            );
-        }
-    }
-    Ok(())
-}
-
 // This data is passed in to the actix httpserver threads that
 // handle quotes.
 #[derive(Debug)]
@@ -608,138 +496,28 @@ async fn main() -> Result<()> {
     // the Identity and Integrity Quotes sent by the agent are validated
     // by the Tenant and Cloud Verifier, respectively.
     // The payload key is always persistent, stored at the configured path.
-    let key_path = Path::new(&config.payload_key);
-    ensure_payload_key(
-        key_path,
-        config.payload_key_password.as_ref(),
-        Path::new(&config.server_key),
-        config.server_key_password.as_ref(),
-    )?;
+    let (payload_pub_key, payload_priv_key) =
+        crypto::load_or_generate_payload_key(
+            Path::new(&config.payload_key),
+            config.payload_key_password.as_ref(),
+            Path::new(&config.server_key),
+            config.server_key_password.as_ref(),
+        )?;
 
-    let (payload_pub_key, payload_priv_key) = crypto::load_or_generate_key(
-        key_path,
-        Some(config.payload_key_password.as_ref()),
-        keylime::algorithms::EncryptionAlgorithm::Rsa2048,
-        false, // Don't validate key size (accept any RSA for backward compatibility)
-    )
-    .map_err(|e| {
-        error!(
-            "Failed to load or generate payload key from {}: {e}",
-            key_path.display()
-        );
-        Error::Configuration(config::KeylimeConfigError::Generic(format!(
-            "Failed to load or generate payload key from {}: {e}",
-            key_path.display()
-        )))
-    })?;
-
-    if payload_priv_key.id() != Id::RSA || payload_priv_key.bits() < 2048 {
-        error!(
-            "Payload key {} must be an RSA key of at least 2048 bits, \
-             found {:?} with {} bits",
-            key_path.display(),
-            payload_priv_key.id(),
-            payload_priv_key.bits()
-        );
-        return Err(Error::Configuration(
-            config::KeylimeConfigError::Generic(format!(
-                "Payload key {} must be an RSA key of at least 2048 \
-                 bits, found {:?} with {} bits",
-                key_path.display(),
-                payload_priv_key.id(),
-                payload_priv_key.bits()
-            )),
-        ));
-    }
-
-    // Load or generate mTLS key pair (separate from payload keys)
-    // The mTLS key is always persistent, stored at the configured path.
-    // Uses ECC P-256 by default for better security and performance
-    let key_path = Path::new(&config.server_key);
-    let (mtls_pub, mtls_priv) = crypto::load_or_generate_key(
-        key_path,
-        Some(config.server_key_password.as_ref()),
-        keylime::algorithms::EncryptionAlgorithm::Ecc256,
-        false, // Don't validate algorithm for mTLS keys (for backward compatibility)
-    )?;
-
-    let cert: X509;
-    let mtls_cert;
-    let ssl_context;
-    if config.enable_agent_mtls {
-        let contact_ips = vec![config.contact_ip.as_str()];
-        cert = match config.server_cert.as_ref() {
-            "" => {
-                debug!("The server_cert option was not set in the configuration file");
-
-                crypto::x509::CertificateBuilder::new()
-                    .private_key(&mtls_priv)
-                    .common_name(&agent_uuid)
-                    .add_ips(contact_ips)
-                    .build()?
-            }
-            path => {
-                let cert_path = Path::new(&path);
-                if cert_path.exists() {
-                    debug!(
-                        "Loading existing mTLS certificate from {}",
-                        cert_path.display()
-                    );
-                    crypto::load_x509_pem(cert_path)?
-                } else {
-                    debug!("Generating new mTLS certificate");
-                    let cert = crypto::x509::CertificateBuilder::new()
-                        .private_key(&mtls_priv)
-                        .common_name(&agent_uuid)
-                        .add_ips(contact_ips)
-                        .build()?;
-                    // Write the generated certificate
-                    crypto::write_x509(&cert, cert_path)?;
-                    cert
-                }
-            }
-        };
-
-        let trusted_client_ca = match config.trusted_client_ca.as_ref() {
-            "" => {
-                error!("Agent mTLS is enabled, but trusted_client_ca option was not provided");
-                return Err(Error::Configuration(config::KeylimeConfigError::Generic("Agent mTLS is enabled, but trusted_client_ca option was not provided".to_string())));
-            }
-            l => l,
-        };
-
-        // The trusted_client_ca config option is a list, parse to obtain a vector
-        let certs_list = parse_list(trusted_client_ca)?;
-        if certs_list.is_empty() {
-            error!(
-                "Trusted client CA certificate list is empty: could not load any certificate"
-            );
-            return Err(Error::Configuration(config::KeylimeConfigError::Generic(
-                "Trusted client CA certificate list is empty: could not load any certificate".to_string()
-            )));
-        }
-
-        let keylime_ca_certs = match crypto::load_x509_cert_list(
-            certs_list.iter().map(Path::new).collect(),
-        ) {
-            Ok(t) => Ok(t),
-            Err(e) => {
-                error!("Failed to load trusted CA certificates: {e:?}");
-                Err(e)
-            }
-        }?;
-
-        mtls_cert = Some(cert.clone());
-        ssl_context = Some(crypto::generate_tls_context(
-            &cert,
-            &mtls_priv,
-            keylime_ca_certs,
-        )?);
-    } else {
-        mtls_cert = None;
-        ssl_context = None;
-        warn!("mTLS disabled, Tenant and Verifier will reach out to agent via HTTP");
-    }
+    let mtls_config = crypto::MtlsConfig {
+        enable_agent_mtls: config.enable_agent_mtls,
+        server_key: Path::new(&config.server_key),
+        server_key_password: config.server_key_password.as_ref(),
+        server_cert: config.server_cert.as_ref(),
+        agent_uuid: &agent_uuid,
+        contact_ip: &config.contact_ip,
+        trusted_client_ca: config.trusted_client_ca.as_ref(),
+    };
+    let mtls_context = crypto::setup_mtls(&mtls_config)?;
+    let mtls_cert = mtls_context.cert;
+    let mtls_pub = mtls_context.pub_key;
+    let mtls_priv = mtls_context.priv_key;
+    let ssl_context = mtls_context.ssl_context;
 
     let ac = AgentRegistrationConfig {
         contact_ip: config.contact_ip.clone(),
@@ -1324,6 +1102,7 @@ mod tests {
 
     mod ensure_payload_key_tests {
         use super::*;
+        use crypto::ensure_payload_key;
         use openssl::ec::{EcGroup, EcKey};
         use openssl::nid::Nid;
         use openssl::pkey::PKey;
