@@ -554,7 +554,23 @@ pub fn write_key_pair(
     file_path: &Path,
     passphrase: Option<&str>,
 ) -> Result<(), CryptoError> {
-    // Write the generated key to the file
+    // Write the generated key to the file with owner-only permissions (0600)
+    #[cfg(unix)]
+    let mut file = {
+        use std::os::unix::fs::OpenOptionsExt;
+        std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o600)
+            .open(file_path)
+    }
+    .map_err(|source| CryptoError::FSCreateError {
+        file: file_path.display().to_string(),
+        source,
+    })?;
+
+    #[cfg(not(unix))]
     let mut file = std::fs::File::create(file_path).map_err(|source| {
         CryptoError::FSCreateError {
             file: file_path.display().to_string(),
