@@ -53,6 +53,24 @@ pub fn ensure_payload_key(
     server_key_password: &str,
 ) -> Result<(), Error> {
     if payload_key_path.exists() {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            if let Ok(metadata) = fs::metadata(payload_key_path) {
+                let mode = metadata.permissions().mode() & 0o777;
+                if mode != 0o600 && mode != 0o400 {
+                    warn!(
+                        "Payload key {} exists with permissions {:o} (expected 0600 or 0400). Tightening permissions to 0600.",
+                        payload_key_path.display(),
+                        mode
+                    );
+                    _ = fs::set_permissions(
+                        payload_key_path,
+                        fs::Permissions::from_mode(0o600),
+                    );
+                }
+            }
+        }
         return Ok(());
     }
     if !server_key_path.exists() {
@@ -485,6 +503,26 @@ mod tests {
 
         let res = setup_mtls(&config);
         assert!(res.is_err());
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_ensure_payload_key_tightens_permissions() -> Result<()> {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = TempDir::new()?;
+        let server = dir.path().join("server-private.pem");
+        let payload = dir.path().join("payload-private.pem");
+
+        write_rsa_key(&payload, 2048, "")?;
+        // Set loose permissions (0666)
+        fs::set_permissions(&payload, fs::Permissions::from_mode(0o666))?;
+
+        ensure_payload_key(&payload, "", &server, "")?;
+
+        let mode = fs::metadata(&payload)?.permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
         Ok(())
     }
 }
