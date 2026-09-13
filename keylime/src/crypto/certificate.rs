@@ -56,19 +56,20 @@ pub fn ensure_payload_key(
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            if let Ok(metadata) = fs::metadata(payload_key_path) {
-                let mode = metadata.permissions().mode() & 0o777;
-                if mode != 0o600 && mode != 0o400 {
-                    warn!(
-                        "Payload key {} exists with permissions {:o} (expected 0600 or 0400). Tightening permissions to 0600.",
-                        payload_key_path.display(),
-                        mode
-                    );
-                    _ = fs::set_permissions(
-                        payload_key_path,
-                        fs::Permissions::from_mode(0o600),
-                    );
-                }
+            let metadata = fs::metadata(payload_key_path)
+                .map_err(CryptoError::IOReadError)?;
+            let mode = metadata.permissions().mode() & 0o777;
+            if mode != 0o600 && mode != 0o400 {
+                warn!(
+                    "Payload key {} exists with permissions {:o} (expected 0600 or 0400). Tightening permissions to 0600.",
+                    payload_key_path.display(),
+                    mode
+                );
+                fs::set_permissions(
+                    payload_key_path,
+                    fs::Permissions::from_mode(0o600),
+                )
+                .map_err(CryptoError::IOSetPermissionError)?;
             }
         }
         return Ok(());
