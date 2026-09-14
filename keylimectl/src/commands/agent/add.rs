@@ -597,8 +597,12 @@ fn apply_file_policies(
 /// occasionally as a string. This function handles both and converts
 /// integers to their string representation.
 fn extract_operational_state(data: &Value) -> Option<String> {
+    // v2: data.results.operational_state
     let raw = data
         .pointer("/results/operational_state")
+        // v3 JSON:API: data.data.attributes.operational_state
+        .or_else(|| data.pointer("/data/attributes/operational_state"))
+        // flat fallback
         .or_else(|| data.get("operational_state"));
 
     match raw {
@@ -676,10 +680,18 @@ async fn poll_attestation_status(
                         // Collect failure details from the response
                         let severity = data
                             .pointer("/results/severity_level")
+                            .or_else(|| {
+                                data.pointer(
+                                    "/data/attributes/severity_level",
+                                )
+                            })
                             .or_else(|| data.get("severity_level"))
                             .and_then(|v| v.as_u64());
                         let last_event = data
                             .pointer("/results/last_event_id")
+                            .or_else(|| {
+                                data.pointer("/data/attributes/last_event_id")
+                            })
                             .or_else(|| data.get("last_event_id"))
                             .and_then(|v| v.as_str());
 
@@ -743,9 +755,16 @@ async fn poll_attestation_status(
 /// The verifier computes this field based on operational_state (pull mode)
 /// or attestation history (push mode). Values: "PENDING", "PASS", "FAIL".
 fn extract_attestation_status(data: &Value) -> Option<&str> {
+    // v2: data.results.attestation_status
     data.get("results")
         .and_then(|r| r.get("attestation_status"))
         .and_then(|s| s.as_str())
+        // v3 JSON:API: data.data.attributes.attestation_status
+        .or_else(|| {
+            data.pointer("/data/attributes/attestation_status")
+                .and_then(|s| s.as_str())
+        })
+        // flat fallback
         .or_else(|| data.get("attestation_status").and_then(|s| s.as_str()))
 }
 
