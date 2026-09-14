@@ -339,6 +339,7 @@ mod tests {
         Config {
             loaded_from: None,
             cli_overrides: CliOverrides::default(),
+            no_version_cache: false,
             verifier: VerifierConfig {
                 ip: "127.0.0.1".to_string(),
                 port: 8881,
@@ -362,6 +363,7 @@ mod tests {
                 retry_interval: 1.0,
                 exponential_backoff: true,
                 max_retries: 3,
+                version_cache_ttl: 86400,
             },
             agent: AgentConfig::default(),
         }

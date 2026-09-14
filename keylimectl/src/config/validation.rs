@@ -417,6 +417,7 @@ mod tests {
             retry_interval: 1.0,
             exponential_backoff: true,
             max_retries: 3,
+            version_cache_ttl: 86400,
         }
     }
 

@@ -99,6 +99,10 @@ struct Cli {
     #[arg(long, value_name = "SECONDS")]
     timeout: Option<u64>,
 
+    /// Skip the persistent API version cache and force live detection
+    #[arg(long)]
+    no_version_cache: bool,
+
     /// Enable verbose logging
     #[arg(short, long, action = clap::ArgAction::Count)]
     verbose: u8,

@@ -752,6 +752,7 @@ mod tests {
         Config {
             loaded_from: None,
             cli_overrides: crate::config::CliOverrides::default(),
+            no_version_cache: false,
             verifier: crate::config::VerifierConfig::default(),
             registrar: crate::config::RegistrarConfig::default(),
             tls: TlsConfig {
@@ -768,6 +769,7 @@ mod tests {
                 retry_interval: 1.0,
                 exponential_backoff: true,
                 max_retries: 3,
+                version_cache_ttl: 86400,
             },
             agent: AgentConfig::default(),
         }

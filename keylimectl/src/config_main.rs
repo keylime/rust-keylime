@@ -123,6 +123,9 @@ pub struct Config {
     /// Records which fields were overridden by CLI arguments
     #[serde(skip)]
     pub cli_overrides: CliOverrides,
+    /// Skip the persistent API version cache (force live detection)
+    #[serde(skip)]
+    pub no_version_cache: bool,
     /// Verifier configuration
     pub verifier: VerifierConfig,
     /// Registrar configuration
@@ -319,6 +322,13 @@ pub struct ClientConfig {
     pub exponential_backoff: bool,
     /// Maximum number of retries
     pub max_retries: u32,
+    /// Time-to-live for cached API version entries, in seconds (0 = disabled)
+    #[serde(default = "default_version_cache_ttl")]
+    pub version_cache_ttl: u64,
+}
+
+fn default_version_cache_ttl() -> u64 {
+    crate::client::version_cache::DEFAULT_TTL_SECS
 }
 
 impl Default for ClientConfig {
@@ -328,6 +338,7 @@ impl Default for ClientConfig {
             retry_interval: 1.0,
             exponential_backoff: true,
             max_retries: 3,
+            version_cache_ttl: default_version_cache_ttl(),
         }
     }
 }
@@ -578,6 +589,10 @@ impl Config {
             self.cli_overrides.timeout = true;
         }
 
+        if cli.no_version_cache {
+            self.no_version_cache = true;
+        }
+
         self
     }
 
@@ -771,6 +786,7 @@ mod tests {
             quiet: false,
             color: crate::ColorMode::Never,
             format: crate::OutputFormat::Json,
+            no_version_cache: false,
             command: Some(crate::Commands::Agent {
                 action: crate::AgentAction::List {
                     detailed: false,
@@ -1080,6 +1096,7 @@ mod tests {
                 retry_interval: 1.0,
                 exponential_backoff: true,
                 max_retries: 3,
+                version_cache_ttl: default_version_cache_ttl(),
             },
             ..Config::default()
         };
@@ -1106,6 +1123,7 @@ mod tests {
                 retry_interval: -1.0,
                 exponential_backoff: true,
                 max_retries: 3,
+                version_cache_ttl: default_version_cache_ttl(),
             },
             ..Config::default()
         };
@@ -1132,6 +1150,7 @@ mod tests {
                 retry_interval: 0.0,
                 exponential_backoff: true,
                 max_retries: 3,
+                version_cache_ttl: default_version_cache_ttl(),
             },
             ..Config::default()
         };

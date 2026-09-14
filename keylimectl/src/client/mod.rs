@@ -10,3 +10,4 @@ pub mod error;
 pub mod factory;
 pub mod registrar;
 pub mod verifier;
+pub mod version_cache;

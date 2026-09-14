@@ -146,6 +146,8 @@ pub struct VerifierClient {
     base: BaseClient,
     api_version: String,
     supported_api_versions: Option<Vec<String>>,
+    skip_version_cache: bool,
+    version_cache_ttl: u64,
 }
 
 /// Builder for creating VerifierClient instances with flexible configuration
@@ -334,6 +336,8 @@ impl VerifierClient {
             base,
             api_version: crate::api_versions::DEFAULT_API_VERSION.to_string(),
             supported_api_versions: None,
+            skip_version_cache: config.no_version_cache,
+            version_cache_ttl: config.client.version_cache_ttl,
         })
     }
 
@@ -370,6 +374,27 @@ impl VerifierClient {
     pub async fn detect_api_version(
         &mut self,
     ) -> Result<(), KeylimectlError> {
+        use crate::client::version_cache;
+
+        // Check persistent cache first (unless disabled)
+        if !self.skip_version_cache && self.version_cache_ttl > 0 {
+            if let Some(cached) = version_cache::lookup(
+                &self.base.base_url,
+                self.version_cache_ttl,
+            ) {
+                info!(
+                    "Using cached API version {} for {} (detected at {}, cache TTL {}s)",
+                    cached.api_version,
+                    self.base.base_url,
+                    cached.detected_at,
+                    self.version_cache_ttl,
+                );
+                self.api_version = cached.api_version;
+                self.supported_api_versions = cached.supported_versions;
+                return Ok(());
+            }
+        }
+
         info!("Starting verifier API version detection");
 
         // Step 1: Try the /version endpoint first
@@ -377,6 +402,7 @@ impl VerifierClient {
             Ok(version) => {
                 info!("Successfully detected verifier API version from /version endpoint: {version}");
                 self.api_version = version;
+                self.cache_detected_version();
                 return Ok(());
             }
             #[cfg(feature = "api-v3")]
@@ -387,6 +413,7 @@ impl VerifierClient {
                 if self.test_api_version_v3("3.0").await.is_ok() {
                     info!("Confirmed verifier supports API v3.0");
                     self.api_version = "3.0".to_string();
+                    self.cache_detected_version();
                     return Ok(());
                 } else {
                     warn!("Got 410 from /version but v3.0 endpoint test failed - falling back to version probing");
@@ -425,6 +452,7 @@ impl VerifierClient {
             if version_works {
                 info!("Successfully detected verifier API version: {api_version}");
                 self.api_version = api_version.to_string();
+                self.cache_detected_version();
                 return Ok(());
             }
         }
@@ -435,6 +463,25 @@ impl VerifierClient {
             self.api_version
         );
         Ok(())
+    }
+
+    /// Store the current API version in the persistent cache.
+    fn cache_detected_version(&self) {
+        use crate::client::version_cache;
+
+        if self.skip_version_cache || self.version_cache_ttl == 0 {
+            return;
+        }
+
+        info!(
+            "Caching detected API version {} for {}",
+            self.api_version, self.base.base_url
+        );
+        version_cache::store(
+            &self.base.base_url,
+            &self.api_version,
+            self.supported_api_versions.clone(),
+        );
     }
 
     /// Get the verifier API version from the '/version' endpoint
@@ -1939,6 +1986,7 @@ mod tests {
         Config {
             loaded_from: None,
             cli_overrides: crate::config::CliOverrides::default(),
+            no_version_cache: false,
             verifier: VerifierConfig {
                 ip: "127.0.0.1".to_string(),
                 port: 8881,
@@ -1959,6 +2007,7 @@ mod tests {
                 retry_interval: 1.0,
                 exponential_backoff: true,
                 max_retries: 3,
+                version_cache_ttl: 86400,
             },
             agent: AgentConfig::default(),
         }

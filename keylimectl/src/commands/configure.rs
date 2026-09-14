@@ -115,6 +115,7 @@ fn build_non_interactive_config(
     Config {
         loaded_from: None,
         cli_overrides: CliOverrides::default(),
+        no_version_cache: defaults.no_version_cache,
         verifier: VerifierConfig {
             ip: verifier_ip.unwrap_or(&defaults.verifier.ip).to_string(),
             port: verifier_port.unwrap_or(defaults.verifier.port),
@@ -371,6 +372,7 @@ fn run_interactive_wizard(
     let config = Config {
         loaded_from: None,
         cli_overrides: CliOverrides::default(),
+        no_version_cache: defaults.no_version_cache,
         verifier: VerifierConfig {
             ip: verifier_ip,
             port: verifier_port,
