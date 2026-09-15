@@ -137,51 +137,40 @@ fn build_summary(result: &Value) -> Value {
 }
 
 /// Attempt direct agent communication (pull model, api-v2 only).
+///
+/// Push-mode agents are identified by the verifier storing ip=null and
+/// port=null, matching the Python verifier's `is_push_mode_agent()` logic.
 async fn query_agent_direct(
     result: &Value,
     _output: &OutputHandler,
 ) -> Value {
     #[cfg(feature = "api-v2")]
     {
-        // Check if the verifier is using a pre-v3 API (pull model)
-        match factory::get_verifier().await {
-            Ok(client) => {
-                let api_version =
-                    client.api_version().parse::<f32>().unwrap_or(2.1);
+        if is_push_mode_from_verifier(result) {
+            return json!({
+                "status": "not_applicable",
+                "model": "push",
+            });
+        }
 
-                if api_version >= 3.0 {
-                    return json!({
-                        "status": "not_applicable",
-                        "model": "push",
-                    });
-                }
-
-                // Extract agent IP/port from available data
-                let agent_connection = extract_agent_connection(result);
-                match agent_connection {
-                    Some((ip, port)) => {
-                        _output.progress(format!(
-                            "Testing direct agent connection {ip}:{port}"
-                        ));
-                        test_agent_connection(&ip, port).await
-                    }
-                    None => json!({
-                        "status": "unknown",
-                        "model": "pull",
-                        "note": "Agent IP/port not found in registrar or verifier data",
-                    }),
-                }
+        let agent_connection = extract_agent_connection(result);
+        match agent_connection {
+            Some((ip, port)) => {
+                _output.progress(format!(
+                    "Testing direct agent connection {ip}:{port}"
+                ));
+                test_agent_connection(&ip, port).await
             }
-            Err(_) => json!({
+            None => json!({
                 "status": "unknown",
-                "note": "Cannot determine model — verifier unreachable",
+                "model": "pull",
+                "note": "Agent IP/port not found in verifier data",
             }),
         }
     }
 
     #[cfg(not(feature = "api-v2"))]
     {
-        // Suppress unused variable warning
         let _ = result;
         json!({
             "status": "not_applicable",
@@ -190,22 +179,31 @@ async fn query_agent_direct(
     }
 }
 
-/// Extract agent IP and port from registrar/verifier data.
+/// Check whether the verifier considers this a push-mode agent.
+///
+/// The verifier stores ip=null and port=null for push-mode agents.
+#[cfg(feature = "api-v2")]
+fn is_push_mode_from_verifier(result: &Value) -> bool {
+    let verifier_data = result.get("verifier").and_then(|v| v.get("data"));
+    verifier_data.is_none_or(|data| {
+        let ip_null = data.get("ip").is_none_or(|v| v.is_null());
+        let port_null = data.get("port").is_none_or(|v| v.is_null());
+        ip_null && port_null
+    })
+}
+
+/// Extract agent IP and port from verifier data.
 #[cfg(feature = "api-v2")]
 fn extract_agent_connection(result: &Value) -> Option<(String, u16)> {
-    let registrar_data = result.get("registrar").and_then(|r| r.get("data"));
     let verifier_data = result.get("verifier").and_then(|v| v.get("data"));
 
-    // Prefer verifier data, fall back to registrar
     let ip = verifier_data
         .and_then(|d| d.get("ip"))
-        .or_else(|| registrar_data.and_then(|d| d.get("ip")))
         .and_then(|v| v.as_str())
         .map(|s| s.to_string());
 
     let port = verifier_data
         .and_then(|d| d.get("port"))
-        .or_else(|| registrar_data.and_then(|d| d.get("port")))
         .and_then(|v| v.as_u64())
         .map(|p| p as u16);
 
@@ -311,19 +309,18 @@ mod tests {
             "verifier": { "status": "found", "data": { "ip": "10.0.0.2", "port": 9003 } },
         });
         let conn = extract_agent_connection(&result);
-        // Should prefer verifier data
         assert_eq!(conn, Some(("10.0.0.2".to_string(), 9003)));
     }
 
     #[cfg(feature = "api-v2")]
     #[test]
-    fn test_extract_agent_connection_from_registrar_fallback() {
+    fn test_extract_agent_connection_no_verifier_data() {
         let result = json!({
             "registrar": { "status": "found", "data": { "ip": "10.0.0.1", "port": 9002 } },
             "verifier": { "status": "not_found" },
         });
         let conn = extract_agent_connection(&result);
-        assert_eq!(conn, Some(("10.0.0.1".to_string(), 9002)));
+        assert_eq!(conn, None);
     }
 
     #[cfg(feature = "api-v2")]
@@ -335,5 +332,32 @@ mod tests {
         });
         let conn = extract_agent_connection(&result);
         assert_eq!(conn, None);
+    }
+
+    #[cfg(feature = "api-v2")]
+    #[test]
+    fn test_is_push_mode_null_ip_port() {
+        let result = json!({
+            "verifier": { "status": "found", "data": { "ip": null, "port": null } },
+        });
+        assert!(is_push_mode_from_verifier(&result));
+    }
+
+    #[cfg(feature = "api-v2")]
+    #[test]
+    fn test_is_push_mode_with_ip_port() {
+        let result = json!({
+            "verifier": { "status": "found", "data": { "ip": "10.0.0.1", "port": 9002 } },
+        });
+        assert!(!is_push_mode_from_verifier(&result));
+    }
+
+    #[cfg(feature = "api-v2")]
+    #[test]
+    fn test_is_push_mode_no_verifier_data() {
+        let result = json!({
+            "verifier": { "status": "not_found" },
+        });
+        assert!(is_push_mode_from_verifier(&result));
     }
 }

@@ -86,42 +86,42 @@ pub(super) async fn get_agent_status(
         }
     }
 
-    // Check agent directly if API < 3.0 and we have connection details
-    // This is only applicable for pull model (api-v2)
+    // Check agent directly for pull-model agents only.
+    // Push-mode agents have ip=null and port=null in the verifier DB,
+    // matching the Python verifier's is_push_mode_agent() logic.
     #[cfg(feature = "api-v2")]
     if !registrar_only {
-        // Extract IP and port from results (clone to avoid borrow conflicts)
-        let agent_connection = {
-            let registrar_data =
-                results.get("registrar").and_then(|r| r.get("data"));
-            let verifier_data =
-                results.get("verifier").and_then(|v| v.get("data"));
-            match (registrar_data, verifier_data) {
-                (Some(reg), Some(ver)) => {
-                    let ip = ver
-                        .get("ip")
-                        .or_else(|| reg.get("ip"))
-                        .and_then(|v| v.as_str())
-                        .map(|s| s.to_string());
-                    let port = ver
-                        .get("port")
-                        .or_else(|| reg.get("port"))
-                        .and_then(|v| v.as_u64().map(|p| p as u16));
-                    ip.zip(port)
-                }
-                _ => None,
-            }
-        };
+        let verifier_data =
+            results.get("verifier").and_then(|v| v.get("data"));
 
-        if let Some((ip, port)) = agent_connection {
-            let verifier_client =
-                factory::get_verifier().await.map_err(|e| {
-                    CommandError::connection_error("verifier", e.to_string())
-                })?;
-            let api_version =
-                verifier_client.api_version().parse::<f32>().unwrap_or(2.1);
+        // Determine push vs pull from verifier-stored ip/port.
+        let is_push_mode = verifier_data.is_none_or(|data| {
+            let ip_null = data.get("ip").is_none_or(|v| v.is_null());
+            let port_null = data.get("port").is_none_or(|v| v.is_null());
+            ip_null && port_null
+        });
 
-            if api_version < 3.0 {
+        if is_push_mode {
+            results["agent"] = json!({
+                "status": "not_applicable",
+                "note": "Direct agent communication is not used with push model. \
+                         Agent attestation status is managed by the verifier."
+            });
+            results["model"] = json!("push");
+        } else {
+            // Pull model: extract IP/port from verifier data for direct agent check.
+            let agent_connection = verifier_data.and_then(|data| {
+                let ip = data
+                    .get("ip")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
+                let port = data
+                    .get("port")
+                    .and_then(|v| v.as_u64().map(|p| p as u16));
+                ip.zip(port)
+            });
+
+            if let Some((ip, port)) = agent_connection {
                 results["model"] = json!("pull");
                 output.progress("Checking agent status directly");
 
@@ -170,13 +170,6 @@ pub(super) async fn get_agent_status(
                         });
                     }
                 }
-            } else {
-                results["agent"] = json!({
-                    "status": "not_applicable",
-                    "note": "Direct agent communication is not used with push model (API >= 3.0). \
-                             Agent attestation status is managed by the verifier."
-                });
-                results["model"] = json!("push");
             }
         }
     }

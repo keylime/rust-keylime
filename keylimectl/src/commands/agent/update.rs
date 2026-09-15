@@ -65,7 +65,7 @@ pub(super) async fn update_agent(
         })?;
 
     // Get agent info from verifier (contains policies, etc.)
-    let _verifier_agent = verifier_client
+    let verifier_agent = verifier_client
         .get_agent(agent_id)
         .await
         .map_err(|e| {
@@ -78,35 +78,25 @@ pub(super) async fn update_agent(
             CommandError::agent_not_found(agent_id.to_string(), "verifier")
         })?;
 
-    // Extract existing configuration
-    let existing_ip = registrar_agent["ip"].as_str().ok_or_else(|| {
-        CommandError::invalid_parameter(
-            "ip",
-            "Agent IP not found in registrar data".to_string(),
-        )
-    })?;
-    let existing_port =
-        registrar_agent["port"].as_u64().ok_or_else(|| {
-            CommandError::invalid_parameter(
-                "port",
-                "Agent port not found in registrar data".to_string(),
-            )
-        })?;
+    // Determine if agent is using push model from verifier data.
+    // The verifier stores ip=null and port=null for push-mode agents
+    // (matching Python verifier's is_push_mode_agent() logic).
+    let verifier_ip_is_null = verifier_agent
+        .pointer("/results/ip")
+        .is_none_or(|v| v.is_null());
+    let verifier_port_is_null = verifier_agent
+        .pointer("/results/port")
+        .is_none_or(|v| v.is_null());
+    let existing_push_model = verifier_ip_is_null && verifier_port_is_null;
 
-    // Determine if agent is using push model based on API version and port
-    let existing_push_model = {
-        #[cfg(feature = "api-v3")]
-        {
-            let (api_major, _) = crate::api_versions::parse_version(
-                verifier_client.api_version(),
-            );
-            existing_port == 0 || api_major >= 3
-        }
-        #[cfg(not(feature = "api-v3"))]
-        {
-            existing_port == 0
-        }
-    };
+    // Extract existing configuration from registrar.
+    // Push-model agents may not have a reachable IP/port, so use
+    // defaults when the registrar data is missing or empty.
+    let existing_ip = registrar_agent["ip"]
+        .as_str()
+        .filter(|s| !s.is_empty())
+        .unwrap_or("0.0.0.0");
+    let existing_port = registrar_agent["port"].as_u64().unwrap_or(0);
 
     // Step 2: Remove existing agent; blocks until fully gone (handles 202)
     output.step(2, 3, "Removing existing agent configuration");
