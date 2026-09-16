@@ -386,6 +386,7 @@ mod tests {
                 ip: "127.0.0.1".to_string(),
                 port: 8881,
                 id: Some("test-verifier".to_string()),
+                api_version: None,
             },
             registrar: RegistrarConfig::default(),
             tls: TlsConfig {

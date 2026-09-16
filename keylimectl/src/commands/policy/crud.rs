@@ -345,10 +345,12 @@ mod tests {
                 ip: "127.0.0.1".to_string(),
                 port: 8881,
                 id: Some("test-verifier".to_string()),
+                api_version: None,
             },
             registrar: RegistrarConfig {
                 ip: "127.0.0.1".to_string(),
                 port: 8891,
+                api_version: None,
             },
             tls: TlsConfig {
                 client_cert: None,

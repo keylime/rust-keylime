@@ -126,10 +126,12 @@ pub fn validate_complete_config(
 ///     ip: "192.168.1.100".to_string(),
 ///     port: 8881,
 ///     id: None,
+///     api_version: None,
 /// };
 /// let registrar = RegistrarConfig {
 ///     ip: "192.168.1.100".to_string(),
 ///     port: 8891,
+///     api_version: None,
 /// };
 ///
 /// validation::validate_network_config(&verifier, &registrar)?;
@@ -389,6 +391,7 @@ mod tests {
             ip: "127.0.0.1".to_string(),
             port: 8881,
             id: None,
+            api_version: None,
         }
     }
 
@@ -396,6 +399,7 @@ mod tests {
         RegistrarConfig {
             ip: "127.0.0.1".to_string(),
             port: 8891,
+            api_version: None,
         }
     }
 

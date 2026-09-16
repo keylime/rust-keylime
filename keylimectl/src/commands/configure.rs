@@ -120,10 +120,12 @@ fn build_non_interactive_config(
             ip: verifier_ip.unwrap_or(&defaults.verifier.ip).to_string(),
             port: verifier_port.unwrap_or(defaults.verifier.port),
             id: defaults.verifier.id,
+            api_version: None,
         },
         registrar: RegistrarConfig {
             ip: registrar_ip.unwrap_or(&defaults.registrar.ip).to_string(),
             port: registrar_port.unwrap_or(defaults.registrar.port),
+            api_version: None,
         },
         tls: defaults.tls,
         client: defaults.client,
@@ -377,10 +379,12 @@ fn run_interactive_wizard(
             ip: verifier_ip,
             port: verifier_port,
             id: None,
+            api_version: None,
         },
         registrar: RegistrarConfig {
             ip: registrar_ip,
             port: registrar_port,
+            api_version: None,
         },
         tls: TlsConfig {
             client_cert,

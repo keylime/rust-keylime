@@ -62,7 +62,9 @@ use log::{debug, info, warn};
 use reqwest::{Method, StatusCode};
 use serde_json::Value;
 
-use crate::api_versions::SUPPORTED_API_VERSIONS;
+use crate::api_versions::{
+    is_v3, negotiate_version_with_cap, parse_version, SUPPORTED_API_VERSIONS,
+};
 
 /// Response structure for version endpoint
 #[derive(serde::Deserialize, Debug)]
@@ -269,6 +271,12 @@ impl RegistrarClient {
     pub async fn new(config: &Config) -> Result<Self, KeylimectlError> {
         let mut client = Self::new_without_version_detection(config)?;
 
+        if let Some(ref forced) = config.registrar.api_version {
+            info!("Using forced registrar API version: {forced}");
+            client.set_api_version(forced.clone());
+            return Ok(client);
+        }
+
         client.detect_api_version().await.map_err(|e| {
             KeylimectlError::Client(
                 crate::client::error::ClientError::Configuration {
@@ -378,33 +386,48 @@ impl RegistrarClient {
         // Step 1: Try the /version endpoint first
         match self.get_registrar_api_version().await {
             Ok(version) => {
-                info!("Successfully detected registrar API version from /version endpoint: {version}");
-                self.api_version = version;
-                self.cache_detected_version();
-                return Ok(());
+                info!("Registrar reports current API version: {version}");
+                if let Some(ref supported) = self.supported_api_versions {
+                    let (current_major, _) = parse_version(&version);
+                    if let Some(negotiated) =
+                        negotiate_version_with_cap(supported, current_major)
+                    {
+                        info!(
+                            "Negotiated registrar API version: {negotiated} (capped by current_version major {current_major})"
+                        );
+                        self.api_version = negotiated.to_string();
+                        self.cache_detected_version();
+                        return Ok(());
+                    }
+                    warn!("No mutually supported version found (remote: {supported:?}, cap: major {current_major}), falling back to version probing");
+                } else {
+                    info!("Using registrar-reported API version: {version}");
+                    self.api_version = version;
+                    self.cache_detected_version();
+                    return Ok(());
+                }
             }
             #[cfg(feature = "api-v3")]
             Err(KeylimectlError::Api { status: 410, .. }) => {
-                info!("/version endpoint returned 410 Gone - this indicates a v3.0+ registrar");
-
-                // Step 2: Confirm v3.0 support by testing the v3.0 endpoint
-                if self.test_api_version_v3("3.0").await.is_ok() {
-                    info!("Confirmed registrar supports API v3.0");
-                    self.api_version = "3.0".to_string();
-                    self.cache_detected_version();
-                    return Ok(());
-                } else {
-                    warn!("Got 410 from /version but v3.0 endpoint test failed - falling back to version probing");
-                }
+                info!("/version endpoint returned 410 Gone - push mode registrar, falling back to v2-first probing");
             }
             Err(e) => {
                 debug!("Failed to get version from /version endpoint ({e}), falling back to version probing");
             }
         }
 
-        // Step 3: Fall back to testing each version individually (newest to oldest)
-        info!("Falling back to individual version testing");
-        for &api_version in SUPPORTED_API_VERSIONS.iter().rev() {
+        // Step 3: Fall back to testing each version individually.
+        // Try v2 versions first (newest to oldest), then v3 as a last resort.
+        // This avoids probing /v3.0/ on hybrid registrars where v3 handlers
+        // are incomplete and would return 500.
+        info!("Falling back to individual version testing (v2 first)");
+        let v2_first_iter: Vec<&&str> = SUPPORTED_API_VERSIONS
+            .iter()
+            .rev()
+            .filter(|v| !is_v3(v))
+            .chain(SUPPORTED_API_VERSIONS.iter().rev().filter(|v| is_v3(v)))
+            .collect();
+        for &api_version in &v2_first_iter {
             debug!("Testing registrar API version {api_version}");
 
             let version_works = if api_version.starts_with("3.") {
@@ -441,6 +464,10 @@ impl RegistrarClient {
             self.api_version
         );
         Ok(())
+    }
+
+    pub(crate) fn set_api_version(&mut self, version: String) {
+        self.api_version = version;
     }
 
     /// Store the current API version in the persistent cache.
@@ -872,6 +899,7 @@ mod tests {
             registrar: RegistrarConfig {
                 ip: "127.0.0.1".to_string(),
                 port: 8891,
+                api_version: None,
             },
             tls: TlsConfig {
                 client_cert: None,
@@ -1106,11 +1134,14 @@ mod tests {
             #[cfg(all(feature = "api-v2", feature = "api-v3"))]
             assert_eq!(
                 SUPPORTED_API_VERSIONS,
-                &["2.0", "2.1", "2.2", "2.3", "3.0"]
+                &["2.0", "2.1", "2.2", "2.3", "2.4", "2.5", "2.6", "3.0"]
             );
 
             #[cfg(all(feature = "api-v2", not(feature = "api-v3")))]
-            assert_eq!(SUPPORTED_API_VERSIONS, &["2.0", "2.1", "2.2", "2.3"]);
+            assert_eq!(
+                SUPPORTED_API_VERSIONS,
+                &["2.0", "2.1", "2.2", "2.3", "2.4", "2.5", "2.6"]
+            );
 
             #[cfg(all(not(feature = "api-v2"), feature = "api-v3"))]
             assert_eq!(SUPPORTED_API_VERSIONS, &["3.0"]);

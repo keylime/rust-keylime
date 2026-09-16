@@ -103,6 +103,14 @@ struct Cli {
     #[arg(long)]
     no_version_cache: bool,
 
+    /// Force verifier API version, skipping auto-detection (e.g. "2.1", "3.0")
+    #[arg(long, value_name = "VERSION")]
+    verifier_api_version: Option<String>,
+
+    /// Force registrar API version, skipping auto-detection (e.g. "2.1", "3.0")
+    #[arg(long, value_name = "VERSION")]
+    registrar_api_version: Option<String>,
+
     /// Enable verbose logging
     #[arg(short, long, action = clap::ArgAction::Count)]
     verbose: u8,

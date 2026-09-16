@@ -102,6 +102,10 @@ pub struct CliOverrides {
     pub registrar_port: bool,
     /// Whether `--timeout` was provided
     pub timeout: bool,
+    /// Whether `--verifier-api-version` was provided
+    pub verifier_api_version: bool,
+    /// Whether `--registrar-api-version` was provided
+    pub registrar_api_version: bool,
 }
 
 /// Main configuration structure for keylimectl
@@ -152,6 +156,7 @@ pub struct Config {
 ///     ip: "192.168.1.100".to_string(),
 ///     port: 8881,
 ///     id: Some("verifier-1".to_string()),
+///     api_version: None,
 /// };
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -162,6 +167,8 @@ pub struct VerifierConfig {
     pub port: u16,
     /// Verifier ID (optional)
     pub id: Option<String>,
+    /// Force API version, skipping auto-detection
+    pub api_version: Option<String>,
 }
 
 impl Default for VerifierConfig {
@@ -170,6 +177,7 @@ impl Default for VerifierConfig {
             ip: "127.0.0.1".to_string(),
             port: 8881,
             id: None,
+            api_version: None,
         }
     }
 }
@@ -187,6 +195,7 @@ impl Default for VerifierConfig {
 /// let config = RegistrarConfig {
 ///     ip: "127.0.0.1".to_string(),
 ///     port: 8891,
+///     api_version: None,
 /// };
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -195,6 +204,8 @@ pub struct RegistrarConfig {
     pub ip: String,
     /// Registrar port
     pub port: u16,
+    /// Force API version, skipping auto-detection
+    pub api_version: Option<String>,
 }
 
 impl Default for RegistrarConfig {
@@ -202,6 +213,7 @@ impl Default for RegistrarConfig {
         Self {
             ip: "127.0.0.1".to_string(),
             port: 8891,
+            api_version: None,
         }
     }
 }
@@ -593,6 +605,16 @@ impl Config {
             self.no_version_cache = true;
         }
 
+        if let Some(ref version) = cli.verifier_api_version {
+            self.verifier.api_version = Some(version.clone());
+            self.cli_overrides.verifier_api_version = true;
+        }
+
+        if let Some(ref version) = cli.registrar_api_version {
+            self.registrar.api_version = Some(version.clone());
+            self.cli_overrides.registrar_api_version = true;
+        }
+
         self
     }
 
@@ -787,6 +809,8 @@ mod tests {
             color: crate::ColorMode::Never,
             format: crate::OutputFormat::Json,
             no_version_cache: false,
+            verifier_api_version: None,
+            registrar_api_version: None,
             command: Some(crate::Commands::Agent {
                 action: crate::AgentAction::List {
                     detailed: false,
@@ -830,6 +854,7 @@ mod tests {
                 ip: "192.168.1.100".to_string(),
                 port: 8881,
                 id: None,
+                api_version: None,
             },
             ..Config::default()
         };
@@ -844,6 +869,7 @@ mod tests {
                 ip: "2001:db8::1".to_string(),
                 port: 8881,
                 id: None,
+                api_version: None,
             },
             ..Config::default()
         };
@@ -858,6 +884,7 @@ mod tests {
                 ip: "[2001:db8::1]".to_string(),
                 port: 8881,
                 id: None,
+                api_version: None,
             },
             ..Config::default()
         };
@@ -871,6 +898,7 @@ mod tests {
             registrar: RegistrarConfig {
                 ip: "10.0.0.1".to_string(),
                 port: 9000,
+                api_version: None,
             },
             ..Config::default()
         };
@@ -884,6 +912,7 @@ mod tests {
             registrar: RegistrarConfig {
                 ip: "::1".to_string(),
                 port: 8891,
+                api_version: None,
             },
             ..Config::default()
         };
@@ -977,6 +1006,7 @@ mod tests {
                 ip: "".to_string(),
                 port: 8881,
                 id: None,
+                api_version: None,
             },
             ..Config::default()
         };
@@ -995,6 +1025,7 @@ mod tests {
             registrar: RegistrarConfig {
                 ip: "".to_string(),
                 port: 8891,
+                api_version: None,
             },
             ..Config::default()
         };
@@ -1014,6 +1045,7 @@ mod tests {
                 ip: "127.0.0.1".to_string(),
                 port: 0,
                 id: None,
+                api_version: None,
             },
             ..Config::default()
         };
@@ -1032,6 +1064,7 @@ mod tests {
             registrar: RegistrarConfig {
                 ip: "127.0.0.1".to_string(),
                 port: 0,
+                api_version: None,
             },
             ..Config::default()
         };

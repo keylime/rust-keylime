@@ -61,7 +61,9 @@ use log::{debug, info, warn};
 use reqwest::{Method, StatusCode};
 use serde_json::{json, Value};
 
-use crate::api_versions::{is_v3, SUPPORTED_API_VERSIONS};
+use crate::api_versions::{
+    is_v3, negotiate_version_with_cap, parse_version, SUPPORTED_API_VERSIONS,
+};
 
 /// Content type for JSON:API requests (v3+)
 const JSON_API_CONTENT_TYPE: &str = "application/vnd.api+json";
@@ -290,6 +292,12 @@ impl VerifierClient {
                config.tls.client_cert, config.tls.client_key, config.tls.trusted_ca);
         let mut client = Self::new_without_version_detection(config)?;
 
+        if let Some(ref forced) = config.verifier.api_version {
+            info!("Using forced verifier API version: {forced}");
+            client.set_api_version(forced.clone());
+            return Ok(client);
+        }
+
         // Detect API version — propagate errors so callers know the
         // verifier is unreachable instead of getting cryptic 404s later
         client.detect_api_version().await.map_err(|e| {
@@ -400,33 +408,48 @@ impl VerifierClient {
         // Step 1: Try the /version endpoint first
         match self.get_verifier_api_version().await {
             Ok(version) => {
-                info!("Successfully detected verifier API version from /version endpoint: {version}");
-                self.api_version = version;
-                self.cache_detected_version();
-                return Ok(());
+                info!("Verifier reports current API version: {version}");
+                if let Some(ref supported) = self.supported_api_versions {
+                    let (current_major, _) = parse_version(&version);
+                    if let Some(negotiated) =
+                        negotiate_version_with_cap(supported, current_major)
+                    {
+                        info!(
+                            "Negotiated verifier API version: {negotiated} (capped by current_version major {current_major})"
+                        );
+                        self.api_version = negotiated.to_string();
+                        self.cache_detected_version();
+                        return Ok(());
+                    }
+                    warn!("No mutually supported version found (remote: {supported:?}, cap: major {current_major}), falling back to version probing");
+                } else {
+                    info!("Using verifier-reported API version: {version}");
+                    self.api_version = version;
+                    self.cache_detected_version();
+                    return Ok(());
+                }
             }
             #[cfg(feature = "api-v3")]
             Err(KeylimectlError::Api { status: 410, .. }) => {
-                info!("/version endpoint returned 410 Gone - this indicates a v3.0+ verifier");
-
-                // Step 2: Confirm v3.0 support by testing the v3.0 endpoint
-                if self.test_api_version_v3("3.0").await.is_ok() {
-                    info!("Confirmed verifier supports API v3.0");
-                    self.api_version = "3.0".to_string();
-                    self.cache_detected_version();
-                    return Ok(());
-                } else {
-                    warn!("Got 410 from /version but v3.0 endpoint test failed - falling back to version probing");
-                }
+                info!("/version endpoint returned 410 Gone - push mode verifier, falling back to v2-first probing");
             }
             Err(e) => {
                 debug!("Failed to get version from /version endpoint ({e}), falling back to version probing");
             }
         }
 
-        // Step 3: Fall back to testing each version individually (newest to oldest)
-        info!("Falling back to individual version testing");
-        for &api_version in SUPPORTED_API_VERSIONS.iter().rev() {
+        // Step 3: Fall back to testing each version individually.
+        // Try v2 versions first (newest to oldest), then v3 as a last resort.
+        // This avoids probing /v3.0/ on hybrid verifiers where v3 handlers
+        // are incomplete and would return 500.
+        info!("Falling back to individual version testing (v2 first)");
+        let v2_first_iter: Vec<&&str> = SUPPORTED_API_VERSIONS
+            .iter()
+            .rev()
+            .filter(|v| !is_v3(v))
+            .chain(SUPPORTED_API_VERSIONS.iter().rev().filter(|v| is_v3(v)))
+            .collect();
+        for &api_version in &v2_first_iter {
             debug!("Testing verifier API version {api_version}");
 
             let version_works = if api_version.starts_with("3.") {
@@ -463,6 +486,10 @@ impl VerifierClient {
             self.api_version
         );
         Ok(())
+    }
+
+    pub(crate) fn set_api_version(&mut self, version: String) {
+        self.api_version = version;
     }
 
     /// Store the current API version in the persistent cache.
@@ -1991,6 +2018,7 @@ mod tests {
                 ip: "127.0.0.1".to_string(),
                 port: 8881,
                 id: Some("test-verifier".to_string()),
+                api_version: None,
             },
             registrar: crate::config::RegistrarConfig::default(),
             tls: TlsConfig {
@@ -2198,11 +2226,14 @@ mod tests {
             #[cfg(all(feature = "api-v2", feature = "api-v3"))]
             assert_eq!(
                 SUPPORTED_API_VERSIONS,
-                &["2.0", "2.1", "2.2", "2.3", "3.0"]
+                &["2.0", "2.1", "2.2", "2.3", "2.4", "2.5", "2.6", "3.0"]
             );
 
             #[cfg(all(feature = "api-v2", not(feature = "api-v3")))]
-            assert_eq!(SUPPORTED_API_VERSIONS, &["2.0", "2.1", "2.2", "2.3"]);
+            assert_eq!(
+                SUPPORTED_API_VERSIONS,
+                &["2.0", "2.1", "2.2", "2.3", "2.4", "2.5", "2.6"]
+            );
 
             #[cfg(all(not(feature = "api-v2"), feature = "api-v3"))]
             assert_eq!(SUPPORTED_API_VERSIONS, &["3.0"]);
