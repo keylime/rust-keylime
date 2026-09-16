@@ -904,6 +904,10 @@ async fn main() -> Result<()> {
         )
         .default_service(web::to(errors_handler::app_default))
     })
+    // Limit the number of spawned workers, see:
+    // https://github.com/keylime/rust-keylime/issues/1276
+    // for details
+    .workers(4)
     // Disable default signal handlers.  See:
     // https://github.com/actix/actix-web/issues/2739
     // for details.
