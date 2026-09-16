@@ -115,9 +115,9 @@ pub enum PolicyError {
 /// including listing, filtering, and display formatting.
 #[derive(Error, Debug)]
 pub enum ResourceError {
-    /// Resource listing failed
-    #[error("Failed to list {resource_type}: {reason}")]
-    ListingFailed {
+    /// Generic resource operation failed
+    #[error("{resource_type}: {reason}")]
+    OperationFailed {
         resource_type: String,
         reason: String,
     },
@@ -218,7 +218,7 @@ impl CommandError {
         resource_type: T,
         reason: R,
     ) -> Self {
-        Self::Resource(ResourceError::ListingFailed {
+        Self::Resource(ResourceError::OperationFailed {
             resource_type: resource_type.into(),
             reason: reason.into(),
         })
@@ -342,19 +342,19 @@ mod tests {
 
     #[test]
     fn test_resource_error_creation() {
-        let listing_failed = ResourceError::ListingFailed {
+        let op_failed = ResourceError::OperationFailed {
             resource_type: "policies".to_string(),
             reason: "API unavailable".to_string(),
         };
-        match listing_failed {
-            ResourceError::ListingFailed {
+        match op_failed {
+            ResourceError::OperationFailed {
                 resource_type,
                 reason,
             } => {
                 assert_eq!(resource_type, "policies");
                 assert_eq!(reason, "API unavailable");
             }
-            _ => panic!("Expected ListingFailed error"), //#[allow_ci]
+            _ => panic!("Expected OperationFailed error"), //#[allow_ci]
         }
 
         let conn_failed = ResourceError::ConnectionFailed {
@@ -381,7 +381,7 @@ mod tests {
         assert!(policy_err.to_string().contains("test_policy"));
         assert!(policy_err.to_string().contains("not found"));
 
-        let resource_err = ResourceError::ListingFailed {
+        let resource_err = ResourceError::OperationFailed {
             resource_type: "agents".to_string(),
             reason: "Service unavailable".to_string(),
         };
@@ -397,8 +397,8 @@ mod tests {
             reason: "Temporary failure".to_string(),
         });
 
-        let _listing_failed =
-            CommandError::Resource(ResourceError::ListingFailed {
+        let _op_failed2 =
+            CommandError::Resource(ResourceError::OperationFailed {
                 resource_type: "agents".to_string(),
                 reason: "Service unavailable".to_string(),
             });
