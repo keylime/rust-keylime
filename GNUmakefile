@@ -3,6 +3,7 @@
 
 RELEASE ?= 0
 TARGETDIR ?= target
+PREFIX ?= /usr
 CONFFILE ?= ./keylime-agent.conf
 
 ifeq ($(RELEASE),1)
@@ -18,7 +19,8 @@ systemdsystemunitdir := $(shell pkg-config systemd --variable=systemdsystemunitd
 programs = \
 	${TARGETDIR}/${PROFILE}/keylime_agent \
 	${TARGETDIR}/${PROFILE}/keylime_ima_emulator \
-	${TARGETDIR}/${PROFILE}/keylime_push_model_agent
+	${TARGETDIR}/${PROFILE}/keylime_push_model_agent \
+	${TARGETDIR}/${PROFILE}/keylimectl
 
 .PHONY: all
 all: $(programs)
@@ -35,8 +37,9 @@ install: all
 	mkdir -p ${DESTDIR}/etc/keylime/
 	mkdir -p ${DESTDIR}/etc/keylime/agent.conf.d
 	cp ${CONFFILE} ${DESTDIR}/etc/keylime/agent.conf
+	cp keylimectl/keylimectl.conf ${DESTDIR}/etc/keylime/keylimectl.conf
 	for f in $(programs); do \
-		install -D -t ${DESTDIR}/usr/bin "$$f"; \
+		install -D -t ${DESTDIR}${PREFIX}/bin "$$f"; \
 	done
 	install -D -m 644 -t ${DESTDIR}$(systemdsystemunitdir) dist/systemd/system/keylime_agent.service
 	install -D -m 644 -t ${DESTDIR}$(systemdsystemunitdir) dist/systemd/system/keylime_push_model_agent.service
