@@ -7,7 +7,7 @@
 //! policy extraction.
 
 use crate::commands::error::CommandError;
-use log::{debug, warn};
+use log::{debug, error, warn};
 use serde_json::Value;
 use std::fs;
 
@@ -58,6 +58,111 @@ const IMA_PCR: u32 = 10;
 const MEASUREDBOOT_PCRS: &[u32] =
     &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 12, 13, 14, 15];
 
+/// TPM data-binding PCR index (matches keylime config.TPM_DATA_PCR)
+const TPM_DATA_PCR: u32 = 16;
+
+/// Maximum valid PCR index
+const MAX_PCR_INDEX: u32 = 24;
+
+/// Validate and normalize a user-provided TPM policy
+///
+/// Equivalent to the Python `readPolicy()` in `tpm_util.py`. Validates
+/// that all keys (except "mask") are valid PCR numbers, computes the
+/// mask from those keys, normalizes values (lowercase hex, wrap
+/// singletons in lists), and inserts the computed mask.
+fn validate_and_normalize_tpm_policy(
+    obj: &mut serde_json::Map<String, Value>,
+) -> Result<(), CommandError> {
+    let keys: Vec<String> =
+        obj.keys().filter(|k| *k != "mask").cloned().collect();
+
+    let mut mask: u32 = 0;
+
+    for key in &keys {
+        let pcr_num = key.parse::<u32>().map_err(|_| {
+            CommandError::invalid_parameter(
+                "tpm_policy",
+                format!("Invalid tpm policy pcr number: {key}"),
+            )
+        })?;
+
+        if pcr_num > MAX_PCR_INDEX {
+            return Err(CommandError::invalid_parameter(
+                "tpm_policy",
+                format!("Invalid tpm policy pcr number: {key}"),
+            ));
+        }
+
+        if pcr_num == TPM_DATA_PCR {
+            return Err(CommandError::invalid_parameter(
+                "tpm_policy",
+                format!("Invalid allowlist PCR number {key}, keylime uses this PCR to bind data."),
+            ));
+        }
+
+        if pcr_num == IMA_PCR {
+            return Err(CommandError::invalid_parameter(
+                "tpm_policy",
+                format!("Invalid allowlist PCR number {key}, this PCR is used for IMA."),
+            ));
+        }
+
+        mask |= 1 << pcr_num;
+    }
+
+    // Normalize values: wrap singletons in lists, lowercase hex
+    for key in &keys {
+        if let Some(value) = obj.get_mut(key) {
+            if let Some(s) = value.as_str() {
+                *value = serde_json::json!([s.to_lowercase()]);
+            } else if let Some(arr) = value.as_array_mut() {
+                for item in arr.iter_mut() {
+                    if let Some(s) = item.as_str() {
+                        *item = Value::String(s.to_lowercase());
+                    }
+                }
+            }
+        }
+    }
+
+    let _ = obj
+        .insert("mask".to_string(), serde_json::json!(format!("0x{mask:x}")));
+
+    Ok(())
+}
+
+/// Check that user-specified PCR keys do not conflict with protected PCRs
+///
+/// Equivalent to the Python `enforce_pcrs()` in `cli/policies.py`.
+/// When a runtime or measured boot policy is also provided, certain
+/// PCRs are reserved and must not appear in the user's `tpm_policy`.
+fn enforce_pcrs(
+    obj: &serde_json::Map<String, Value>,
+    protected_pcrs: &[u32],
+    pcr_use: &str,
+) -> Result<(), CommandError> {
+    for key in obj.keys() {
+        if key == "mask" {
+            continue;
+        }
+        if let Ok(pcr_num) = key.parse::<u32>() {
+            if protected_pcrs.contains(&pcr_num) {
+                let msg = format!(
+                    "WARNING: PCR {key} is specified in \"tpm_policy\", \
+                     but will in fact be used by {pcr_use}. \
+                     Please remove it from policy"
+                );
+                error!("{msg}");
+                return Err(CommandError::invalid_parameter(
+                    "tpm_policy",
+                    msg,
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Enhanced TPM policy resolution with measured boot policy extraction
 ///
 /// This function implements the full precedence chain for TPM policy resolution,
@@ -89,6 +194,8 @@ pub(super) fn resolve_tpm_policy_enhanced(
     has_runtime_policy: bool,
     has_mb_policy: bool,
 ) -> Result<String, CommandError> {
+    let is_explicit = explicit_policy.is_some();
+
     // Priority 1: Explicit CLI argument
     let mut tpm_policy: Value = if let Some(policy) = explicit_policy {
         debug!("Using explicit TPM policy from CLI: {policy}");
@@ -136,7 +243,7 @@ pub(super) fn resolve_tpm_policy_enhanced(
         })
     };
 
-    // Auto-enable PCRs based on provided policies (matching Python tenant)
+    // Validate and normalize the policy
     let obj = tpm_policy.as_object_mut().ok_or_else(|| {
         CommandError::invalid_parameter(
             "tpm_policy",
@@ -144,6 +251,22 @@ pub(super) fn resolve_tpm_policy_enhanced(
         )
     })?;
 
+    // Validate PCR keys and compute mask for explicit user-provided policies
+    // (matching Python readPolicy() in tpm_util.py)
+    if is_explicit {
+        validate_and_normalize_tpm_policy(obj)?;
+    }
+
+    // Check for conflicts between user PCR keys and protected PCRs
+    // (matching Python enforce_pcrs() in cli/policies.py)
+    if has_runtime_policy {
+        enforce_pcrs(obj, &[IMA_PCR], "IMA")?;
+    }
+    if has_mb_policy {
+        enforce_pcrs(obj, MEASUREDBOOT_PCRS, "measured boot")?;
+    }
+
+    // Auto-enable PCRs based on provided policies (matching Python tenant)
     let mut mask: u32 = obj
         .get("mask")
         .and_then(|v| v.as_str())
@@ -263,18 +386,18 @@ mod tests {
     #[test]
     fn test_resolve_tpm_policy_explicit_priority() {
         // Explicit policy should have highest priority.
-        // The mask is updated by auto-enable logic even for explicit policies.
+        // The mask is computed from PCR keys plus auto-enable logic.
         let result = resolve_tpm_policy_enhanced(
-            Some("{\"pcr\": [15], \"mask\": \"0x0\"}"),
+            Some("{\"23\": [\"abc123\"]}"),
             Some("/path/to/mb.json"),
             true,
             false,
         )
         .unwrap(); //#[allow_ci]
         let parsed: Value = serde_json::from_str(&result).unwrap(); //#[allow_ci]
-        assert_eq!(parsed["pcr"], json!([15]));
-        // IMA PCR 10 should be auto-enabled (has_runtime_policy=true)
-        assert_eq!(parsed["mask"], "0x400");
+        assert_eq!(parsed["23"], json!(["abc123"]));
+        // Mask: PCR 23 (from key) | IMA PCR 10 (auto-enabled)
+        assert_eq!(parsed["mask"], "0x800400");
     }
 
     #[test]
@@ -442,7 +565,7 @@ mod tests {
 
         // Explicit policy should override extracted policy
         let result = resolve_tpm_policy_enhanced(
-            Some("{\"pcr\": [15], \"mask\": \"0x0\"}"),
+            Some("{\"23\": [\"abc123\"]}"),
             Some(policy_file.to_str().unwrap()), //#[allow_ci]
             false,
             false,
@@ -451,7 +574,8 @@ mod tests {
 
         // Should use explicit policy, not extracted one
         let parsed: Value = serde_json::from_str(&result).unwrap(); //#[allow_ci]
-        assert_eq!(parsed["pcr"], json!([15]));
+        assert_eq!(parsed["23"], json!(["abc123"]));
+        assert_eq!(parsed["mask"], "0x800000");
     }
 
     #[test]
@@ -506,12 +630,12 @@ mod tests {
     }
 
     #[test]
-    fn test_resolve_tpm_policy_auto_enable_preserves_existing_mask() {
-        // Existing mask bits should be preserved when auto-enabling
+    fn test_resolve_tpm_policy_auto_enable_preserves_existing_pcrs() {
+        // PCR keys from user policy should be preserved when auto-enabling
         let has_runtime_policy = true;
         let has_mb_policy = false;
         let result = resolve_tpm_policy_enhanced(
-            Some("{\"mask\": \"0x800000\"}"), // PCR 23
+            Some("{\"23\": [\"abc123\"]}"), // PCR 23 via key
             None,
             has_runtime_policy,
             has_mb_policy,
@@ -519,6 +643,169 @@ mod tests {
         .unwrap(); //#[allow_ci]
 
         let parsed: Value = serde_json::from_str(&result).unwrap(); //#[allow_ci]
-        assert_eq!(parsed["mask"], "0x800400"); // PCR 23 | PCR 10
+                                                                    // Mask: PCR 23 (from key) | PCR 10 (auto-enabled IMA)
+        assert_eq!(parsed["mask"], "0x800400");
+    }
+
+    #[test]
+    fn test_enforce_pcrs_rejects_pcr15_with_mb_policy() {
+        let result = resolve_tpm_policy_enhanced(
+            Some("{\"15\":[\"0000000000000000000000000000000000000000\"]}"),
+            None,
+            true,
+            true,
+        );
+        let err = result.unwrap_err(); //#[allow_ci]
+        let msg = err.to_string();
+        assert!(
+            msg.contains("PCR 15 is specified in \"tpm_policy\""),
+            "Error should mention PCR 15 conflict: {msg}"
+        );
+        assert!(
+            msg.contains("measured boot"),
+            "Error should mention measured boot: {msg}"
+        );
+    }
+
+    #[test]
+    fn test_enforce_pcrs_rejects_pcr0_with_mb_policy() {
+        let result = resolve_tpm_policy_enhanced(
+            Some("{\"0\":[\"abc123\"]}"),
+            None,
+            false,
+            true,
+        );
+        let err = result.unwrap_err(); //#[allow_ci]
+        let msg = err.to_string();
+        assert!(
+            msg.contains("PCR 0 is specified in \"tpm_policy\""),
+            "Error should mention PCR 0 conflict: {msg}"
+        );
+    }
+
+    #[test]
+    fn test_validate_rejects_pcr10_ima() {
+        let result = resolve_tpm_policy_enhanced(
+            Some("{\"10\":[\"abc123\"]}"),
+            None,
+            false,
+            false,
+        );
+        let err = result.unwrap_err(); //#[allow_ci]
+        let msg = err.to_string();
+        assert!(
+            msg.contains("this PCR is used for IMA"),
+            "Error should mention IMA: {msg}"
+        );
+    }
+
+    #[test]
+    fn test_validate_rejects_pcr16_data_binding() {
+        let result = resolve_tpm_policy_enhanced(
+            Some("{\"16\":[\"abc123\"]}"),
+            None,
+            false,
+            false,
+        );
+        let err = result.unwrap_err(); //#[allow_ci]
+        let msg = err.to_string();
+        assert!(
+            msg.contains("keylime uses this PCR to bind data"),
+            "Error should mention data binding: {msg}"
+        );
+    }
+
+    #[test]
+    fn test_validate_rejects_pcr_out_of_range() {
+        let result = resolve_tpm_policy_enhanced(
+            Some("{\"25\":[\"abc123\"]}"),
+            None,
+            false,
+            false,
+        );
+        let err = result.unwrap_err(); //#[allow_ci]
+        let msg = err.to_string();
+        assert!(
+            msg.contains("Invalid tpm policy pcr number: 25"),
+            "Error should mention invalid PCR number: {msg}"
+        );
+    }
+
+    #[test]
+    fn test_validate_rejects_non_digit_key() {
+        let result = resolve_tpm_policy_enhanced(
+            Some("{\"abc\":[\"123\"]}"),
+            None,
+            false,
+            false,
+        );
+        let err = result.unwrap_err(); //#[allow_ci]
+        let msg = err.to_string();
+        assert!(
+            msg.contains("Invalid tpm policy pcr number: abc"),
+            "Error should mention invalid key: {msg}"
+        );
+    }
+
+    #[test]
+    fn test_empty_policy_with_mb_policy_succeeds() {
+        let result =
+            resolve_tpm_policy_enhanced(Some("{}"), None, true, true)
+                .unwrap(); //#[allow_ci]
+        let parsed: Value = serde_json::from_str(&result).unwrap(); //#[allow_ci]
+        assert_eq!(parsed["mask"], "0xffff");
+    }
+
+    #[test]
+    fn test_mask_computed_from_pcr_keys() {
+        let result = resolve_tpm_policy_enhanced(
+            Some("{\"23\":[\"abc\"]}"),
+            None,
+            false,
+            false,
+        )
+        .unwrap(); //#[allow_ci]
+        let parsed: Value = serde_json::from_str(&result).unwrap(); //#[allow_ci]
+        assert_eq!(parsed["mask"], "0x800000");
+    }
+
+    #[test]
+    fn test_value_normalization_lowercase() {
+        let result = resolve_tpm_policy_enhanced(
+            Some("{\"23\":[\"ABCDEF\"]}"),
+            None,
+            false,
+            false,
+        )
+        .unwrap(); //#[allow_ci]
+        let parsed: Value = serde_json::from_str(&result).unwrap(); //#[allow_ci]
+        assert_eq!(parsed["23"], json!(["abcdef"]));
+    }
+
+    #[test]
+    fn test_value_normalization_singleton_to_array() {
+        let result = resolve_tpm_policy_enhanced(
+            Some("{\"23\":\"abcdef\"}"),
+            None,
+            false,
+            false,
+        )
+        .unwrap(); //#[allow_ci]
+        let parsed: Value = serde_json::from_str(&result).unwrap(); //#[allow_ci]
+        assert_eq!(parsed["23"], json!(["abcdef"]));
+    }
+
+    #[test]
+    fn test_pcr15_allowed_without_mb_policy() {
+        // PCR 15 should be valid when no measured boot policy is provided
+        let result = resolve_tpm_policy_enhanced(
+            Some("{\"15\":[\"abc123\"]}"),
+            None,
+            false,
+            false,
+        )
+        .unwrap(); //#[allow_ci]
+        let parsed: Value = serde_json::from_str(&result).unwrap(); //#[allow_ci]
+        assert_eq!(parsed["mask"], "0x8000");
     }
 }
