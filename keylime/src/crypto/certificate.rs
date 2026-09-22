@@ -56,8 +56,20 @@ pub fn ensure_payload_key(
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            let metadata = fs::metadata(payload_key_path)
+            let metadata = fs::symlink_metadata(payload_key_path)
                 .map_err(CryptoError::IOReadError)?;
+            if metadata.file_type().is_symlink() {
+                error!(
+                    "Payload key {} is a symlink; refusing to use insecure path.",
+                    payload_key_path.display()
+                );
+                return Err(Error::Configuration(KeylimeConfigError::Generic(
+                    format!(
+                        "Payload key {} is a symlink; refusing to use insecure path.",
+                        payload_key_path.display()
+                    ),
+                )));
+            }
             let mode = metadata.permissions().mode() & 0o777;
             if mode != 0o600 && mode != 0o400 {
                 warn!(
@@ -473,7 +485,7 @@ mod tests {
             enable_agent_mtls: true,
             server_key: &server_key,
             server_key_password: "",
-            server_cert: server_cert.to_str().unwrap(),
+            server_cert: server_cert.to_str().ok_or("invalid path")?,
             agent_uuid: "d432fbb3-d2f1-4a97-9ef7-75bd81c00000",
             contact_ip: "127.0.0.1",
             trusted_client_ca: &trusted_ca_str,
@@ -524,6 +536,22 @@ mod tests {
 
         let mode = fs::metadata(&payload)?.permissions().mode() & 0o777;
         assert_eq!(mode, 0o600);
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_ensure_payload_key_rejects_symlink() -> Result<()> {
+        let dir = TempDir::new()?;
+        let server = dir.path().join("server-private.pem");
+        let real_payload = dir.path().join("real-payload.pem");
+        let symlink_payload = dir.path().join("symlink-payload.pem");
+
+        write_rsa_key(&real_payload, 2048, "")?;
+        std::os::unix::fs::symlink(&real_payload, &symlink_payload)?;
+
+        let result = ensure_payload_key(&symlink_payload, "", &server, "");
+        assert!(result.is_err());
         Ok(())
     }
 }
