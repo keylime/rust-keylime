@@ -192,6 +192,7 @@ async fn run(
             }
         }
     };
+    info!("Agent UUID: {agent_identifier}");
     let verifier_url = match args.verifier_url {
         Some(ref url) => url.clone(),
         _ => config.verifier_url().to_string(),
