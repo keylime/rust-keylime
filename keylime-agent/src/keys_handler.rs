@@ -143,7 +143,7 @@ async fn u_key(
 
     // get key and decode it from web data
     let encrypted_key = match general_purpose::STANDARD
-        .decode(&body.encrypted_key)
+        .decode(body.encrypted_key.replace(|c: char| c.is_ascii_whitespace(), ""))
         .map_err(Error::from)
     {
         Ok(k) => k,
@@ -214,7 +214,7 @@ async fn u_key(
 
     let payload = match &body.payload {
         Some(data) => match general_purpose::STANDARD
-            .decode(data)
+            .decode(data.replace(|c: char| c.is_ascii_whitespace(), ""))
             .map_err(Error::from)
         {
             Ok(d) => Some(d.into()),
@@ -257,7 +257,7 @@ async fn v_key(
 
     // get key and decode it from web data
     let encrypted_key = match general_purpose::STANDARD
-        .decode(&body.encrypted_key)
+        .decode(body.encrypted_key.replace(|c: char| c.is_ascii_whitespace(), ""))
         .map_err(Error::from)
     {
         Ok(k) => k,
