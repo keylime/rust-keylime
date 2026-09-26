@@ -21,6 +21,17 @@ use log::*;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::convert::TryInto;
+
+fn decode_base64(
+    data: &str,
+) -> std::result::Result<Vec<u8>, base64::DecodeError> {
+    general_purpose::STANDARD.decode(
+        data.bytes()
+            .filter(|byte| !byte.is_ascii_whitespace())
+            .collect::<Vec<_>>(),
+    )
+}
+
 use tokio::sync::{
     mpsc::{Receiver, Sender},
     oneshot,
@@ -142,8 +153,7 @@ async fn u_key(
     debug!("Received ukey");
 
     // get key and decode it from web data
-    let encrypted_key = match general_purpose::STANDARD
-        .decode(&body.encrypted_key)
+    let encrypted_key = match decode_base64(&body.encrypted_key)
         .map_err(Error::from)
     {
         Ok(k) => k,
@@ -213,10 +223,7 @@ async fn u_key(
     };
 
     let payload = match &body.payload {
-        Some(data) => match general_purpose::STANDARD
-            .decode(data)
-            .map_err(Error::from)
-        {
+        Some(data) => match decode_base64(data).map_err(Error::from) {
             Ok(d) => Some(d.into()),
             Err(e) => {
                 warn!("POST u_key returning 400 response. Invalid base64 encoding in payload: {e}");
@@ -256,8 +263,7 @@ async fn v_key(
     debug!("Received vkey");
 
     // get key and decode it from web data
-    let encrypted_key = match general_purpose::STANDARD
-        .decode(&body.encrypted_key)
+    let encrypted_key = match decode_base64(&body.encrypted_key)
         .map_err(Error::from)
     {
         Ok(k) => k,
@@ -972,7 +978,9 @@ mod tests {
         let ukey = KeylimeUKey {
             encrypted_key: general_purpose::STANDARD.encode(&encrypted_key),
             auth_tag: hex::encode(auth_tag),
-            payload: payload.map(|p| general_purpose::STANDARD.encode(p)),
+            payload: payload.map(|p| {
+                format!("{}\n", general_purpose::STANDARD.encode(p))
+            }),
         };
 
         let req = test::TestRequest::post()
@@ -1084,6 +1092,12 @@ mod tests {
     #[actix_rt::test]
     async fn test_u_or_v_key_long() {
         test_u_or_v_key(AES_256_KEY_LEN, None).await;
+    }
+
+    #[cfg(feature = "testing")]
+    #[actix_rt::test]
+    async fn test_u_or_v_key_payload_with_newline() {
+        test_u_or_v_key(AES_128_KEY_LEN, Some(b"test payload")).await;
     }
 
     #[cfg(feature = "testing")]
