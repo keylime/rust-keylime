@@ -28,6 +28,7 @@ pub(super) async fn update_agent(
     runtime_policy_name: Option<&str>,
     runtime_policy_sig_key: Option<&str>,
     mb_policy: Option<&str>,
+    mb_policy_name: Option<&str>,
     output: &OutputHandler,
 ) -> Result<Value, CommandError> {
     // Validate agent ID
@@ -114,6 +115,7 @@ pub(super) async fn update_agent(
             runtime_policy_name,
             runtime_policy_sig_key,
             mb_policy, // Use new policy if provided, otherwise will use default
+            mb_policy_name, // Use new name if provided, otherwise will use default
             payload: None, // Payload updates not supported in update operation
             cert_dir: None, // Use default cert handling
             verify: false, // Skip verification during update
@@ -141,7 +143,8 @@ pub(super) async fn update_agent(
         },
         "updated_fields": {
             "runtime_policy": runtime_policy.map(|p| p.to_string()),
-            "mb_policy": mb_policy.map(|p| p.to_string())
+            "mb_policy": mb_policy.map(|p| p.to_string()),
+            "mb_policy_name": mb_policy_name.map(|p| p.to_string())
         },
         "results": add_result
     }))

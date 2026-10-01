@@ -41,6 +41,8 @@ pub(super) struct AddAgentParams<'a> {
     pub runtime_policy_sig_key: Option<&'a str>,
     /// Optional path to measured boot policy file
     pub mb_policy: Option<&'a str>,
+    /// Optional name for the measured boot policy in the verifier database
+    pub mb_policy_name: Option<&'a str>,
     /// Optional path to payload file for agent
     pub payload: Option<&'a str>,
     /// Optional path to certificate directory
@@ -372,6 +374,7 @@ mod tests {
             runtime_policy_name: None,
             runtime_policy_sig_key: None,
             mb_policy: None,
+            mb_policy_name: None,
             payload: None,
             cert_dir: None,
             verify: true,
@@ -401,6 +404,7 @@ mod tests {
             runtime_policy_name: None,
             runtime_policy_sig_key: None,
             mb_policy: Some("/path/to/measured_boot.json"),
+            mb_policy_name: None,
             payload: Some("/path/to/payload.txt"),
             cert_dir: Some("/path/to/certs"),
             verify: false,
@@ -435,6 +439,7 @@ mod tests {
                 runtime_policy_name: None,
                 runtime_policy_sig_key: None,
                 mb_policy: None,
+                mb_policy_name: None,
                 payload: None,
                 cert_dir: None,
                 verify: false,
@@ -467,6 +472,7 @@ mod tests {
                 runtime_policy_name: None,
                 runtime_policy_sig_key: None,
                 mb_policy: Some("/etc/keylime/measured_boot.json"),
+                mb_policy_name: None,
                 payload: Some("/etc/keylime/payload.txt"),
                 cert_dir: Some("/etc/keylime/certs"),
                 verify: true,
@@ -500,6 +506,7 @@ mod tests {
                 runtime_policy_name: None,
                 runtime_policy_sig_key: None,
                 mb_policy: None,
+                mb_policy_name: None,
                 payload: None,
                 cert_dir: None,
                 verify: false, // Verification different in push model
@@ -718,6 +725,7 @@ mod tests {
                 runtime_policy_name: None,
                 runtime_policy_sig_key: None,
                 mb_policy: None,
+                mb_policy_name: None,
                 payload: None,
                 cert_dir: None,
                 verify: false,
@@ -744,6 +752,7 @@ mod tests {
                 runtime_policy_name: None,
                 runtime_policy_sig_key: None,
                 mb_policy: None,
+                mb_policy_name: None,
                 payload: None,
                 cert_dir: None,
                 verify: false,

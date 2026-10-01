@@ -253,6 +253,10 @@ enum AgentAction {
         #[arg(long, value_name = "POLICY")]
         mb_policy: Option<String>,
 
+        /// Name for the measured boot policy in the verifier database
+        #[arg(long, value_name = "NAME")]
+        mb_policy_name: Option<String>,
+
         /// Payload file to deliver securely
         #[arg(long, value_name = "FILE")]
         payload: Option<String>,
@@ -326,6 +330,10 @@ enum AgentAction {
         /// New measured boot policy
         #[arg(long, value_name = "POLICY")]
         mb_policy: Option<String>,
+
+        /// Name for the measured boot policy in the verifier database
+        #[arg(long, value_name = "NAME")]
+        mb_policy_name: Option<String>,
     },
 
     /// Show agent status

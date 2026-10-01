@@ -248,7 +248,7 @@ pub(super) async fn add_agent(
             "policy",
             "At least one attestation policy must be provided: \
              --runtime-policy, --runtime-policy-name, --mb-policy, \
-             or --tpm-policy"
+             --mb-policy-name, or --tpm-policy"
                 .to_string(),
         ));
     }
@@ -260,7 +260,7 @@ pub(super) async fn add_agent(
         params.tpm_policy,
         params.mb_policy,
         params.runtime_policy.is_some(),
-        params.mb_policy.is_some(),
+        params.mb_policy.is_some() || params.mb_policy_name.is_some(),
     )?;
 
     // Build enrollment request with version-appropriate fields.
@@ -322,11 +322,15 @@ pub(super) async fn add_agent(
         ))
         .with_mb_policy(Some(String::new()))
         .with_mb_policy_name(Some(
-            agent_data
-                .get("mb_policy_name")
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_string(),
+            params.mb_policy_name.map(|s| s.to_string()).unwrap_or_else(
+                || {
+                    agent_data
+                        .get("mb_policy_name")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string()
+                },
+            ),
         ))
         .with_mb_refstate(Some("null".to_string()));
 
@@ -391,11 +395,15 @@ pub(super) async fn add_agent(
                     .to_string(),
             ))
             .with_mb_policy_name(Some(
-                agent_data
-                    .get("mb_policy_name")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string(),
+                params.mb_policy_name.map(|s| s.to_string()).unwrap_or_else(
+                    || {
+                        agent_data
+                            .get("mb_policy_name")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string()
+                    },
+                ),
             ))
             .with_mb_policy(Some(
                 agent_data
@@ -541,6 +549,7 @@ fn has_attestation_policy(params: &AddAgentParams) -> bool {
     params.runtime_policy.is_some()
         || params.runtime_policy_name.is_some()
         || params.mb_policy.is_some()
+        || params.mb_policy_name.is_some()
         || params.tpm_policy.is_some()
 }
 
@@ -948,6 +957,7 @@ mod tests {
             runtime_policy_name: None,
             runtime_policy_sig_key: None,
             mb_policy: None,
+            mb_policy_name: None,
             payload: None,
             cert_dir: None,
             verify: false,

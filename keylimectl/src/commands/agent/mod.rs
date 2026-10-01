@@ -51,6 +51,7 @@
 //!     runtime_policy_name: None,
 //!     runtime_policy_sig_key: None,
 //!     mb_policy: None,
+//!     mb_policy_name: None,
 //!     payload: None,
 //!     cert_dir: None,
 //!     verify: true,
@@ -144,6 +145,7 @@ use serde_json::{json, Value};
 ///     runtime_policy_name: None,
 ///     runtime_policy_sig_key: None,
 ///     mb_policy: None,
+///     mb_policy_name: None,
 ///     payload: None,
 ///     cert_dir: None,
 ///     verify: true,
@@ -184,6 +186,7 @@ pub async fn execute(
             runtime_policy_name,
             runtime_policy_sig_key,
             mb_policy,
+            mb_policy_name,
             payload,
             cert_dir,
             verify,
@@ -203,6 +206,7 @@ pub async fn execute(
                 runtime_policy_name: runtime_policy_name.as_deref(),
                 runtime_policy_sig_key: runtime_policy_sig_key.as_deref(),
                 mb_policy: mb_policy.as_deref(),
+                mb_policy_name: mb_policy_name.as_deref(),
                 payload: payload.as_deref(),
                 cert_dir: cert_dir.as_deref(),
                 verify: *verify,
@@ -230,12 +234,14 @@ pub async fn execute(
             runtime_policy_name,
             runtime_policy_sig_key,
             mb_policy,
+            mb_policy_name,
         } => update_agent(
             uuid,
             runtime_policy.as_deref(),
             runtime_policy_name.as_deref(),
             runtime_policy_sig_key.as_deref(),
             mb_policy.as_deref(),
+            mb_policy_name.as_deref(),
             output,
         )
         .await
@@ -477,6 +483,7 @@ mod tests {
                 runtime_policy_name: None,
                 runtime_policy_sig_key: None,
                 mb_policy: None,
+                mb_policy_name: None,
                 payload: None,
                 cert_dir: None,
                 verify: true,
@@ -500,6 +507,7 @@ mod tests {
                 runtime_policy_name: None,
                 runtime_policy_sig_key: None,
                 mb_policy: None,
+                mb_policy_name: None,
             };
 
             let status_action = AgentAction::Status {
@@ -696,6 +704,7 @@ mod tests {
                 runtime_policy_name: None,
                 runtime_policy_sig_key: None,
                 mb_policy: None,
+                mb_policy_name: None,
                 payload: None,
                 cert_dir: None,
                 verify: true,
