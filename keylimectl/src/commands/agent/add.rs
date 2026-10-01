@@ -579,7 +579,13 @@ fn apply_file_policies(
     }
     if let Some(policy_path) = mb_policy {
         let content = load_policy_file(policy_path)?;
-        req = req.with_mb_policy(Some(STANDARD.encode(content.as_bytes())));
+        let _: Value = serde_json::from_str(&content).map_err(|e| {
+            CommandError::policy_file_error(
+                policy_path,
+                format!("Invalid JSON in measured boot policy file: {e}"),
+            )
+        })?;
+        req = req.with_mb_policy(Some(content));
     }
     if let Some(payload_path) = payload {
         let content = load_payload_file(payload_path)?;
@@ -994,5 +1000,52 @@ mod tests {
         params.runtime_policy = Some("policy.json");
         params.mb_policy = Some("mb-policy.json");
         assert!(has_attestation_policy(&params));
+    }
+
+    fn test_request() -> AddAgentRequest {
+        AddAgentRequest::new(None, None, None, None, "{}".to_string())
+    }
+
+    #[test]
+    fn test_apply_file_policies_mb_policy_not_base64_encoded() {
+        let dir = tempfile::tempdir().unwrap();
+        let mb_path = dir.path().join("mb_policy.json");
+        let mb_content = r#"{"test": "value"}"#;
+        std::fs::write(&mb_path, mb_content).unwrap();
+
+        let result = apply_file_policies(
+            test_request(),
+            None,
+            None,
+            None,
+            Some(mb_path.to_str().unwrap()),
+            None,
+            None,
+        )
+        .unwrap();
+
+        let mb_policy = result.mb_policy.unwrap();
+        assert_eq!(mb_policy, mb_content);
+        let _: Value = serde_json::from_str(&mb_policy)
+            .expect("mb_policy should be valid JSON, not base64");
+    }
+
+    #[test]
+    fn test_apply_file_policies_mb_policy_rejects_invalid_json() {
+        let dir = tempfile::tempdir().unwrap();
+        let mb_path = dir.path().join("mb_policy.txt");
+        std::fs::write(&mb_path, "not valid json").unwrap();
+
+        let result = apply_file_policies(
+            test_request(),
+            None,
+            None,
+            None,
+            Some(mb_path.to_str().unwrap()),
+            None,
+            None,
+        );
+
+        assert!(result.is_err());
     }
 }
