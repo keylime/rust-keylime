@@ -16,21 +16,6 @@ use keylime::uefi::UefiLogHandler;
 use std::collections::HashMap;
 use std::path::Path;
 
-/// Select the strongest available digest from an event's digest map.
-/// Prefers SHA-512 > SHA-384 > SHA-256 > SHA-1, falling back to the
-/// first available if none of the preferred algorithms are present.
-fn select_strongest_digest(
-    digests: &HashMap<String, Vec<u8>>,
-) -> Option<String> {
-    const PREFERRED_ALGS: &[&str] = &["sha512", "sha384", "sha256"];
-    for alg in PREFERRED_ALGS {
-        if let Some(d) = digests.get(*alg) {
-            return Some(hex::encode(d));
-        }
-    }
-    digests.values().next().map(hex::encode)
-}
-
 /// Generate a measured boot policy from a UEFI event log file.
 pub fn generate_from_eventlog(
     path: &Path,
@@ -136,24 +121,33 @@ fn extract_secureboot_events(
         let var_data =
             uefi_event_data::parse_efi_variable_data(&event.event_data);
 
-        let var_name = var_data.as_ref().map(|v| v.variable_name.as_str());
-
-        // Get the digest for the first available algorithm
-        let digest =
-            select_strongest_digest(&event.digests).unwrap_or_default();
-
-        let sig = SecureBootSignature {
-            signature_owner: "uefi-var".to_string(),
-            signature_data: format!("0x{digest}"),
+        let var_data = match var_data {
+            Some(v) => v,
+            None => continue,
         };
 
-        match var_name {
-            Some("PK") => policy.pk.push(sig),
-            Some("KEK") => policy.kek.push(sig),
-            Some("db") => policy.db.push(sig),
-            Some("dbx") => policy.dbx.push(sig),
+        let signatures = uefi_event_data::parse_efi_signature_list(
+            &var_data.variable_data,
+        );
+
+        let sigs: Vec<SecureBootSignature> = signatures
+            .into_iter()
+            .map(|e| SecureBootSignature {
+                signature_owner: e.signature_owner,
+                signature_data: e.signature_data,
+            })
+            .collect();
+
+        match var_data.variable_name.as_str() {
+            "PK" => policy.pk.extend(sigs),
+            "KEK" => policy.kek.extend(sigs),
+            "db" => policy.db.extend(sigs),
+            "dbx" => policy.dbx.extend(sigs),
             _ => {
-                log::debug!("Skipping EFI variable event: {:?}", var_name);
+                log::debug!(
+                    "Skipping EFI variable event: {:?}",
+                    var_data.variable_name
+                );
             }
         }
     }
@@ -225,7 +219,8 @@ fn extract_kernel_entries(
                     .strip_prefix("kernel_cmdline: ")
                     .or_else(|| s.strip_prefix("kernel_cmdline:"))
                     .unwrap_or(&s);
-                entry.kernel_cmdline = Some(cmdline.to_string());
+                entry.kernel_cmdline =
+                    Some(uefi_event_data::regex_escape(cmdline));
                 break;
             }
         }
@@ -238,7 +233,8 @@ fn extract_kernel_entries(
                 uefi_event_data::parse_ipl_string(&event.event_data)
             {
                 if !s.is_empty() {
-                    entry.kernel_cmdline = Some(s);
+                    entry.kernel_cmdline =
+                        Some(uefi_event_data::regex_escape(&s));
                 }
             }
         }
@@ -341,13 +337,16 @@ fn extract_vendor_db(
             uefi_event_data::parse_efi_variable_data(&event.event_data)
         {
             if var_data.variable_name == "vendor_db" {
-                let digest = select_strongest_digest(&event.digests)
-                    .unwrap_or_default();
+                let sigs = uefi_event_data::parse_authority_signatures(
+                    &var_data.variable_data,
+                );
 
-                policy.vendor_db.push(SecureBootSignature {
-                    signature_owner: "vendor".to_string(),
-                    signature_data: format!("0x{digest}"),
-                });
+                for sig in sigs {
+                    policy.vendor_db.push(SecureBootSignature {
+                        signature_owner: sig.signature_owner,
+                        signature_data: sig.signature_data,
+                    });
+                }
             }
         }
     }
