@@ -6,6 +6,7 @@
 //! This module handles push, show, update, and delete operations for
 //! runtime policies stored on the Keylime verifier.
 
+use crate::client::error::{ApiResponseError, ClientError};
 use crate::client::factory;
 use crate::commands::error::CommandError;
 use crate::error::{ErrorContext, KeylimectlError};
@@ -290,11 +291,14 @@ async fn delete_policy(
     let response = verifier_client
         .delete_runtime_policy(name)
         .await
-        .map_err(|e| {
-            CommandError::resource_error(
+        .map_err(|e| match &e {
+            KeylimectlError::Client(ClientError::Api(
+                ApiResponseError::ServerError { status: 409, .. },
+            )) => CommandError::policy_in_use(name),
+            _ => CommandError::resource_error(
                 "verifier",
                 format!("Failed to delete runtime policy '{name}': {e}"),
-            )
+            ),
         })?;
 
     output.info(format!("Runtime policy '{name}' deleted successfully"));

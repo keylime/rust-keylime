@@ -68,6 +68,7 @@
 //! # }
 //! ```
 
+use crate::client::error::{ApiResponseError, ClientError};
 use crate::client::factory;
 use crate::commands::error::CommandError;
 use crate::error::KeylimectlError;
@@ -420,15 +421,19 @@ async fn delete_mb_policy(
     let verifier_client = factory::get_verifier().await.map_err(|e| {
         CommandError::connection_error("verifier", e.to_string())
     })?;
-    let response =
-        verifier_client.delete_mb_policy(name).await.map_err(|e| {
-            CommandError::resource_error(
+    let response = verifier_client.delete_mb_policy(name).await.map_err(
+        |e| match &e {
+            KeylimectlError::Client(ClientError::Api(
+                ApiResponseError::ServerError { status: 409, .. },
+            )) => CommandError::policy_in_use(name),
+            _ => CommandError::resource_error(
                 "verifier",
                 format!(
                     "Failed to delete measured boot policy '{name}': {e}"
                 ),
-            )
-        })?;
+            ),
+        },
+    )?;
 
     output.info(format!(
         "Measured boot policy '{name}' deleted successfully"

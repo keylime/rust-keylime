@@ -104,6 +104,10 @@ pub enum PolicyError {
     #[error("Policy '{name}' not found")]
     NotFound { name: String },
 
+    /// Policy is in use by one or more agents and cannot be deleted
+    #[error("Cannot delete policy '{name}': it is currently in use by agents. Remove or reassign all agents using this policy before deleting it.")]
+    InUse { name: String },
+
     /// Policy file errors
     #[error("Policy file error: {path} - {reason}")]
     FileError { path: PathBuf, reason: String },
@@ -251,6 +255,11 @@ impl CommandError {
             operation: operation.into(),
             reason: reason.into(),
         })
+    }
+
+    /// Create a policy in use error
+    pub fn policy_in_use<N: Into<String>>(name: N) -> Self {
+        Self::Policy(PolicyError::InUse { name: name.into() })
     }
 
     /// Create a policy file error
