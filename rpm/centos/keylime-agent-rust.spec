@@ -66,6 +66,7 @@ BuildRequires:  systemd
 BuildRequires:  openssl-devel
 BuildRequires:  tpm2-tss-devel
 BuildRequires:  clang
+BuildRequires:  rpm-devel
 BuildRequires:  rust-toolset
 
 # Requires common files from exact same release
@@ -142,6 +143,18 @@ The Keylime IMA emulator for testing with emulated TPM
 
 #===============================================================================
 
+%package -n keylimectl
+Summary:        Command-line tool for Keylime remote attestation
+License: (Apache-2.0 OR MIT) AND BSD-3-Clause AND (MIT OR Apache-2.0) AND Unicode-DFS-2016 AND (Apache-2.0 OR Apache-2.0 WITH LLVM-exception OR MIT) AND (Apache-2.0 OR BSL-1.0) AND (Apache-2.0 OR MIT) AND (Apache-2.0 OR MIT OR Zlib) AND Apache-2.0 WITH LLVM-exception AND ISC AND MIT AND (MIT OR Unlicense)
+Requires: openssl
+
+%description -n keylimectl
+keylimectl is a command-line tool for managing Keylime remote
+attestation: adding/removing agents, generating and validating
+attestation policies, and querying system status.
+
+#===============================================================================
+
 %prep
 %autosetup -n rust-keylime-%{version} -N %{?bundled_rust_deps:-a1}
 %autopatch -M 99 -p1
@@ -203,6 +216,12 @@ install -Dpm 0755 \
 install -Dpm 0755 \
     -t %{buildroot}%{_bindir} \
     ./target/release/keylime_push_model_agent
+install -Dpm 0755 \
+    -t %{buildroot}%{_bindir} \
+    ./target/release/keylimectl
+install -Dpm 0644 \
+    keylimectl/keylimectl.conf \
+    %{buildroot}%{_sysconfdir}/keylime/keylimectl.conf
 
 %posttrans
 chmod 500 %{_sysconfdir}/keylime/agent.conf.d
@@ -254,6 +273,14 @@ chown -R keylime:keylime %{_sysconfdir}/keylime
 %license cargo-vendor.txt
 %endif
 %{_bindir}/keylime_ima_emulator
+
+%files -n keylimectl
+%license LICENSE.dependencies
+%if 0%{?bundled_rust_deps}
+%license cargo-vendor.txt
+%endif
+%{_bindir}/keylimectl
+%config(noreplace) %{_sysconfdir}/keylime/keylimectl.conf
 
 %if %{with check}
 %check
